@@ -238,6 +238,24 @@ def main() -> None:
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
     years = list(year_range(config))
+    meteo = dict(config.get("气象策略", {}))
+    prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
+
+    prec_count = 0
+    if prec_source == "era5":
+        for year in years:
+            nc_file = paths["raw_prec_era5_dir"] / f"era5_tp_hourly_{year}.nc"
+            if not nc_file.exists():
+                continue
+            with open_netcdf_dataset_safe(nc_file) as ds:
+                var_name = "tp" if "tp" in ds.data_vars else list(ds.data_vars)[0]
+                prec_count += write_hourly_stack(
+                    hourly_increments_from_cumulative(ds[var_name] * 1000.0),
+                    paths["raw_prec_era5_hourly_dir"],
+                    "PREC",
+                    lambda values: np.clip(values, 0.0, None),
+                    overwrite=bool(args.覆盖),
+                )
 
     temp_count = 0
     for year in years:
@@ -257,6 +275,8 @@ def main() -> None:
     for year in years:
         evap_count += build_hourly_et(year, paths, config, overwrite=bool(args.覆盖))
 
+    if prec_source == "era5":
+        print(f"[完成] 小时降水文件数: {prec_count}")
     print(f"[完成] 小时温度文件数: {temp_count}")
     print(f"[完成] 小时蒸散发文件数: {evap_count}")
 

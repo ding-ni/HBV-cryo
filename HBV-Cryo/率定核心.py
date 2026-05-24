@@ -82,6 +82,7 @@ GIS_ROOT = _prefer_existing_path(os.path.join(DATA_ROOT, "地理数据"), os.pat
 RESULTS_ROOT = _prefer_existing_path(os.path.join(PROJECT_ROOT, "结果"), os.path.join(PROJECT_ROOT, "results"))
 PREC_DIR_MSWEP = _prefer_existing_path(os.path.join(ALIGNED_ROOT, "降水_MSWEP"), os.path.join(ALIGNED_ROOT, "prec"))
 PREC_DIR_CMFD = _prefer_existing_path(os.path.join(ALIGNED_ROOT, "降水_CMFD"), os.path.join(ALIGNED_ROOT, "prec_cmfd"))
+PREC_DIR_ERA5 = _prefer_existing_path(os.path.join(ALIGNED_ROOT, "降水"), os.path.join(ALIGNED_ROOT, "precipitation"))
 PREC_DIR = PREC_DIR_MSWEP
 TEMP_DIR = _prefer_existing_path(os.path.join(ALIGNED_ROOT, "气温"), os.path.join(ALIGNED_ROOT, "temp"))
 EVAP_DIR = _prefer_existing_path(os.path.join(ALIGNED_ROOT, "蒸散发"), os.path.join(ALIGNED_ROOT, "evap"))
@@ -2321,7 +2322,7 @@ def parse_args():
         default=DEFAULT_PARAM_BOUNDS_PROFILE,
         help="参数搜索边界档案：默认使用青藏高原高寒区推荐范围，可切换为通用宽范围。",
     )
-    parser.add_argument("--prec-source", choices=["mswep", "cmfd", "custom_tif"], default="mswep")
+    parser.add_argument("--prec-source", choices=["era5", "mswep", "cmfd", "custom_tif"], default="era5")
     parser.add_argument("--prec-dir", type=str, default=None)
     parser.add_argument("--glacier-mode", choices=["inline", "off"], default="inline")
     parser.add_argument(
@@ -5736,6 +5737,8 @@ def main():
 
     if args.prec_dir:
         PREC_DIR = args.prec_dir
+    elif args.prec_source == "era5":
+        PREC_DIR = PREC_DIR_ERA5
     elif args.prec_source == "cmfd":
         PREC_DIR = PREC_DIR_CMFD
     else:
@@ -5744,7 +5747,13 @@ def main():
     log_msg("=" * 70)
     log_msg(f"HBV-Cryo 空间分区率定 ({len(param_names)} 参数)")
     log_msg("=" * 70)
-    precip_label = f"本地降水目录（{args.prec_dir}）" if args.prec_dir else ("CMFD 格点降水" if args.prec_source == "cmfd" else "MSWEP 格点降水")
+    precip_label_map = {
+        "era5": "ERA5 格点降水",
+        "cmfd": "CMFD 格点降水",
+        "mswep": "MSWEP 格点降水",
+        "custom_tif": "本地降水目录",
+    }
+    precip_label = f"本地降水目录（{args.prec_dir}）" if args.prec_dir else precip_label_map.get(args.prec_source, args.prec_source)
     glacier_label = "联动计算" if args.glacier_mode == "inline" else "关闭"
     log_msg(f"并行线程数: {args.workers}")
     log_msg(f"最大迭代轮数: {args.maxiter}")

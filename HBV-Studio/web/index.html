@@ -70,7 +70,7 @@
           <p id="page-subtitle">管理工作区与内置模板</p>
         </div>
         <div class="topbar-actions">
-          <button class="ghost-button" id="refresh-all-button">刷新数据</button>
+          <button class="ghost-button" id="refresh-all-button">刷新状态</button>
           <button class="ghost-button" id="quit-app-button">退出程序</button>
           <div class="service-pill" id="service-pill">正在连接本地服务</div>
         </div>
@@ -268,7 +268,7 @@
                   <label class="radio-card selected" data-value="grid_only">
                     <input type="radio" name="wz-precip-mode" value="grid_only" checked>
                     <strong>格点直接使用</strong>
-                    <small>使用 1km 格点降水（MSWEP/CMFD）作为输入</small>
+                    <small>直接使用所选降水源生成的格点降水，不做站点订正</small>
                   </label>
                   <label class="radio-card" data-value="grid_plus_station_bias">
                     <input type="radio" name="wz-precip-mode" value="grid_plus_station_bias">
@@ -304,8 +304,9 @@
                 <div class="field-group">
                   <label>降水数据源</label>
                   <select id="wz-prec-source">
-                    <option value="mswep">MSWEP（需下载）</option>
-                    <option value="cmfd">CMFD（需下载）</option>
+                    <option value="era5">ERA5 自动下载处理（推荐）</option>
+                    <option value="mswep">MSWEP 本地原始文件</option>
+                    <option value="cmfd">CMFD 本地原始文件</option>
                     <option value="custom_tif">本地栅格目录（仅登记来源，第 6 步自动带入）</option>
                   </select>
                 </div>
@@ -544,6 +545,7 @@
                 <div class="field-group">
                   <label>降水源</label>
                   <select id="task-prec-source">
+                    <option value="era5">ERA5</option>
                     <option value="mswep">MSWEP</option>
                     <option value="cmfd">CMFD</option>
                   </select>

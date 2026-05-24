@@ -191,6 +191,8 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
+APP_VERSION = "2026-05-24-meteo-workflow"
+SERVER_STARTED_AT = time.time()
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -449,25 +451,34 @@ def configured_precip_source(config: dict[str, Any]) -> str:
     top_level_source = str(config.get("默认降水源", "")).strip().lower()
     if source:
         return source
-    if top_level_source in {"cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
+    if top_level_source in {"era5", "cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
         return top_level_source
-    return legacy_source or top_level_source or "mswep"
+    return legacy_source or top_level_source or "era5"
 
 
 def resolve_precip_source(config: dict[str, Any], source: Any = None) -> str:
     raw = str(source or "").strip().lower()
-    if raw in {"mswep", "cmfd", "custom_tif"}:
+    if raw in {"era5", "mswep", "cmfd", "custom_tif"}:
         return raw
-    return configured_precip_source(config)
+    configured = configured_precip_source(config)
+    if configured in {"era5", "mswep", "cmfd", "custom_tif"}:
+        return configured
+    return "era5"
 
 
 def effective_precip_source(source: str) -> str:
-    return "cmfd" if str(source).strip().lower() == "cmfd" else "mswep"
+    key = str(source).strip().lower()
+    if key in {"era5", "cmfd"}:
+        return key
+    if key == "mswep":
+        return "mswep"
+    return "era5"
 
 
 PRECIP_SOURCE_LABELS = {
-    "mswep": "MSWEP 格点降水",
-    "cmfd": "CMFD 格点降水",
+    "era5": "ERA5 自动下载降水",
+    "mswep": "MSWEP 本地原始文件",
+    "cmfd": "CMFD 本地原始文件",
     "custom_tif": "本地降水栅格目录",
 }
 
@@ -492,6 +503,8 @@ def effective_precip_paths(
     active_profile = profile or current_profile(config)
     paths = build_profile_paths(config, active_profile)
     selected_source = resolve_precip_source(config, precip_source)
+    if selected_source == "era5":
+        return Path(paths["aligned_prec_era5_base_dir"]), Path(paths["aligned_prec_era5_dir"]), selected_source
     if selected_source == "custom_tif":
         return Path(paths["aligned_prec_custom_base_dir"]), Path(paths["aligned_prec_custom_dir"]), selected_source
     if selected_source == "cmfd":
@@ -519,8 +532,6 @@ def seed_workspace_runtime_dirs(config: dict[str, Any]) -> None:
         Path(paths["aligned_evap_dir"]),
         Path(paths["results_root"]),
     ]
-    if str(config.get("冰川边界_shp", "")).strip():
-        required_dirs.append(Path(paths["glacier_melt_dir"]))
 
     created: set[Path] = set()
     for dir_path in required_dirs:
@@ -2537,16 +2548,24 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
             )
             paths = build_profile_paths(config, profile)
             configured_source = configured_precip_source(config)
-            source_key = str(
+            raw_source_key = str(
                 data_sources.get("runtime_prec_source")
                 or data_sources.get("prec_source")
                 or data_sources.get("configured_precip_source")
                 or configured_source
-                or "mswep"
+                or "era5"
             ).strip().lower()
+            source_key = resolve_precip_source(config, raw_source_key)
             _, effective_prec_dir, _ = effective_precip_paths(config, profile, precip_source=source_key)
             prec_candidates: list[Path] = []
-            if source_key == "custom_tif":
+            if source_key == "era5":
+                prec_candidates.extend(
+                    [
+                        Path(paths["aligned_prec_era5_dir"]),
+                        Path(paths["aligned_prec_era5_base_dir"]),
+                    ]
+                )
+            elif source_key == "custom_tif":
                 prec_candidates.extend(
                     [
                         Path(paths["aligned_prec_custom_dir"]),
@@ -2860,8 +2879,8 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFI
         },
         "气象策略": {
             "降水方案": "grid_only",
-            "降水来源": "mswep",
-            "降水源": "mswep",
+            "降水来源": "era5",
+            "降水源": "era5",
             "站点降水_csv": "",
             "站点信息_csv": "",
             "原始小时降水目录": "",
@@ -2886,7 +2905,7 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFI
         "时间步长_小时": 24.0 if profile == PROFILE_DAILY else 1.0,
         "初始状态": dict(profile_runner.DEFAULT_INIT_STATE),
         "FAO56平均海拔_m": 4500.0,
-        "默认降水源": "mswep",
+        "默认降水源": "era5",
         "CFMAX分区阈值_m": 5000.0,
     }
 
@@ -3473,7 +3492,7 @@ def create_workspace_from_import(payload: dict[str, Any]) -> dict[str, Any]:
     if object_type not in {OBJECT_REGRESSION, OBJECT_INTERBASIN, OBJECT_FULL_UPSTREAM}:
         object_type = OBJECT_FULL_UPSTREAM
     workspace_name = str(payload.get("workspace_name", "")).strip()
-    prec_source = str(payload.get("prec_source", "mswep")).strip()
+    prec_source = str(payload.get("prec_source", "era5")).strip()
     if not basin_shp:
         raise ValueError("缺少流域边界 shapefile。")
     if not obs_csv:
@@ -3689,7 +3708,10 @@ def check_daily_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
 def check_daily_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
     paths = build_workspace_paths(config)
     temp_source, pet_source = _configured_daily_meteo_sources(config)
+    precip_source = configured_precip_source(config)
     entries: list[tuple[str, Path, str]] = []
+    if precip_source == "era5":
+        entries.append(("ERA5 降水", Path(paths["raw_prec_era5_dir"]), "era5_tp_*.nc"))
     if temp_source != "custom_tif" or pet_source != "custom_tif":
         entries.append(("ERA5 温度", Path(paths["raw_temp_dir"]), "era5_t2m_*.nc"))
     if pet_source != "custom_tif":
@@ -3729,8 +3751,15 @@ def check_daily_prec(config: dict[str, Any], precip_source: Any = None) -> tuple
             return True, "当前为本地栅格降水模式，降水已导入工程独立降水目录。", count_matching(aligned)
         return True, "当前为本地栅格降水模式，不需要执行原始降水预处理。", 0
     source = effective_precip_source(source_key)
-    target = paths["raw_prec_daily_dir"] if source == "mswep" else paths["raw_prec_cmfd_daily_dir"]
-    aligned = paths["aligned_prec_base_dir"] if source == "mswep" else paths["aligned_prec_cmfd_base_dir"]
+    if source == "era5":
+        target = paths["raw_prec_era5_daily_dir"]
+        aligned = paths["aligned_prec_era5_base_dir"]
+    elif source == "cmfd":
+        target = paths["raw_prec_cmfd_daily_dir"]
+        aligned = paths["aligned_prec_cmfd_base_dir"]
+    else:
+        target = paths["raw_prec_daily_dir"]
+        aligned = paths["aligned_prec_base_dir"]
     return _prefer_raw_or_aligned_group_status(
         [("日尺度降水中间结果", Path(target))],
         [("工程降水输入", Path(aligned))],
@@ -3988,6 +4017,8 @@ def check_hourly_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
         paths["raw_wind_dir"].glob("era5_v10_hourly_*.nc"),
         paths["raw_dewpoint_dir"].glob("era5_d2m_hourly_*.nc"),
     ]
+    if configured_precip_source(config) == "era5":
+        patterns.append(paths["raw_prec_era5_dir"].glob("era5_tp_hourly_*.nc"))
     count = sum(len(list(items)) for items in patterns)
     return count > 0, f"小时 ERA5 原始 NetCDF 文件数：{count}", count
 
@@ -4002,8 +4033,15 @@ def check_hourly_prec(config: dict[str, Any], precip_source: Any = None) -> tupl
             return True, "当前为本地栅格降水模式，小时降水已导入工程独立降水目录。", count_matching(aligned)
         return True, "当前为本地栅格降水模式，不需要执行原始小时降水标准化。", 0
     source = effective_precip_source(source_key)
-    target = paths["raw_prec_hourly_dir"] if source == "mswep" else paths["raw_prec_cmfd_hourly_dir"]
-    aligned = profile_paths["aligned_prec_base_dir"] if source == "mswep" else profile_paths["aligned_prec_cmfd_base_dir"]
+    if source == "era5":
+        target = paths["raw_prec_era5_hourly_dir"]
+        aligned = profile_paths["aligned_prec_era5_base_dir"]
+    elif source == "cmfd":
+        target = paths["raw_prec_cmfd_hourly_dir"]
+        aligned = profile_paths["aligned_prec_cmfd_base_dir"]
+    else:
+        target = paths["raw_prec_hourly_dir"]
+        aligned = profile_paths["aligned_prec_base_dir"]
     return _prefer_raw_or_aligned_group_status(
         [("小时尺度降水中间结果", Path(target))],
         [("工程降水输入", Path(aligned))],
@@ -4089,7 +4127,7 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
                 {
                     "id": "download_era5",
                     "title": "5. 下载 ERA5 变量",
-                    "description": "按当前配置下载需要的 ERA5 原始变量。",
+                    "description": "按当前配置下载 ERA5 降水、气温或 FAO56 所需变量；MSWEP/CMFD 不在此步自动下载。",
                     "script": DATA_PREP_DIR / "05_下载ERA5和FAO56变量.py",
                     "depends_on": [],
                     "check": check_daily_era5_download,
@@ -4106,7 +4144,7 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
                 {
                     "id": "process_prec",
                     "title": "7. 处理日尺度降水",
-                    "description": "处理 MSWEP 或 CMFD 降水数据。",
+                    "description": "处理 ERA5 自动下载降水，或处理已放入原始目录的 MSWEP/CMFD 降水数据。",
                     "script": DATA_PREP_DIR / "07_处理降水数据.py",
                     "depends_on": [],
                     "check": check_daily_prec,
@@ -4182,10 +4220,10 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
 
     common.extend(
         [
-            {
-                "id": "download_hourly_era5",
-                "title": "5. 下载小时 ERA5 变量",
-                "description": "下载小时温度与 FAO 变量（太阳辐射、风速、露点）。",
+                {
+                    "id": "download_hourly_era5",
+                    "title": "5. 下载小时 ERA5 变量",
+                    "description": "下载小时 ERA5 降水、温度与 FAO 变量（太阳辐射、风速、露点）。",
                 "depends_on": [],
                 "check": check_hourly_era5_download,
                 "script": DATA_PREP_DIR / "05b_下载ERA5小时变量.py",
@@ -4202,7 +4240,7 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
             {
                 "id": "process_hourly_prec",
                 "title": "7. 处理小时降水",
-                "description": "把原始小时降水栅格标准化到工程原始降水目录。",
+                "description": "处理 ERA5 小时降水，或把本地小时降水栅格标准化到工程原始降水目录。",
                 "depends_on": [],
                 "check": check_hourly_prec,
                 "needs_prec_source": True,
@@ -6098,7 +6136,7 @@ def step_command(step: dict[str, Any], config_path: Path, payload: dict[str, Any
         runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
         command.extend([
             "--降水源",
-            runtime_prec_source if runtime_prec_source == "custom_tif" else profile_runner.resolve_legacy_precip_source(runtime_prec_source),
+            runtime_prec_source if runtime_prec_source in {"era5", "custom_tif"} else profile_runner.resolve_legacy_precip_source(runtime_prec_source),
         ])
     if step.get("supports_overwrite") and bool(payload.get("overwrite", False)):
         command.append("--覆盖")
@@ -6391,6 +6429,8 @@ def start_calibration(payload: dict[str, Any]) -> TaskRecord:
         command.extend(["--param-bounds-profile", param_bounds_profile])
     if runtime_prec_source == "custom_tif":
         command.extend(["--降水源", "custom_tif", "--prec-dir", str(paths["aligned_prec_custom_dir"])])
+    elif runtime_prec_source == "era5":
+        command.extend(["--降水源", "era5"])
     else:
         command.extend(["--降水源", legacy_prec_source])
     if init_params_file:
@@ -7948,6 +7988,8 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "prec_dir": (
             paths["aligned_prec_custom_base_dir"]
             if precip_source == "custom_tif"
+            else paths["aligned_prec_era5_base_dir"]
+            if precip_source == "era5"
             else (paths["aligned_prec_base_dir"] if precip_source == "mswep" else paths["aligned_prec_cmfd_base_dir"])
         ),
         "temp_dir": paths["aligned_temp_dir"],
@@ -8512,7 +8554,8 @@ def _build_forward_payload_context(payload: dict[str, Any]) -> dict[str, Any]:
         metadata.get("data_sources", {}).get("runtime_prec_source")
         or metadata.get("data_sources", {}).get("prec_source")
         or metadata.get("data_sources", {}).get("configured_precip_source")
-        or "mswep"
+        or profile_runner.configured_precip_source(config)
+        or "era5"
     ).strip().lower()
     prec_source = profile_runner.resolve_runtime_precip_source(config, raw_prec_source)
     validation = validate_workspace_fields(str(config_path), stage="forward", precip_source=prec_source, config_override=config)
@@ -9352,7 +9395,14 @@ class StudioHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if parsed.path == "/api/health":
-                self.send_json({"ok": True, "time": time.time(), "version": "2026-04-03a"})
+                self.send_json({
+                    "ok": True,
+                    "time": time.time(),
+                    "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "server_started_at": SERVER_STARTED_AT,
+                    "server_started_at_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(SERVER_STARTED_AT)),
+                    "version": APP_VERSION,
+                })
             elif parsed.path == "/api/dashboard":
                 self.send_json({"ok": True, "data": dashboard_payload()})
             elif parsed.path == "/api/templates":
@@ -9641,7 +9691,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
     mark_server_activity()
-    print(f"HBV-Studio server v2026-04-03a on {host}:{port}")
+    print(f"HBV-Studio server v{APP_VERSION} on {host}:{port}")
     server = ExclusiveThreadingHTTPServer((host, port), StudioHandler)
     threading.Thread(target=monitor_server_lifecycle, args=(server,), daemon=True).start()
     try:

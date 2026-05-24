@@ -381,6 +381,9 @@ def build_workspace_paths(config):
         "observed_dir": select_workspace_path(root, ("数据", "观测数据"), ("data", "observed")),
         "raw_root": raw_root,
         "raw_prec_root": raw_prec_root,
+        "raw_prec_era5_dir": select_workspace_path(raw_prec_root, ("ERA5",), ("era5",)),
+        "raw_prec_era5_daily_dir": select_workspace_path(raw_prec_root, ("ERA5_日尺度",), ("era5_daily",)),
+        "raw_prec_era5_hourly_dir": select_workspace_path(raw_prec_root, ("ERA5_小时尺度",), ("era5_hourly",)),
         "raw_prec_mswep_dir": select_workspace_path(raw_prec_root, ("MSWEP",), ("mswep",)),
         "raw_prec_daily_dir": select_workspace_path(raw_prec_root, ("MSWEP_日尺度",), ("daily",)),
         "raw_prec_hourly_dir": select_workspace_path(raw_prec_root, ("MSWEP_小时尺度",), ("hourly",)),
@@ -397,6 +400,7 @@ def build_workspace_paths(config):
         "raw_wind_dir": select_workspace_path(raw_root, ("风速",), ("wind",)),
         "raw_dewpoint_dir": select_workspace_path(raw_root, ("露点温度",), ("dewpoint",)),
         "aligned_dir": aligned_root,
+        "aligned_prec_era5_dir": select_workspace_path(aligned_root, ("降水",), ("precipitation",)),
         "aligned_prec_dir": select_workspace_path(aligned_root, ("降水_MSWEP",), ("prec",)),
         "aligned_prec_cmfd_dir": select_workspace_path(aligned_root, ("降水_CMFD",), ("prec_cmfd",)),
         "aligned_temp_dir": select_workspace_path(aligned_root, ("气温",), ("temp",)),
@@ -718,7 +722,7 @@ def print_config_summary(config, paths):
     print(f"流域名称: {流域名称}")
     print(f"流域编号: {流域编号}")
     print(f"运行目录: {paths['workspace_root']}")
-    print(f"默认降水源: {config.get('默认降水源', 'mswep')}")
+    print(f"默认降水源: {config.get('默认降水源', 'era5')}")
     print(f"时间步长: {step_hours:.3f} h")
     print(f"CFMAX 分区阈值: {zone_threshold:.1f} m")
     print("=" * 72)

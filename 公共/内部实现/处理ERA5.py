@@ -40,8 +40,10 @@ def _prefer_existing_path(*paths):
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "运行目录", "默认流域"))
 DATA_ROOT = ""
 RAW_ROOT = ""
+RAW_PREC_ERA5_DIR = ""
 RAW_TEMP_DIR = ""
 RAW_EVAP_DIR = ""
+PREC_ERA5_DAILY_DIR = ""
 TEMP_DAILY_DIR = ""
 EVAP_DAILY_DIR = ""
 
@@ -50,11 +52,14 @@ OVERWRITE = False
 
 
 def refresh_workspace_paths():
-    global DATA_ROOT, RAW_ROOT, RAW_TEMP_DIR, RAW_EVAP_DIR, TEMP_DAILY_DIR, EVAP_DAILY_DIR
+    global DATA_ROOT, RAW_ROOT, RAW_PREC_ERA5_DIR, RAW_TEMP_DIR, RAW_EVAP_DIR, PREC_ERA5_DAILY_DIR, TEMP_DAILY_DIR, EVAP_DAILY_DIR
     DATA_ROOT = _prefer_existing_path(os.path.join(PROJECT_ROOT, "数据"), os.path.join(PROJECT_ROOT, "data"))
     RAW_ROOT = _prefer_existing_path(os.path.join(DATA_ROOT, "原始气象"), os.path.join(DATA_ROOT, "raw"))
+    RAW_PREC_ROOT = _prefer_existing_path(os.path.join(RAW_ROOT, "降水"), os.path.join(RAW_ROOT, "precipitation"))
+    RAW_PREC_ERA5_DIR = _prefer_existing_path(os.path.join(RAW_PREC_ROOT, "ERA5"), os.path.join(RAW_PREC_ROOT, "era5"))
     RAW_TEMP_DIR = _prefer_existing_path(os.path.join(RAW_ROOT, "气温"), os.path.join(RAW_ROOT, "temperature"))
     RAW_EVAP_DIR = _prefer_existing_path(os.path.join(RAW_ROOT, "蒸散发"), os.path.join(RAW_ROOT, "evaporation"))
+    PREC_ERA5_DAILY_DIR = _prefer_existing_path(os.path.join(RAW_PREC_ROOT, "ERA5_日尺度"), os.path.join(RAW_PREC_ROOT, "era5_daily"))
     TEMP_DAILY_DIR = _prefer_existing_path(os.path.join(RAW_TEMP_DIR, "日尺度"), os.path.join(RAW_TEMP_DIR, "daily"))
     EVAP_DAILY_DIR = _prefer_existing_path(os.path.join(RAW_EVAP_DIR, "日尺度"), os.path.join(RAW_EVAP_DIR, "daily"))
 
@@ -131,6 +136,66 @@ def daily_totals_from_cumulative(arr):
     if not slices:
         return accum.isel(time=slice(0, 0))
     return xr.concat(slices, dim=pd.Index(pd.DatetimeIndex(output_days), name="time")).sortby("time")
+
+
+# ============================================================
+# 处理降水数据
+# ============================================================
+def process_precipitation(year):
+    """处理单年 ERA5 total_precipitation 数据"""
+
+    nc_file = os.path.join(RAW_PREC_ERA5_DIR, f"era5_tp_{year}.nc")
+
+    if not os.path.exists(nc_file):
+        print(f"   [WARN] {year}: ERA5 降水 NetCDF文件不存在")
+        return 0
+
+    print(f"   处理 {year} 年 ERA5 降水数据...")
+
+    with open_netcdf_dataset_safe(nc_file) as ds:
+        var_name = 'tp' if 'tp' in ds.data_vars else list(ds.data_vars)[0]
+        precip = ds[var_name]
+        precip_mm = precip * 1000.0
+        precip_daily = daily_totals_from_cumulative(precip_mm)
+
+        os.makedirs(PREC_ERA5_DAILY_DIR, exist_ok=True)
+
+        lons, lats = coords_of(precip_daily)
+        _, lons_out, lats_out = orient_grid(np.zeros((len(lats), len(lons)), dtype=np.float32), lons, lats)
+
+        count = 0
+        time_values = precip_daily["time"].values
+
+        for i, time in enumerate(time_values):
+            date = np.datetime_as_string(time, unit='D')
+            date_str = date.replace('-', '.')
+
+            output_file = os.path.join(PREC_ERA5_DAILY_DIR, f"P_ERA5_{date_str}.tif")
+            if (not OVERWRITE) and os.path.exists(output_file):
+                count += 1
+                continue
+
+            data = precip_daily.isel(time=i).values
+            data = np.where(np.isfinite(data), np.clip(data, 0.0, None), -9999)
+            data, _, _ = orient_grid(data, lons, lats)
+            transform = output_transform(lons_out, lats_out)
+
+            with rasterio.open(
+                output_file, 'w',
+                driver='GTiff',
+                height=data.shape[0],
+                width=data.shape[1],
+                count=1,
+                dtype=np.float32,
+                crs=CRS.from_epsg(4326),
+                transform=transform,
+                nodata=-9999
+            ) as dst:
+                dst.write(data.astype(np.float32), 1)
+
+            count += 1
+    print(f"   [OK] {year}: 生成 {count} 个日降水文件")
+    return count
 
 
 # ============================================================
@@ -287,16 +352,25 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # 检查是否有 NetCDF 文件
+    prec_files = [f for f in os.listdir(RAW_PREC_ERA5_DIR) if f.endswith('.nc')] if os.path.exists(RAW_PREC_ERA5_DIR) else []
     temp_files = [f for f in os.listdir(RAW_TEMP_DIR) if f.endswith('.nc')] if os.path.exists(RAW_TEMP_DIR) else []
     evap_files = [f for f in os.listdir(RAW_EVAP_DIR) if f.endswith('.nc')] if os.path.exists(RAW_EVAP_DIR) else []
 
+    print(f"\n找到 ERA5 降水 NetCDF 文件: {len(prec_files)}")
     print(f"\n找到温度 NetCDF 文件: {len(temp_files)}")
     print(f"找到蒸散发 NetCDF 文件: {len(evap_files)}")
 
-    if not temp_files and not evap_files:
+    if not prec_files and not temp_files and not evap_files:
         print("\n[WARN] 未找到 ERA5 NetCDF 文件")
         print("   请先运行 02_download_meteorological_data.py 下载数据")
         sys.exit(0)
+
+    if prec_files:
+        print("\n[0/2] 处理 ERA5 降水数据")
+        total_prec = 0
+        for year in YEARS:
+            total_prec += process_precipitation(year)
+        print(f"   共生成 {total_prec} 个降水文件")
 
     # 处理温度
     if temp_files:

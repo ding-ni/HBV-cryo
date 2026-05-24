@@ -119,7 +119,7 @@ def write_series(
 def main() -> None:
     parser = argparse.ArgumentParser(description="把小时尺度降水、温度、蒸散发对齐到 DEM 并裁剪到流域。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--覆盖", "--overwrite", dest="覆盖", action="store_true")
     args = parser.parse_args()
 
@@ -140,13 +140,17 @@ def main() -> None:
     meteo = config.get("气象策略", {})
     custom_prec_dir = str(meteo.get("自带降水tif目录", "")).strip()
     custom_prec_path = resolve_config_entry_path(config, custom_prec_dir)
-    runtime_source = str(getattr(args, "降水源", None) or configured_precip_source(config) or "mswep").strip().lower()
+    runtime_source = str(getattr(args, "降水源", None) or configured_precip_source(config) or "era5").strip().lower()
     if runtime_source == "custom_tif":
         if not custom_prec_dir or not custom_prec_path.is_dir():
             raise FileNotFoundError(f"当前降水来源为 custom_tif，但自带降水tif目录无效：{custom_prec_dir or '未设置'}")
         precip_input = custom_prec_path
         precip_output = paths["aligned_prec_custom_base_dir"]
         print(f"[降水] 使用自带 tif 目录: {precip_input}")
+    elif runtime_source == "era5":
+        precip_input = base_paths["raw_prec_era5_hourly_dir"]
+        precip_output = paths["aligned_prec_era5_base_dir"]
+        print(f"[降水] 使用 ERA5 小时降水目录: {precip_input}")
     elif runtime_source == "cmfd":
         precip_input = base_paths["raw_prec_cmfd_hourly_dir"]
         precip_output = paths["aligned_prec_cmfd_base_dir"]

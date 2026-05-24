@@ -36,7 +36,7 @@ def print_summary_rows(rows):
 def main() -> None:
     parser = argparse.ArgumentParser(description="检查当前流域小时尺度输入是否齐全。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     args = parser.parse_args()
     config_path = str(read_config(args.配置).get("_config_path", str(Path(args.配置).resolve())))
 

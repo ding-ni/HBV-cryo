@@ -98,7 +98,7 @@ def write_series(records, output_dir, prefix, dem_profile, dem_shape, basin_mask
 def main():
     parser = argparse.ArgumentParser(description="把温度、降水、蒸散发统一对齐到 DEM 并裁到流域。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--覆盖", "--overwrite", dest="覆盖", action="store_true")
     args = parser.parse_args()
 
@@ -122,7 +122,7 @@ def main():
 
     meteo = config.get("气象策略", {})
     configured_source = configured_precip_source(config)
-    runtime_source = str(args.降水源 or configured_source or "mswep").strip().lower()
+    runtime_source = str(args.降水源 or configured_source or "era5").strip().lower()
     custom_prec_dir = str(meteo.get("自带降水tif目录", "")).strip()
     custom_prec_path = resolve_config_entry_path(config, custom_prec_dir)
     if runtime_source == "custom_tif":
@@ -131,6 +131,10 @@ def main():
         prec_input = custom_prec_path
         prec_output = profile_paths["aligned_prec_custom_base_dir"]
         print(f"[降水] 使用自带 tif 目录: {prec_input}")
+    elif runtime_source == "era5":
+        prec_input = paths["raw_prec_era5_daily_dir"]
+        prec_output = profile_paths["aligned_prec_era5_base_dir"]
+        print(f"[降水] 使用 ERA5 日降水目录: {prec_input}")
     else:
         prec_input = paths["raw_prec_daily_dir"] if runtime_source == "mswep" else paths["raw_prec_cmfd_daily_dir"]
         prec_output = profile_paths["aligned_prec_base_dir"] if runtime_source == "mswep" else profile_paths["aligned_prec_cmfd_base_dir"]

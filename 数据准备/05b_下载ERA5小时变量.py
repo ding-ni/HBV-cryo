@@ -57,12 +57,16 @@ def main() -> None:
     config = read_config(args.配置)
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
+    meteo = dict(config.get("气象策略", {}))
+    prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
     bbox = bbox_dict(config)
     area = [bbox["lat_max"], bbox["lon_min"], bbox["lat_min"], bbox["lon_max"]]
     years = list(year_range(config))
     client = cdsapi.Client()
 
     for year in years:
+        if prec_source == "era5":
+            download_variable(client, "reanalysis-era5-land", "total_precipitation", year, area, paths["raw_prec_era5_dir"] / f"era5_tp_hourly_{year}.nc")
         download_variable(client, "reanalysis-era5-land", "2m_temperature", year, area, paths["raw_temp_dir"] / f"era5_t2m_hourly_{year}.nc")
         download_variable(client, "reanalysis-era5-land", "surface_solar_radiation_downwards", year, area, paths["raw_solar_dir"] / f"era5_ssrd_hourly_{year}.nc")
         download_variable(client, "reanalysis-era5-land", "10m_u_component_of_wind", year, area, paths["raw_wind_dir"] / f"era5_u10_hourly_{year}.nc")

@@ -34,7 +34,7 @@ def parse_time_token(name: str) -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="处理或标准化小时尺度降水文件。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--覆盖", "--overwrite", dest="覆盖", action="store_true")
     args = parser.parse_args()
 
@@ -43,12 +43,18 @@ def main() -> None:
     ensure_workspace_dirs(paths)
     meteo = dict(config.get("气象策略", {}))
     configured_source = str(
-        meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "mswep")))
+        meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))
     ).strip().lower()
-    runtime_source = str(args.降水源 or configured_source or "mswep").strip().lower()
+    runtime_source = str(args.降水源 or configured_source or "era5").strip().lower()
     if runtime_source == "custom_tif":
         print("[跳过] 当前工作区为本地降水栅格模式，不执行小时格点降水标准化。")
         return
+    if runtime_source == "era5":
+        target_dir = Path(paths["raw_prec_era5_hourly_dir"])
+        if list(target_dir.glob("*.tif")):
+            print(f"[完成] ERA5 小时降水已生成 -> {target_dir}")
+            return
+        raise FileNotFoundError("当前降水来源为 ERA5，请先运行“处理小时温度与蒸散”步骤；该步骤会同步生成 ERA5 小时降水。")
     source_dir_raw = str(meteo.get("原始小时降水目录", "")).strip()
     if source_dir_raw:
         source_dir = Path(resolve_path(source_dir_raw, base=config_base_dir(config))).resolve(strict=False)

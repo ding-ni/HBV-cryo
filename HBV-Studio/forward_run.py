@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--参数文件", "--params-file", dest="params_file", required=True)
     parser.add_argument("--率定模式", "--profile", dest="profile", default="")
     parser.add_argument("--目标函数", "--objective-mode", dest="objective_mode", default="")
-    parser.add_argument("--降水源", "--prec-source", dest="prec_source", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="prec_source", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--prec-dir", dest="prec_dir", default="")
     parser.add_argument("--冰川模式", "--glacier-mode", dest="glacier_mode", choices=["inline", "off"], default="inline")
     parser.add_argument("--output-json", dest="output_json", default="")

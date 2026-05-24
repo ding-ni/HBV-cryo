@@ -1088,11 +1088,13 @@ function directoryAliasLabel(path) {
     { matches: ["/数据/原始气象/蒸散发", "/data/raw/evaporation"], label: "原始蒸散发资料目录" },
     { matches: ["/数据/原始气象", "/data/raw"], label: "原始气象资料目录" },
     { matches: ["/数据/模型输入/降水_本地导入_站点订正", "/data/aligned_masked/prec_custom_corrected"], label: "本地导入降水运行目录（站点订正后）" },
+    { matches: ["/数据/模型输入/降水_ERA5_站点订正", "/data/aligned_masked/precipitation_corrected"], label: "ERA5 运行降水目录（站点订正后）" },
     { matches: ["/数据/模型输入/降水_CMFD_站点订正", "/data/aligned_masked/prec_cmfd_corrected"], label: "CMFD 运行降水目录（站点订正后）" },
     { matches: ["/数据/模型输入/降水_MSWEP_站点订正", "/data/aligned_masked/prec_corrected"], label: "MSWEP 运行降水目录（站点订正后）" },
     { matches: ["/数据/模型输入/降水_本地导入", "/data/aligned_masked/prec_custom"], label: "本地导入降水基线目录" },
     { matches: ["/数据/模型输入/降水_CMFD", "/data/aligned_masked/prec_cmfd"], label: "CMFD 基线降水目录" },
     { matches: ["/数据/模型输入/降水_MSWEP", "/data/aligned_masked/prec"], label: "MSWEP 基线降水目录" },
+    { matches: ["/数据/模型输入/降水", "/data/aligned_masked/precipitation"], label: "工程降水目录" },
     { matches: ["/数据/模型输入/冰川融水", "/data/aligned_masked/glacier_melt"], label: "冰川融水参考目录" },
     { matches: ["/数据/模型输入", "/data/aligned_masked"], label: "标准气象驱动目录" },
     { matches: ["/结果/日尺度/运行记录", "/results/daily/runs"], label: "日尺度结果目录" },
@@ -2568,8 +2570,8 @@ function optimizationSummary(meta) {
 function runPrecipSummary(meta) {
   const sources = meta?.data_sources || {};
   const runtimeSource = String(sources.runtime_prec_source || sources.prec_source || sources.configured_precip_source || "").trim().toLowerCase();
-  const sourceLabel = getConfiguredPrecipSourceLabel(runtimeSource || "mswep");
-  const directoryLabel = sources.prec_dir ? dataPathAlias(sources.prec_dir) : getRuntimePrecipDirectoryLabel(runtimeSource || "mswep");
+  const sourceLabel = getConfiguredPrecipSourceLabel(runtimeSource || "era5");
+  const directoryLabel = sources.prec_dir ? dataPathAlias(sources.prec_dir) : getRuntimePrecipDirectoryLabel(runtimeSource || "era5");
   return `${sourceLabel} · ${directoryLabel}`;
 }
 
@@ -2898,7 +2900,7 @@ function isFullUpstream() {
   return getSelectedRadio("wz-object") === "full_upstream_basin";
 }
 
-function normalizePrecipSourceKey(source, fallback = "mswep") {
+function normalizePrecipSourceKey(source, fallback = "era5") {
   const key = String(source || "").trim().toLowerCase();
   return key || fallback;
 }
@@ -2909,10 +2911,10 @@ function workspaceConfiguredPrecipSource(cfg = state.currentWorkspace || {}) {
   const legacySource = normalizePrecipSourceKey(meteo?.降水源, "");
   const topLevelSource = normalizePrecipSourceKey(cfg?.默认降水源, "");
   if (source) return source;
-  if ((topLevelSource === "cmfd" || topLevelSource === "custom_tif") && (!legacySource || legacySource === "mswep")) {
+  if ((topLevelSource === "era5" || topLevelSource === "cmfd" || topLevelSource === "custom_tif") && (!legacySource || legacySource === "mswep")) {
     return topLevelSource;
   }
-  return legacySource || topLevelSource || "mswep";
+  return legacySource || topLevelSource || "era5";
 }
 
 function getConfiguredPrecipSource() {
@@ -2926,7 +2928,8 @@ function getTaskPrecipSource() {
 function getEffectiveRuntimePrecipSource(source = getConfiguredPrecipSource()) {
   const key = normalizePrecipSourceKey(source, "");
   if (key === "custom_tif") return "custom_tif";
-  return key === "cmfd" ? "cmfd" : "mswep";
+  if (key === "era5" || key === "cmfd") return key;
+  return "mswep";
 }
 
 function getTaskRuntimePrecipSource() {
@@ -2961,16 +2964,18 @@ function syncTaskPrecipSourceControl() {
 function getConfiguredPrecipSourceLabel(source = getConfiguredPrecipSource()) {
   const key = normalizePrecipSourceKey(source, "");
   if (key === "custom_tif") return "本地降水栅格目录";
-  if (key === "cmfd") return "CMFD 格点降水";
-  return "MSWEP 格点降水";
+  if (key === "era5") return "ERA5 自动下载降水";
+  if (key === "cmfd") return "CMFD 本地原始文件";
+  return "MSWEP 本地原始文件";
 }
 
 function getRuntimePrecipDirectoryLabel(source = getConfiguredPrecipSource()) {
   const key = normalizePrecipSourceKey(source, "");
   if (key === "custom_tif") return "工程独立降水目录（本地导入）";
+  if (getEffectiveRuntimePrecipSource(key) === "era5") return "工程降水目录（ERA5 自动下载）";
   return getEffectiveRuntimePrecipSource(key) === "cmfd"
-    ? "工程标准降水目录（CMFD）"
-    : "工程标准降水目录（MSWEP）";
+    ? "工程降水目录（CMFD 本地原始文件）"
+    : "工程降水目录（MSWEP 本地原始文件）";
 }
 
 function isStudioEditableRun(data) {
@@ -3190,7 +3195,7 @@ function syncCustomMeteoImportInputs(force = false) {
     {
       sourceSel: "#wz-custom-prec-dir",
       targetSel: "#wz-import-prec-dir",
-      enabled: () => ($("#wz-prec-source")?.value || "mswep") === "custom_tif",
+      enabled: () => ($("#wz-prec-source")?.value || "era5") === "custom_tif",
     },
     {
       sourceSel: "#wz-custom-temp-dir",
@@ -3217,7 +3222,7 @@ function syncCustomMeteoImportInputs(force = false) {
 
 function getWizardMeteoSources() {
   return {
-    prec: ($("#wz-prec-source")?.value || "mswep").trim().toLowerCase(),
+    prec: ($("#wz-prec-source")?.value || "era5").trim().toLowerCase(),
     temp: ($("#wz-temp-source")?.value || "era5").trim().toLowerCase(),
     pet: ($("#wz-pet-source")?.value || "era5_fao56").trim().toLowerCase(),
   };
@@ -3225,12 +3230,12 @@ function getWizardMeteoSources() {
 
 function wizardNeedsEra5Download() {
   const sources = getWizardMeteoSources();
-  return sources.temp !== "custom_tif" || sources.pet !== "custom_tif";
+  return sources.prec === "era5" || sources.temp !== "custom_tif" || sources.pet !== "custom_tif";
 }
 
 function currentEra5NeedSignature() {
   const sources = getWizardMeteoSources();
-  return `${sources.temp}|${sources.pet}`;
+  return `${sources.prec}|${sources.temp}|${sources.pet}`;
 }
 
 function getWizardLocalMeteoLabels() {
@@ -3327,7 +3332,7 @@ function updateConditionalFields() {
   }
 
   // custom prec dir: only show when prec source is custom_tif
-  const precSource = $("#wz-prec-source")?.value || "mswep";
+  const precSource = $("#wz-prec-source")?.value || "era5";
   const customPrecGroup = $("#wz-custom-prec-group");
   if (customPrecGroup) {
     if (precSource === "custom_tif") {
@@ -3462,7 +3467,7 @@ function collectStepData(step) {
         潜在蒸散发来源: $("#wz-pet-source")?.value || "era5_fao56",
         自带蒸散发tif目录: $("#wz-custom-pet-dir")?.value.trim() || "",
       },
-      默认降水源: $("#wz-prec-source").value || "mswep",
+      默认降水源: $("#wz-prec-source").value || "era5",
     };
     default: return {};
   }
@@ -3672,7 +3677,7 @@ function resetWizard() {
   $("#wz-boundary-flow").value = "inflow_m3s";
   setRadioAndCard("wz-precip-mode", "grid_only");
   setRadioValue("wz-meteo-mode", "pipeline");
-  $("#wz-prec-source").value = "mswep";
+  $("#wz-prec-source").value = "era5";
   $("#wz-temp-source").value = "era5";
   $("#wz-pet-source").value = "era5_fao56";
   $("#wz-obs-hint").textContent = "选择观测径流文件后将自动推断时间范围。";
@@ -3714,7 +3719,7 @@ function resetWizard() {
   state.taskManualPresetConfigPath = "";
   nextTaskManualPresetRequestId();
   if ($("#task-kind")) $("#task-kind").value = "calibration";
-  if ($("#task-prec-source")) $("#task-prec-source").value = "mswep";
+  if ($("#task-prec-source")) $("#task-prec-source").value = "era5";
   if ($("#task-glacier-mode")) $("#task-glacier-mode").value = "inline";
   if ($("#task-quick-days")) $("#task-quick-days").value = "30";
   if ($("#task-method")) $("#task-method").value = "mc_screen_de";
@@ -4333,7 +4338,7 @@ async function importGisFiles() {
 async function importMeteoFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
-  const precDir = $("#wz-import-prec-dir").value.trim() || ((($("#wz-prec-source")?.value || "mswep") === "custom_tif") ? ($("#wz-custom-prec-dir")?.value.trim() || "") : "");
+  const precDir = $("#wz-import-prec-dir").value.trim() || ((($("#wz-prec-source")?.value || "era5") === "custom_tif") ? ($("#wz-custom-prec-dir")?.value.trim() || "") : "");
   const tempDir = $("#wz-import-temp-dir").value.trim() || ((($("#wz-temp-source")?.value || "era5") === "custom_tif") ? ($("#wz-custom-temp-dir")?.value.trim() || "") : "");
   const evapDir = $("#wz-import-evap-dir").value.trim() || ((($("#wz-pet-source")?.value || "era5_fao56") === "custom_tif") ? ($("#wz-custom-pet-dir")?.value.trim() || "") : "");
   if (!precDir || !tempDir || !evapDir) { showToast("请选择降水、气温和蒸散发三个目录。", true); return; }
@@ -4408,6 +4413,9 @@ function pollBootstrapLog(task) {
 
 function describeEra5Need() {
   const sources = getWizardMeteoSources();
+  if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
+    return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
+  }
   if (sources.pet !== "custom_tif" && sources.temp === "custom_tif") {
     return "下面先下载计算潜在蒸散发要用的 ERA5 变量，再生成潜在蒸散发。";
   }
@@ -4435,22 +4443,31 @@ function buildVisiblePrepSteps() {
   };
   const needsEra5Temp = sources.temp !== "custom_tif";
   const needsEra5Pet = sources.pet !== "custom_tif";
+  const needsEra5Precip = sources.prec === "era5";
   const needsGridPrec = sources.prec !== "custom_tif";
 
   if (isHourlyTimescaleSelected()) {
-    if (needsEra5Temp || needsEra5Pet) {
+    if (needsEra5Precip || needsEra5Temp || needsEra5Pet) {
       const hourlyDownloadTitle = needsEra5Pet
         ? (needsEra5Temp ? "下载小时 ERA5 变量" : "下载 PET 所需 ERA5 变量")
-        : "下载小时 ERA5 气温";
+        : needsEra5Precip
+          ? "下载小时 ERA5 降水"
+          : "下载小时 ERA5 气温";
       const hourlyDownloadDesc = needsEra5Pet
         ? "下载这一步要用到的 ERA5 原始变量。"
-        : "下载小时气温要用的 ERA5 原始变量。";
+        : needsEra5Precip
+          ? "下载小时 ERA5 total_precipitation 原始变量。"
+          : "下载小时气温要用的 ERA5 原始变量。";
       const hourlyProcessTitle = needsEra5Pet
         ? (needsEra5Temp ? "生成小时气温和潜在蒸散发" : "生成小时潜在蒸散发")
-        : "生成小时气温";
+        : needsEra5Precip
+          ? "生成小时 ERA5 降水"
+          : "生成小时气温";
       const hourlyProcessDesc = needsEra5Pet
         ? "把下载结果处理成当前项目要用的小时结果。"
-        : "把下载结果处理成小时气温。";
+        : needsEra5Precip
+          ? "把 ERA5 降水下载结果处理成小时降水栅格。"
+          : "把下载结果处理成小时气温。";
       add(
         "download_hourly_era5",
         hourlyDownloadTitle,
@@ -4473,13 +4490,17 @@ function buildVisiblePrepSteps() {
       add("apply_precip_strategy", "执行降水方案", "按你选的站点订正或泰森方案，生成最终降水输入。");
     }
   } else {
-    if (needsEra5Temp || needsEra5Pet) {
+    if (needsEra5Precip || needsEra5Temp || needsEra5Pet) {
       const dailyDownloadTitle = needsEra5Pet
         ? (needsEra5Temp ? "下载 ERA5 变量" : "下载 PET 所需 ERA5 变量")
-        : "下载 ERA5 气温";
+        : needsEra5Precip
+          ? "下载 ERA5 降水"
+          : "下载 ERA5 气温";
       const dailyDownloadDesc = needsEra5Pet
         ? "下载这一步要用到的 ERA5 原始变量。"
-        : "下载气温要用的 ERA5 原始变量。";
+        : needsEra5Precip
+          ? "下载 ERA5 total_precipitation 原始变量。"
+          : "下载气温要用的 ERA5 原始变量。";
       const dailyProcessTitle = needsEra5Pet
         ? (needsEra5Temp ? "生成日尺度气温和潜在蒸散发" : "生成日尺度潜在蒸散发")
         : "生成日尺度气温";
@@ -4491,11 +4512,13 @@ function buildVisiblePrepSteps() {
         dailyDownloadTitle,
         dailyDownloadDesc
       );
-      add(
-        "process_era5",
-        dailyProcessTitle,
-        dailyProcessDesc
-      );
+      if (needsEra5Temp || needsEra5Pet) {
+        add(
+          "process_era5",
+          dailyProcessTitle,
+          dailyProcessDesc
+        );
+      }
     }
     if (needsGridPrec) {
       add("process_prec", "整理降水", "把降水整理到当前工程可直接使用的格式。");
@@ -4520,8 +4543,15 @@ function updatePrepPanelSummary(steps) {
   const hint = $("#wz-pipeline-meteo-hint");
   if (!hint) return;
   const sources = getWizardMeteoSources();
+  const precText = sources.prec === "custom_tif"
+    ? "本地栅格"
+    : sources.prec === "era5"
+      ? "ERA5 自动下载"
+      : sources.prec === "cmfd"
+        ? "CMFD 本地原始文件"
+        : "MSWEP 本地原始文件";
   hint.textContent =
-    `当前流程：降水用${sources.prec === "custom_tif" ? "本地栅格" : "格点数据"}，`
+    `当前流程：降水用${precText}，`
     + `气温用${sources.temp === "custom_tif" ? "本地栅格" : "ERA5"}，`
     + `潜在蒸散发用${sources.pet === "custom_tif" ? "本地栅格" : "ERA5+FAO56"}。`
     + describeEra5Need();
@@ -4540,6 +4570,7 @@ function renderEra5ApiPanel() {
   }
   const sources = getWizardMeteoSources();
   const petOnly = sources.pet !== "custom_tif" && sources.temp === "custom_tif";
+  const precipOnly = sources.prec === "era5" && sources.temp === "custom_tif" && sources.pet === "custom_tif";
   const status = state.cdsApiStatus;
   hint.style.display = "";
   actions.style.display = "";
@@ -4553,7 +4584,9 @@ function renderEra5ApiPanel() {
     hint.className = "hint-box status-fail";
     return;
   }
-  const basis = petOnly
+  const basis = precipOnly
+    ? "这一步会下载 ERA5 降水。"
+    : petOnly
     ? "这一步会下载计算潜在蒸散发要用的 ERA5 变量。"
     : "这一步会下载当前方案要用的 ERA5 变量。";
   if (status.exists && status.looks_valid !== false) {
@@ -5164,7 +5197,7 @@ async function saveCurrentManualPreset() {
       || state._runData?.metadata?.data_sources?.prec_source
       || state._runData?.metadata?.data_sources?.configured_precip_source
       || getTaskRuntimePrecipSource()
-      || "mswep"
+      || "era5"
     ).trim().toLowerCase(),
     glacier_mode: state._runData?.metadata?.data_sources?.glacier_mode || $("#task-glacier-mode")?.value || "inline",
     name,
@@ -6910,6 +6943,9 @@ function bindEvents() {
 // ===============================================================
 
 async function refreshAll() {
+  if (state.currentView === "wizard" && state.wizardWorkspacePath) {
+    await saveCurrentWizardStep();
+  }
   await loadDashboard();
   refreshCalibrationControls();
   if (state.wizardWorkspacePath) {
@@ -6975,8 +7011,8 @@ async function init() {
 
   try {
     const health = await apiGet("/api/health");
-    const ver = health.version || "unknown";
-    setServiceState(true, `本地服务已连接 (${ver})`);
+    const connectedAt = health.server_time ? String(health.server_time).split(" ").pop() : new Date().toLocaleTimeString();
+    setServiceState(true, `本地服务已连接 · ${connectedAt}`);
     await refreshAll();
     startPolling();
   } catch (err) {

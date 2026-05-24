@@ -22,7 +22,7 @@ from 公共函数 import (
 def main():
     parser = argparse.ArgumentParser(description="处理降水数据，支持 MSWEP、CMFD 和本地栅格模式跳过。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--覆盖", action="store_true")
     args = parser.parse_args()
 
@@ -33,13 +33,31 @@ def main():
     configured_source = str(
         dict(config.get("气象策略", {})).get(
             "降水来源",
-            dict(config.get("气象策略", {})).get("降水源", config.get("默认降水源", "mswep")),
+            dict(config.get("气象策略", {})).get("降水源", config.get("默认降水源", "era5")),
         )
     ).strip().lower()
-    runtime_source = str(args.降水源 or configured_source or "mswep").strip().lower()
+    runtime_source = str(args.降水源 or configured_source or "era5").strip().lower()
 
     if runtime_source == "custom_tif":
         print("[跳过] 当前工作区为本地降水栅格模式，不执行格点降水预处理。")
+        return
+
+    if runtime_source == "era5":
+        module = load_legacy_module(old_script_path(config, "scripts", "02b_process_era5_netcdf.py"))
+        patch_module(
+            module,
+            {
+                "PROJECT_ROOT": str(paths["workspace_root"]),
+                "RAW_PREC_ERA5_DIR": str(paths["raw_prec_era5_dir"]),
+                "PREC_ERA5_DAILY_DIR": str(paths["raw_prec_era5_daily_dir"]),
+                "YEARS": years,
+                "OVERWRITE": bool(args.覆盖),
+            },
+        )
+        total = 0
+        for year in years:
+            total += module.process_precipitation(year)
+        print(f"[完成] ERA5 日降水文件数：{total}")
         return
 
     if runtime_source == "mswep":

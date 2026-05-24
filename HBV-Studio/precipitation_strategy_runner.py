@@ -31,7 +31,7 @@ DATE_PATTERNS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply precipitation strategy for HBV-Studio workspaces.")
     parser.add_argument("--配置", "--config", dest="配置", required=True)
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--覆盖", "--overwrite", dest="覆盖", action="store_true")
     return parser.parse_args()
 
@@ -121,6 +121,8 @@ def base_and_target_dirs(config: dict[str, Any], prec_source: str) -> tuple[Path
     paths = build_profile_paths(config, profile)
     if str(prec_source or "").strip().lower() == "custom_tif" or configured_precip_source(config) == "custom_tif":
         return Path(paths["aligned_prec_custom_base_dir"]), Path(paths["aligned_prec_custom_corrected_dir"])
+    if prec_source == "era5":
+        return Path(paths["aligned_prec_era5_base_dir"]), Path(paths["aligned_prec_era5_corrected_dir"])
     if prec_source == "cmfd":
         return Path(paths["aligned_prec_cmfd_base_dir"]), Path(paths["aligned_prec_cmfd_corrected_dir"])
     return Path(paths["aligned_prec_base_dir"]), Path(paths["aligned_prec_corrected_dir"])

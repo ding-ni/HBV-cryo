@@ -262,17 +262,17 @@ def write_portable_workspace(bundle_gui_root: Path) -> None:
             legacy_source = str(meteo.get("降水源", "")).strip().lower()
             top_level_source = str(config.get("默认降水源", "")).strip().lower()
             if not source_value:
-                if top_level_source in {"cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
+                if top_level_source in {"era5", "cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
                     source_value = top_level_source
                 else:
-                    source_value = legacy_source or top_level_source or "mswep"
+                    source_value = legacy_source or top_level_source or "era5"
             meteo["降水来源"] = source_value
             meteo["降水源"] = source_value
             config["默认降水源"] = source_value
             meteo["自带降水tif目录"] = (
                 f"{runtime_root}/数据/模型输入/降水_本地导入"
                 if source_value == "custom_tif"
-                else f"{runtime_root}/数据/模型输入/降水_MSWEP"
+                else f"{runtime_root}/数据/模型输入/降水"
             )
             meteo["自带温度tif目录"] = f"{runtime_root}/数据/模型输入/气温"
             meteo["自带蒸散发tif目录"] = f"{runtime_root}/数据/模型输入/蒸散发"

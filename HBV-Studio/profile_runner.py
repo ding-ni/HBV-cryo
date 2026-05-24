@@ -427,23 +427,26 @@ def configured_precip_source(config: dict[str, Any]) -> str:
     top_level_source = str(config.get("默认降水源", "")).strip().lower()
     if source:
         return source
-    if top_level_source in {"cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
+    if top_level_source in {"era5", "cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
         return top_level_source
-    return legacy_source or top_level_source or "mswep"
+    return legacy_source or top_level_source or "era5"
 
 
 def resolve_runtime_precip_source(config: dict[str, Any], cli_source: Any) -> str:
     raw = str(cli_source or "").strip().lower()
-    if raw in {"mswep", "cmfd", "custom_tif"}:
+    if raw in {"era5", "mswep", "cmfd", "custom_tif"}:
         return raw
     configured = configured_precip_source(config)
-    if configured in {"mswep", "cmfd", "custom_tif"}:
+    if configured in {"era5", "mswep", "cmfd", "custom_tif"}:
         return configured
-    return "mswep"
+    return "era5"
 
 
 def resolve_legacy_precip_source(runtime_source: str) -> str:
-    return "cmfd" if str(runtime_source).strip().lower() == "cmfd" else "mswep"
+    source = str(runtime_source).strip().lower()
+    if source in {"era5", "cmfd"}:
+        return source
+    return "mswep"
 
 
 def _workspace_mirror_name(workspace_root: Path) -> str:
@@ -547,9 +550,11 @@ def _seed_workspace_runtime_inputs(
     source_roots = _workspace_seed_root_candidates(requested_root)
     path_keys = (
         "gis_dir",
+        "aligned_prec_era5_base_dir",
         "aligned_prec_base_dir",
         "aligned_prec_cmfd_base_dir",
         "aligned_prec_custom_base_dir",
+        "aligned_prec_era5_corrected_dir",
         "aligned_prec_corrected_dir",
         "aligned_prec_cmfd_corrected_dir",
         "aligned_prec_custom_corrected_dir",
@@ -583,7 +588,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--配置", "--config", dest="配置", required=True)
     parser.add_argument("--率定模式", "--calibration-mode", dest="率定模式", choices=[PROFILE_DAILY, PROFILE_HOURLY], default=None)
     parser.add_argument("--目标函数", "--objective-mode", dest="目标函数", default=None)
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--prec-dir", type=str, default="")
     parser.add_argument("--冰川模式", "--glacier-mode", dest="冰川模式", choices=["inline", "off"], default="inline")
     parser.add_argument("--maxiter", type=int, default=24)
@@ -749,19 +754,25 @@ def build_profile_paths(config: dict[str, Any], profile: str) -> dict[str, Path]
     else:
         aligned_root = Path(paths["aligned_dir"])
 
+    paths["aligned_prec_era5_base_dir"] = select_workspace_path(aligned_root, ("降水",), ("precipitation",))
     paths["aligned_prec_base_dir"] = select_workspace_path(aligned_root, ("降水_MSWEP",), ("prec",))
     paths["aligned_prec_cmfd_base_dir"] = select_workspace_path(aligned_root, ("降水_CMFD",), ("prec_cmfd",))
     paths["aligned_prec_custom_base_dir"] = select_workspace_path(aligned_root, ("降水_本地导入",), ("prec_custom",))
+    paths["aligned_prec_era5_corrected_dir"] = select_workspace_path(aligned_root, ("降水_ERA5_站点订正",), ("precipitation_corrected",))
     paths["aligned_prec_corrected_dir"] = select_workspace_path(aligned_root, ("降水_MSWEP_站点订正",), ("prec_corrected",))
     paths["aligned_prec_cmfd_corrected_dir"] = select_workspace_path(aligned_root, ("降水_CMFD_站点订正",), ("prec_cmfd_corrected",))
     paths["aligned_prec_custom_corrected_dir"] = select_workspace_path(aligned_root, ("降水_本地导入_站点订正",), ("prec_custom_corrected",))
     precip_mode = str(dict(config.get("气象策略", {})).get("降水方案", "grid_only")).strip()
     use_corrected = precip_mode != "grid_only"
+    paths["aligned_prec_era5_dir"] = paths["aligned_prec_era5_corrected_dir"] if use_corrected else paths["aligned_prec_era5_base_dir"]
     paths["aligned_prec_dir"] = paths["aligned_prec_corrected_dir"] if use_corrected else paths["aligned_prec_base_dir"]
     paths["aligned_prec_cmfd_dir"] = paths["aligned_prec_cmfd_corrected_dir"] if use_corrected else paths["aligned_prec_cmfd_base_dir"]
     paths["aligned_prec_custom_dir"] = paths["aligned_prec_custom_corrected_dir"] if use_corrected else paths["aligned_prec_custom_base_dir"]
     configured_source = configured_precip_source(config)
-    if configured_source == "custom_tif":
+    if configured_source == "era5":
+        paths["aligned_prec_effective_base_dir"] = paths["aligned_prec_era5_base_dir"]
+        paths["aligned_prec_effective_dir"] = paths["aligned_prec_era5_dir"]
+    elif configured_source == "custom_tif":
         paths["aligned_prec_effective_base_dir"] = paths["aligned_prec_custom_base_dir"]
         paths["aligned_prec_effective_dir"] = paths["aligned_prec_custom_dir"]
     elif configured_source == "cmfd":
@@ -982,9 +993,21 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
         module,
         {
             "PROJECT_ROOT": str(paths["workspace_root"]),
+            "PREC_DIR_ERA5": str(paths["aligned_prec_era5_dir"]),
             "PREC_DIR_MSWEP": str(paths["aligned_prec_dir"]),
             "PREC_DIR_CMFD": str(paths["aligned_prec_cmfd_dir"]),
-            "PREC_DIR": str(prec_dir_override or (paths["aligned_prec_dir"] if prec_source == "mswep" else paths["aligned_prec_cmfd_dir"])),
+            "PREC_DIR": str(
+                prec_dir_override
+                or (
+                    paths["aligned_prec_era5_dir"]
+                    if prec_source == "era5"
+                    else paths["aligned_prec_dir"]
+                    if prec_source == "mswep"
+                    else paths["aligned_prec_custom_dir"]
+                    if prec_source == "custom_tif"
+                    else paths["aligned_prec_cmfd_dir"]
+                )
+            ),
             "TEMP_DIR": str(paths["aligned_temp_dir"]),
             "EVAP_DIR": str(paths["aligned_evap_dir"]),
             "OBS_FILE": str(obs_path or basin["obs_csv"] or ""),

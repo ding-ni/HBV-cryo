@@ -4,11 +4,12 @@
 
 包含：
 1. ERA5-Land 温度下载（用于后续温度栅格与 FAO56 PET 计算）
-2. MSWEP 降水数据说明
+2. ERA5-Land 降水下载（当工程降水源选择 ERA5 时启用）
+3. MSWEP/CMFD 降水本地原始文件说明
 
 注意：
 - ERA5下载需要先注册 CDS 账号并配置 ~/.cdsapirc
-- MSWEP需要手动从官网下载
+- MSWEP/CMFD 当前不在本模块自动下载，需要用户自行准备本地原始文件
 - 当前默认流程不再下载 ERA5 实际蒸散发 total_evaporation；
   潜在蒸散发统一走 ERA5 气象变量 + FAO56 Penman-Monteith
 """
@@ -31,6 +32,7 @@ RAW_ROOT = ""
 RAW_TEMP_DIR = ""
 RAW_EVAP_DIR = ""
 RAW_PREC_DIR = ""
+RAW_PREC_ERA5_DIR = ""
 
 # 当前流域大致范围 [North, West, South, East]
 # 可根据实际流域边界调整
@@ -42,11 +44,12 @@ END_YEAR = 2020
 
 
 def refresh_workspace_paths():
-    global RAW_ROOT, RAW_TEMP_DIR, RAW_EVAP_DIR, RAW_PREC_DIR
+    global RAW_ROOT, RAW_TEMP_DIR, RAW_EVAP_DIR, RAW_PREC_DIR, RAW_PREC_ERA5_DIR
     RAW_ROOT = _prefer_existing_path(os.path.join(PROJECT_ROOT, "数据", "原始气象"), os.path.join(PROJECT_ROOT, "data", "raw"))
     RAW_TEMP_DIR = _prefer_existing_path(os.path.join(RAW_ROOT, "气温"), os.path.join(RAW_ROOT, "temperature"))
     RAW_EVAP_DIR = _prefer_existing_path(os.path.join(RAW_ROOT, "蒸散发"), os.path.join(RAW_ROOT, "evaporation"))
     RAW_PREC_DIR = _prefer_existing_path(os.path.join(RAW_ROOT, "降水"), os.path.join(RAW_ROOT, "precipitation"))
+    RAW_PREC_ERA5_DIR = _prefer_existing_path(os.path.join(RAW_PREC_DIR, "ERA5"), os.path.join(RAW_PREC_DIR, "era5"))
 
 
 refresh_workspace_paths()
@@ -183,7 +186,42 @@ def download_era5_evaporation(year):
     print(f"   {year}: [OK]")
 
 
-def download_era5_all(download_actual_evaporation=False):
+def download_era5_precipitation(year):
+    """下载 ERA5-Land 总降水数据"""
+    import cdsapi
+
+    c = cdsapi.Client()
+
+    output_file = os.path.join(RAW_PREC_ERA5_DIR, f"era5_tp_{year}.nc")
+
+    if os.path.exists(output_file):
+        with open(output_file, 'rb') as f:
+            header = f.read(2)
+        if header != b'PK':
+            print(f"   {year}: 文件已存在，跳过")
+            return
+
+    print(f"   {year}: 下载中...")
+
+    c.retrieve(
+        'reanalysis-era5-land',
+        {
+            'variable': 'total_precipitation',
+            'year': str(year),
+            'month': [f'{m:02d}' for m in range(1, 13)],
+            'day': [f'{d:02d}' for d in range(1, 32)],
+            'time': ['00:00', '06:00', '12:00', '18:00'],
+            'area': TUOTUOHE_BBOX,
+            'format': 'netcdf',
+        },
+        output_file
+    )
+
+    extract_if_zip(output_file)
+    print(f"   {year}: [OK]")
+
+
+def download_era5_all(download_actual_evaporation=False, download_precipitation=False, download_temperature=True):
     """下载所有年份的 ERA5 数据。
 
     默认仅下载 2m 温度。
@@ -193,14 +231,20 @@ def download_era5_all(download_actual_evaporation=False):
     print("下载 ERA5-Land 数据")
     print("=" * 60)
     print(f"工作区运行目录: {PROJECT_ROOT}")
-    print(f"ERA5 温度目录: {RAW_TEMP_DIR}")
+    if download_precipitation:
+        print(f"ERA5 降水目录: {RAW_PREC_ERA5_DIR}")
+    if download_temperature:
+        print(f"ERA5 温度目录: {RAW_TEMP_DIR}")
     if download_actual_evaporation:
         print(f"ERA5 实际蒸散发目录: {RAW_EVAP_DIR}")
     else:
         print("说明: 当前只下载 PET 所需的 ERA5 温度，不下载 ERA5 实际蒸散发。")
 
     # 确保目录存在
-    os.makedirs(RAW_TEMP_DIR, exist_ok=True)
+    if download_precipitation:
+        os.makedirs(RAW_PREC_ERA5_DIR, exist_ok=True)
+    if download_temperature:
+        os.makedirs(RAW_TEMP_DIR, exist_ok=True)
     if download_actual_evaporation:
         os.makedirs(RAW_EVAP_DIR, exist_ok=True)
 
@@ -215,13 +259,22 @@ def download_era5_all(download_actual_evaporation=False):
         print("   pip install cdsapi")
         return
 
+    if download_precipitation:
+        print("\n[降水] 下载 ERA5 total_precipitation")
+        for year in range(START_YEAR, END_YEAR + 1):
+            try:
+                download_era5_precipitation(year)
+            except Exception as e:
+                print(f"   [ERROR] {year}: {e}")
+
     # 下载温度
-    print("\n[1/1] 下载温度数据")
-    for year in range(START_YEAR, END_YEAR + 1):
-        try:
-            download_era5_temperature(year)
-        except Exception as e:
-            print(f"   [ERROR] {year}: {e}")
+    if download_temperature:
+        print("\n[温度] 下载 ERA5 2m 温度")
+        for year in range(START_YEAR, END_YEAR + 1):
+            try:
+                download_era5_temperature(year)
+            except Exception as e:
+                print(f"   [ERROR] {year}: {e}")
 
     if download_actual_evaporation:
         print("\n[附加] 下载 ERA5 实际蒸散发数据")

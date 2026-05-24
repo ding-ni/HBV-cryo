@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
     parser.add_argument("--率定模式", "--calibration-mode", dest="率定模式", choices=["daily", "hourly"], default=None)
     parser.add_argument("--目标函数", "--objective-mode", dest="目标函数", default=None)
-    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["mswep", "cmfd", "custom_tif"], default=None)
+    parser.add_argument("--降水源", "--prec-source", dest="降水源", choices=["era5", "mswep", "cmfd", "custom_tif"], default=None)
     parser.add_argument("--prec-dir", type=str, default="")
     parser.add_argument("--冰川模式", "--glacier-mode", dest="冰川模式", choices=["inline", "off"], default="inline")
     parser.add_argument("--method", choices=["de", "mc_screen_de", "mc_only"], default="mc_screen_de")
