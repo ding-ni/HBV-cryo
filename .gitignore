@@ -1,0 +1,31 @@
+# Python/runtime cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build and packaging outputs
+build/
+dist/
+*.spec
+
+# Runtime/user-generated workspace data
+运行目录/
+HBV-Studio/logs/
+HBV-Studio/workspaces/*.bak
+
+# Local temporary files
+.claude/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.log
+*.tmp
+*.temp
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

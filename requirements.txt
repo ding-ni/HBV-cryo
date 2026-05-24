@@ -1,0 +1,14 @@
+# HBV-Cryo Studio 最小依赖列表
+# 安装: pip install -r requirements.txt
+numpy
+pandas
+scipy
+numba
+rasterio
+geopandas
+shapely
+xarray
+netCDF4
+fiona
+pyproj
+whitebox

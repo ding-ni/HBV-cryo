@@ -1,0 +1,779 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HBV-Studio</title>
+  <link rel="icon" type="image/png" href="./assets/hbv-studio-logo.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="plotly.min.js" charset="utf-8" onerror="(function(){var s=document.createElement('script');s.src='https://cdn.plot.ly/plotly-2.35.0.min.js';s.charset='utf-8';document.head.appendChild(s);})();"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-card">
+        <img src="./assets/hbv-studio-logo.png" alt="HBV-Studio Logo" class="brand-logo">
+        <div class="brand-copy">
+          <div class="brand-title">HBV-Studio</div>
+          <div class="brand-subtitle">分布式水文模型工作台</div>
+        </div>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-item active" data-view-target="dashboard">项目管理</button>
+        <button class="nav-item" data-view-target="wizard">建模向导</button>
+        <button class="nav-item" data-view-target="calibration">率定运行</button>
+        <button class="nav-item" data-view-target="results">结果分析</button>
+      </nav>
+
+      <section class="sidebar-panel">
+        <div class="sidebar-kicker">数量</div>
+        <div class="sidebar-stat"><span>模板</span><strong id="count-templates">0</strong></div>
+        <div class="sidebar-stat"><span>工作区</span><strong id="count-workspaces">0</strong></div>
+        <div class="sidebar-stat"><span>结果</span><strong id="count-runs">0</strong></div>
+        <div class="sidebar-stat"><span>任务</span><strong id="count-tasks">0</strong></div>
+      </section>
+
+      <section class="sidebar-panel">
+        <div class="sidebar-kicker">当前上下文</div>
+        <div class="focus-block">
+          <div class="focus-label">工作区</div>
+          <div class="focus-value" id="sidebar-current-workspace">未选择</div>
+        </div>
+        <div class="focus-block">
+          <div class="focus-label">率定方案</div>
+          <div class="focus-value" id="sidebar-current-profile">未选择</div>
+        </div>
+        <div class="focus-block">
+          <div class="focus-label">流域工程类型</div>
+          <div class="focus-value" id="sidebar-current-object">未选择</div>
+        </div>
+        <div class="focus-block">
+          <div class="focus-label">流程状态</div>
+          <div class="focus-value" id="sidebar-current-workflow">未检查</div>
+        </div>
+        <div class="focus-block">
+          <div class="focus-label">下一步</div>
+          <div class="focus-value" id="sidebar-next-step">—</div>
+        </div>
+      </section>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="topbar-title-wrap">
+          <div class="topbar-kicker-row">
+            <img src="./assets/hbv-studio-logo.png" alt="" class="topbar-logo">
+            <div class="eyebrow">HBV-Cryo Studio</div>
+          </div>
+          <h1 id="page-title">项目管理</h1>
+          <p id="page-subtitle">管理工作区与内置模板</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-button" id="refresh-all-button">刷新数据</button>
+          <button class="ghost-button" id="quit-app-button">退出程序</button>
+          <div class="service-pill" id="service-pill">正在连接本地服务</div>
+        </div>
+      </header>
+
+      <main class="content-shell">
+
+        <!-- ==================== 项目管理 ==================== -->
+        <section class="view active" data-view="dashboard">
+          <div class="dashboard-actions">
+            <button class="primary-button" id="new-project-button">+ 新建流域项目</button>
+          </div>
+          <div class="card-grid two">
+            <section class="panel">
+              <div class="panel-head"><h3>工作区</h3><span class="panel-note">点击进入建模向导编辑</span></div>
+              <div class="hint-box" style="margin-bottom:12px">工作区包含两部分：一份配置文件和一套本地工程目录。点“目录结构”可直接看清本地会生成哪些目录、当前哪些目录已经有内容。</div>
+              <div class="workspace-grid" id="workspace-card-list"></div>
+              <div class="workspace-layout-panel" id="workspace-layout-panel">
+                <div class="hint-box">点击某个工作区右下角的“目录结构”，查看该工程在本地的目录分工与当前状态。</div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h3>内置模板</h3><span class="panel-note">只读模板，复制后使用</span></div>
+              <div class="list-stack" id="template-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ==================== 建模向导 ==================== -->
+        <section class="view" data-view="wizard">
+          <div class="wizard-progress" id="wizard-progress">
+            <button class="wizard-step active" data-step="1">① 基本设置</button>
+            <button class="wizard-step" data-step="2">② 流域与观测</button>
+            <button class="wizard-step" data-step="3">③ 边界条件</button>
+            <button class="wizard-step" data-step="4">④ 气象来源</button>
+            <button class="wizard-step" data-step="5">⑤ 地理数据生成</button>
+            <button class="wizard-step" data-step="6">⑥ 气象导入/处理</button>
+            <button class="wizard-step" data-step="7">⑦ 输入检查</button>
+          </div>
+
+          <!-- Step 1: 基本设置 -->
+          <div class="wizard-panel active" data-wizard-step="1">
+            <div class="panel">
+              <div class="panel-head"><h3>基本设置</h3><span class="panel-note">选择时间尺度与流域工程类型</span></div>
+              <div class="field-group">
+                <label>工作区名称</label>
+                <input id="wz-name" type="text" placeholder="例如 玛曲_日尺度">
+              </div>
+              <div class="field-group" style="margin-top:16px">
+                <label>时间尺度</label>
+                <div class="radio-card-group">
+                  <label class="radio-card selected" data-value="daily">
+                    <input type="radio" name="wz-timescale" value="daily" checked>
+                    <strong>日尺度</strong>
+                    <small>适用于大多数流域模拟，数据准备简单</small>
+                  </label>
+                  <label class="radio-card" data-value="hourly">
+                    <input type="radio" name="wz-timescale" value="hourly">
+                    <strong>小时尺度</strong>
+                    <small>需要小时级气象驱动数据，适用于洪水过程模拟</small>
+                  </label>
+                </div>
+              </div>
+              <div class="field-group" style="margin-top:16px">
+                <label>流域工程类型</label>
+                <div class="radio-card-group">
+                  <label class="radio-card selected" data-value="full_upstream_basin">
+                    <input type="radio" name="wz-object" value="full_upstream_basin" checked>
+                    <strong>完整上游流域</strong>
+                    <small>无上游边界入流，模拟整个流域的产汇流</small>
+                  </label>
+                  <label class="radio-card" data-value="interbasin_with_boundary">
+                    <input type="radio" name="wz-object" value="interbasin_with_boundary">
+                    <strong>区间流域</strong>
+                    <small>需要提供上游边界入流数据（A站→B站区间）</small>
+                  </label>
+                </div>
+              </div>
+              <div class="hint-box" id="wz-project-focus" style="margin-top:12px"></div>
+              <div class="workspace-layout-panel wizard-layout-panel" id="wz-workspace-layout-preview"></div>
+            </div>
+            <div class="wizard-nav">
+              <span></span>
+              <button class="primary-button" id="wz-next-1">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: 流域与观测 -->
+          <div class="wizard-panel" data-wizard-step="2">
+            <div class="panel">
+              <div class="panel-head"><h3>流域与观测数据</h3><span class="panel-note">设置流域范围与时间分段</span></div>
+              <div class="field-grid two">
+                <div class="field-group">
+                  <label>流域边界 shp</label>
+                  <div class="path-input">
+                    <input id="wz-basin-shp" type="text" placeholder="选择 .shp">
+                    <button class="browse-button" data-target="wz-basin-shp" data-browse-kind="file" data-extensions=".shp">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>观测径流文件</label>
+                  <div class="path-input">
+                    <input id="wz-obs-csv" type="text" placeholder="选择 .csv / .xlsx / .xls">
+                    <button class="browse-button" data-target="wz-obs-csv" data-browse-kind="file" data-extensions=".csv,.xlsx,.xls">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>数字高程模型 DEM（GeoTIFF 格式）</label>
+                  <div class="path-input">
+                    <input id="wz-dem-tif" type="text" placeholder="默认使用内置DEM">
+                    <button class="browse-button" data-target="wz-dem-tif" data-browse-kind="file" data-extensions=".tif">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>冰川边界 shp（可选）</label>
+                  <div class="path-input">
+                    <input id="wz-glacier-shp" type="text" placeholder="无冰川可留空">
+                    <button class="browse-button" data-target="wz-glacier-shp" data-browse-kind="file" data-extensions=".shp">选择</button>
+                  </div>
+                </div>
+              </div>
+              <div class="hint-box" id="wz-obs-hint">选择观测径流文件后将自动推断时间范围。</div>
+              <div class="field-group" style="margin-top:16px">
+                <label>时间分段 <button class="ghost-button" id="wz-auto-split-time" style="margin-left:8px;padding:4px 10px;font-size:12px">自动划分</button></label>
+                <div class="field-grid three">
+                  <div class="field-group"><label class="sub-label">预热开始</label><input id="wz-warmup-start" type="date"></div>
+                  <div class="field-group"><label class="sub-label">预热结束</label><input id="wz-warmup-end" type="date"></div>
+                  <div></div>
+                  <div class="field-group"><label class="sub-label">率定开始</label><input id="wz-calib-start" type="date"></div>
+                  <div class="field-group"><label class="sub-label">率定结束</label><input id="wz-calib-end" type="date"></div>
+                  <div></div>
+                  <div class="field-group"><label class="sub-label">验证开始</label><input id="wz-valid-start" type="date"></div>
+                  <div class="field-group"><label class="sub-label">验证结束</label><input id="wz-valid-end" type="date"></div>
+                  <div></div>
+                </div>
+              </div>
+              <div class="field-grid two" style="margin-top:12px">
+                <div class="field-group"><label>融雪度日因子分区阈值（米） <small style="color:var(--muted)">— 高/低海拔分别使用不同 CFMAX</small></label><input id="wz-cfmax" type="number" step="0.1" value="5000"></div>
+                <div class="field-group"><label>FAO56 平均海拔（米） <small style="color:var(--muted)">— 用于 FAO56 潜在蒸散发气压修正</small></label><input id="wz-fao-elev" type="number" step="0.1" value="4500"></div>
+              </div>
+              <div class="hint-box" id="wz-elev-hint">选择流域边界 shp 后，将直接从原始 DEM 中按流域范围叠置计算 CFMAX 分区阈值和 FAO56 海拔（无需先执行 DEM 裁剪步骤）。</div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="1">← 上一步</button>
+              <button class="primary-button wz-next" data-to="3">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: 边界条件 (仅区间流域) -->
+          <div class="wizard-panel" data-wizard-step="3">
+            <div class="panel">
+              <div class="panel-head"><h3>上游边界入流</h3><span class="panel-note">仅区间流域需要设置</span></div>
+              <div class="field-grid two">
+                <div class="field-group">
+                  <label>上游边界入流 csv</label>
+                  <div class="path-input">
+                    <input id="wz-boundary-csv" type="text" placeholder="选择边界入流文件">
+                    <button class="browse-button" data-target="wz-boundary-csv" data-browse-kind="file" data-extensions=".csv">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>缺失填补方式</label>
+                  <select id="wz-gap-fill">
+                    <option value="zero">零值填补</option>
+                    <option value="interpolate">线性插值</option>
+                  </select>
+                </div>
+                <div class="field-group"><label>时间字段名</label><input id="wz-boundary-date" type="text" value="date"></div>
+                <div class="field-group"><label>流量字段名</label><input id="wz-boundary-flow" type="text" value="inflow_m3s"></div>
+              </div>
+              <div class="action-row">
+                <button class="ghost-button" id="wz-boundary-preview-btn">预览边界入流数据</button>
+              </div>
+              <div class="hint-box" id="wz-boundary-guidance"></div>
+              <div id="wz-boundary-preview"></div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="2">← 上一步</button>
+              <button class="primary-button wz-next" data-to="4">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: 气象数据 -->
+          <div class="wizard-panel" data-wizard-step="4">
+            <div class="panel">
+              <div class="panel-head"><h3>气象来源配置</h3><span class="panel-note">这里只登记来源；真正下载或导入在第 6 步执行</span></div>
+              <p class="step-desc">HBV-Cryo 需要三个气象驱动输入：<strong>降水(P)</strong>、<strong>气温(T)</strong>、<strong>潜在蒸散发(PET)</strong>。这一步只负责告诉系统“数据从哪里来”；真正的下载、裁剪、对齐和导入，会在第 6 步统一执行。</p>
+              <div class="hint-box status-ok">如果这里选择了“本地栅格目录”，第 6 步会自动带入这些目录，不需要你再从头重新选一遍。</div>
+
+              <!-- 降水配置 -->
+              <h4 style="margin-top:20px; font-family:var(--font-display)">降水 (P)</h4>
+              <div class="field-group" style="margin-top:8px">
+                <label>降水融合方案</label>
+                <div class="radio-card-group">
+                  <label class="radio-card selected" data-value="grid_only">
+                    <input type="radio" name="wz-precip-mode" value="grid_only" checked>
+                    <strong>格点直接使用</strong>
+                    <small>使用 1km 格点降水（MSWEP/CMFD）作为输入</small>
+                  </label>
+                  <label class="radio-card" data-value="grid_plus_station_bias">
+                    <input type="radio" name="wz-precip-mode" value="grid_plus_station_bias">
+                    <strong>格点 + 站点偏差订正</strong>
+                    <small>用实测站点数据对格点降水进行偏差校正</small>
+                  </label>
+                  <label class="radio-card" data-value="thiessen_station_only">
+                    <input type="radio" name="wz-precip-mode" value="thiessen_station_only">
+                    <strong>纯泰森多边形插值</strong>
+                    <small>仅使用站点数据通过泰森多边形生成面降水</small>
+                  </label>
+                </div>
+              </div>
+              <div id="wz-station-fields" class="conditional-block hidden">
+                <div class="field-grid two" style="margin-top:12px">
+                  <div class="field-group">
+                    <label>站点降水 csv</label>
+                    <div class="path-input">
+                      <input id="wz-station-prec" type="text" placeholder="站点降水观测数据">
+                      <button class="browse-button" data-target="wz-station-prec" data-browse-kind="file" data-extensions=".csv">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>站点信息 csv</label>
+                    <div class="path-input">
+                      <input id="wz-station-meta" type="text" placeholder="站点经纬度等信息">
+                      <button class="browse-button" data-target="wz-station-meta" data-browse-kind="file" data-extensions=".csv">选择</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="field-grid two" style="margin-top:12px">
+                <div class="field-group">
+                  <label>降水数据源</label>
+                  <select id="wz-prec-source">
+                    <option value="mswep">MSWEP（需下载）</option>
+                    <option value="cmfd">CMFD（需下载）</option>
+                    <option value="custom_tif">本地栅格目录（仅登记来源，第 6 步自动带入）</option>
+                  </select>
+                </div>
+                <div class="field-group hidden" id="wz-hourly-prec-group">
+                  <label>原始小时降水目录</label>
+                  <div class="path-input">
+                    <input id="wz-hourly-prec-dir" type="text" placeholder="小时尺度时需要">
+                    <button class="browse-button" data-target="wz-hourly-prec-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+              </div>
+              <div class="field-group hidden" id="wz-custom-prec-group" style="margin-top:12px">
+                <label>本地降水栅格目录</label>
+                <div class="path-input">
+                  <input id="wz-custom-prec-dir" type="text" placeholder="含逐日/逐时降水 GeoTIFF 的目录">
+                  <button class="browse-button" data-target="wz-custom-prec-dir" data-browse-kind="dir">选择</button>
+                </div>
+                <div class="hint-box">本地降水目录模式：提供包含降水 GeoTIFF 的目录，文件名需包含日期（如 P_2006.01.01.tif）。系统将自动裁剪对齐到 DEM 网格。</div>
+              </div>
+
+              <!-- 温度配置 -->
+              <h4 style="margin-top:24px; font-family:var(--font-display)">气温 (T)</h4>
+              <div class="field-grid two" style="margin-top:8px">
+                <div class="field-group">
+                  <label>温度来源</label>
+                  <select id="wz-temp-source">
+                    <option value="era5">ERA5 自动下载处理</option>
+                    <option value="custom_tif">本地栅格目录（仅登记目录，第 6 步裁剪对齐）</option>
+                  </select>
+                </div>
+                <div class="field-group hidden" id="wz-custom-temp-group">
+                  <label>本地气温栅格目录</label>
+                  <div class="path-input">
+                    <input id="wz-custom-temp-dir" type="text" placeholder="含逐日/逐时气温 GeoTIFF 的目录">
+                    <button class="browse-button" data-target="wz-custom-temp-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+              </div>
+              <div class="hint-box" id="wz-temp-hint">ERA5 模式：自动下载 2m 温度并处理为日均温，再裁剪对齐到 DEM。本地栅格模式：只登记目录，第 6 步自动读取并裁剪对齐。</div>
+
+              <!-- 潜在蒸散发配置 -->
+              <h4 style="margin-top:24px; font-family:var(--font-display)">潜在蒸散发 (PET)</h4>
+              <div class="field-grid two" style="margin-top:8px">
+                <div class="field-group">
+                  <label>蒸散发来源</label>
+                  <select id="wz-pet-source">
+                    <option value="era5_fao56">ERA5 + FAO56 Penman-Monteith（推荐）</option>
+                    <option value="era5_direct" disabled>ERA5 直接蒸发量（预留接口，暂未接通）</option>
+                    <option value="custom_tif">本地栅格目录（仅登记目录，第 6 步裁剪对齐）</option>
+                  </select>
+                </div>
+                <div class="field-group hidden" id="wz-custom-pet-group">
+                  <label>本地蒸散发栅格目录</label>
+                  <div class="path-input">
+                    <input id="wz-custom-pet-dir" type="text" placeholder="含逐日/逐时 PET GeoTIFF 的目录">
+                    <button class="browse-button" data-target="wz-custom-pet-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+              </div>
+              <div class="hint-box" id="wz-pet-hint">FAO56 模式：不会下载降水；会下载 ERA5 温度、辐射、风速、露点，用 Penman-Monteith 计算参考蒸散发 ET₀，再裁剪对齐。如果气温本身走本地栅格，PET 也只是临时借用 ERA5 温度参与计算，不会覆盖你的本地气温。</div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="3">← 上一步</button>
+              <button class="primary-button wz-next" data-to="5">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 5: 基础地理数据生成 -->
+          <div class="wizard-panel" data-wizard-step="5">
+            <div class="panel">
+              <div class="panel-head"><h3>基础地理数据生成</h3><span class="panel-note">裁剪 DEM → 生成流向流量累积 → 高程分区</span></div>
+              <div class="radio-card-group" style="margin-bottom:16px">
+                <label class="radio-card selected" data-value="auto">
+                  <input type="radio" name="wz-gis-mode" value="auto" checked>
+                  <strong>自动生成</strong>
+                  <small>从内置/自选 DEM 自动裁剪并生成全部 GIS 文件</small>
+                </label>
+                <label class="radio-card" data-value="import">
+                  <input type="radio" name="wz-gis-mode" value="import">
+                  <strong>导入已有 GIS</strong>
+                  <small>我已有裁剪好的 DEM 和流量累积文件，直接导入</small>
+                </label>
+              </div>
+              <div id="wz-gis-auto-panel">
+                <p class="step-desc">自动执行：裁剪 DEM → 生成流向与流量累积 → 生成流域掩膜 → 生成高程分区。</p>
+                <div class="bootstrap-status" id="bootstrap-status"></div>
+                <div class="action-row">
+                  <button class="primary-button" id="wz-run-bootstrap">一键生成</button>
+                  <button class="ghost-button" id="wz-refresh-bootstrap">刷新状态</button>
+                  <button class="ghost-button" id="wz-copy-bootstrap-log">复制日志</button>
+                </div>
+                <div class="task-output-box" id="wz-bootstrap-log"></div>
+              </div>
+              <div id="wz-gis-import-panel" class="hidden">
+                <p class="step-desc">选择已有的 GIS 文件导入到工作区。至少需要裁剪后的 DEM 和流量累积掩膜文件；DEM 可使用 `dem_1km.tif` 或 `dem_0p1deg.tif`。</p>
+                <div class="field-grid two">
+                  <div class="field-group">
+                    <label>裁剪后 DEM (必选)</label>
+                    <div class="path-input">
+                      <input id="wz-import-dem" type="text" placeholder="选择 dem_1km.tif 或 dem_0p1deg.tif">
+                      <button class="browse-button" data-target="wz-import-dem" data-browse-kind="file" data-extensions=".tif">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>流量累积掩膜 (必选)</label>
+                    <div class="path-input">
+                      <input id="wz-import-flowacc" type="text" placeholder="选择 flow_accumulation_masked.tif">
+                      <button class="browse-button" data-target="wz-import-flowacc" data-browse-kind="file" data-extensions=".tif">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>流向栅格 (可选)</label>
+                    <div class="path-input">
+                      <input id="wz-import-flowdir" type="text" placeholder="flow_direction.tif">
+                      <button class="browse-button" data-target="wz-import-flowdir" data-browse-kind="file" data-extensions=".tif">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>冰川掩膜 (可选)</label>
+                    <div class="path-input">
+                      <input id="wz-import-glacier" type="text" placeholder="glacier_mask.tif">
+                      <button class="browse-button" data-target="wz-import-glacier" data-browse-kind="file" data-extensions=".tif">选择</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="action-row" style="margin-top:12px">
+                  <button class="primary-button" id="wz-import-gis-btn">导入并生成高程分区</button>
+                </div>
+                <div class="hint-box" id="wz-import-gis-hint"></div>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="4">← 上一步</button>
+              <button class="primary-button wz-next" data-to="6">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 6: 气象数据准备 -->
+          <div class="wizard-panel" data-wizard-step="6">
+            <div class="panel">
+              <div class="panel-head"><h3>气象导入与处理</h3><span class="panel-note">第 4 步选来源，这一步真正写入工程目录</span></div>
+              <div class="radio-card-group" style="margin-bottom:16px">
+                <label class="radio-card selected" data-value="pipeline">
+                  <input type="radio" name="wz-meteo-mode" value="pipeline" checked>
+                  <strong>按步骤处理</strong>
+                  <small>只显示当前选择真正需要的步骤</small>
+                </label>
+                <label class="radio-card" data-value="import">
+                  <input type="radio" name="wz-meteo-mode" value="import">
+                  <strong>直接导入本地栅格</strong>
+                  <small>我已有逐日/逐时 GeoTIFF 栅格，直接选择目录导入</small>
+                </label>
+              </div>
+              <div id="wz-meteo-pipeline-panel">
+                <div class="hint-box" id="wz-pipeline-meteo-hint"></div>
+                <div class="hint-box" id="wz-era5-api-hint" style="display:none"></div>
+                <div class="action-row" id="wz-era5-api-actions" style="display:none;margin-top:8px">
+                  <button class="ghost-button" id="wz-check-era5-api">检查 API 配置</button>
+                  <button class="ghost-button" id="wz-open-era5-home">打开用户目录</button>
+                </div>
+                <div class="prep-step-list" id="prep-step-list"></div>
+                <div class="hint-box" id="wz-pipeline-task-hint" style="display:none"></div>
+                <div class="task-output-box" id="wz-pipeline-task-log" style="display:none"></div>
+                <div class="action-row" style="margin-top:12px">
+                  <button class="ghost-button" id="wz-copy-pipeline-log">复制日志</button>
+                </div>
+              </div>
+              <div id="wz-meteo-import-panel" class="hidden">
+                <p class="step-desc">选择包含栅格 GeoTIFF 文件的目录。文件命名格式需为 <code>NNN_VAR_YYYY.MM.DD.tif</code>（如 <code>000_PREC_2006.01.01.tif</code>）。导入时会先检查文件名时间戳，再按时间顺序导入；若网格与 DEM 不一致，将自动裁剪对齐。若第 4 步已经填写本地栅格目录，这里会自动带入，无需重复选择。</p>
+                <div class="field-grid two">
+                  <div class="field-group">
+                    <label>降水栅格目录（必选）</label>
+                    <div class="path-input">
+                      <input id="wz-import-prec-dir" type="text" placeholder="选择降水栅格目录">
+                      <button class="browse-button" data-target="wz-import-prec-dir" data-browse-kind="dir">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>气温栅格目录（必选）</label>
+                    <div class="path-input">
+                      <input id="wz-import-temp-dir" type="text" placeholder="选择气温栅格目录">
+                      <button class="browse-button" data-target="wz-import-temp-dir" data-browse-kind="dir">选择</button>
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label>蒸散发栅格目录（必选）</label>
+                    <div class="path-input">
+                      <input id="wz-import-evap-dir" type="text" placeholder="选择蒸散发栅格目录">
+                      <button class="browse-button" data-target="wz-import-evap-dir" data-browse-kind="dir">选择</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="action-row" style="margin-top:12px">
+                  <button class="primary-button" id="wz-import-meteo-btn">验证并导入</button>
+                  <button class="ghost-button" id="wz-copy-import-log">复制日志</button>
+                </div>
+                <div class="hint-box" id="wz-import-meteo-hint"></div>
+                <div class="task-output-box" id="wz-import-meteo-log" style="display:none"></div>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="5">← 上一步</button>
+              <button class="primary-button wz-next" data-to="7">下一步 →</button>
+            </div>
+          </div>
+
+          <!-- Step 7: 输入检查 -->
+          <div class="wizard-panel" data-wizard-step="7">
+            <div class="panel">
+              <div class="panel-head"><h3>输入完整性检查</h3><span class="panel-note">确认所有率定所需数据已就位</span></div>
+              <div id="wz-check-results"></div>
+              <div class="action-row">
+                <button class="ghost-button" id="wz-run-check">运行检查</button>
+                <button class="primary-button" id="wz-go-calibration">进入率定 →</button>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="ghost-button wz-prev" data-to="6">← 上一步</button>
+              <span></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 率定运行 ==================== -->
+        <section class="view" data-view="calibration">
+          <div class="card-grid two">
+            <section class="panel">
+              <div class="panel-head"><h3>率定启动</h3><span class="panel-note">配置参数并启动率定任务</span></div>
+              <div class="field-grid two">
+                <div class="field-group hidden">
+                  <label>任务类型</label>
+                  <select id="task-kind">
+                    <option value="calibration">正式率定（最终用）</option>
+                  </select>
+                </div>
+                <div class="field-group">
+                  <label>降水源</label>
+                  <select id="task-prec-source">
+                    <option value="mswep">MSWEP</option>
+                    <option value="cmfd">CMFD</option>
+                  </select>
+                </div>
+                <div class="field-group">
+                  <label>冰川模式</label>
+                  <select id="task-glacier-mode">
+                    <option value="inline">开启</option>
+                    <option value="off">关闭</option>
+                  </select>
+                </div>
+                <div class="field-group" id="task-param-bounds-profile-group">
+                  <label>参数范围</label>
+                  <select id="task-param-bounds-profile">
+                    <option value="qtp_alpine_default">青藏高原高寒区默认</option>
+                    <option value="generic_wide">通用宽范围</option>
+                  </select>
+                </div>
+                <div class="field-group hidden">
+                  <label>辅助计算长度（天）</label>
+                  <input id="task-quick-days" type="number" value="30">
+                </div>
+                <div class="field-group" id="task-method-group">
+                  <label>搜索策略</label>
+                  <select id="task-method">
+                    <option value="mc_screen_de">快速筛选 + 精细搜索</option>
+                    <option value="de">精细搜索（差分进化）</option>
+                    <option value="mc_only">仅快速筛选</option>
+                  </select>
+                </div>
+                <div class="field-group hidden" id="task-objective-mode-group">
+                  <label>评分标准（默认）</label>
+                  <select id="task-objective-mode">
+                    <option value="daily_unified_professional_v1">综合水文目标函数</option>
+                  </select>
+                </div>
+                <div class="field-group" id="task-mc-samples-group">
+                  <label>快速筛选样本数</label>
+                  <input id="task-mc-samples" type="number" value="300">
+                </div>
+                <div class="field-group" id="task-init-preset-group">
+                  <label>手调初值参数集</label>
+                  <select id="task-init-preset">
+                    <option value="">不使用手调初值</option>
+                  </select>
+                </div>
+                <div class="field-group" id="task-init-bound-shrink-group">
+                  <label>初值搜索范围（0–1，越小越严）</label>
+                  <input id="task-init-bound-shrink" type="number" value="0.25" min="0" max="0.9" step="0.05">
+                </div>
+                <div class="field-group">
+                  <label>并行线程数</label>
+                  <input id="task-workers" type="number" value="4">
+                </div>
+                <div class="field-group">
+                  <label>搜索轮数</label>
+                  <input id="task-maxiter" type="number" value="24">
+                </div>
+                <div class="field-group">
+                  <label>每轮候选数倍率</label>
+                  <input id="task-popsize" type="number" value="6">
+                </div>
+                <div class="field-group">
+                  <label>随机种子</label>
+                  <input id="task-seed" type="number" value="42">
+                </div>
+                <div class="field-group" id="task-refine-group">
+                  <label>启用局部精修
+                    <small style="color:var(--muted)">— 在精细搜索后追加 L-BFGS 局部优化</small>
+                  </label>
+                  <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                    <input id="task-refine-enabled" type="checkbox">
+                    <span>开启</span>
+                  </label>
+                </div>
+                <div class="field-group" id="task-refine-maxiter-group">
+                  <label>精修轮数
+                    <small style="color:var(--muted)">— 仅在「启用局部精修」勾选时生效</small>
+                  </label>
+                  <input id="task-refine-maxiter" type="number" value="12" min="0" max="100">
+                </div>
+              </div>
+              <div class="hint-box" id="calibration-smart-advice" style="margin-top:12px"></div>
+              <div class="hint-box" id="calibration-plain-guide" style="margin-top:12px"></div>
+              <div class="hint-box" id="calibration-strategy-summary" style="margin-top:12px"></div>
+              <div class="hint-box" id="calibration-load-summary" style="margin-top:12px"></div>
+              <div class="action-row">
+                <button class="ghost-button" id="go-recommended-step">前往建议步骤</button>
+                <button class="ghost-button" id="open-latest-result">打开结果页手动调参</button>
+                <button class="ghost-button" id="start-manual-starter">生成手调起点</button>
+                <button class="ghost-button" id="apply-recommended-calibration">采用推荐设置</button>
+                <button class="primary-button" id="start-task-button">启动任务</button>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h3>任务列表</h3><span class="panel-note">任务完成后自动刷新结果</span></div>
+              <div class="phase-toolbar" id="task-filter-toolbar"></div>
+              <div class="hint-box" id="task-filter-hint" style="margin-bottom:12px"></div>
+              <div class="list-stack" id="task-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ==================== 结果分析 ==================== -->
+        <section class="view" data-view="results">
+          <div class="card-grid results-layout">
+            <aside class="panel">
+              <div class="panel-head"><h3>运行结果</h3><span class="panel-note">支持按阶段筛选、重命名和删除</span></div>
+              <div class="phase-toolbar" id="results-filter-toolbar"></div>
+              <div class="hint-box" id="results-filter-hint" style="margin-bottom:12px"></div>
+              <div class="list-stack" id="run-list"></div>
+            </aside>
+            <div class="results-main">
+              <div class="hint-box" id="results-entry-hint" style="margin-bottom:12px"></div>
+              <div class="action-row" id="results-empty-actions" style="display:none;margin-bottom:12px">
+                <button class="primary-button" id="results-generate-manual-starter">生成手调起点</button>
+              </div>
+              <section class="metric-strip" id="results-metric-strip"></section>
+              <section class="panel" id="run-engineering-panel">
+                <div class="panel-head">
+                  <h3>水文摘要</h3>
+                  <div class="workspace-card-actions" id="run-engineering-actions"></div>
+                </div>
+                <div class="engineering-summary-grid" id="run-engineering-summary"></div>
+                <div class="hint-box" id="run-engineering-note" style="margin-top:12px"></div>
+              </section>
+              <section class="panel" id="run-export-panel">
+                <div class="panel-head">
+                  <h3>结果导出</h3>
+                  <div class="workspace-card-actions">
+                    <button class="ghost-button" id="btn-open-export-file" disabled>打开导出文件</button>
+                    <button class="primary-button" id="btn-run-export" disabled>导出 Excel</button>
+                  </div>
+                </div>
+                <div class="field-grid two" style="margin-bottom:12px">
+                  <div class="field-group">
+                    <label>开始时间</label>
+                    <input id="run-export-start" type="date">
+                  </div>
+                  <div class="field-group">
+                    <label>结束时间</label>
+                    <input id="run-export-end" type="date">
+                  </div>
+                </div>
+                <div class="field-group" style="margin-bottom:12px">
+                  <label>导出字段</label>
+                  <div class="phase-toolbar" id="run-export-fields"></div>
+                </div>
+                <div class="hint-box" id="run-export-hint">选择一个结果后，可按时间范围导出 Excel。</div>
+              </section>
+              <section class="panel"><div class="panel-head"><h3>流量过程线</h3></div><div class="chart-host" id="hydrograph-chart"></div></section>
+              <div class="card-grid two">
+                <section class="panel"><div class="panel-head"><h3>组分分解</h3></div><div class="chart-host" id="component-chart"></div></section>
+                <section class="panel"><div class="panel-head"><h3>残差</h3></div><div class="chart-host" id="residual-chart"></div></section>
+              </div>
+              <section class="panel">
+                <div class="panel-head">
+                  <h3>参数调节</h3>
+                  <button class="ghost-button" id="btn-reset-params">恢复率定值</button>
+                  <button class="ghost-button" id="btn-copy-resim-log">复制日志</button>
+                  <button class="primary-button" id="btn-resimulate">保存并重算</button>
+                </div>
+                <div class="hint-box" id="resim-hint" style="display:none"></div>
+                <div class="task-output-box" id="resim-log" style="display:none;margin-bottom:12px"></div>
+                <div class="hint-box" style="margin-bottom:12px">每次“保存并重算”都会生成一条新的手调结果，左侧结果列表会自动增加，新的参数和指标会一起保存。</div>
+                <div class="field-grid two" style="margin-bottom:12px">
+                  <div class="field-group">
+                    <label>参数集名称</label>
+                    <input id="manual-preset-name" type="text" placeholder="例如 雪过程试调_v1">
+                  </div>
+                  <div class="field-group">
+                    <label>已保存参数集</label>
+                    <select id="manual-preset-select">
+                      <option value="">选择已保存参数集</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="action-row" style="margin-bottom:12px">
+                  <button class="ghost-button" id="btn-save-manual-preset">保存当前参数集</button>
+                  <button class="ghost-button" id="btn-load-manual-preset">载入参数集</button>
+                  <button class="ghost-button" id="btn-delete-manual-preset">删除参数集</button>
+                  <button class="ghost-button" id="btn-compare-manual-preset">对比参数集</button>
+                  <button class="ghost-button" id="btn-clear-manual-compare">清除对比</button>
+                </div>
+                <div class="phase-toolbar" id="manual-phase-toolbar">
+                  <button class="phase-chip active" data-manual-group="all">全部参数</button>
+                  <button class="phase-chip" data-manual-group="snow">雪过程</button>
+                  <button class="phase-chip" data-manual-group="soil">土壤过程</button>
+                  <button class="phase-chip" data-manual-group="response">产汇流</button>
+                  <button class="phase-chip" data-manual-group="routing">河道路由</button>
+                  <button class="phase-chip" data-manual-group="glacier">冰川过程</button>
+                </div>
+                <div class="hint-box" id="manual-phase-guide" style="margin-bottom:12px"></div>
+                <div class="hint-box" id="manual-change-summary" style="margin-bottom:12px;display:none"></div>
+                <div class="hint-box" id="manual-preset-diff" style="margin-bottom:12px;display:none"></div>
+                <div class="hint-box" id="manual-compare-summary" style="margin-bottom:12px;display:none"></div>
+                <div class="param-slider-grid" id="param-sliders"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-head"><h3>水文复核摘要</h3></div>
+                <div class="diagnostic-grid" id="metadata-grid"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal hidden" id="path-modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="path-modal-title">选择路径</h3>
+        <button class="close-button" id="close-path-modal">关闭</button>
+      </div>
+      <div class="path-browser-toolbar">
+        <button class="ghost-button" id="path-modal-go-up">上一级</button>
+        <button class="ghost-button" id="path-modal-use-current">选择当前目录</button>
+        <input id="path-modal-current" type="text" readonly>
+      </div>
+      <div class="path-browser-content">
+        <div class="browser-column"><div class="browser-title">磁盘</div><div class="list-stack compact" id="path-modal-roots"></div></div>
+        <div class="browser-column"><div class="browser-title">文件夹</div><div class="list-stack compact" id="path-modal-directories"></div></div>
+        <div class="browser-column"><div class="browser-title">文件</div><div class="list-stack compact" id="path-modal-files"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+{
+  "_studio_template": {
+    "id": "tuotuohe-daily-builtin",
+    "title": "沱沱河日尺度内置模板",
+    "description": "用于验证 Studio 日尺度工作流与冰川模块展示逻辑的内置模板。",
+    "calibration_mode": "daily",
+    "builtin": true,
+    "sync_hint": "如需补齐旧工作区 forcing，可从任一盘符下的 Hapi/data 同步到本仓库运行目录。"
+  },
+  "_说明": [
+    "沱沱河日尺度（含冰川）内置模板。",
+    "作为 Studio 的内置验证模板使用。",
+    "shp、观测径流和冰川边界固定保存在 HBV-Studio/templates/assets/tuotuohe/。",
+    "运行目录固定为 __PROJECT_ROOT__/运行目录/沱沱河。"
+  ],
+  "项目对象": "regression_validation",
+  "率定模式": "daily",
+  "目标函数模式": "auto",
+  "运行目录": "__PROJECT_ROOT__/运行目录/沱沱河",
+  "流域名称": "沱沱河",
+  "流域编号": "tuotuohe",
+  "流域边界_shp": "__GUI_ROOT__/templates/assets/tuotuohe/tuotuohe_basin.shp",
+  "DEM_tif": "__PROJECT_ROOT__/基础数据/DEM源/青藏高原_1km_DEM.tif",
+  "观测径流_csv": "__GUI_ROOT__/templates/assets/tuotuohe/discharge_tuotuohe.csv",
+  "观测口径模式": "full_year",
+  "边界条件": {
+    "上游边界入流_csv": "",
+    "时间字段": "date",
+    "流量字段": "inflow_m3s",
+    "缺失填补": "zero"
+  },
+  "气象策略": {
+    "降水方案": "grid_only",
+    "站点降水_csv": "",
+    "站点信息_csv": "",
+    "原始小时降水目录": "",
+    "温度来源": "era5",
+    "潜在蒸散发来源": "era5_fao56",
+    "降水源": "mswep",
+    "降水来源": "mswep",
+    "自带温度tif目录": "",
+    "自带蒸散发tif目录": "",
+    "自带降水tif目录": ""
+  },
+  "冰川边界_shp": "__GUI_ROOT__/templates/assets/tuotuohe/glacier.shp",
+  "范围_bbox": {
+    "北": 34.99762438101045,
+    "西": 90.54671137922683,
+    "南": 33.387899016711,
+    "东": 92.51568246587513
+  },
+  "时间": {
+    "开始年份": 2006,
+    "结束年份": 2020,
+    "预热开始": "2006-01-01",
+    "预热结束": "2008-12-31",
+    "率定开始": "2009-01-01",
+    "率定结束": "2017-12-31",
+    "验证开始": "2018-01-01",
+    "验证结束": "2020-12-31"
+  },
+  "时间步长_小时": 24.0,
+  "FAO56平均海拔_m": 4500.0,
+  "默认降水源": "mswep",
+  "CFMAX分区阈值_m": 5000.0,
+  "name": "沱沱河",
+  "timescale": "daily",
+  "object": "full_upstream_basin",
+  "basin_shp": "__GUI_ROOT__/templates/assets/tuotuohe/tuotuohe_basin.shp",
+  "obs_csv": "__GUI_ROOT__/templates/assets/tuotuohe/discharge_tuotuohe.csv",
+  "dem_tif": "__PROJECT_ROOT__/基础数据/DEM源/青藏高原_1km_DEM.tif",
+  "glacier_shp": "__GUI_ROOT__/templates/assets/tuotuohe/glacier.shp",
+  "warmup_start": "2006-01-01",
+  "warmup_end": "2008-12-31",
+  "calib_start": "2009-01-01",
+  "calib_end": "2017-12-31",
+  "valid_start": "2018-01-01",
+  "valid_end": "2020-12-31",
+  "cfmax": 5000,
+  "fao_elev": 4500
+}
