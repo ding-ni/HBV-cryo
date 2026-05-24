@@ -19,6 +19,7 @@ installer_packaging/
 # Runtime/user-generated workspace data
 运行目录/
 用户数据/
+基础数据/
 runtime/
 HBV-Studio/logs/
 HBV-Studio/workspaces/*.bak
