@@ -6,12 +6,36 @@ __pycache__/
 # Build and packaging outputs
 build/
 dist/
+_build_temp/
+portable_output/
+installer_stage/
+installer_packaging/
 *.spec
+*.exe
+*.zip
+*.7z
+*.rar
 
 # Runtime/user-generated workspace data
 运行目录/
+用户数据/
+runtime/
 HBV-Studio/logs/
 HBV-Studio/workspaces/*.bak
+
+# Large hydrology / GIS / meteorological data artifacts
+*.nc
+*.nc4
+*.grib
+*.grb
+*.tif
+*.tiff
+*.vrt
+*.shp
+*.shx
+*.dbf
+*.sbn
+*.sbx
 
 # Local temporary files
 .claude/
