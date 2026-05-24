@@ -431,6 +431,13 @@ MAX_FORWARD_RUNTIME_CACHE = 4
 METEO_KEY = "\u6c14\u8c61\u7b56\u7565"
 OBSERVED_FLOW_KEY = "\u89c2\u6d4b\u5f84\u6d41_csv"
 OBSERVED_FLOW_SUFFIXES = {".csv", ".xlsx", ".xls", ".xlsm"}
+VECTOR_BUNDLE_SUFFIXES = tuple(
+    getattr(
+        profile_runner,
+        "VECTOR_BUNDLE_SUFFIXES",
+        (".shp", ".dbf", ".shx", ".prj", ".cpg", ".sbn", ".sbx", ".xml"),
+    )
+)
 METEO_PRECIP_MODE_KEY = "\u964d\u6c34\u65b9\u6848"
 METEO_PRECIP_SOURCE_KEY = "\u964d\u6c34\u6765\u6e90"
 METEO_PRECIP_SOURCE_LEGACY_KEY = "\u964d\u6c34\u6e90"
@@ -540,6 +547,52 @@ def seed_workspace_runtime_dirs(config: dict[str, Any]) -> None:
             continue
         dir_path.mkdir(parents=True, exist_ok=True)
         created.add(resolved)
+
+
+def stage_vector_shapefile(
+    config: dict[str, Any],
+    raw_path: Any,
+    *,
+    role: str,
+    config_path: Path | None = None,
+) -> Path:
+    """Copy a shapefile bundle into the active workspace GIS directory."""
+    src = resolve_any_path(str(raw_path), must_exist=True)
+    if not src.is_file():
+        raise ValueError(f"shp 路径不是文件：{src}")
+    if src.suffix.lower() != ".shp":
+        raise ValueError(f"当前只支持 .shp 文件：{src}")
+
+    resolved_config = replace_placeholders(dict(config))
+    if config_path is not None:
+        resolved_config["_config_path"] = str(config_path.resolve(strict=False))
+    elif not str(resolved_config.get("_config_path", "")).strip():
+        resolved_config["_config_path"] = str((WORKSPACE_DIR / "_staging_context.json").resolve(strict=False))
+    if not str(resolved_config.get("运行目录", "")).strip():
+        raise ValueError("缺少运行目录，无法归档 shp 文件。")
+
+    paths = build_workspace_paths(resolved_config)
+    gis_dir = Path(paths["gis_dir"]).resolve(strict=False)
+    if role == "basin":
+        dst = (gis_dir / "basin.shp").resolve(strict=False)
+    elif role == "glacier":
+        dst = (gis_dir / "glacier_shp" / "glacier.shp").resolve(strict=False)
+    else:
+        raise ValueError(f"未知 shp 类型：{role}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    copied = False
+    for suffix in VECTOR_BUNDLE_SUFFIXES:
+        sidecar = src.with_suffix(suffix)
+        if not sidecar.exists():
+            continue
+        target = dst.with_suffix(suffix)
+        if sidecar.resolve(strict=False) != target.resolve(strict=False):
+            shutil.copy2(sidecar, target)
+        copied = True
+    if not copied:
+        shutil.copy2(src, dst)
+    return dst
 
 
 def stage_observed_runoff_file(config: dict[str, Any], raw_path: Any, *, config_path: Path | None = None) -> Path:
@@ -3550,6 +3603,11 @@ def create_workspace_from_import(payload: dict[str, Any]) -> dict[str, Any]:
     meteo[METEO_PRECIP_SOURCE_LEGACY_KEY] = prec_source
     config[METEO_KEY] = meteo
     workspace_path = WORKSPACE_DIR / f"{slugify_workspace_name(workspace_name)}.json"
+    config["流域边界_shp"] = str(stage_vector_shapefile(config, shp_path, role="basin", config_path=workspace_path))
+    if str(config.get("冰川边界_shp", "")).strip():
+        config["冰川边界_shp"] = str(
+            stage_vector_shapefile(config, config["冰川边界_shp"], role="glacier", config_path=workspace_path)
+        )
     config[OBSERVED_FLOW_KEY] = str(stage_observed_runoff_file(config, obs_path, config_path=workspace_path))
     write_json_file(workspace_path, normalize_config_before_save(config, workspace_path))
     return {
@@ -6735,7 +6793,9 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
             config["项目对象"] = step_data["object"]
     elif step == 2:
         if step_data.get("basin_shp"):
-            config["流域边界_shp"] = step_data["basin_shp"]
+            config["流域边界_shp"] = str(
+                stage_vector_shapefile(config, step_data["basin_shp"], role="basin", config_path=path)
+            )
         if step_data.get("obs_csv"):
             config[OBSERVED_FLOW_KEY] = str(stage_observed_runoff_file(config, step_data["obs_csv"], config_path=path))
         if step_data.get("dem_tif"):
@@ -6743,9 +6803,13 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
         if "glacier_shp" in step_data:
             glacier_shp = str(step_data.get("glacier_shp", "")).strip()
             if glacier_shp:
-                config["冰川边界_shp"] = glacier_shp
+                config["冰川边界_shp"] = str(
+                    stage_vector_shapefile(config, glacier_shp, role="glacier", config_path=path)
+                )
             elif (not str(config.get("冰川边界_shp", "")).strip()) and BUILTIN_GLACIER_SHP.exists():
-                config["冰川边界_shp"] = str(BUILTIN_GLACIER_SHP.resolve())
+                config["冰川边界_shp"] = str(
+                    stage_vector_shapefile(config, BUILTIN_GLACIER_SHP, role="glacier", config_path=path)
+                )
         time_map = {
             "warmup_start": "预热开始", "warmup_end": "预热结束",
             "calib_start": "率定开始", "calib_end": "率定结束",

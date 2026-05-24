@@ -3504,6 +3504,11 @@ async function saveCurrentWizardStep() {
     }
     if (result.config) {
       state.currentWorkspace = result.config;
+      if (step === 2) {
+        if ($("#wz-basin-shp")) $("#wz-basin-shp").value = result.config.流域边界_shp || $("#wz-basin-shp").value;
+        if ($("#wz-obs-csv")) $("#wz-obs-csv").value = result.config.观测径流_csv || $("#wz-obs-csv").value;
+        if ($("#wz-glacier-shp")) $("#wz-glacier-shp").value = result.config.冰川边界_shp || $("#wz-glacier-shp").value;
+      }
     }
     if (step === 1) {
       await loadWorkspaces();
