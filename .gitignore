@@ -22,7 +22,10 @@ installer_packaging/
 基础数据/
 runtime/
 HBV-Studio/logs/
+HBV-Studio/workspaces/*.json
 HBV-Studio/workspaces/*.bak
+配置/*_验证.json
+memories/
 
 # Large hydrology / GIS / meteorological data artifacts
 *.nc
@@ -40,6 +43,7 @@ HBV-Studio/workspaces/*.bak
 
 # Local temporary files
 .claude/
+dev_tools/*acceptance*.md
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

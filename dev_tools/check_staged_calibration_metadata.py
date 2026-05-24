@@ -167,10 +167,6 @@ def check_product_boundary() -> dict[str, Any]:
         "memories/studio_acceptance",
         "memories\\staged_calibration_smoke",
         "memories/staged_calibration_smoke",
-        "F:\\HBV成勘院代码\\memories\\studio_acceptance",
-        "F:/HBV成勘院代码/memories/studio_acceptance",
-        "F:\\HBV成勘院代码\\memories\\staged_calibration_smoke",
-        "F:/HBV成勘院代码/memories/staged_calibration_smoke",
     ]
     hardcoded_hits: list[str] = []
     for root in (STUDIO_ROOT, CORE_ROOT):
