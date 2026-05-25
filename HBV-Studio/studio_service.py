@@ -88,6 +88,7 @@ DEFAULT_MANUAL_START_VECTOR = [
 RUN_KIND_LABELS = {
     "manual_starter": "手调起点",
     "manual_result": "手调结果",
+    "forecast_restart": "连续状态预报",
     "calibration": "正式率定",
     "legacy": "历史结果",
 }
@@ -5400,8 +5401,11 @@ def _workspace_name_for_summary(metadata: dict[str, Any], resolved_config: Path 
 
 def _run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
     meta = dict(metadata or {})
+    forecast_result = dict(meta.get("forecast_result", {}) or {})
     manual_result = dict(meta.get("manual_result", {}) or {})
     starter_result = dict(meta.get("starter_result", {}) or {})
+    if bool(forecast_result.get("enabled")) or str(meta.get("run_class", "") or "") == "forecast_restart":
+        return "forecast_restart"
     if bool(manual_result.get("enabled")):
         return "manual_result"
     if bool(starter_result.get("enabled")):
@@ -9690,6 +9694,70 @@ def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
+def _forecast_restart_args(payload: dict[str, Any]) -> argparse.Namespace:
+    config_path = str(payload.get("config_path", payload.get("config", "")) or "").strip()
+    source_run = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
+    if not config_path:
+        run_path = resolve_any_path(source_run, must_exist=True)
+        metadata = read_json_file(run_path / "metadata.json")
+        config_path = str(metadata.get("workspace_config", "") or "").strip()
+    if not config_path:
+        raise ValueError("缺少工作区配置路径。")
+    if not source_run:
+        raise ValueError("缺少源结果目录。")
+    forecast_end = str(payload.get("forecast_end", "") or "").strip()
+    if not forecast_end:
+        raise ValueError("缺少预报结束时间 forecast_end。")
+    return argparse.Namespace(
+        config=config_path,
+        source_run=source_run,
+        forecast_start=str(payload.get("forecast_start", "") or "").strip(),
+        forecast_end=forecast_end,
+        forecast_prec_dir=str(payload.get("forecast_prec_dir", payload.get("prec_dir", "")) or "").strip(),
+        forecast_temp_dir=str(payload.get("forecast_temp_dir", payload.get("temp_dir", "")) or "").strip(),
+        forecast_evap_dir=str(payload.get("forecast_evap_dir", payload.get("evap_dir", "")) or "").strip(),
+        profile=str(payload.get("profile", payload.get("calibration_mode", "")) or "").strip(),
+        objective_mode=str(payload.get("objective_mode", "") or "").strip(),
+        prec_source=str(payload.get("prec_source", "custom_tif") or "custom_tif").strip(),
+        glacier_mode=str(payload.get("glacier_mode", "inline") or "inline").strip(),
+        output_dir=str(payload.get("output_dir", "") or "").strip(),
+        output_json="",
+    )
+
+
+def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
+    import forecast_run
+
+    return forecast_run.run_forecast(_forecast_restart_args(payload))
+
+
+def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
+    last_stage = ""
+
+    def report(stage: str, message: str | None = None) -> None:
+        nonlocal last_stage
+        last_stage = stage
+        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "连续状态预报"})
+        if message:
+            add_task_output(task_id, message)
+
+    try:
+        report("准备启动", "[阶段] 准备连续状态预报")
+        result = forecast_restart(payload)
+        if result.get("run_path"):
+            set_task_metadata(task_id, run_path=result["run_path"])
+            with TASK_LOCK:
+                task = TASKS.get(task_id)
+                if task is not None:
+                    task.detected_runs = [str(result["run_path"])]
+        _mark_task_finished(task_id, ok=True, return_code=0, result=result)
+    except Exception as exc:
+        if last_stage:
+            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
+        add_task_output(task_id, f"[失败] {exc}")
+        _mark_task_finished(task_id, ok=False, return_code=-1)
+
+
 def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
     context = _build_forward_payload_context(payload)
     run_path = Path(context["run_dir"])
@@ -9712,6 +9780,32 @@ def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
     with TASK_LOCK:
         TASKS[task_id] = record
     threading.Thread(target=forward_sim_worker, args=(task_id, dict(payload)), daemon=True).start()
+    return record
+
+
+def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
+    args = _forecast_restart_args(payload)
+    source_run = resolve_any_path(args.source_run, must_exist=True)
+    task_id = uuid.uuid4().hex[:10]
+    record = TaskRecord(
+        id=task_id,
+        task_type="forecast_restart",
+        label=f"连续状态预报 | {source_run.name}",
+        command=["forecast_restart"],
+        cwd=str(PROJECT_ROOT),
+        metadata={
+            "config_path": str(resolve_any_path(args.config, must_exist=True).resolve(strict=False)),
+            "run_path": str(source_run.resolve(strict=False)),
+            "forecast_start": args.forecast_start,
+            "forecast_end": args.forecast_end,
+            "runtime_prec_source": args.prec_source,
+            "glacier_mode": args.glacier_mode,
+            "ui_progress": {"stage": "准备启动", "label": "连续状态预报"},
+        },
+    )
+    with TASK_LOCK:
+        TASKS[task_id] = record
+    threading.Thread(target=forecast_restart_worker, args=(task_id, dict(payload)), daemon=True).start()
     return record
 
 
@@ -10006,6 +10100,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "task": start_forward_simulation(payload).as_dict()}, status=201)
             elif parsed.path == "/api/simulate/forward":
                 self.send_json({"ok": True, "data": forward_simulate(payload)})
+            elif parsed.path == "/api/forecast/restart/start":
+                self.send_json({"ok": True, "task": start_forecast_restart(payload).as_dict()}, status=201)
+            elif parsed.path == "/api/forecast/restart":
+                self.send_json({"ok": True, "data": forecast_restart(payload)})
             elif parsed.path == "/api/manual-start/start":
                 self.send_json({"ok": True, "task": start_manual_start(payload).as_dict()}, status=201)
             elif parsed.path == "/api/manual-preset/save":

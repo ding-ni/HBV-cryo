@@ -106,6 +106,7 @@ const MANUAL_GROUP_META = {
 const RUN_TYPE_LABELS = {
   manual_starter: "手调起点",
   manual_result: "手调结果",
+  forecast_restart: "连续状态预报",
   calibration: "正式率定",
   legacy: "历史结果",
 };
@@ -478,7 +479,7 @@ function visibleTasks() {
       if (state.taskTypeFilter === "prep" && !["data_prep", "bootstrap", "meteo_import"].includes(task.task_type)) {
         return false;
       }
-      if (state.taskTypeFilter === "simulate" && !["forward_sim", "manual_start"].includes(task.task_type)) {
+      if (state.taskTypeFilter === "simulate" && !["forward_sim", "manual_start", "forecast_restart"].includes(task.task_type)) {
         return false;
       }
       if (state.taskTypeFilter === "support" && !["self_check", "sync"].includes(task.task_type)) {
@@ -1610,6 +1611,7 @@ function taskTypeLabel(taskType) {
     meteo_import: "气象导入",
     manual_start: "手调起点",
     forward_sim: "保存并重算",
+    forecast_restart: "连续状态预报",
     self_check: "系统自检",
     sync: "模板同步",
   })[String(taskType || "").toLowerCase()] || "任务";
@@ -2242,12 +2244,29 @@ function manualStartStageEntries(task) {
   });
 }
 
+function forecastRestartStageEntries(task) {
+  const stageText = String(task?.ui_progress?.stage || "");
+  let phase = 0;
+  if (/写出|完成/.test(stageText)) phase = 4;
+  else if (/重启|预报/.test(stageText)) phase = 3;
+  else if (/加载未来气象|加载/.test(stageText)) phase = 2;
+  else if (/读取|准备/.test(stageText)) phase = 1;
+  return ["读取源结果", "校验状态快照", "加载未来气象", "状态重启预报", "写出预报结果"].map((label, idx) => {
+    let status = "pending";
+    if (task?.status === "completed") status = "completed";
+    else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
+    else status = idx < phase ? "completed" : idx === phase ? "running" : "pending";
+    return { label, status };
+  });
+}
+
 function taskMilestoneEntries(task) {
   if (task?.task_type === "calibration") return calibrationTaskStageEntries(task);
   if (task?.task_type === "bootstrap" || task?.task_type === "data_prep") return workflowTaskSnapshot(task).entries;
   if (task?.task_type === "meteo_import") return meteoImportStageEntries(task);
   if (task?.task_type === "manual_start") return manualStartStageEntries(task);
   if (task?.task_type === "forward_sim") return forwardSimStageEntries(task);
+  if (task?.task_type === "forecast_restart") return forecastRestartStageEntries(task);
   return [];
 }
 
@@ -2376,6 +2395,21 @@ function manualStartTaskSummary(task) {
   return taskLastMeaningfulLog(task) || "手调起点生成失败。";
 }
 
+function forecastRestartTaskSummary(task) {
+  if (task?.status === "running") {
+    const stage = task?.ui_progress?.stage || "正在执行连续状态预报。";
+    const lastLog = taskLastMeaningfulLog(task);
+    return lastLog && lastLog !== stage ? `${stage} · ${lastLog}` : stage;
+  }
+  if (task?.status === "completed" && task?.result) {
+    const result = task.result || {};
+    const meta = result.metadata?.forecast_result || {};
+    const range = meta.forecast_start && meta.forecast_end ? `${meta.forecast_start} 至 ${meta.forecast_end}` : "未来时段";
+    return result.run_path ? `连续状态预报已生成：${range}。` : "连续状态预报已完成。";
+  }
+  return taskLastMeaningfulLog(task) || "连续状态预报失败。";
+}
+
 function selfCheckTaskSummary(task) {
   if (task?.status === "running") {
     return task?.ui_progress?.stage || "正在检查本地环境、脚本与关键依赖。";
@@ -2390,6 +2424,7 @@ function taskSummaryLine(task) {
   if (task?.task_type === "meteo_import") return meteoImportTaskSummary(task);
   if (task?.task_type === "manual_start") return manualStartTaskSummary(task);
   if (task?.task_type === "forward_sim") return forwardSimTaskSummary(task);
+  if (task?.task_type === "forecast_restart") return forecastRestartTaskSummary(task);
   if (task?.task_type === "self_check") return selfCheckTaskSummary(task);
   if (task?.status === "completed") return "任务已完成。";
   if (task?.status === "failed") return taskLastMeaningfulLog(task) || "任务失败。";
@@ -2784,6 +2819,37 @@ function floodEventRows(meta = {}) {
   });
   if (events.length > 12) {
     rows.push(["更多事件", `还有 ${events.length - 12} 场`, "完整事件表见结果目录 flood_events.csv"]);
+  }
+  return rows;
+}
+
+function restartStateRows(meta = {}) {
+  const initial = meta?.initial_state || {};
+  const forecast = meta?.forecast_result || {};
+  const rows = [];
+  if (initial?.state_snapshot_available || initial?.hot_start_supported || forecast?.enabled) {
+    rows.push([
+      "状态热启动",
+      initial?.hot_start_enabled || forecast?.enabled ? "可用" : "未启用",
+      initial?.state_snapshot_file ? `状态文件：${initial.state_snapshot_file}` : "当前结果未记录状态文件",
+    ]);
+    rows.push([
+      "状态时刻",
+      initial?.state_snapshot_time || forecast?.forecast_end || "—",
+      initial?.state_snapshot_routing_state ? "包含汇流上一时刻记忆" : "未记录汇流记忆",
+    ]);
+  }
+  if (forecast?.enabled) {
+    rows.push([
+      "预报来源",
+      forecast?.source_run_name || "源结果",
+      forecast?.source_run_path ? shortPath(forecast.source_run_path) : "读取源结果参数与状态快照",
+    ]);
+    rows.push([
+      "预报时段",
+      timeRangeText(forecast?.forecast_start, forecast?.forecast_end, meta?.time_config?.time_step_hours || 24),
+      "不重新率定参数，直接接续未来气象输入",
+    ]);
   }
   return rows;
 }
@@ -5462,6 +5528,7 @@ function renderRunDetail(data) {
   const reportDisplayPath = summary.diagnostics_detail_display_path || summary.diagnostics_detail_path || "";
   const componentReport = componentFractionReport(meta);
   const floodRows = floodEventRows(meta);
+  const restartRows = restartStateRows(meta);
   const metadataHtml = [
     metadataSection("水文结果摘要", [
       ["率定流程", hydrologySummaryValue(summary, "workflow_label_zh", "单流程参数率定")],
@@ -5473,11 +5540,12 @@ function renderRunDetail(data) {
       ["结果说明", hydrologySummaryValue(summary, "diagnostics_detail_note", "水文模拟结果说明已保存至本地结果目录。")],
       ["说明文件", reportDisplayPath ? shortPath(reportDisplayPath) : "结果目录内生成"],
       ["运行时间", meta.run_time],
-      ["结果类型", manual ? "手调结果" : starter ? "手调起点" : data.run?.run_origin === "studio" ? "可调结果" : "查看结果"],
+      ["结果类型", data.run?.run_type_label || RUN_TYPE_LABELS[data.run?.run_type] || (manual ? "手调结果" : starter ? "手调起点" : data.run?.run_origin === "studio" ? "可调结果" : "查看结果")],
       ["所属工作区", workspaceLabelByPath(meta.workspace_config || data.run?.workspace_config)],
       ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
       ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
     ]),
+    restartRows.length ? metadataSection("状态重启与预报", restartRows) : "",
     floodRows.length ? metadataSection("洪水事件评价", floodRows) : "",
     `
       <section class="metadata-section">

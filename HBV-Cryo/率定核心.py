@@ -1143,6 +1143,233 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
 
 
 @njit(cache=False, fastmath=True, nogil=True)
+def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base, zone_high_cells,
+                              state_sp, state_sm, state_wc,
+                              state_uz_r, state_uz_s, state_uz_i,
+                              state_lz_r, state_lz_s, state_lz_i,
+                              active_cells, cell_scale, glacier_cells, glacier_on, ice_factor,
+                              cfmax_low, cfmax_high, glacier_delta_t_cells):
+    n_cells = prec_cells.shape[0]
+    ts = prec_cells.shape[1]
+    q_total = np.zeros(ts, dtype=np.float64)
+    q_rain = np.zeros(ts, dtype=np.float64)
+    q_snow = np.zeros(ts, dtype=np.float64)
+    q_ice = np.zeros(ts, dtype=np.float64)
+
+    sp_end = np.full(n_cells, np.nan, dtype=np.float32)
+    sm_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_end = np.full(n_cells, np.nan, dtype=np.float32)
+    uz_r_end = np.full(n_cells, np.nan, dtype=np.float32)
+    uz_s_end = np.full(n_cells, np.nan, dtype=np.float32)
+    uz_i_end = np.full(n_cells, np.nan, dtype=np.float32)
+    lz_r_end = np.full(n_cells, np.nan, dtype=np.float32)
+    lz_s_end = np.full(n_cells, np.nan, dtype=np.float32)
+    lz_i_end = np.full(n_cells, np.nan, dtype=np.float32)
+
+    tt = par_base[0]
+    rfcf = par_base[1]
+    sfcf = par_base[2]
+    cwh = par_base[4]
+    cfr = par_base[5]
+    fc_base = max(par_base[6], 10.0)
+    beta_base = max(min(par_base[7], 10.0), 0.1)
+    e_corr = par_base[8]
+    lp_base = max(min(par_base[9], 0.99), 0.01)
+    k = par_base[10]
+    k1 = par_base[11]
+    k2 = par_base[12]
+    uzl = par_base[13]
+    perc = par_base[14]
+
+    for idx in range(n_cells):
+        if not active_cells[idx]:
+            continue
+
+        scale = cell_scale[idx]
+        cfmax = cfmax_high if zone_high_cells[idx] else cfmax_low
+        is_glacier = glacier_on and glacier_cells[idx]
+        delta_t_here = glacier_delta_t_cells[idx] if is_glacier else 0.0
+
+        sp = state_sp[idx]
+        sm = state_sm[idx]
+        wc = state_wc[idx]
+        uz_r = state_uz_r[idx]
+        uz_s = state_uz_s[idx]
+        uz_i = state_uz_i[idx]
+        lz_r = state_lz_r[idx]
+        lz_s = state_lz_s[idx]
+        lz_i = state_lz_i[idx]
+        if np.isnan(sp):
+            sp = 0.0
+        if np.isnan(sm):
+            sm = 0.0
+        if np.isnan(wc):
+            wc = 0.0
+        if np.isnan(uz_r):
+            uz_r = 0.0
+        if np.isnan(uz_s):
+            uz_s = 0.0
+        if np.isnan(uz_i):
+            uz_i = 0.0
+        if np.isnan(lz_r):
+            lz_r = 0.0
+        if np.isnan(lz_s):
+            lz_s = 0.0
+        if np.isnan(lz_i):
+            lz_i = 0.0
+
+        for t_idx in range(ts):
+            p = prec_cells[idx, t_idx]
+            t = temp_cells[idx, t_idx]
+            e = et_cells[idx, t_idx]
+            tm = ll_temp_cells[idx, t_idx]
+
+            if np.isnan(p) or np.isnan(t) or np.isnan(e):
+                continue
+
+            p = max(p, 0.0)
+            e = max(e, 0.0)
+
+            t_eff = t + delta_t_here
+
+            if t_eff <= tt:
+                rf = 0.0
+                sf = p * sfcf
+            else:
+                rf = p * rfcf
+                sf = 0.0
+
+            melt = 0.0
+            ice_melt = 0.0
+            if t_eff > tt:
+                ddt = t_eff - tt
+                avail_snow = sp + sf
+                melt_pot_snow = cfmax * ddt
+                melt = min(melt_pot_snow, avail_snow)
+                sp = max(avail_snow - melt, 0.0)
+                if is_glacier and (sp <= SWE_ICE_THRESHOLD_MM) and (melt_pot_snow > 0.0):
+                    f_snow = melt / (melt_pot_snow + EPS)
+                    if f_snow < 0.0:
+                        f_snow = 0.0
+                    elif f_snow > 1.0:
+                        f_snow = 1.0
+                    melt_pot_ice = (cfmax * ice_factor) * ddt
+                    ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
+                wc_int = wc + melt + rf + ice_melt
+            else:
+                refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+                sp = sp + sf + refr
+                wc_int = max(wc - refr + rf, 0.0)
+
+            sp = min(sp, 10000.0)
+            if wc_int > cwh * sp:
+                inf = wc_int - cwh * sp
+                wc = cwh * sp
+            else:
+                inf = 0.0
+                wc = wc_int
+
+            input_total = rf + melt + ice_melt
+            den_in = input_total + EPS
+            frac_r = rf / den_in
+            frac_s = melt / den_in
+            frac_i = ice_melt / den_in
+
+            sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
+            recharge = (sm_ratio ** beta_base) * inf
+            r_r = recharge * frac_r
+            r_s = recharge * frac_s
+            r_i = recharge * frac_i
+
+            ep_adj = max((1.0 + (t_eff - tm) * e_corr) * e, 0.0)
+            lp_fc = lp_base * fc_base
+            if lp_fc > 0.001:
+                ea = min(ep_adj, (sm / lp_fc) * ep_adj)
+            else:
+                ea = ep_adj
+            ea = min(ea, sm)
+
+            uz_r += r_r
+            uz_s += r_s
+            uz_i += r_i
+            uz_int = uz_r + uz_s + uz_i
+            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
+
+            perc_actual = min(perc, uz_int)
+            den_uz = uz_int + EPS
+            frac_ur = uz_r / den_uz
+            frac_us = uz_s / den_uz
+            frac_ui = uz_i / den_uz
+            uz_r -= perc_actual * frac_ur
+            uz_s -= perc_actual * frac_us
+            uz_i -= perc_actual * frac_ui
+            lz_r += perc_actual * frac_ur
+            lz_s += perc_actual * frac_us
+            lz_i += perc_actual * frac_ui
+
+            uz_int2 = uz_r + uz_s + uz_i
+            q0 = k * max(uz_int2 - uzl, 0.0)
+            q1 = k1 * uz_int2
+            if q0 + q1 > uz_int2:
+                q0 = uz_int2 * 0.67
+                q1 = uz_int2 * 0.33
+
+            den_uz2 = uz_int2 + EPS
+            frac_ur2 = uz_r / den_uz2
+            frac_us2 = uz_s / den_uz2
+            frac_ui2 = uz_i / den_uz2
+            q0_r = q0 * frac_ur2
+            q0_s = q0 * frac_us2
+            q0_i = q0 * frac_ui2
+            q1_r = q1 * frac_ur2
+            q1_s = q1 * frac_us2
+            q1_i = q1 * frac_ui2
+
+            uz_r = max(uz_r - (q0_r + q1_r), 0.0)
+            uz_s = max(uz_s - (q0_s + q1_s), 0.0)
+            uz_i = max(uz_i - (q0_i + q1_i), 0.0)
+
+            lz_int = lz_r + lz_s + lz_i
+            q2 = k2 * lz_int
+            if q2 > lz_int:
+                q2 = lz_int
+
+            den_lz = lz_int + EPS
+            frac_lr = lz_r / den_lz
+            frac_ls = lz_s / den_lz
+            frac_li = lz_i / den_lz
+            q2_r = q2 * frac_lr
+            q2_s = q2 * frac_ls
+            q2_i = q2 * frac_li
+
+            lz_r = max(lz_r - q2_r, 0.0)
+            lz_s = max(lz_s - q2_s, 0.0)
+            lz_i = max(lz_i - q2_i, 0.0)
+
+            q_total[t_idx] += (q0 + q1 + q2) * scale
+            q_rain[t_idx] += (q0_r + q1_r + q2_r) * scale
+            q_snow[t_idx] += (q0_s + q1_s + q2_s) * scale
+            q_ice[t_idx] += (q0_i + q1_i + q2_i) * scale
+
+        sp_end[idx] = sp
+        sm_end[idx] = sm
+        wc_end[idx] = wc
+        uz_r_end[idx] = uz_r
+        uz_s_end[idx] = uz_s
+        uz_i_end[idx] = uz_i
+        lz_r_end[idx] = lz_r
+        lz_s_end[idx] = lz_s
+        lz_i_end[idx] = lz_i
+
+    return (
+        q_total, q_rain, q_snow, q_ice,
+        sp_end, sm_end, wc_end,
+        uz_r_end, uz_s_end, uz_i_end,
+        lz_r_end, lz_s_end, lz_i_end,
+    )
+
+
+@njit(cache=False, fastmath=True, nogil=True)
 def run_all_cells_total_only_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base, zone_high_cells,
                                   init_st, cell_scale, glacier_cells, glacier_on, ice_factor,
                                   cfmax_low, cfmax_high, glacier_delta_t_cells):
@@ -3313,6 +3540,329 @@ def route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_mu
     }
 
 
+def _last_finite_value(values):
+    if values is None:
+        return float("nan")
+    try:
+        arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    except Exception:
+        return float("nan")
+    finite = arr[np.isfinite(arr)]
+    return float(finite[-1]) if finite.size else float("nan")
+
+
+def _snapshot_scalar(snapshot, key, default=float("nan")):
+    try:
+        value = snapshot.get(key, default) if isinstance(snapshot, dict) else snapshot[key]
+    except Exception:
+        return float(default)
+    try:
+        arr = np.asarray(value, dtype=np.float64).reshape(-1)
+    except Exception:
+        return float(default)
+    if arr.size == 0 or not np.isfinite(arr[0]):
+        return float(default)
+    return float(arr[0])
+
+
+def muskingum_route_warm_start(q_in, k, x, dt, previous_in=None, previous_out=None):
+    q_in = np.asarray(q_in, dtype=np.float64)
+    n = len(q_in)
+    q_out = np.zeros(n, dtype=np.float64)
+    if n == 0:
+        return q_out
+    denom = 2 * k * (1 - x) + dt
+    c0 = (dt - 2 * k * x) / denom
+    c1 = (dt + 2 * k * x) / denom
+    c2 = (2 * k * (1 - x) - dt) / denom
+    prev_in = float(previous_in) if previous_in is not None and np.isfinite(float(previous_in)) else float("nan")
+    prev_out = float(previous_out) if previous_out is not None and np.isfinite(float(previous_out)) else float("nan")
+    if np.isfinite(prev_in) and np.isfinite(prev_out):
+        q_out[0] = c0 * q_in[0] + c1 * prev_in + c2 * prev_out
+    else:
+        q_out[0] = q_in[0]
+    if q_out[0] < 0:
+        q_out[0] = 0.0
+    for i in range(1, n):
+        q_out[i] = c0 * q_in[i] + c1 * q_in[i - 1] + c2 * q_out[i - 1]
+        if q_out[i] < 0:
+            q_out[i] = 0.0
+    return q_out
+
+
+def build_routing_state_snapshot(sim):
+    if not isinstance(sim, dict):
+        return {}
+    local_raw = sim.get("q_local_raw")
+    boundary_raw = sim.get("q_boundary_raw")
+    if local_raw is not None and boundary_raw is not None:
+        try:
+            q_total_in = np.asarray(local_raw, dtype=np.float64) + np.asarray(boundary_raw, dtype=np.float64)
+        except Exception:
+            q_total_in = None
+    else:
+        q_total_in = sim.get("q_total_raw")
+    fields = {
+        "routing_q_total": (q_total_in, sim.get("q_total")),
+        "routing_q_local": (local_raw, sim.get("q_local")),
+        "routing_q_boundary": (boundary_raw, sim.get("q_boundary")),
+        "routing_q_rain": (sim.get("q_rain_raw"), sim.get("q_rain")),
+        "routing_q_snow": (sim.get("q_snow_raw"), sim.get("q_snow")),
+        "routing_q_ice": (sim.get("q_ice_raw"), sim.get("q_ice")),
+    }
+    state = {}
+    for prefix, (raw_values, routed_values) in fields.items():
+        state[f"{prefix}_in_last"] = _last_finite_value(raw_values)
+        state[f"{prefix}_out_last"] = _last_finite_value(routed_values)
+    return state
+
+
+def append_routing_state_to_snapshot(snapshot_arrays, sim):
+    for key, value in build_routing_state_snapshot(sim).items():
+        snapshot_arrays[key] = np.asarray([float(value)], dtype=np.float64)
+
+
+def _route_forecast_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_musk, routing_state=None):
+    routing_state = dict(routing_state or {})
+    q_total_in = q_total + boundary_full
+
+    def routed(name, raw):
+        return muskingum_route_warm_start(
+            raw,
+            k_musk,
+            x_musk,
+            MUSK_DT,
+            routing_state.get(f"routing_{name}_in_last"),
+            routing_state.get(f"routing_{name}_out_last"),
+        )
+
+    return {
+        "q_total": routed("q_total", q_total_in),
+        "q_local": routed("q_local", q_total),
+        "q_boundary": routed("q_boundary", boundary_full),
+        "q_rain": routed("q_rain", q_rain),
+        "q_snow": routed("q_snow", q_snow),
+        "q_ice": routed("q_ice", q_ice),
+        "q_local_raw": np.asarray(q_total, dtype=np.float64),
+        "q_boundary_raw": np.asarray(boundary_full, dtype=np.float64),
+        "q_rain_raw": np.asarray(q_rain, dtype=np.float64),
+        "q_snow_raw": np.asarray(q_snow, dtype=np.float64),
+        "q_ice_raw": np.asarray(q_ice, dtype=np.float64),
+    }
+
+
+def load_state_snapshot(path):
+    snapshot_path = os.fspath(path)
+    with np.load(snapshot_path, allow_pickle=False) as data:
+        return {key: data[key].copy() for key in data.files}
+
+
+def _snapshot_branch_tuple(snapshot, prefix):
+    required = ("sp", "sm", "wc", "uz_r", "uz_s", "uz_i", "lz_r", "lz_s", "lz_i")
+    arrays = []
+    for name in required:
+        key = f"{prefix}{name}"
+        if key not in snapshot:
+            raise ValueError(f"状态快照缺少 {key}。")
+        arrays.append(np.ascontiguousarray(snapshot[key], dtype=np.float32))
+    return tuple(arrays)
+
+
+def _validate_snapshot_grid(snapshot):
+    if VALID_CELLS is None:
+        raise ValueError("尚未加载未来预报网格，无法校验状态快照。")
+    expected_count = int(len(VALID_CELLS))
+    rows = snapshot.get("valid_cell_rows")
+    cols = snapshot.get("valid_cell_cols")
+    if rows is None or cols is None:
+        raise ValueError("状态快照缺少有效像元索引。")
+    rows = np.asarray(rows, dtype=np.int64)
+    cols = np.asarray(cols, dtype=np.int64)
+    if rows.shape[0] != expected_count or cols.shape[0] != expected_count:
+        raise ValueError(f"状态快照像元数与当前工作区不一致：快照 {rows.shape[0]}，当前 {expected_count}。")
+    if not (
+        np.array_equal(rows, np.asarray(VALID_CELLS[:, 0], dtype=np.int64))
+        and np.array_equal(cols, np.asarray(VALID_CELLS[:, 1], dtype=np.int64))
+    ):
+        raise ValueError("状态快照有效像元顺序与当前地理网格不一致，不能热启动。")
+
+
+def _forecast_par_base(opt_params):
+    opt_params = validate_parameter_vector(opt_params)
+    TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, K_MUSK, X_MUSK = opt_params
+    cfmax_low_step = scale_linear_to_step(CFMAX_low)
+    cfmax_high_step = scale_linear_to_step(CFMAX_high)
+    cfr_step = scale_linear_to_step(CFR)
+    k_step = scale_recession_to_step(K)
+    k1_step = scale_recession_to_step(K1)
+    k2_step = scale_recession_to_step(K2)
+    perc_step = scale_linear_to_step(PERC)
+    par_base = np.array([
+        TT, RFCF, SFCF, 0.0, CWH, cfr_step,
+        FC, BETA, FIXED["E_CORR"], LP, k_step, k1_step, k2_step, UZL, perc_step,
+    ], dtype=np.float64)
+    return par_base, ICE_FACTOR, K_MUSK, X_MUSK, cfmax_low_step, cfmax_high_step
+
+
+def _run_forecast_branch(snapshot, prefix, active_cells, cell_scale, glacier_cells, glacier_on,
+                         par_base, ice_factor, cfmax_low_step, cfmax_high_step):
+    states = _snapshot_branch_tuple(snapshot, prefix)
+    result = run_cells_from_state_flat(
+        PREC_CELLS,
+        TEMP_CELLS,
+        ET_CELLS,
+        LL_TEMP_CELLS,
+        par_base,
+        ZONE_HIGH_CELLS,
+        states[0],
+        states[1],
+        states[2],
+        states[3],
+        states[4],
+        states[5],
+        states[6],
+        states[7],
+        states[8],
+        np.ascontiguousarray(active_cells, dtype=np.bool_),
+        np.ascontiguousarray(cell_scale, dtype=np.float64),
+        np.ascontiguousarray(glacier_cells, dtype=np.bool_),
+        bool(glacier_on),
+        float(ice_factor),
+        float(cfmax_low_step),
+        float(cfmax_high_step),
+        GLACIER_DELTA_T_CELLS,
+    )
+    branch_arrays = _state_branch_arrays(prefix, result[4:])
+    return result[0], result[1], result[2], result[3], branch_arrays
+
+
+def run_forecast_from_state(opt_params, snapshot_path=None, snapshot=None, boundary_series=None):
+    if snapshot is None:
+        if not snapshot_path:
+            raise ValueError("必须提供状态快照文件。")
+        snapshot = load_state_snapshot(snapshot_path)
+    snapshot = dict(snapshot)
+    _validate_snapshot_grid(snapshot)
+    if PREC_CELLS is None or TEMP_CELLS is None or ET_CELLS is None:
+        raise ValueError("尚未加载未来气象输入。")
+    par_base, ice_factor, k_musk, x_musk, cfmax_low_step, cfmax_high_step = _forecast_par_base(opt_params)
+    glacier_on = glacier_feature_enabled()
+    n_cells = int(PREC_CELLS.shape[0])
+    use_fractional_snapshot = "glacier_sp" in snapshot and "nonglacier_sp" in snapshot
+    use_fractional_current = bool(
+        glacier_on
+        and glacier_processing_mode() == "fractional_subgrid"
+        and GLACIER_FRACTION_CELLS is not None
+    )
+
+    forecast_state_arrays = {
+        "valid_cell_rows": np.asarray(VALID_CELLS[:, 0], dtype=np.int32),
+        "valid_cell_cols": np.asarray(VALID_CELLS[:, 1], dtype=np.int32),
+        "zone_high_cells": np.asarray(ZONE_HIGH_CELLS, dtype=np.uint8),
+    }
+    if use_fractional_snapshot or use_fractional_current:
+        if not (use_fractional_snapshot and use_fractional_current):
+            raise ValueError("状态快照冰川子格模式与当前工作区不一致，不能热启动。")
+        glacier_active = np.asarray(snapshot.get("glacier_active_cells"), dtype=np.uint8).astype(bool)
+        nonglacier_active = np.asarray(snapshot.get("nonglacier_active_cells"), dtype=np.uint8).astype(bool)
+        glacier_scale = (CELL_SCALE * GLACIER_FRACTION_CELLS).astype(np.float64, copy=False)
+        nonglacier_scale = (CELL_SCALE * (1.0 - GLACIER_FRACTION_CELLS)).astype(np.float64, copy=False)
+        nonglacier_glacier_cells = np.zeros(n_cells, dtype=np.bool_)
+        q_total_g, q_rain_g, q_snow_g, q_ice_g, glacier_state = _run_forecast_branch(
+            snapshot, "glacier_", glacier_active, glacier_scale, glacier_active, True,
+            par_base, ice_factor, cfmax_low_step, cfmax_high_step,
+        )
+        q_total_ng, q_rain_ng, q_snow_ng, q_ice_ng, nonglacier_state = _run_forecast_branch(
+            snapshot, "nonglacier_", nonglacier_active, nonglacier_scale, nonglacier_glacier_cells, False,
+            par_base, ice_factor, cfmax_low_step, cfmax_high_step,
+        )
+        q_total = q_total_g + q_total_ng
+        q_rain = q_rain_g + q_rain_ng
+        q_snow = q_snow_g + q_snow_ng
+        q_ice = q_ice_g + q_ice_ng
+        q_snow_glacier_raw = q_snow_g
+        forecast_state_arrays["glacier_fraction_cells"] = np.asarray(GLACIER_FRACTION_CELLS, dtype=np.float32)
+        forecast_state_arrays["glacier_active_cells"] = np.asarray(glacier_active, dtype=np.uint8)
+        forecast_state_arrays["nonglacier_active_cells"] = np.asarray(nonglacier_active, dtype=np.uint8)
+        forecast_state_arrays.update(glacier_state)
+        forecast_state_arrays.update(nonglacier_state)
+        branches = ["glacier", "nonglacier"]
+    else:
+        active_cells = np.ones(n_cells, dtype=np.bool_)
+        glacier_cells = (
+            np.ascontiguousarray(GLACIER_CELLS, dtype=np.bool_)
+            if GLACIER_CELLS is not None
+            else np.zeros(n_cells, dtype=np.bool_)
+        )
+        q_total, q_rain, q_snow, q_ice, main_state = _run_forecast_branch(
+            snapshot, "main_", active_cells, CELL_SCALE, glacier_cells, glacier_on,
+            par_base, ice_factor, cfmax_low_step, cfmax_high_step,
+        )
+        q_snow_glacier_raw = np.asarray(q_snow, dtype=np.float64).copy() if glacier_on else np.zeros_like(q_total)
+        forecast_state_arrays["glacier_active_cells"] = np.asarray(glacier_cells if glacier_on else np.zeros(n_cells, dtype=np.bool_), dtype=np.uint8)
+        forecast_state_arrays.update(main_state)
+        branches = ["main"]
+
+    if boundary_series is None:
+        if BOUNDARY_INFLOW_ENABLED and BOUNDARY_INFLOW_SERIES is not None:
+            boundary_full = np.asarray(BOUNDARY_INFLOW_SERIES, dtype=np.float64)
+        else:
+            boundary_full = np.zeros_like(q_total)
+    else:
+        boundary_full = np.asarray(boundary_series, dtype=np.float64)
+    if len(boundary_full) != len(q_total):
+        raise ValueError(f"边界入流长度与预报时段不一致：期望 {len(q_total)}，实际 {len(boundary_full)}。")
+
+    routing_state = {
+        key: _snapshot_scalar(snapshot, key)
+        for key in (
+            "routing_q_total_in_last",
+            "routing_q_total_out_last",
+            "routing_q_local_in_last",
+            "routing_q_local_out_last",
+            "routing_q_boundary_in_last",
+            "routing_q_boundary_out_last",
+            "routing_q_rain_in_last",
+            "routing_q_rain_out_last",
+            "routing_q_snow_in_last",
+            "routing_q_snow_out_last",
+            "routing_q_ice_in_last",
+            "routing_q_ice_out_last",
+        )
+    }
+    sim = _route_forecast_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_musk, routing_state)
+    q_glacier_total_raw = np.asarray(q_snow_glacier_raw, dtype=np.float64) + np.asarray(q_ice, dtype=np.float64)
+    sim["q_snow_glacier"] = muskingum_route_warm_start(q_snow_glacier_raw, k_musk, x_musk, MUSK_DT)
+    sim["q_glacier_total"] = muskingum_route_warm_start(q_glacier_total_raw, k_musk, x_musk, MUSK_DT)
+    sim["q_forecast"] = sim["q_total"]
+    sim["date"] = pd.DatetimeIndex(SIM_DATES) if SIM_DATES is not None else None
+    sim["q_obs"] = Q_OBS_FULL
+    sim["forecast_restart"] = {
+        "schema": "continuous_state_forecast_v1",
+        "status": "ok",
+        "source_snapshot": os.fspath(snapshot_path) if snapshot_path else "",
+        "snapshot_mode": str(snapshot.get("snapshot_mode", "")),
+        "branches": list(branches),
+        "cell_count": int(n_cells),
+        "time_steps": int(len(q_total)),
+        "routing_state_available": bool(np.isfinite(routing_state.get("routing_q_total_out_last", float("nan")))),
+    }
+    forecast_state_meta = {
+        "schema": "per_cell_branch_states_v1",
+        "snapshot_mode": "forecast_restart",
+        "source_snapshot_mode": str(snapshot.get("snapshot_mode", "")),
+        "branch_count": int(len(branches)),
+        "branches": list(branches),
+        "cell_count": int(n_cells),
+        "time_steps": int(len(q_total)),
+        "forecast_restart_schema": "continuous_state_forecast_v1",
+    }
+    append_routing_state_to_snapshot(forecast_state_arrays, sim)
+    sim["forecast_state_snapshot_arrays"] = forecast_state_arrays
+    sim["forecast_state_snapshot_meta"] = forecast_state_meta
+    return sim
+
+
 def load_glacier_melt_reference_series(start_date, end_date):
     if not os.path.isdir(GLACIER_MELT_DIR):
         return None
@@ -4038,8 +4588,6 @@ def _state_branch_arrays(prefix, branch_tuple):
 
 
 def compute_state_snapshot(opt_params):
-    # hot_start_supported=False: 当前只保存按像元末状态快照，不支持从快照恢复。
-    # 决策理由见 HBVStudio_项目续接说明.md「2026-04-21 · 本轮完美闭环收口」章节。
     opt_params = validate_parameter_vector(opt_params)
     TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, _, _ = opt_params
     cfmax_low_step = scale_linear_to_step(CFMAX_low)
@@ -4070,6 +4618,9 @@ def compute_state_snapshot(opt_params):
         "branches": [],
         "cell_count": int(len(VALID_CELLS)),
         "time_steps": int(PREC_CELLS.shape[1]) if PREC_CELLS is not None else 0,
+        "time_step_hours": float(TIME_STEP_HOURS),
+        "snapshot_time": format_time_value(SIM_DATES[-1]) if SIM_DATES is not None and len(SIM_DATES) else "",
+        "hot_start_supported": True,
     }
 
     glacier_on = glacier_feature_enabled()
@@ -6150,6 +6701,8 @@ def save_results(result):
     }
     try:
         snapshot_arrays, snapshot_meta = compute_state_snapshot(result.x)
+        append_routing_state_to_snapshot(snapshot_arrays, sim)
+        snapshot_meta["routing_state_available"] = True
         state_snapshot_meta.update(snapshot_meta)
         np.savez_compressed(state_snapshot_path, **snapshot_arrays)
         state_snapshot_saved = True
@@ -6296,17 +6849,19 @@ def save_results(result):
             "state_snapshot_branch_count": int(state_snapshot_meta.get("branch_count", 0) or 0),
             "state_snapshot_cell_count": int(state_snapshot_meta.get("cell_count", 0) or 0),
             "state_snapshot_time_steps": int(state_snapshot_meta.get("time_steps", 0) or 0),
+            "state_snapshot_time": state_snapshot_meta.get("snapshot_time", ""),
+            "state_snapshot_routing_state": bool(state_snapshot_meta.get("routing_state_available", False)),
             "state_snapshot_error": state_snapshot_error,
-            "hot_start_supported": False,
-            "hot_start_enabled": False,
+            "hot_start_supported": bool(state_snapshot_saved),
+            "hot_start_enabled": bool(state_snapshot_saved),
             "notes": [
-                "当前核心支持统一初始状态向量 INIT_ST。",
+                "当前核心支持统一初始状态向量 INIT_ST，也支持从结果末端按像元状态快照继续预报。",
                 (
-                    "当前结果已保存按像元末状态快照，可用于审计与后续热启动开发。"
+                    "当前结果已保存 SP/SM/WC/UZ/LZ 及雨、雪、冰水源分支状态，可作为未来预报热启动状态。"
                     if state_snapshot_saved
                     else "当前结果未成功保存按像元末状态快照。"
                 ),
-                "Studio 的手调起点/手调后重算当前仍属于参数回放，不是真正状态热启动。",
+                "状态重启预报不重新率定参数；未来气象输入进入热启动预报运行。",
             ],
         },
         "basin_info": {
