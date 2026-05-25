@@ -114,6 +114,30 @@ SIGNATURE_PEAK_TOL_MONTHS = 1
 
 EPS = 1e-12
 
+FLOOD_EVENT_SCHEMA = "flood_event_evaluation_v1"
+DEFAULT_FLOOD_EVENT_WEIGHTS = {
+    "peak_flow_error": 0.30,
+    "peak_time_error": 0.25,
+    "volume_error": 0.25,
+    "recession_error": 0.10,
+    "high_flow_weighted_nse": 0.10,
+}
+FLOOD_EVENT_WEIGHT_ALIASES = {
+    "洪峰流量误差": "peak_flow_error",
+    "peak_flow_error": "peak_flow_error",
+    "peak_error": "peak_flow_error",
+    "峰现时间误差": "peak_time_error",
+    "peak_time_error": "peak_time_error",
+    "峰现误差": "peak_time_error",
+    "洪量误差": "volume_error",
+    "volume_error": "volume_error",
+    "退水过程误差": "recession_error",
+    "recession_error": "recession_error",
+    "高流量加权NSE": "high_flow_weighted_nse",
+    "高流量加权 NSE": "high_flow_weighted_nse",
+    "high_flow_weighted_nse": "high_flow_weighted_nse",
+}
+
 MUSK_DT = 1.0
 BAD_OBJ = 1e6
 
@@ -171,6 +195,7 @@ RELIABILITY_FLAG = "ok"
 OBS_MONTHLY_CALIB = None
 BASIN_GLACIER_AREA_FRACTION = float("nan")
 PROJECT_OBJECT_TYPE = "full_upstream_basin"
+FLOOD_EVENT_CONFIG = {}
 
 RUN_ID = None
 LOG_FILE = None
@@ -2314,6 +2339,7 @@ def parse_args():
     parser.add_argument("--mc-samples", type=int, default=600)
     parser.add_argument("--init-params-file", type=str, default=None)
     parser.add_argument("--init-bound-shrink", type=float, default=0.0)
+    parser.add_argument("--flood-events-file", "--洪水事件文件", dest="flood_events_file", type=str, default=None)
     parser.add_argument(
         "--param-bounds-profile",
         "--参数边界档案",
@@ -4143,6 +4169,532 @@ def compute_metrics(q_sim):
     return result
 
 
+def load_flood_event_config_file(path):
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _config_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on", "启用", "是"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off", "禁用", "否"}:
+        return False
+    return default
+
+
+def _finite_float(value, default=float("nan")):
+    try:
+        value = float(value)
+    except Exception:
+        return default
+    return value if np.isfinite(value) else default
+
+
+def _event_time_text(value):
+    if value is None:
+        return None
+    try:
+        return pd.Timestamp(value).isoformat()
+    except Exception:
+        return str(value)
+
+
+def normalize_flood_event_weights(raw_weights=None):
+    weights = dict(DEFAULT_FLOOD_EVENT_WEIGHTS)
+    if isinstance(raw_weights, dict):
+        for raw_key, raw_value in raw_weights.items():
+            key = FLOOD_EVENT_WEIGHT_ALIASES.get(str(raw_key).strip(), str(raw_key).strip())
+            if key not in weights:
+                continue
+            value = _finite_float(raw_value)
+            if np.isfinite(value) and value >= 0.0:
+                weights[key] = value
+    total = float(sum(weights.values()))
+    if total <= EPS:
+        weights = dict(DEFAULT_FLOOD_EVENT_WEIGHTS)
+        total = float(sum(weights.values()))
+    return {
+        "raw": {key: float(value) for key, value in weights.items()},
+        "normalized": {key: float(value) / total for key, value in weights.items()},
+    }
+
+
+def parse_flood_event_config(config=None):
+    raw = FLOOD_EVENT_CONFIG if config is None else config
+    if raw is None:
+        raw = {}
+    if isinstance(raw, list):
+        cfg = {"启用": True, "事件表": raw}
+    elif isinstance(raw, dict):
+        cfg = dict(raw)
+    else:
+        return {
+            "enabled": False,
+            "events": [],
+            "weights": normalize_flood_event_weights(),
+            "warnings": ["洪水事件配置不是对象或数组，已跳过。"],
+            "peak_time_tolerance_hours": max(float(TIME_STEP_HOURS), 24.0),
+        }
+
+    events = cfg.get("事件表", cfg.get("events", []))
+    if not isinstance(events, list):
+        events = []
+    enabled_default = bool(events)
+    enabled = _config_bool(cfg.get("启用", cfg.get("enabled")), default=enabled_default)
+    weights = normalize_flood_event_weights(cfg.get("目标权重", cfg.get("weights", {})))
+    peak_time_tolerance_hours = _finite_float(
+        cfg.get("峰现容许误差小时", cfg.get("peak_time_tolerance_hours", max(float(TIME_STEP_HOURS), 24.0))),
+        default=max(float(TIME_STEP_HOURS), 24.0),
+    )
+    if peak_time_tolerance_hours <= 0.0:
+        peak_time_tolerance_hours = max(float(TIME_STEP_HOURS), 24.0)
+    return {
+        "enabled": bool(enabled),
+        "events": list(events),
+        "weights": weights,
+        "warnings": [],
+        "peak_time_tolerance_hours": float(peak_time_tolerance_hours),
+    }
+
+
+def high_flow_weighted_nse(obs, sim, quantile=0.70):
+    obs = np.asarray(obs, dtype=np.float64)
+    sim = np.asarray(sim, dtype=np.float64)
+    mask = np.isfinite(obs) & np.isfinite(sim)
+    if int(np.sum(mask)) < 2:
+        return float("nan")
+    o = obs[mask]
+    s = sim[mask]
+    threshold = float(np.nanquantile(o, min(max(float(quantile), 0.0), 1.0)))
+    if not np.isfinite(threshold) or threshold <= EPS:
+        threshold = max(float(np.nanmean(o)), EPS)
+    weights = np.ones_like(o, dtype=np.float64)
+    high_mask = o >= threshold
+    weights[high_mask] = np.maximum(1.0, o[high_mask] / threshold)
+    weight_sum = float(np.sum(weights))
+    if weight_sum <= EPS:
+        return float("nan")
+    weighted_mean = float(np.sum(weights * o) / weight_sum)
+    denominator = float(np.sum(weights * (o - weighted_mean) ** 2))
+    if denominator <= EPS:
+        return float("nan")
+    numerator = float(np.sum(weights * (o - s) ** 2))
+    return float(1.0 - numerator / denominator)
+
+
+def _log_recession_slope_per_day(dates, series, peak_pos):
+    dates = pd.DatetimeIndex(dates)
+    q = np.asarray(series, dtype=np.float64)
+    if peak_pos is None or peak_pos < 0 or peak_pos >= len(q):
+        return float("nan"), 0
+    dates = dates[peak_pos:]
+    q = q[peak_pos:]
+    mask = np.isfinite(q) & (q > EPS)
+    count = int(np.sum(mask))
+    if count < 3:
+        return float("nan"), count
+    dates = dates[mask]
+    q = q[mask]
+    days = np.asarray((dates - dates[0]) / pd.Timedelta(days=1), dtype=np.float64)
+    if float(np.nanmax(days) - np.nanmin(days)) <= EPS:
+        return float("nan"), count
+    slope = float(np.polyfit(days, np.log(q), 1)[0])
+    return slope, count
+
+
+def compute_flood_event_recession_metrics(dates, obs, sim, obs_peak_pos, sim_peak_pos):
+    obs_slope, obs_count = _log_recession_slope_per_day(dates, obs, obs_peak_pos)
+    sim_slope, sim_count = _log_recession_slope_per_day(dates, sim, sim_peak_pos)
+    slope_error = float("nan")
+    slope_error_percent = float("nan")
+    if np.isfinite(obs_slope) and np.isfinite(sim_slope):
+        slope_error = float(sim_slope - obs_slope)
+        if abs(obs_slope) > EPS:
+            slope_error_percent = float(100.0 * slope_error / abs(obs_slope))
+
+    obs = np.asarray(obs, dtype=np.float64)
+    sim = np.asarray(sim, dtype=np.float64)
+    paired_nse = float("nan")
+    paired_count = 0
+    if obs_peak_pos is not None and 0 <= obs_peak_pos < len(obs):
+        obs_tail = obs[obs_peak_pos:]
+        sim_tail = sim[obs_peak_pos:]
+        mask = np.isfinite(obs_tail) & np.isfinite(sim_tail)
+        paired_count = int(np.sum(mask))
+        if paired_count >= 2:
+            paired_nse = nse_safe(obs_tail[mask], sim_tail[mask])
+
+    return {
+        "obs_log_slope_per_day": obs_slope,
+        "sim_log_slope_per_day": sim_slope,
+        "slope_error_per_day": slope_error,
+        "slope_error_percent": slope_error_percent,
+        "obs_recession_count": int(obs_count),
+        "sim_recession_count": int(sim_count),
+        "paired_recession_count": int(paired_count),
+        "paired_recession_nse": paired_nse,
+    }
+
+
+def flood_event_component_scores(metrics, peak_time_tolerance_hours):
+    components = {}
+    peak_error = _finite_float(metrics.get("peak_error_percent"))
+    if np.isfinite(peak_error):
+        components["peak_flow_error"] = abs(peak_error) / 100.0
+    peak_time = _finite_float(metrics.get("peak_time_error_hours"))
+    if np.isfinite(peak_time):
+        components["peak_time_error"] = abs(peak_time) / max(float(peak_time_tolerance_hours), EPS)
+    volume_error = _finite_float(metrics.get("volume_error_percent"))
+    if np.isfinite(volume_error):
+        components["volume_error"] = abs(volume_error) / 100.0
+    recession_error = _finite_float(metrics.get("recession_slope_error_percent"))
+    if np.isfinite(recession_error):
+        components["recession_error"] = abs(recession_error) / 100.0
+    high_flow_nse = _finite_float(metrics.get("high_flow_weighted_nse"))
+    if np.isfinite(high_flow_nse):
+        components["high_flow_weighted_nse"] = max(0.0, 1.0 - high_flow_nse)
+    return components
+
+
+def flood_event_diagnostic_objective(metrics, weights, peak_time_tolerance_hours):
+    components = flood_event_component_scores(metrics, peak_time_tolerance_hours)
+    normalized = dict(weights.get("normalized", {}) or {})
+    numerator = 0.0
+    denominator = 0.0
+    for key, value in components.items():
+        if not np.isfinite(value):
+            continue
+        weight = float(normalized.get(key, 0.0) or 0.0)
+        if weight <= 0.0:
+            continue
+        numerator += weight * float(value)
+        denominator += weight
+    score = float("nan") if denominator <= EPS else float(numerator / denominator)
+    return {
+        "score": score,
+        "components": {key: float(value) for key, value in components.items()},
+    }
+
+
+def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weights, peak_time_tolerance_hours):
+    event_config = dict(event_config or {}) if isinstance(event_config, dict) else {}
+    event_name = str(event_config.get("名称", event_config.get("name", "")) or "").strip()
+    event_type = str(event_config.get("类型", event_config.get("type", "calibration")) or "calibration").strip()
+    if not event_name:
+        token = json.dumps(event_config, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        event_name = f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+
+    warnings = []
+    event_start_raw = event_config.get("事件开始", event_config.get("start"))
+    event_end_raw = event_config.get("事件结束", event_config.get("end"))
+    if event_start_raw in (None, "") or event_end_raw in (None, ""):
+        return {
+            "name": event_name,
+            "type": event_type,
+            "status": "missing_event_dates",
+            "valid": False,
+            "warnings": ["事件缺少开始或结束时间。"],
+        }
+    try:
+        event_start = normalize_time_value(event_start_raw)
+        event_end = normalize_time_value(event_end_raw, is_end=True)
+    except Exception as exc:
+        return {
+            "name": event_name,
+            "type": event_type,
+            "status": "invalid_event_dates",
+            "valid": False,
+            "warnings": [f"事件起止时间无法解析：{exc}"],
+        }
+    if event_end < event_start:
+        return {
+            "name": event_name,
+            "type": event_type,
+            "status": "invalid_event_order",
+            "valid": False,
+            "event_start": _event_time_text(event_start),
+            "event_end": _event_time_text(event_end),
+            "warnings": ["事件结束时间早于事件开始时间。"],
+        }
+
+    warmup_start_raw = event_config.get("预热开始", event_config.get("warmup_start"))
+    warmup_start = None
+    if warmup_start_raw:
+        try:
+            warmup_start = normalize_time_value(warmup_start_raw)
+            if warmup_start > event_start:
+                warnings.append("预热开始晚于事件开始；当前仅按连续模拟结果进行事件评价。")
+        except Exception as exc:
+            warnings.append(f"预热开始无法解析：{exc}")
+
+    date_index = pd.DatetimeIndex(dates)
+    q_obs = np.asarray(q_obs, dtype=np.float64)
+    q_sim = np.asarray(q_sim, dtype=np.float64)
+    n = min(len(date_index), len(q_obs), len(q_sim))
+    date_index = date_index[:n]
+    q_obs = q_obs[:n]
+    q_sim = q_sim[:n]
+    if n == 0:
+        return {
+            "name": event_name,
+            "type": event_type,
+            "status": "empty_series",
+            "valid": False,
+            "warnings": warnings + ["模拟序列为空，无法评价洪水事件。"],
+        }
+
+    if event_start < date_index[0] or event_end > date_index[-1]:
+        warnings.append("事件窗口超出当前连续模拟时段，已按可用时段裁剪评价。")
+    window_mask = (date_index >= event_start) & (date_index <= event_end)
+    if not np.any(window_mask):
+        return {
+            "name": event_name,
+            "type": event_type,
+            "status": "outside_simulation_period",
+            "valid": False,
+            "event_start": _event_time_text(event_start),
+            "event_end": _event_time_text(event_end),
+            "warmup_start": _event_time_text(warmup_start),
+            "warnings": warnings,
+        }
+
+    event_dates = date_index[window_mask]
+    obs_event = q_obs[window_mask]
+    sim_event = q_sim[window_mask]
+    valid_mask = np.isfinite(obs_event) & np.isfinite(sim_event)
+    valid_count = int(np.sum(valid_mask))
+    total_steps = int(len(obs_event))
+    duration_hours = float((event_dates[-1] - event_dates[0]) / pd.Timedelta(hours=1) + TIME_STEP_HOURS)
+    base = {
+        "name": event_name,
+        "type": event_type,
+        "status": "ok" if valid_count >= 2 else "insufficient_valid_points",
+        "valid": bool(valid_count >= 2),
+        "event_start": _event_time_text(event_start),
+        "event_end": _event_time_text(event_end),
+        "warmup_start": _event_time_text(warmup_start),
+        "window_start_used": _event_time_text(event_dates[0]),
+        "window_end_used": _event_time_text(event_dates[-1]),
+        "total_steps": total_steps,
+        "valid_count": valid_count,
+        "duration_hours": duration_hours,
+        "warnings": warnings,
+    }
+    if valid_count < 2:
+        base["diagnostic_objective"] = flood_event_diagnostic_objective(base, weights, peak_time_tolerance_hours)
+        return base
+
+    obs_valid = obs_event[valid_mask]
+    sim_valid = sim_event[valid_mask]
+    dates_valid = pd.DatetimeIndex(event_dates[valid_mask])
+    obs_peak_pos = int(np.nanargmax(obs_valid))
+    sim_peak_pos = int(np.nanargmax(sim_valid))
+    obs_peak = float(obs_valid[obs_peak_pos])
+    sim_peak = float(sim_valid[sim_peak_pos])
+    obs_peak_time = dates_valid[obs_peak_pos]
+    sim_peak_time = dates_valid[sim_peak_pos]
+    peak_error_percent = float("nan")
+    if abs(obs_peak) > EPS:
+        peak_error_percent = float(100.0 * (sim_peak - obs_peak) / obs_peak)
+    peak_time_error_hours = float((sim_peak_time - obs_peak_time) / pd.Timedelta(hours=1))
+
+    dt_seconds = float(TIME_STEP_HOURS) * 3600.0
+    obs_volume = float(np.nansum(obs_valid) * dt_seconds)
+    sim_volume = float(np.nansum(sim_valid) * dt_seconds)
+    volume_error_percent = float("nan")
+    if abs(obs_volume) > EPS:
+        volume_error_percent = float(100.0 * (sim_volume - obs_volume) / obs_volume)
+
+    kge_value, kge_r, kge_alpha, kge_beta = kge_numba(obs_valid, sim_valid)
+    if kge_value <= -900:
+        kge_value = kge_r = kge_alpha = kge_beta = float("nan")
+    recession = compute_flood_event_recession_metrics(
+        dates_valid,
+        obs_valid,
+        sim_valid,
+        obs_peak_pos,
+        sim_peak_pos,
+    )
+
+    base.update({
+        "obs_peak_m3s": obs_peak,
+        "sim_peak_m3s": sim_peak,
+        "peak_error_percent": peak_error_percent,
+        "obs_peak_time": _event_time_text(obs_peak_time),
+        "sim_peak_time": _event_time_text(sim_peak_time),
+        "peak_time_error_hours": peak_time_error_hours,
+        "peak_time_error_steps": float(peak_time_error_hours / max(float(TIME_STEP_HOURS), EPS)),
+        "obs_volume_m3": obs_volume,
+        "sim_volume_m3": sim_volume,
+        "volume_error_percent": volume_error_percent,
+        "nse": nse_safe(obs_valid, sim_valid),
+        "kge": float(kge_value) if np.isfinite(kge_value) else float("nan"),
+        "kge_r": float(kge_r) if np.isfinite(kge_r) else float("nan"),
+        "kge_alpha": float(kge_alpha) if np.isfinite(kge_alpha) else float("nan"),
+        "kge_beta": float(kge_beta) if np.isfinite(kge_beta) else float("nan"),
+        "rmse_m3s": rmse(obs_valid, sim_valid),
+        "pbias": pbias(obs_valid, sim_valid),
+        "high_flow_weighted_nse": high_flow_weighted_nse(obs_valid, sim_valid),
+        "high_flow_quantile": 0.70,
+        "recession_obs_log_slope_per_day": recession["obs_log_slope_per_day"],
+        "recession_sim_log_slope_per_day": recession["sim_log_slope_per_day"],
+        "recession_slope_error_per_day": recession["slope_error_per_day"],
+        "recession_slope_error_percent": recession["slope_error_percent"],
+        "recession_obs_count": recession["obs_recession_count"],
+        "recession_sim_count": recession["sim_recession_count"],
+        "recession_paired_count": recession["paired_recession_count"],
+        "recession_paired_nse": recession["paired_recession_nse"],
+    })
+    base["diagnostic_objective"] = flood_event_diagnostic_objective(
+        base,
+        weights,
+        peak_time_tolerance_hours,
+    )
+    return base
+
+
+def _finite_mean(items, key, absolute=False):
+    values = []
+    for item in items:
+        value = _finite_float(item.get(key))
+        if np.isfinite(value):
+            values.append(abs(value) if absolute else value)
+    return float(np.mean(values)) if values else float("nan")
+
+
+def aggregate_flood_event_metrics(events):
+    valid_events = [item for item in events if bool(item.get("valid"))]
+
+    def _summary(items):
+        scores = []
+        for item in items:
+            score = _finite_float(dict(item.get("diagnostic_objective", {}) or {}).get("score"))
+            if np.isfinite(score):
+                scores.append(score)
+        return {
+            "event_count": int(len(items)),
+            "valid_event_count": int(sum(1 for item in items if bool(item.get("valid")))),
+            "mean_abs_peak_error_percent": _finite_mean(items, "peak_error_percent", absolute=True),
+            "mean_abs_peak_time_error_hours": _finite_mean(items, "peak_time_error_hours", absolute=True),
+            "mean_abs_volume_error_percent": _finite_mean(items, "volume_error_percent", absolute=True),
+            "mean_nse": _finite_mean(items, "nse"),
+            "mean_kge": _finite_mean(items, "kge"),
+            "mean_high_flow_weighted_nse": _finite_mean(items, "high_flow_weighted_nse"),
+            "mean_diagnostic_objective": float(np.mean(scores)) if scores else float("nan"),
+        }
+
+    result = {"all": _summary(valid_events)}
+    for event_type in sorted({str(item.get("type", "") or "") for item in valid_events}):
+        result[event_type or "unspecified"] = _summary([
+            item for item in valid_events if str(item.get("type", "") or "") == event_type
+        ])
+    return result
+
+
+def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_basis=None):
+    parsed = parse_flood_event_config(config)
+    result = {
+        "schema": FLOOD_EVENT_SCHEMA,
+        "enabled": bool(parsed["enabled"]),
+        "status": "disabled",
+        "evaluation_basis": str(evaluation_basis or current_q_score_basis()),
+        "time_step_hours": float(TIME_STEP_HOURS),
+        "peak_time_tolerance_hours": float(parsed["peak_time_tolerance_hours"]),
+        "weights": parsed["weights"],
+        "event_count": int(len(parsed["events"])),
+        "valid_event_count": 0,
+        "events": [],
+        "summary": {},
+        "warnings": list(parsed.get("warnings", [])),
+        "diagnostic_only": True,
+        "notes": [
+            "洪水事件评价基于连续模拟序列裁剪事件窗口计算。",
+            "本版本仅输出事件诊断指标，不改变当前正式率定目标函数。",
+        ],
+    }
+    if not result["enabled"]:
+        return result
+    if len(parsed["events"]) == 0:
+        result["status"] = "no_events"
+        result["warnings"].append("洪水事件率定已启用，但事件表为空。")
+        return result
+
+    events = []
+    for item in parsed["events"]:
+        event_metrics = compute_single_flood_event_metrics(
+            dates,
+            q_obs,
+            q_sim,
+            item,
+            parsed["weights"],
+            parsed["peak_time_tolerance_hours"],
+        )
+        events.append(event_metrics)
+    result["events"] = events
+    result["valid_event_count"] = int(sum(1 for item in events if bool(item.get("valid"))))
+    result["status"] = "ok" if result["valid_event_count"] > 0 else "no_valid_events"
+    result["summary"] = aggregate_flood_event_metrics(events)
+    return result
+
+
+def flatten_flood_event_record(event):
+    diagnostic = dict(event.get("diagnostic_objective", {}) or {})
+    return {
+        "name": event.get("name"),
+        "type": event.get("type"),
+        "status": event.get("status"),
+        "valid": event.get("valid"),
+        "event_start": event.get("event_start"),
+        "event_end": event.get("event_end"),
+        "window_start_used": event.get("window_start_used"),
+        "window_end_used": event.get("window_end_used"),
+        "total_steps": event.get("total_steps"),
+        "valid_count": event.get("valid_count"),
+        "obs_peak_m3s": event.get("obs_peak_m3s"),
+        "sim_peak_m3s": event.get("sim_peak_m3s"),
+        "peak_error_percent": event.get("peak_error_percent"),
+        "obs_peak_time": event.get("obs_peak_time"),
+        "sim_peak_time": event.get("sim_peak_time"),
+        "peak_time_error_hours": event.get("peak_time_error_hours"),
+        "obs_volume_m3": event.get("obs_volume_m3"),
+        "sim_volume_m3": event.get("sim_volume_m3"),
+        "volume_error_percent": event.get("volume_error_percent"),
+        "nse": event.get("nse"),
+        "kge": event.get("kge"),
+        "rmse_m3s": event.get("rmse_m3s"),
+        "pbias": event.get("pbias"),
+        "high_flow_weighted_nse": event.get("high_flow_weighted_nse"),
+        "recession_obs_log_slope_per_day": event.get("recession_obs_log_slope_per_day"),
+        "recession_sim_log_slope_per_day": event.get("recession_sim_log_slope_per_day"),
+        "recession_slope_error_percent": event.get("recession_slope_error_percent"),
+        "recession_paired_nse": event.get("recession_paired_nse"),
+        "diagnostic_objective": diagnostic.get("score"),
+        "warnings": "; ".join(str(item) for item in event.get("warnings", []) or []),
+    }
+
+
+def write_flood_event_outputs(run_dir, evaluation):
+    if not isinstance(evaluation, dict) or not evaluation.get("enabled"):
+        return None
+    events = list(evaluation.get("events", []) or [])
+    if not events:
+        return None
+    path = os.path.join(run_dir, "flood_events.csv")
+    pd.DataFrame([flatten_flood_event_record(item) for item in events]).to_csv(
+        path,
+        index=False,
+        encoding="utf-8-sig",
+    )
+    return os.path.basename(path)
+
+
 def objective(x):
     _increment_eval_count()
     try:
@@ -5268,7 +5820,7 @@ def save_results(result):
     q_ice_raw = sim["q_ice_raw"]
     q_ice_ref = sim["q_ice_reference"]
     q_ice_ref_raw = sim["q_ice_reference_raw"]
-    q_score_series, _ = scoring_series(sim)
+    q_score_series, q_score_basis = scoring_series(sim)
     metrics = compute_metrics(q_score_series)
     objective_value, objective_evaluation = compute_objective_terms(metrics, sim)
 
@@ -5301,6 +5853,16 @@ def save_results(result):
 
     run_dir = os.path.join(RUNS_DIR, f"hbv_cryo_{args.prec_source}_{args.glacier_mode}_{RUN_ID}")
     os.makedirs(run_dir, exist_ok=True)
+    flood_event_evaluation = compute_flood_event_evaluation(
+        SIM_DATES,
+        Q_OBS_FULL,
+        q_score_series if q_score_series is not None else q_sim,
+        FLOOD_EVENT_CONFIG,
+        evaluation_basis=q_score_basis,
+    )
+    flood_event_file = write_flood_event_outputs(run_dir, flood_event_evaluation)
+    if flood_event_file:
+        flood_event_evaluation["output_file"] = flood_event_file
 
     export_start = max(int(WARMUP_STEPS or 0), 0)
     q_sim_export = q_sim[export_start:]
@@ -5540,6 +6102,7 @@ def save_results(result):
         "diagnostics": dict(objective_evaluation.get("diagnostics", {}) or {}) if objective_evaluation else {},
         "diagnostic_only_constraints": dict(objective_evaluation.get("diagnostic_only_constraints", {}) or {}) if objective_evaluation else {"glacier_fraction_window": True},
         "evidence_registry": dict(objective_evaluation.get("evidence_registry", {}) or {}) if objective_evaluation else {},
+        "flood_event_evaluation": flood_event_evaluation,
         "optimization": {
             "method": str(getattr(args, "method", "de")),
             "mc_samples": int(getattr(args, "mc_samples", 0)),
@@ -5674,6 +6237,15 @@ def save_results(result):
             routed_rmse = glacier_cmp_routed["rmse_m3s"]
             if np.isfinite(routed_rmse):
                 f.write(f"冰川融水参考 RMSE（汇流后）: {routed_rmse:.4f} m3/s\n")
+        if flood_event_evaluation.get("enabled"):
+            f.write(
+                "洪水事件评价: "
+                f"{int(flood_event_evaluation.get('valid_event_count', 0))}/"
+                f"{int(flood_event_evaluation.get('event_count', 0))} 场有效"
+            )
+            if flood_event_file:
+                f.write(f"（详见 {flood_event_file}）")
+            f.write("\n")
         f.write("\n参数结果\n")
         for name, val in zip(param_names, result.x):
             f.write(f"{name} = {float(val):.6f}\n")
@@ -5696,12 +6268,20 @@ def save_results(result):
         print(f"  验证期 RMSE: {metrics['rmse_val']:.2f} m3/s")
     if glacier_cmp_routed is not None and np.isfinite(glacier_cmp_routed["rmse_m3s"]):
         print(f"  冰川融水参考 RMSE（汇流后）: {glacier_cmp_routed['rmse_m3s']:.2f} m3/s")
+    if flood_event_evaluation.get("enabled"):
+        print(
+            "  洪水事件评价: "
+            f"{int(flood_event_evaluation.get('valid_event_count', 0))}/"
+            f"{int(flood_event_evaluation.get('event_count', 0))} 场有效"
+        )
     print(f"  结果目录: {run_dir}")
 
 
 def main():
-    global args, eval_count, best_score, best_objective, best_params, DEBUG_WINDOW_INFO, PREC_DIR, PROGRESS_FILE, PROGRESS_FILE_REFINE, gen_count, OBJECTIVE_MODE_SELECTED, REQUESTED_OBJECTIVE_MODE, OPTIMIZATION_STAGE_STATS, CALIBRATION_WORKFLOW_SELECTED, STAGED_CALIBRATION_METADATA
+    global args, eval_count, best_score, best_objective, best_params, DEBUG_WINDOW_INFO, PREC_DIR, PROGRESS_FILE, PROGRESS_FILE_REFINE, gen_count, OBJECTIVE_MODE_SELECTED, REQUESTED_OBJECTIVE_MODE, OPTIMIZATION_STAGE_STATS, CALIBRATION_WORKFLOW_SELECTED, STAGED_CALIBRATION_METADATA, FLOOD_EVENT_CONFIG
     args = parse_args()
+    if getattr(args, "flood_events_file", None):
+        FLOOD_EVENT_CONFIG = load_flood_event_config_file(args.flood_events_file)
     if bool(getattr(args, "quick_test", False)):
         args.debug_days = 0
     patched_parameter_profile = (

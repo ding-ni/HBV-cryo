@@ -988,6 +988,9 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
     zone_threshold = cfmax_zone_threshold(config)
     obs_mode = config.get("观测口径模式", config.get("观测径流口径模式", "full_year"))
     init_state_vector = resolve_runtime_init_state(config)
+    flood_event_config = config.get("洪水事件率定", {})
+    if not isinstance(flood_event_config, (dict, list)):
+        flood_event_config = {}
 
     patch_module(
         module,
@@ -1040,6 +1043,7 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
             "BOUNDARY_INFLOW_FLOW_FIELD": str(boundary["流量字段"]) if use_boundary_inflow else "inflow_m3s",
             "BOUNDARY_INFLOW_GAP_FILL": str(boundary.get("缺失填补", "zero")) if use_boundary_inflow else "zero",
             "PROJECT_OBJECT_TYPE": object_type,
+            "FLOOD_EVENT_CONFIG": flood_event_config,
         },
     )
     setattr(module, "REQUESTED_WORKSPACE_ROOT", str(Path(requested_paths["workspace_root"]).resolve(strict=False)))
