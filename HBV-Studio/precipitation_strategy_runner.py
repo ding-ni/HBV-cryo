@@ -36,6 +36,13 @@ DATE_PATTERNS = [
     ("%Y-%m-%d", [r"\d{4}-\d{2}-\d{2}"]),
 ]
 
+STATION_ONLY_TEMPLATE_CANDIDATES = (
+    "flow_accumulation_masked.tif",
+    "dem_1km.tif",
+    "dem_0p1deg.tif",
+    "dem.tif",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply precipitation strategy for HBV-Studio workspaces.")
@@ -174,6 +181,32 @@ def list_rasters(directory: Path) -> list[tuple[pd.Timestamp, Path]]:
         if ts is not None:
             records.append((ts, path))
     return sorted(records, key=lambda item: item[0])
+
+
+def raster_name_from_timestamp(ts: pd.Timestamp) -> str:
+    ts = pd.to_datetime(ts)
+    if ts.minute or ts.second or ts.microsecond or ts.nanosecond:
+        return ts.strftime("%Y.%m.%d.%H.%M.tif")
+    if ts.hour:
+        return ts.strftime("%Y.%m.%d.%H.tif")
+    return ts.strftime("%Y.%m.%d.tif")
+
+
+def resolve_station_only_template(paths: dict[str, Path]) -> Path:
+    gis_dir = Path(paths["gis_dir"])
+    for name in STATION_ONLY_TEMPLATE_CANDIDATES:
+        candidate = gis_dir / name
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "站点泰森分配需要目标格网模板。请先完成地理数据生成，确保流域掩膜或 DEM 栅格已生成。"
+    )
+
+
+def records_from_station_times(station_series: pd.DataFrame, template_path: Path) -> list[tuple[pd.Timestamp, Path]]:
+    index = pd.DatetimeIndex(pd.to_datetime(station_series.index, errors="coerce"))
+    index = index[index.notna()].drop_duplicates().sort_values()
+    return [(pd.Timestamp(ts), template_path) for ts in index]
 
 
 def sample_station_values(src: rasterio.io.DatasetReader, stations: pd.DataFrame) -> np.ndarray:
@@ -389,14 +422,22 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
     return written
 
 
-def apply_thiessen(records: list[tuple[pd.Timestamp, Path]], target_dir: Path, stations: pd.DataFrame, station_series: pd.DataFrame, overwrite: bool) -> int:
+def apply_thiessen(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    overwrite: bool,
+    *,
+    use_timestamp_names: bool = False,
+) -> int:
     written = 0
     station_ids = stations["station_id"].tolist()
     nearest_cache: dict[tuple[int, ...], np.ndarray] = {}
     valid_mask: np.ndarray | None = None
     no_station_step_count = 0
     for ts, path in records:
-        output = target_dir / path.name
+        output = target_dir / (raster_name_from_timestamp(ts) if use_timestamp_names else path.name)
         if output.exists() and not overwrite:
             written += 1
             continue
@@ -449,17 +490,12 @@ def main() -> None:
     mode = str(meteo.get("降水方案", "grid_only")).strip()
     prec_source = args.降水源 or configured_precip_source(config)
     profile = resolve_profile(config, None)
+    paths = build_profile_paths(config, profile)
     base_dir, target_dir = base_and_target_dirs(config, prec_source)
 
     if mode == "grid_only":
-      print("当前降水方案为 grid_only，不需要额外处理。")
-      return
-
-    if not base_dir.exists():
-        raise FileNotFoundError(f"基础降水目录不存在：{base_dir}")
-    records = list_rasters(base_dir)
-    if not records:
-        raise FileNotFoundError(f"基础降水目录没有 tif：{base_dir}")
+        print("当前降水方案为 grid_only，不需要额外处理。")
+        return
 
     station_prec_path = resolve_config_entry_path(config, meteo.get("站点降水_csv", ""))
     station_meta_path = resolve_config_entry_path(config, meteo.get("站点信息_csv", ""))
@@ -468,11 +504,28 @@ def main() -> None:
     if not station_meta_path.exists():
         raise FileNotFoundError(f"站点信息文件不存在：{station_meta_path}")
 
-    with rasterio.open(records[0][1]) as src:
-        stations = load_station_metadata(station_meta_path, src.crs)
     station_series, fmt = load_station_precip(station_prec_path)
     station_series.index = pd.to_datetime(station_series.index)
     station_series.columns = [str(col).strip() for col in station_series.columns]
+
+    records = list_rasters(base_dir) if base_dir.exists() else []
+    use_timestamp_names = False
+    if mode == "grid_plus_station_bias":
+        if not base_dir.exists():
+            raise FileNotFoundError(f"基础降水目录不存在：{base_dir}")
+        if not records:
+            raise FileNotFoundError(f"基础降水目录没有 tif：{base_dir}")
+    elif mode == "thiessen_station_only" and not records:
+        template_path = resolve_station_only_template(paths)
+        records = records_from_station_times(station_series, template_path)
+        use_timestamp_names = True
+        if not records:
+            raise ValueError("站点降水文件没有可用时间，无法生成逐栅格降水。")
+    elif mode != "thiessen_station_only":
+        raise ValueError(f"未知降水方案：{mode}")
+
+    with rasterio.open(records[0][1]) as src:
+        stations = load_station_metadata(station_meta_path, src.crs)
     available_ids = set(station_series.columns)
     stations = stations[stations["station_id"].isin(available_ids)].copy()
     if stations.empty:
@@ -486,14 +539,14 @@ def main() -> None:
     print(f"站点格式: {fmt}")
     print(f"匹配站点数: {len(stations)}")
     print(f"时间步文件数: {len(records)}")
+    if use_timestamp_names:
+        print(f"站点-only 目标格网模板: {records[0][1]}")
 
     target_dir.mkdir(parents=True, exist_ok=True)
     if mode == "grid_plus_station_bias":
         written = apply_grid_bias_correction(records, target_dir, stations, station_series, args.覆盖)
     elif mode == "thiessen_station_only":
-        written = apply_thiessen(records, target_dir, stations, station_series, args.覆盖)
-    else:
-        raise ValueError(f"未知降水方案：{mode}")
+        written = apply_thiessen(records, target_dir, stations, station_series, args.覆盖, use_timestamp_names=use_timestamp_names)
     print(f"完成：{written} 个文件写入 {target_dir}")
 
 
