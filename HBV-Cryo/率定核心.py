@@ -114,13 +114,14 @@ SIGNATURE_PEAK_TOL_MONTHS = 1
 
 EPS = 1e-12
 
+FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1"
 FLOOD_EVENT_SCHEMA = "flood_event_evaluation_v1"
 DEFAULT_FLOOD_EVENT_WEIGHTS = {
     "peak_flow_error": 0.30,
     "peak_time_error": 0.25,
     "volume_error": 0.25,
     "recession_error": 0.10,
-    "high_flow_weighted_nse": 0.10,
+    "high_flow_skill": 0.10,
 }
 FLOOD_EVENT_WEIGHT_ALIASES = {
     "洪峰流量误差": "peak_flow_error",
@@ -133,10 +134,28 @@ FLOOD_EVENT_WEIGHT_ALIASES = {
     "volume_error": "volume_error",
     "退水过程误差": "recession_error",
     "recession_error": "recession_error",
-    "高流量加权NSE": "high_flow_weighted_nse",
-    "高流量加权 NSE": "high_flow_weighted_nse",
-    "high_flow_weighted_nse": "high_flow_weighted_nse",
+    "高流量加权NSE": "high_flow_skill",
+    "高流量加权 NSE": "high_flow_skill",
+    "high_flow_weighted_nse": "high_flow_skill",
+    "高流量加权KGE": "high_flow_skill",
+    "高流量加权 KGE": "high_flow_skill",
+    "high_flow_kge": "high_flow_skill",
+    "高流量过程效率": "high_flow_skill",
+    "high_flow_skill": "high_flow_skill",
 }
+FLOOD_EVENT_OBJECTIVE_MODE_VALUES = {
+    "objective",
+    "event_objective",
+    "flood_event_objective",
+    "calibration",
+    "event_calibration",
+    "flood_event_calibration_v1",
+    "目标函数",
+    "事件目标函数",
+    "事件率定",
+    "洪水事件率定",
+}
+FLOOD_EVENT_CALIBRATION_TYPE_ALIASES = {"calibration", "calib", "train", "training", "率定", "训练"}
 
 MUSK_DT = 1.0
 BAD_OBJ = 1e6
@@ -2355,7 +2374,7 @@ def parse_args():
         "--目标函数",
         "--objective-mode",
         dest="objective_mode",
-        choices=["auto", "single_objective_nse", "weighted_multi_criteria", OBJECTIVE_FAMILY_DAILY],
+        choices=["auto", "single_objective_nse", "weighted_multi_criteria", OBJECTIVE_FAMILY_DAILY, FLOOD_EVENT_OBJECTIVE_FAMILY],
         default="auto",
     )
     parser.add_argument("--fill-nan", dest="fill_nan", action="store_true", default=True)
@@ -4261,7 +4280,71 @@ def parse_flood_event_config(config=None):
         "weights": weights,
         "warnings": [],
         "peak_time_tolerance_hours": float(peak_time_tolerance_hours),
+        "raw_config": cfg,
     }
+
+
+def flood_event_objective_enabled(config=None):
+    raw = FLOOD_EVENT_CONFIG if config is None else config
+    if raw is None:
+        return False
+    if isinstance(raw, list):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    parsed = parse_flood_event_config(raw)
+    if not parsed.get("enabled"):
+        return False
+    explicit = (
+        raw.get("作为目标函数")
+        if "作为目标函数" in raw
+        else raw.get("目标函数启用")
+        if "目标函数启用" in raw
+        else raw.get("objective_enabled")
+        if "objective_enabled" in raw
+        else raw.get("use_as_objective")
+    )
+    if explicit is not None:
+        return _config_bool(explicit, default=False)
+    mode = str(raw.get("模式", raw.get("mode", raw.get("率定模式", ""))) or "").strip().lower()
+    return mode in FLOOD_EVENT_OBJECTIVE_MODE_VALUES
+
+
+def _event_type_key(value):
+    return str(value or "").strip().lower()
+
+
+def _configured_event_type_set(raw_config):
+    raw = None
+    if isinstance(raw_config, dict):
+        raw = raw_config.get("目标事件类型", raw_config.get("objective_event_types"))
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        items = [item.strip() for item in re.split(r"[,;，；、\s]+", raw) if item.strip()]
+    elif isinstance(raw, (list, tuple, set)):
+        items = [str(item).strip() for item in raw if str(item).strip()]
+    else:
+        items = [str(raw).strip()]
+    return {_event_type_key(item) for item in items if item}
+
+
+def selected_flood_event_indices_for_objective(events, raw_config=None):
+    if not events:
+        return set()
+    configured = _configured_event_type_set(raw_config)
+    type_keys = []
+    for item in events:
+        event = dict(item or {}) if isinstance(item, dict) else {}
+        type_keys.append(_event_type_key(event.get("类型", event.get("type", ""))))
+    if configured:
+        selected = {idx for idx, item_type in enumerate(type_keys) if item_type in configured}
+        return selected
+    calibration_indices = {
+        idx for idx, item_type in enumerate(type_keys)
+        if item_type in FLOOD_EVENT_CALIBRATION_TYPE_ALIASES
+    }
+    return calibration_indices if calibration_indices else set(range(len(events)))
 
 
 def high_flow_weighted_nse(obs, sim, quantile=0.70):
@@ -4287,6 +4370,20 @@ def high_flow_weighted_nse(obs, sim, quantile=0.70):
         return float("nan")
     numerator = float(np.sum(weights * (o - s) ** 2))
     return float(1.0 - numerator / denominator)
+
+
+def high_flow_kge(obs, sim, quantile=0.70):
+    obs = np.asarray(obs, dtype=np.float64)
+    sim = np.asarray(sim, dtype=np.float64)
+    mask = np.isfinite(obs) & np.isfinite(sim)
+    if int(np.sum(mask)) < 2:
+        return float("nan")
+    threshold = float(np.nanquantile(obs[mask], min(max(float(quantile), 0.0), 1.0)))
+    high_mask = mask & (obs >= threshold)
+    if int(np.sum(high_mask)) < 2:
+        return float("nan")
+    value, _, _, _ = kge_numba(obs[high_mask], sim[high_mask])
+    return float(value) if value > -900 else float("nan")
 
 
 def _log_recession_slope_per_day(dates, series, peak_pos):
@@ -4358,8 +4455,14 @@ def flood_event_component_scores(metrics, peak_time_tolerance_hours):
     if np.isfinite(recession_error):
         components["recession_error"] = abs(recession_error) / 100.0
     high_flow_nse = _finite_float(metrics.get("high_flow_weighted_nse"))
+    high_flow_penalties = []
     if np.isfinite(high_flow_nse):
-        components["high_flow_weighted_nse"] = max(0.0, 1.0 - high_flow_nse)
+        high_flow_penalties.append(max(0.0, 1.0 - high_flow_nse))
+    high_flow_kge_value = _finite_float(metrics.get("high_flow_kge"))
+    if np.isfinite(high_flow_kge_value):
+        high_flow_penalties.append(max(0.0, 1.0 - high_flow_kge_value))
+    if high_flow_penalties:
+        components["high_flow_skill"] = float(np.mean(high_flow_penalties))
     return components
 
 
@@ -4542,6 +4645,7 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
         "rmse_m3s": rmse(obs_valid, sim_valid),
         "pbias": pbias(obs_valid, sim_valid),
         "high_flow_weighted_nse": high_flow_weighted_nse(obs_valid, sim_valid),
+        "high_flow_kge": high_flow_kge(obs_valid, sim_valid),
         "high_flow_quantile": 0.70,
         "recession_obs_log_slope_per_day": recession["obs_log_slope_per_day"],
         "recession_sim_log_slope_per_day": recession["sim_log_slope_per_day"],
@@ -4587,6 +4691,7 @@ def aggregate_flood_event_metrics(events):
             "mean_nse": _finite_mean(items, "nse"),
             "mean_kge": _finite_mean(items, "kge"),
             "mean_high_flow_weighted_nse": _finite_mean(items, "high_flow_weighted_nse"),
+            "mean_high_flow_kge": _finite_mean(items, "high_flow_kge"),
             "mean_diagnostic_objective": float(np.mean(scores)) if scores else float("nan"),
         }
 
@@ -4598,8 +4703,15 @@ def aggregate_flood_event_metrics(events):
     return result
 
 
-def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_basis=None):
+def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_basis=None, objective_only=False):
     parsed = parse_flood_event_config(config)
+    raw_events = list(parsed["events"])
+    selected_indices = selected_flood_event_indices_for_objective(raw_events, parsed.get("raw_config", {}))
+    indexed_events = [
+        (idx, event)
+        for idx, event in enumerate(raw_events)
+        if (not objective_only) or idx in selected_indices
+    ]
     result = {
         "schema": FLOOD_EVENT_SCHEMA,
         "enabled": bool(parsed["enabled"]),
@@ -4608,26 +4720,37 @@ def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_
         "time_step_hours": float(TIME_STEP_HOURS),
         "peak_time_tolerance_hours": float(parsed["peak_time_tolerance_hours"]),
         "weights": parsed["weights"],
-        "event_count": int(len(parsed["events"])),
+        "event_count": int(len(raw_events)),
+        "objective_event_count": int(len(selected_indices)),
         "valid_event_count": 0,
+        "valid_objective_event_count": 0,
         "events": [],
         "summary": {},
         "warnings": list(parsed.get("warnings", [])),
-        "diagnostic_only": True,
+        "objective_enabled": bool(
+            flood_event_objective_enabled(config)
+            or current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY
+        ),
+        "objective_only": bool(objective_only),
         "notes": [
             "洪水事件评价基于连续模拟序列裁剪事件窗口计算。",
-            "本版本仅输出事件诊断指标，不改变当前正式率定目标函数。",
+            "只有显式启用事件目标函数时，事件指标才进入优化目标；默认仍作为诊断输出。",
         ],
     }
+    result["diagnostic_only"] = not bool(result["objective_enabled"])
     if not result["enabled"]:
         return result
-    if len(parsed["events"]) == 0:
+    if len(raw_events) == 0:
         result["status"] = "no_events"
         result["warnings"].append("洪水事件率定已启用，但事件表为空。")
         return result
+    if objective_only and len(indexed_events) == 0:
+        result["status"] = "no_objective_events"
+        result["warnings"].append("未找到用于事件目标函数的洪水事件。")
+        return result
 
     events = []
-    for item in parsed["events"]:
+    for idx, item in indexed_events:
         event_metrics = compute_single_flood_event_metrics(
             dates,
             q_obs,
@@ -4636,9 +4759,14 @@ def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_
             parsed["weights"],
             parsed["peak_time_tolerance_hours"],
         )
+        event_metrics["used_in_objective"] = bool(result["objective_enabled"] and idx in selected_indices)
         events.append(event_metrics)
     result["events"] = events
     result["valid_event_count"] = int(sum(1 for item in events if bool(item.get("valid"))))
+    result["valid_objective_event_count"] = int(sum(
+        1 for item in events
+        if bool(item.get("valid")) and bool(item.get("used_in_objective"))
+    ))
     result["status"] = "ok" if result["valid_event_count"] > 0 else "no_valid_events"
     result["summary"] = aggregate_flood_event_metrics(events)
     return result
@@ -4651,6 +4779,7 @@ def flatten_flood_event_record(event):
         "type": event.get("type"),
         "status": event.get("status"),
         "valid": event.get("valid"),
+        "used_in_objective": event.get("used_in_objective"),
         "event_start": event.get("event_start"),
         "event_end": event.get("event_end"),
         "window_start_used": event.get("window_start_used"),
@@ -4671,6 +4800,7 @@ def flatten_flood_event_record(event):
         "rmse_m3s": event.get("rmse_m3s"),
         "pbias": event.get("pbias"),
         "high_flow_weighted_nse": event.get("high_flow_weighted_nse"),
+        "high_flow_kge": event.get("high_flow_kge"),
         "recession_obs_log_slope_per_day": event.get("recession_obs_log_slope_per_day"),
         "recession_sim_log_slope_per_day": event.get("recession_sim_log_slope_per_day"),
         "recession_slope_error_percent": event.get("recession_slope_error_percent"),
@@ -4693,6 +4823,60 @@ def write_flood_event_outputs(run_dir, evaluation):
         encoding="utf-8-sig",
     )
     return os.path.basename(path)
+
+
+def flood_event_objective_score(evaluation):
+    if not isinstance(evaluation, dict) or evaluation.get("status") != "ok":
+        return float("nan")
+    summary = dict(evaluation.get("summary", {}).get("all", {}) or {})
+    return _finite_float(summary.get("mean_diagnostic_objective"))
+
+
+def compute_flood_event_objective_terms(metrics, sim):
+    q_score_series, q_score_basis = scoring_series(sim)
+    if q_score_series is None:
+        return BAD_OBJ, None
+    event_eval = compute_flood_event_evaluation(
+        SIM_DATES,
+        Q_OBS_FULL,
+        q_score_series,
+        FLOOD_EVENT_CONFIG,
+        evaluation_basis=q_score_basis,
+        objective_only=True,
+    )
+    score = flood_event_objective_score(event_eval)
+    if (not np.isfinite(score)) or int(event_eval.get("valid_event_count", 0) or 0) <= 0:
+        return BAD_OBJ, None
+    nse_cal = float(metrics.get("nse_cal", float("nan")))
+    nse_val = float(metrics.get("nse_val", float("nan")))
+    log_nse_cal = float(metrics.get("log_nse_cal", float("nan")))
+    log_nse_val = float(metrics.get("log_nse_val", float("nan")))
+    pbias_cal = float(metrics.get("pbias_cal", float("nan")))
+    pbias_val = float(metrics.get("pbias_val", float("nan")))
+    return float(score), {
+        "objective_family": FLOOD_EVENT_OBJECTIVE_FAMILY,
+        "objective_value": float(score),
+        "event_objective_value": float(score),
+        "event_count": int(event_eval.get("event_count", 0) or 0),
+        "objective_event_count": int(event_eval.get("objective_event_count", 0) or 0),
+        "valid_objective_event_count": int(event_eval.get("valid_event_count", 0) or 0),
+        "nse_cal": nse_cal,
+        "nse_val": nse_val,
+        "log_nse_cal": log_nse_cal if np.isfinite(log_nse_cal) else nse_cal,
+        "log_nse_val": log_nse_val,
+        "pbias_cal": pbias_cal,
+        "pbias_val": pbias_val,
+        "objective_terms": {
+            "flood_events": {
+                "score": float(score),
+                "weights": dict(event_eval.get("weights", {}) or {}),
+                "summary": dict(event_eval.get("summary", {}) or {}),
+            }
+        },
+        "diagnostics": {
+            "flood_event_evaluation": event_eval,
+        },
+    }
 
 
 def objective(x):
@@ -4739,7 +4923,12 @@ def objective_with_logging(x):
                 f"[评估 {current_eval}] 率定期NSE={terms['nse_cal']:.4f} "
                 f"验证期NSE={terms['nse_val']:.4f} 目标值={obj:.4f} "
             )
-            if current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
+            if current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY:
+                log_line += (
+                    f"事件有效场次={int(terms.get('valid_objective_event_count', 0) or 0)}/"
+                    f"{int(terms.get('objective_event_count', 0) or 0)} "
+                )
+            elif current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
                 log_line += (
                     f"logNSE_cal={terms['log_nse_cal']:.4f} "
                     f"PBIAS_cal={terms['pbias_cal']:+.2f}% "
@@ -5544,7 +5733,12 @@ def de_callback(xk, convergence):
             f"[{stage} 第 {current_gen} 代] 率定期NSE={nse_cal:.4f} "
             f"验证期NSE={nse_val:.4f} 目标值={obj:.4f} "
         )
-        if terms and current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
+        if terms and current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY:
+            log_line += (
+                f"事件有效场次={int(terms.get('valid_objective_event_count', 0) or 0)}/"
+                f"{int(terms.get('objective_event_count', 0) or 0)} "
+            )
+        elif terms and current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
             log_line += f"logNSE_cal={terms['log_nse_cal']:.4f} PBIAS_cal={terms['pbias_cal']:+.2f}% "
             frac_info = (
                 dict(terms.get("diagnostics", {}).get("glacier_fraction_report", {}) or {})
@@ -5584,6 +5778,18 @@ def current_calibration_profile():
 
 
 def current_objective_mode():
+    raw_selected = str(OBJECTIVE_MODE_SELECTED or "").strip().lower()
+    raw_profile_type = (
+        str(OBJECTIVE_PROFILE.get("type", "") or "").strip().lower()
+        if isinstance(OBJECTIVE_PROFILE, dict)
+        else ""
+    )
+    if (
+        flood_event_objective_enabled()
+        or raw_selected in {FLOOD_EVENT_OBJECTIVE_FAMILY, "flood_event", "event_objective"}
+        or raw_profile_type in {FLOOD_EVENT_OBJECTIVE_FAMILY, "flood_event", "event_objective"}
+    ):
+        return FLOOD_EVENT_OBJECTIVE_FAMILY
     profile_name = current_calibration_profile()
     if profile_name == "daily":
         return OBJECTIVE_FAMILY_DAILY
@@ -5594,10 +5800,14 @@ def current_objective_mode():
         raw = str(OBJECTIVE_MODE_SELECTED or "").strip().lower()
     if raw in {"single_objective_nse", "single", "single_nse", "nse"}:
         return "single_objective_nse"
+    if raw in {FLOOD_EVENT_OBJECTIVE_FAMILY, "flood_event", "event_objective"}:
+        return FLOOD_EVENT_OBJECTIVE_FAMILY
     return "single_objective_nse"
 
 
 def objective_simulation_mode():
+    if current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY:
+        return "full"
     if current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
         return "full"
     return "objective_total"
@@ -5605,6 +5815,8 @@ def objective_simulation_mode():
 
 def compute_objective_terms(metrics, sim=None):
     nse_cal = float(metrics.get("nse_cal", float("nan")))
+    if current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY:
+        return compute_flood_event_objective_terms(metrics, sim or {})
     if current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
         translated = dict(sim or {})
         translated["glacier_fraction_window"] = (
@@ -5740,6 +5952,30 @@ def build_daily_unified_objective_meta(profile_name=None):
     }
 
 
+def build_flood_event_objective_meta(profile_name=None):
+    profile_name = str(profile_name or current_calibration_profile()).strip().lower()
+    if profile_name not in {"daily", "hourly"}:
+        profile_name = current_calibration_profile()
+    parsed = parse_flood_event_config()
+    return {
+        "type": FLOOD_EVENT_OBJECTIVE_FAMILY,
+        "profile": profile_name,
+        "label": "事件洪水率定目标函数",
+        "summary": "连续运行模型，只在配置洪水事件窗口内合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。",
+        "formula": "weighted_mean(|peak_error|, |peak_time_error|, |volume_error|, recession_error, 1 - high_flow_skill)",
+        "weights": parsed.get("weights", {}).get("raw", dict(DEFAULT_FLOOD_EVENT_WEIGHTS)),
+        "diagnostic_only_constraints": {
+            "continuous_state_evolution": True,
+            "non_event_period_state_update_only": True,
+        },
+        "notes": [
+            "气象驱动和状态演化仍按完整连续时段运行，事件窗口只决定目标函数取样范围。",
+            "未显式启用事件目标函数时，洪水事件评价只作为结果诊断输出。",
+            "验证类事件可用于结果复核，默认不参与事件目标函数。"
+        ],
+    }
+
+
 def build_single_objective_meta(profile_name=None):
     profile_name = str(profile_name or current_calibration_profile()).strip().lower()
     if profile_name not in {"daily", "hourly"}:
@@ -5763,10 +5999,15 @@ def current_objective_profile():
     objective_mode = current_objective_mode()
     profile_name = current_calibration_profile()
     base_profile = (
+        build_flood_event_objective_meta(profile_name)
+        if objective_mode == FLOOD_EVENT_OBJECTIVE_FAMILY
+        else
         build_daily_unified_objective_meta(profile_name)
         if objective_mode == OBJECTIVE_FAMILY_DAILY
         else build_single_objective_meta(profile_name)
     )
+    if objective_mode == FLOOD_EVENT_OBJECTIVE_FAMILY:
+        return base_profile
     if isinstance(OBJECTIVE_PROFILE, dict):
         profile = dict(base_profile)
         profile.update(dict(OBJECTIVE_PROFILE))

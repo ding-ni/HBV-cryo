@@ -62,6 +62,7 @@ OBJECT_FULL_UPSTREAM = "full_upstream_basin"
 OBJECTIVE_MODE_AUTO = "auto"
 OBJECTIVE_MODE_SINGLE = "single_objective_nse"
 OBJECTIVE_MODE_MULTI = "daily_unified_professional_v1"
+OBJECTIVE_MODE_FLOOD_EVENT = "flood_event_calibration_v1"
 CALIBRATION_WORKFLOW_SINGLE = "single_pass"
 CALIBRATION_WORKFLOW_STAGED = "staged_calibration_v1"
 PROFILE_LABELS = {
@@ -408,6 +409,16 @@ def normalize_objective_mode(value: Any) -> str:
     if raw in {OBJECTIVE_MODE_SINGLE, "single", "single_nse", "nse"}:
         return OBJECTIVE_MODE_SINGLE
     if raw in {
+        OBJECTIVE_MODE_FLOOD_EVENT,
+        "flood_event",
+        "event_objective",
+        "flood_event_objective",
+        "event_calibration",
+        "洪水事件率定",
+        "事件率定",
+    }:
+        return OBJECTIVE_MODE_FLOOD_EVENT
+    if raw in {
         OBJECTIVE_MODE_MULTI,
         "weighted_multi_criteria",
         "multi",
@@ -638,8 +649,28 @@ def detect_object_type(config: dict[str, Any]) -> str:
 
 def resolve_objective_mode(config: dict[str, Any], explicit: Any, profile: str) -> str:
     selected = normalize_objective_mode(explicit)
+    flood_cfg = config.get("洪水事件率定", {})
+    if isinstance(flood_cfg, dict):
+        flood_objective_enabled = (
+            flood_cfg.get("作为目标函数")
+            if "作为目标函数" in flood_cfg
+            else flood_cfg.get("目标函数启用")
+            if "目标函数启用" in flood_cfg
+            else flood_cfg.get("objective_enabled")
+            if "objective_enabled" in flood_cfg
+            else flood_cfg.get("use_as_objective")
+        )
+        flood_mode = str(flood_cfg.get("模式", flood_cfg.get("mode", flood_cfg.get("率定模式", ""))) or "").strip().lower()
+        flood_objective_bool = (
+            flood_objective_enabled is True
+            or str(flood_objective_enabled or "").strip().lower() in {"1", "true", "yes", "on", "启用", "是"}
+        )
+        if flood_objective_bool or flood_mode in {"objective", "event_objective", "calibration", "event_calibration", OBJECTIVE_MODE_FLOOD_EVENT, "目标函数", "事件率定", "洪水事件率定"}:
+            return OBJECTIVE_MODE_FLOOD_EVENT
     if selected == OBJECTIVE_MODE_AUTO:
         selected = normalize_objective_mode(config.get("目标函数模式", OBJECTIVE_MODE_AUTO))
+    if selected == OBJECTIVE_MODE_FLOOD_EVENT:
+        return OBJECTIVE_MODE_FLOOD_EVENT
     if profile == PROFILE_DAILY:
         return OBJECTIVE_MODE_MULTI
     if selected == OBJECTIVE_MODE_AUTO:
@@ -1504,12 +1535,17 @@ def patch_profile_behavior(
         )
         metadata["project_object_type"] = detect_object_type(config)
         metadata["parameter_profile"] = module.PARAMETER_PROFILE
-        metadata["objective_profile"] = module.OBJECTIVE_PROFILE
+        actual_objective_profile = (
+            dict(metadata.get("objective_profile", {}) or {})
+            if effective_objective == OBJECTIVE_MODE_FLOOD_EVENT
+            else module.OBJECTIVE_PROFILE
+        )
+        metadata["objective_profile"] = actual_objective_profile
         objective_meta = dict(metadata.get("objective", {}))
-        if isinstance(module.OBJECTIVE_PROFILE, dict):
+        if isinstance(actual_objective_profile, dict):
             for key in ("type", "profile", "label", "summary", "formula", "weights", "diagnostic_only_constraints", "notes"):
-                if key in module.OBJECTIVE_PROFILE:
-                    objective_meta[key] = module.OBJECTIVE_PROFILE[key]
+                if key in actual_objective_profile:
+                    objective_meta[key] = actual_objective_profile[key]
         metadata["objective"] = objective_meta
         metadata["workspace_config"] = to_portable_path(str(config.get("_config_path", "") or ""))
         metadata["rate_mode"] = profile

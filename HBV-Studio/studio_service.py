@@ -4235,6 +4235,7 @@ def glacier_formal_requirements(config: dict[str, Any], profile: str | None = No
         "enabled": bool(glacier_shp),
         "objective_mode": profile_runner.resolve_objective_mode(config, None, profile_name),
         "objective_is_multi": False,
+        "objective_is_event": False,
         "reference_count": 0,
         "reference_ready": False,
         "dem_kind": "",
@@ -4246,6 +4247,7 @@ def glacier_formal_requirements(config: dict[str, Any], profile: str | None = No
         "diagnostic_notes": [],
     }
     result["objective_is_multi"] = result["objective_mode"] == profile_runner.OBJECTIVE_MODE_MULTI
+    result["objective_is_event"] = result["objective_mode"] == getattr(profile_runner, "OBJECTIVE_MODE_FLOOD_EVENT", "")
     if not result["enabled"]:
         return result
 
@@ -4275,7 +4277,9 @@ def glacier_formal_requirements(config: dict[str, Any], profile: str | None = No
             f"0.1° 工作区尚未生成 glacier_elev.tif：{result['glacier_elev_message']}；"
             "冰川子格温度递减将降级运行，冰川融水趋势可能偏高。"
         )
-    if not result["objective_is_multi"]:
+    if result["objective_is_event"]:
+        notes.append("当前工作区启用事件洪水率定目标函数，应重点复核事件表、洪峰、峰现时间、洪量和退水过程。")
+    elif not result["objective_is_multi"]:
         notes.append(
             "当前结果使用简化径流评价口径；启用冰川模块时，建议采用统一日尺度综合水文评价口径，并重点复核径流过程、冰川面积占比与冰雪融水分量。"
         )
@@ -5467,6 +5471,7 @@ HYDROLOGY_PROCESS_REVIEW_REPORT_NAME = "水文过程复核报告.md"
 HYDROLOGY_DIAGNOSTIC_REPORT_NAME = HYDROLOGY_PROCESS_REVIEW_REPORT_NAME
 LEGACY_HYDROLOGY_DIAGNOSTIC_REPORT_NAME = "水文诊断摘要.md"
 CURRENT_DAILY_OBJECTIVE_FAMILY = "daily_unified_professional_v1"
+FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1"
 HISTORICAL_OBJECTIVE_FAMILIES = {"weighted_daily_universal", "weighted_multi_criteria"}
 
 
@@ -5549,12 +5554,66 @@ def _metric_text(value: Any, digits: int = 4, suffix: str = "") -> str:
     return f"{num:.{digits}f}{suffix}"
 
 
+def _flood_event_evaluation(metadata: dict[str, Any]) -> dict[str, Any]:
+    raw = metadata.get("flood_event_evaluation")
+    if isinstance(raw, dict):
+        return raw
+    diagnostics = dict(metadata.get("diagnostics", {}) or {})
+    raw = diagnostics.get("flood_event_evaluation")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _flood_event_report_lines(metadata: dict[str, Any]) -> list[str]:
+    evaluation = _flood_event_evaluation(metadata)
+    if not bool(evaluation.get("enabled")):
+        return []
+    events = list(evaluation.get("events", []) or [])
+    lines = [
+        "## 4. 洪水事件评价",
+        "",
+        f"- 事件评价状态：{evaluation.get('status', '—')}",
+        f"- 有效事件场次：{evaluation.get('valid_event_count', 0)}/{evaluation.get('event_count', 0)}",
+        f"- 事件目标函数：{'已启用' if evaluation.get('objective_enabled') else '未启用，仅作诊断'}",
+        "",
+    ]
+    if not events:
+        lines.extend(["当前结果未写出可显示的洪水事件。", ""])
+        return lines
+    lines.extend([
+        "| 事件 | 类型 | 洪峰误差 | 峰现误差 | 洪量误差 | NSE | KGE | 高流量NSE | 高流量KGE | 退水误差 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ])
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        lines.append(
+            "| "
+            + " | ".join([
+                str(event.get("name", "—") or "—"),
+                str(event.get("type", "—") or "—"),
+                _metric_text(event.get("peak_error_percent"), 2, "%"),
+                _metric_text(event.get("peak_time_error_hours"), 1, " h"),
+                _metric_text(event.get("volume_error_percent"), 2, "%"),
+                _metric_text(event.get("nse")),
+                _metric_text(event.get("kge")),
+                _metric_text(event.get("high_flow_weighted_nse")),
+                _metric_text(event.get("high_flow_kge")),
+                _metric_text(event.get("recession_slope_error_percent"), 2, "%"),
+            ])
+            + " |"
+        )
+    lines.append("")
+    return lines
+
+
 def _workflow_label_zh(metadata: dict[str, Any]) -> str:
     family = _metadata_objective_family(metadata)
     workflow = str(metadata.get("calibration_workflow") or "").strip()
     workflow_status = str(metadata.get("calibration_workflow_status") or "").strip()
     if family in HISTORICAL_OBJECTIVE_FAMILIES or workflow_status == "historical":
         return "历史率定结果"
+    if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
+        return "事件洪水率定"
     if workflow == "staged_calibration_v1" or workflow_status == "experimental":
         return "过程复核结果"
     if workflow == "single_pass" or not workflow:
@@ -5564,6 +5623,8 @@ def _workflow_label_zh(metadata: dict[str, Any]) -> str:
 
 def _objective_label_zh(metadata: dict[str, Any]) -> str:
     family = _metadata_objective_family(metadata)
+    if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
+        return "事件洪水率定目标函数"
     if family == CURRENT_DAILY_OBJECTIVE_FAMILY:
         return "统一日尺度综合水文目标函数"
     if family in HISTORICAL_OBJECTIVE_FAMILIES:
@@ -5664,12 +5725,20 @@ def _hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[st
         "",
         f"- 口径：{_component_basis_text(component_report.get('evaluation_period'))}",
         "",
-        "## 4. 备注",
+    ]
+    event_lines = _flood_event_report_lines(metadata)
+    if event_lines:
+        lines.extend(event_lines)
+        remarks_title = "## 5. 备注"
+    else:
+        remarks_title = "## 4. 备注"
+    lines.extend([
+        remarks_title,
         "",
         "- 三水源比例为模型按 HBV 标准三水源追踪算法逐时步累加得到的全流域汇总值。",
         "- 具体数值受流域冰川面积、气温递减率、降水相态划分和参数率定结果共同影响。",
         "",
-    ]
+    ])
     return "\n".join(lines)
 
 

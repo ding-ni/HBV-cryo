@@ -120,6 +120,7 @@ const RUN_EXPORT_FIELDS = [
 ];
 
 const CURRENT_OBJECTIVE_FAMILY = "daily_unified_professional_v1";
+const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
 const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted_multi_criteria"]);
 
 // --------------- state ---------------
@@ -360,6 +361,15 @@ function objectiveVersionStatus(metaOrRun = {}) {
       label: "当前口径",
       value: "当前综合评价口径",
       detail: "该结果使用当前统一日尺度水文评价口径，可用于径流拟合与冰雪融水过程复核。",
+      badgeClass: "status-ok",
+    };
+  }
+  if (family === FLOOD_EVENT_OBJECTIVE_FAMILY) {
+    return {
+      state: "current",
+      label: "事件口径",
+      value: "事件洪水率定结果",
+      detail: "该结果采用连续模拟、事件窗口评分的洪水过程评价口径。",
       badgeClass: "status-ok",
     };
   }
@@ -2731,6 +2741,53 @@ function metadataSection(title, rows) {
   `;
 }
 
+function floodEventEvaluation(meta = {}) {
+  return meta?.flood_event_evaluation || meta?.diagnostics?.flood_event_evaluation || {};
+}
+
+function floodEventStatusText(evaluation = {}) {
+  if (!evaluation?.enabled) return "未启用";
+  const valid = Number(evaluation.valid_event_count || 0);
+  const total = Number(evaluation.event_count || 0);
+  const mode = evaluation.objective_enabled ? "事件目标函数" : "事件诊断";
+  return `${mode}：${valid}/${total} 场有效`;
+}
+
+function floodEventObjectiveText(evaluation = {}) {
+  const score = evaluation?.summary?.all?.mean_diagnostic_objective;
+  return Number.isFinite(Number(score)) ? formatNumber(score, 4) : "—";
+}
+
+function floodEventRows(meta = {}) {
+  const evaluation = floodEventEvaluation(meta);
+  if (!evaluation?.enabled) return [];
+  const rows = [
+    ["事件评价", floodEventStatusText(evaluation), `评价口径：${evaluation.evaluation_basis || "模拟流量"}`],
+    ["事件目标值", floodEventObjectiveText(evaluation), evaluation.objective_enabled ? "数值越小表示事件综合偏差越小" : "当前为诊断值，不参与本次优化"],
+  ];
+  const events = Array.isArray(evaluation.events) ? evaluation.events : [];
+  events.slice(0, 12).forEach(event => {
+    const name = event?.name || "未命名事件";
+    const value = [
+      `洪峰 ${formatMetricValue(event?.peak_error_percent, 2, "%")}`,
+      `峰现 ${formatMetricValue(event?.peak_time_error_hours, 1, " h")}`,
+      `洪量 ${formatMetricValue(event?.volume_error_percent, 2, "%")}`,
+    ].join(" / ");
+    const detail = [
+      `NSE ${formatMetricValue(event?.nse, 4)}`,
+      `KGE ${formatMetricValue(event?.kge, 4)}`,
+      `高流量NSE ${formatMetricValue(event?.high_flow_weighted_nse, 4)}`,
+      `高流量KGE ${formatMetricValue(event?.high_flow_kge, 4)}`,
+      `退水 ${formatMetricValue(event?.recession_slope_error_percent, 2, "%")}`,
+    ].join("，");
+    rows.push([String(name), value, `${event?.used_in_objective ? "参与目标函数" : "诊断事件"}；${detail}`]);
+  });
+  if (events.length > 12) {
+    rows.push(["更多事件", `还有 ${events.length - 12} 场`, "完整事件表见结果目录 flood_events.csv"]);
+  }
+  return rows;
+}
+
 function hydrologySummaryFor(data = {}, meta = null) {
   const metadata = meta || data?.metadata || {};
   return data?.hydrology_summary || data?.run?.hydrology_summary || metadata?.hydrology_summary || {};
@@ -2757,10 +2814,12 @@ function renderRunEngineeringSummary(data) {
   const isDegraded = reliabilityFlag !== "ok";
   const reportPath = summary.diagnostics_detail_path || summary.diagnostics_detail_display_path || "";
   const componentReport = componentFractionReport(meta);
+  const floodEval = floodEventEvaluation(meta);
   const cards = [
     { label: "率定流程", value: hydrologySummaryValue(summary, "workflow_label_zh", runTypeLabel(data?.run?.run_type, manual ? "手调结果" : starter ? "手调起点" : editable ? "单流程参数率定" : "历史率定结果")), detail: "当前页面显示水文摘要，详细数据见本地结果目录" },
     { label: "评分标准", value: hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数"), detail: "径流拟合与三水源构成综合评分" },
     { label: "径流拟合", value: hydrologySummaryValue(summary, "flow_status_zh"), detail: "综合 NSE、KGE、PBIAS 径流指标" },
+    ...(floodEval?.enabled ? [{ label: "洪水事件", value: floodEventStatusText(floodEval), detail: floodEval.objective_enabled ? "本次按事件窗口参与率定评分" : "本次输出逐场洪水诊断" }] : []),
     { label: "三水源构成", value: componentFractionText(componentReport), detail: componentFractionBasisText(componentReport) },
     { label: "结果说明", value: reportPath ? shortPath(summary.diagnostics_detail_display_path || reportPath) : "结果目录内生成", detail: "水文模拟结果说明已保存至本地结果目录" },
   ];
@@ -5402,6 +5461,7 @@ function renderRunDetail(data) {
   const reportPath = summary.diagnostics_detail_path || summary.diagnostics_detail_display_path || "";
   const reportDisplayPath = summary.diagnostics_detail_display_path || summary.diagnostics_detail_path || "";
   const componentReport = componentFractionReport(meta);
+  const floodRows = floodEventRows(meta);
   const metadataHtml = [
     metadataSection("水文结果摘要", [
       ["率定流程", hydrologySummaryValue(summary, "workflow_label_zh", "单流程参数率定")],
@@ -5418,6 +5478,7 @@ function renderRunDetail(data) {
       ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
       ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
     ]),
+    floodRows.length ? metadataSection("洪水事件评价", floodRows) : "",
     `
       <section class="metadata-section">
         <h4>本地过程复核报告</h4>
@@ -5454,14 +5515,20 @@ function renderRunDetail(data) {
 }
 
 function updateMetricsStrip(cal, val, meta) {
-  $("#results-metric-strip").innerHTML = [
+  const floodEval = floodEventEvaluation(meta);
+  const items = [
     { l: "模式", v: profileLabel(meta.calibration_profile) },
     { l: "步长", v: `${formatNumber(meta.time_config?.time_step_hours, 0)} 小时` },
     { l: "率定纳什效率系数", v: formatNumber(cal.nse, 4) },
     { l: "验证纳什效率系数", v: formatNumber(val.nse, 4) },
     { l: "率定 KGE 综合效率", v: formatNumber(cal.kge, 4) },
     { l: "率定水量偏差", v: `${formatNumber(cal.pbias, 2)}%` },
-  ].map(i => `<div class="metric-tile"><span>${i.l}</span><strong>${i.v}</strong></div>`).join("");
+  ];
+  if (floodEval?.enabled) {
+    items.push({ l: "洪水事件", v: floodEventStatusText(floodEval) });
+    items.push({ l: "事件目标值", v: floodEventObjectiveText(floodEval) });
+  }
+  $("#results-metric-strip").innerHTML = items.map(i => `<div class="metric-tile"><span>${i.l}</span><strong>${i.v}</strong></div>`).join("");
 }
 
 function renderRunExportFields() {
