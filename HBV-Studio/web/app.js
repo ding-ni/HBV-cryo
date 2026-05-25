@@ -4488,7 +4488,7 @@ function buildVisiblePrepSteps() {
       add("process_hourly_prec", "整理小时降水", "把降水整理到当前工程可直接使用的格式。");
     }
     if (precipMode !== "grid_only") {
-      add("station_precip_strategy", "检查站点降水资料", "核对站点降水和站点信息是否齐全。");
+      add("station_precip_strategy", "分析站点降水资料", "核对站点匹配、时间覆盖、缺测和异常值。");
     }
     add("align_hourly_inputs", "写入工程目录", "把最终要用的气象数据裁剪对齐到 DEM，并写入工程目录。");
     if (precipMode !== "grid_only") {
@@ -4529,7 +4529,7 @@ function buildVisiblePrepSteps() {
       add("process_prec", "整理降水", "把降水整理到当前工程可直接使用的格式。");
     }
     if (precipMode !== "grid_only") {
-      add("station_precip_strategy", "检查站点降水资料", "核对站点降水和站点信息是否齐全。");
+      add("station_precip_strategy", "分析站点降水资料", "核对站点匹配、时间覆盖、缺测和异常值。");
     }
     add("align_inputs", "写入工程目录", "把最终要用的气象数据裁剪对齐到 DEM，并写入工程目录。");
     if (precipMode !== "grid_only") {

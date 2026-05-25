@@ -3854,33 +3854,288 @@ def check_precip_strategy_outputs(config: dict[str, Any], precip_source: Any = N
     return count > 0, f"{label}文件数：{count}", count
 
 
-def check_station_precip_strategy(config: dict[str, Any]) -> tuple[bool, str, int]:
-    meteo = dict(config.get("气象策略", {}))
-    mode = str(meteo.get("降水方案", "grid_only")).strip()
-    station_prec = str(meteo.get("站点降水_csv", "")).strip()
-    station_meta = str(meteo.get("站点信息_csv", "")).strip()
-    station_prec_path = _resolve_config_related_path(config, station_prec)
-    station_meta_path = _resolve_config_related_path(config, station_meta)
+def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
+    lowered = {str(col).strip().lower(): str(col) for col in columns}
+    for candidate in candidates:
+        found = lowered.get(candidate.lower())
+        if found is not None:
+            return found
+    return None
+
+
+def _detect_table_time_column(frame: pd.DataFrame) -> str | None:
+    for column in frame.columns:
+        parsed = pd.to_datetime(frame[column], errors="coerce")
+        if int(parsed.notna().sum()) >= max(1, len(frame) // 3):
+            return str(column)
+    return None
+
+
+def _read_station_csv(path: Path) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "gbk"):
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return pd.read_csv(path)
+
+
+def _time_range_from_config(config: dict[str, Any]) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    time_cfg = dict(config.get("时间", {}) or {})
+    start_raw = str(time_cfg.get("预热开始") or time_cfg.get("率定开始") or "").strip()
+    end_raw = str(time_cfg.get("验证结束") or time_cfg.get("率定结束") or "").strip()
+    try:
+        start = pd.to_datetime(start_raw) if start_raw else None
+    except Exception:
+        start = None
+    try:
+        end = pd.to_datetime(end_raw) if end_raw else None
+    except Exception:
+        end = None
+    return start, end
+
+
+def _format_time_for_check(value: Any, step_hours: float) -> str:
+    try:
+        ts = pd.to_datetime(value)
+    except Exception:
+        return "未识别"
+    if abs(float(step_hours) - 24.0) < 1e-9 and ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+        return ts.strftime("%Y-%m-%d")
+    return ts.strftime("%Y-%m-%d %H:%M")
+
+
+def _load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:
+    frame = _read_station_csv(path)
+    if frame.empty:
+        raise ValueError("站点降水 csv 为空。")
+    time_col = _detect_table_time_column(frame)
+    if not time_col:
+        raise ValueError("站点降水 csv 未识别到时间列。")
+
+    columns = [str(col) for col in frame.columns]
+    id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
+    value_col = _detect_table_column(columns, ["precip", "prec", "ppt", "rain", "value", "降水", "降水量"])
+    if id_col and value_col and id_col != time_col and value_col != time_col:
+        data = frame[[time_col, id_col, value_col]].copy()
+        data.columns = ["time", "station_id", "value"]
+        data["time"] = pd.to_datetime(data["time"], errors="coerce")
+        data["station_id"] = data["station_id"].astype(str).str.strip()
+        data["value"] = pd.to_numeric(data["value"], errors="coerce")
+        wide = data.pivot_table(index="time", columns="station_id", values="value", aggfunc="mean")
+        wide.columns = [str(col).strip() for col in wide.columns]
+        return wide.sort_index(), "长表", time_col
+
+    wide = frame.copy()
+    wide[time_col] = pd.to_datetime(wide[time_col], errors="coerce")
+    wide = wide.dropna(subset=[time_col]).set_index(time_col).sort_index()
+    wide.columns = [str(col).strip() for col in wide.columns]
+    for column in list(wide.columns):
+        wide[column] = pd.to_numeric(wide[column], errors="coerce")
+    return wide, "宽表", time_col
+
+
+def _load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, str | None]]:
+    frame = _read_station_csv(path)
+    if frame.empty:
+        raise ValueError("站点信息 csv 为空。")
+    columns = [str(col) for col in frame.columns]
+    id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
+    lon_col = _detect_table_column(columns, ["lon", "longitude", "x", "经度"])
+    lat_col = _detect_table_column(columns, ["lat", "latitude", "y", "纬度"])
+    if not id_col:
+        raise ValueError("站点信息 csv 未识别到站号字段。")
+    out = frame.copy()
+    out["_station_id"] = out[id_col].astype(str).str.strip()
+    return out, {"id": id_col, "lon": lon_col, "lat": lat_col}
+
+
+def analyze_station_precip_inputs(config: dict[str, Any], *, step_hours: float | None = None) -> dict[str, Any]:
+    meteo = dict(config.get(METEO_KEY, {}) or {})
+    mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip() or "grid_only"
     if mode == "grid_only":
-        return True, "当前为格点基线模式，未启用站点订正。", 0
-    count = 0
-    ready = True
-    messages: list[str] = []
-    if station_prec and station_prec_path is not None and station_prec_path.exists():
-        count += 1
-        messages.append("站点降水已提供")
+        return {
+            "enabled": False,
+            "mode": mode,
+            "status": "ok",
+            "summary": "当前为格点基线模式，未启用站点降水订正或泰森分配。",
+            "items": [],
+            "warnings": [],
+            "missing": [],
+            "matched_station_count": 0,
+        }
+
+    step = float(step_hours if step_hours is not None else normalize_time_step_hours(config.get("时间步长_小时", 24.0)))
+    station_prec_raw = str(meteo.get(METEO_STATION_PREC_KEY, "") or "").strip()
+    station_meta_raw = str(meteo.get(METEO_STATION_META_KEY, "") or "").strip()
+    station_prec_path = _resolve_config_related_path(config, station_prec_raw)
+    station_meta_path = _resolve_config_related_path(config, station_meta_raw)
+    missing: list[str] = []
+    warnings: list[str] = []
+    items: list[dict[str, Any]] = []
+
+    if not station_prec_raw:
+        missing.append("降水方案需要 站点降水_csv。")
+    elif station_prec_path is None or not station_prec_path.exists():
+        missing.append(f"站点降水文件不存在：{station_prec_raw}")
+    if not station_meta_raw:
+        missing.append("降水方案需要 站点信息_csv。")
+    elif station_meta_path is None or not station_meta_path.exists():
+        missing.append(f"站点信息文件不存在：{station_meta_raw}")
+    if missing:
+        return {
+            "enabled": True,
+            "mode": mode,
+            "status": "fail",
+            "summary": "站点降水方案缺少必要输入文件。",
+            "items": [
+                {"label": "站点降水文件", "value": "已提供" if station_prec_path is not None and station_prec_path.exists() else "缺失", "status": "ok" if station_prec_path is not None and station_prec_path.exists() else "fail"},
+                {"label": "站点信息文件", "value": "已提供" if station_meta_path is not None and station_meta_path.exists() else "缺失", "status": "ok" if station_meta_path is not None and station_meta_path.exists() else "fail"},
+            ],
+            "warnings": warnings,
+            "missing": missing,
+            "matched_station_count": 0,
+        }
+
+    assert station_prec_path is not None and station_meta_path is not None
+    try:
+        station_series, station_format, _ = _load_station_precip_table(station_prec_path)
+        station_meta, meta_columns = _load_station_metadata_table(station_meta_path)
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "mode": mode,
+            "status": "fail",
+            "summary": f"站点降水资料读取失败：{exc}",
+            "items": [{"label": "读取状态", "value": str(exc), "status": "fail"}],
+            "warnings": warnings,
+            "missing": [f"站点降水资料读取失败：{exc}"],
+            "matched_station_count": 0,
+        }
+
+    station_series = station_series.loc[station_series.index.notna()].copy()
+    station_series = station_series[~station_series.index.duplicated(keep="first")].sort_index()
+    precip_ids = [str(col).strip() for col in station_series.columns if str(col).strip()]
+    meta_ids = [str(item).strip() for item in station_meta["_station_id"].tolist() if str(item).strip()]
+    precip_id_set = set(precip_ids)
+    meta_id_set = set(meta_ids)
+    matched_ids = sorted(precip_id_set & meta_id_set)
+    missing_in_precip = sorted(meta_id_set - precip_id_set)
+    missing_in_meta = sorted(precip_id_set - meta_id_set)
+
+    if not matched_ids:
+        missing.append("站点信息与站点降水之间没有可匹配的站号。")
+    elif missing_in_precip:
+        warnings.append(f"{len(missing_in_precip)} 个站点在站点信息中存在，但站点降水表没有对应列。")
+    if missing_in_meta:
+        warnings.append(f"{len(missing_in_meta)} 个站点降水列没有对应站点信息。")
+    if not meta_columns.get("lon") or not meta_columns.get("lat"):
+        warnings.append("站点信息未识别到经纬度或坐标字段，执行降水方案时会失败。")
+
+    matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
+    start, end = _time_range_from_config(config)
+    expected_count = 0
+    covered_count = 0
+    coverage_ratio: float | None = None
+    if start is not None and end is not None and end >= start:
+        freq = "h" if abs(step - 1.0) < 1e-9 else f"{int(round(step))}h"
+        expected_index = pd.date_range(start=start, end=end, freq=freq)
+        expected_count = int(len(expected_index))
+        if expected_count > 0 and not matched_series.empty:
+            present = matched_series.reindex(expected_index)
+            covered_count = int(present.notna().any(axis=1).sum())
+            coverage_ratio = covered_count / expected_count
+            if covered_count == 0:
+                missing.append("站点降水时间范围与当前模型时段完全不重叠。")
+            elif coverage_ratio < 0.99:
+                warnings.append(f"站点降水时间覆盖不足：覆盖 {coverage_ratio * 100:.1f}%。")
+
+    numeric_values = matched_series.to_numpy(dtype="float64") if not matched_series.empty else np.empty((0, 0), dtype="float64")
+    negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0
+    extreme_threshold = 80.0 if abs(step - 1.0) < 1e-9 else 300.0
+    extreme_count = int(np.sum(numeric_values > extreme_threshold)) if numeric_values.size else 0
+    all_zero_count = 0
+    max_missing_rate = 0.0
+    zero_available_steps = 0
+    if matched_ids:
+        all_zero_count = int(sum(bool(np.nanmax(np.abs(matched_series[col].to_numpy(dtype="float64"))) <= 1e-9) for col in matched_ids if matched_series[col].notna().any()))
+        missing_rates = matched_series[matched_ids].isna().mean(axis=0)
+        max_missing_rate = float(missing_rates.max()) if not missing_rates.empty else 0.0
+        zero_available_steps = int((matched_series[matched_ids].notna().sum(axis=1) == 0).sum())
+    if negative_count > 0:
+        warnings.append(f"站点降水存在 {negative_count} 条负值记录。")
+    if extreme_count > 0:
+        unit_label = "小时" if abs(step - 1.0) < 1e-9 else "日"
+        warnings.append(f"站点降水存在 {extreme_count} 条超过 {extreme_threshold:g} mm/{unit_label} 的异常大值。")
+    if all_zero_count > 0:
+        warnings.append(f"{all_zero_count} 个匹配站点在当前资料中为全零序列。")
+    if max_missing_rate > 0.20:
+        warnings.append(f"单站最大缺测率为 {max_missing_rate * 100:.1f}%，建议核对资料完整性。")
+
+    if missing:
+        status = "fail"
+        summary = "站点降水方案仍有关键问题，无法作为率定输入。"
+    elif warnings:
+        status = "warn"
+        summary = "站点降水资料可以继续处理，但存在缺测、异常值或站号匹配风险。"
     else:
-        ready = False
-        messages.append("缺少站点降水_csv")
-    if station_meta and station_meta_path is not None and station_meta_path.exists():
-        count += 1
-        messages.append("站点信息已提供")
-    else:
-        ready = False
-        messages.append("缺少站点信息_csv")
-    if ready:
-        messages.append("站点订正方案已具备输入条件（校正逻辑仍为外部/后续模块）。")
-    return ready, "；".join(messages), count
+        status = "ok"
+        summary = "站点降水资料匹配和时间覆盖基本合理，可用于降水订正或泰森分配。"
+
+    station_start = station_series.index.min() if len(station_series.index) else None
+    station_end = station_series.index.max() if len(station_series.index) else None
+    items.extend(
+        [
+            {"label": "降水方案", "value": "格点+站点偏差订正" if mode == "grid_plus_station_bias" else "站点泰森分配", "status": "ok"},
+            {"label": "站号匹配", "value": f"{len(matched_ids)}/{len(meta_id_set)}", "status": "ok" if matched_ids and not missing_in_precip else "warn" if matched_ids else "fail"},
+            {"label": "降水表额外站号", "value": str(len(missing_in_meta)), "status": "ok" if not missing_in_meta else "warn"},
+            {"label": "资料格式", "value": station_format, "status": "ok"},
+            {"label": "时间范围", "value": f"{_format_time_for_check(station_start, step)} 至 {_format_time_for_check(station_end, step)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "模型时段覆盖", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未配置完整时段", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "单站最大缺测率", "value": f"{max_missing_rate * 100:.1f}%", "status": "warn" if max_missing_rate > 0.20 else "ok"},
+            {"label": "负降水记录", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
+            {"label": "异常大值记录", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
+        ]
+    )
+    return {
+        "enabled": True,
+        "mode": mode,
+        "status": status,
+        "summary": summary,
+        "items": items,
+        "warnings": warnings,
+        "missing": missing,
+        "matched_station_count": len(matched_ids),
+        "station_count": len(meta_id_set),
+        "precip_station_count": len(precip_id_set),
+        "missing_in_precip": missing_in_precip[:20],
+        "missing_in_meta": missing_in_meta[:20],
+        "expected_time_steps": expected_count,
+        "covered_time_steps": covered_count,
+        "coverage_ratio": coverage_ratio,
+        "zero_available_steps": zero_available_steps,
+    }
+
+
+def check_station_precip_strategy(config: dict[str, Any]) -> tuple[bool, str, int]:
+    analysis = analyze_station_precip_inputs(
+        config,
+        step_hours=normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
+    )
+    if not analysis.get("enabled"):
+        return True, str(analysis.get("summary", "当前为格点基线模式，未启用站点订正。")), 0
+    status = str(analysis.get("status", "fail"))
+    matched = int(analysis.get("matched_station_count", 0) or 0)
+    warnings = list(analysis.get("warnings", []) or [])
+    message = str(analysis.get("summary", "站点降水资料已检查。"))
+    if matched:
+        message += f" 站点匹配：{matched} 个。"
+    if warnings:
+        message += " " + "；".join(str(item) for item in warnings[:2])
+    return status != "fail", message, matched
 
 
 def check_glacier_mask(config: dict[str, Any]) -> tuple[bool, str, int]:
@@ -4211,8 +4466,8 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
                 },
                 {
                     "id": "station_precip_strategy",
-                    "title": "8. 站点降水订正准备（按方案）",
-                    "description": "当降水方案不是“格点直接使用”时，检查站点降水与站点信息是否齐备。",
+                    "title": "8. 站点降水资料分析（按方案）",
+                    "description": "当降水方案不是“格点直接使用”时，检查站点匹配、时间覆盖、缺测和异常值。",
                     "depends_on": ["process_prec"],
                     "check": check_station_precip_strategy,
                     "manual": True,
@@ -4307,8 +4562,8 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
             },
             {
                 "id": "station_precip_strategy",
-                "title": "8. 小时尺度站点降水订正准备（按方案）",
-                "description": "当降水方案不是“格点直接使用”时，检查小时项目所需的站点降水与站点信息是否齐备。",
+                "title": "8. 小时尺度站点降水资料分析（按方案）",
+                "description": "当降水方案不是“格点直接使用”时，检查小时项目的站点匹配、时间覆盖、缺测和异常值。",
                 "depends_on": ["process_hourly_prec"],
                 "check": check_station_precip_strategy,
                 "manual": True,
@@ -4406,6 +4661,7 @@ def build_engineering_focus_checks(
     obs_info: dict[str, Any] | None = None,
     boundary_info: dict[str, Any] | None = None,
     forcing: dict[str, Any] | None = None,
+    station_precip_info: dict[str, Any] | None = None,
     boundary_csv: str = "",
 ) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
@@ -4557,6 +4813,17 @@ def build_engineering_focus_checks(
                     ],
                 }
             )
+    if station_precip_info and station_precip_info.get("enabled"):
+        checks.append(
+            {
+                "id": "station_precip",
+                "title": "站点降水专项检查",
+                "summary": str(station_precip_info.get("summary", "")),
+                "status": str(station_precip_info.get("status", "warn") or "warn"),
+                "target_step": 4,
+                "items": list(station_precip_info.get("items", []) or []),
+            }
+        )
     return checks
 
 
@@ -4599,6 +4866,7 @@ def validate_workspace_fields(
     obs_info: dict[str, Any] | None = None
     boundary_info: dict[str, Any] | None = None
     forcing: dict[str, Any] | None = None
+    station_precip_info: dict[str, Any] | None = None
     for repair_key, label in (("流域边界_shp", "流域边界"), ("冰川边界_shp", "冰川边界"), (OBSERVED_FLOW_KEY, "观测径流")):
         repair_info = dict(config.get("_path_repairs", {})).get(repair_key)
         if isinstance(repair_info, dict) and repair_info.get("recovered_from"):
@@ -4732,19 +5000,14 @@ def validate_workspace_fields(
     meteo = dict(config.get(METEO_KEY, {}))
     precip_mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip()
     precip_source_ui = resolve_precip_source(config, precip_source)
-    station_prec = str(meteo.get(METEO_STATION_PREC_KEY, "")).strip()
-    station_meta = str(meteo.get(METEO_STATION_META_KEY, "")).strip()
-    station_prec_path = _resolve_config_related_path(config, station_prec)
-    station_meta_path = _resolve_config_related_path(config, station_meta)
     if runtime_stage == "calibration" and precip_mode in {"grid_plus_station_bias", "thiessen_station_only"}:
-        if not station_prec:
-            missing.append("降水方案需要 站点降水_csv。")
-        elif station_prec_path is None or not station_prec_path.exists():
-            missing.append(f"站点降水文件不存在：{station_prec}")
-        if not station_meta:
-            missing.append("降水方案需要 站点信息_csv。")
-        elif station_meta_path is None or not station_meta_path.exists():
-            missing.append(f"站点信息文件不存在：{station_meta}")
+        station_precip_info = analyze_station_precip_inputs(config, step_hours=step_hours)
+        for item in list(station_precip_info.get("missing", []) or []):
+            if item not in missing:
+                missing.append(str(item))
+        for item in list(station_precip_info.get("warnings", []) or []):
+            if item not in warnings:
+                warnings.append(str(item))
     if precip_mode == "thiessen_station_only":
         warnings.append("纯泰森方案建议只作为快速基线，不建议直接作为最终方案。")
     if precip_source_ui == "custom_tif":
@@ -4782,6 +5045,7 @@ def validate_workspace_fields(
         obs_info=obs_info,
         boundary_info=boundary_info,
         forcing=forcing,
+        station_precip_info=station_precip_info,
         boundary_csv=boundary_csv,
     )
 
