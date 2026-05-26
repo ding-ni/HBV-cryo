@@ -2272,6 +2272,7 @@ function updateObservationHint() {
 function updateEventModeHint() {
   const host = $("#wz-event-mode-hint");
   if (!host) return;
+  clearWizardEventSummary();
   const basis = $("#wz-time-basis")?.value || "continuous";
   const eventFile = $("#wz-event-file")?.value.trim() || "";
   if (basis === "event_windows") {
@@ -2283,6 +2284,24 @@ function updateEventModeHint() {
     host.className = "hint-box";
     host.textContent = "连续时段要求完整覆盖预热、率定和验证期；洪水事件窗口只要求每场事件内部资料连续。";
   }
+}
+
+function clearWizardEventSummary() {
+  const host = $("#wz-event-file-summary");
+  if (host) host.innerHTML = "";
+}
+
+function renderWizardEventSummary(eventInfo = null) {
+  const host = $("#wz-event-file-summary");
+  if (!host) return;
+  if (!eventInfo || !window.HBVStudioEventMode?.renderEventWindowSummary) {
+    host.innerHTML = "";
+    return;
+  }
+  host.innerHTML = window.HBVStudioEventMode.renderEventWindowSummary(eventInfo, {
+    escapeHtml,
+    statusClass: focusStatusClass,
+  });
 }
 
 function clearBoundaryPreview() {
@@ -4028,6 +4047,7 @@ async function saveCurrentWizardStep() {
           $("#wz-event-file").value = eventMode.事件表路径 || floodMode.事件表路径 || $("#wz-event-file").value;
         }
         updateEventModeHint();
+        renderWizardEventSummary(result.validation?.event_windows || null);
       }
     }
     if (step === 1) {
@@ -4051,6 +4071,7 @@ async function saveCurrentWizardStep() {
 function enforceWizardValidation(validation, step = state.wizardStep) {
   if (!validation || validation.valid) return true;
   if (step === 2) {
+    renderWizardEventSummary(validation.event_windows || null);
     const issues = (validation.missing || []).slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("");
     const warns = (validation.warnings || []).slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join("");
     $("#wz-obs-hint").innerHTML = `<strong>第 2 步未通过。</strong>${issues ? `<ul>${issues}</ul>` : ""}${warns ? `<div style="margin-top:6px">提示：</div><ul>${warns}</ul>` : ""}`;

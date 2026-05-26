@@ -7835,6 +7835,7 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
     except Exception as exc:
         return {"step": step, "valid": False, "missing": [str(exc)], "warnings": []}
     runtime_prec_source = resolve_precip_source(config, precip_source)
+    event_windows: dict[str, Any] | None = None
 
     if step == 1:
         if not config.get("流域名称"):
@@ -7858,6 +7859,7 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
         time_basis = task_time_basis(config, context="calibration")
         if time_basis == TIME_BASIS_EVENT_WINDOWS:
             event_info = normalized_flood_events(config, step_hours=step_hours)
+            event_windows = event_windows_ui_summary(event_info, step_hours)
             for item in list(event_info.get("errors", []) or []):
                 missing.append(str(item))
             for item in list(event_info.get("warnings", []) or []):
@@ -7972,7 +7974,10 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
         missing.extend(validation["missing"])
         warnings.extend(validation["warnings"])
 
-    return {"step": step, "valid": len(missing) == 0, "missing": missing, "warnings": warnings}
+    result = {"step": step, "valid": len(missing) == 0, "missing": missing, "warnings": warnings}
+    if event_windows is not None:
+        result["event_windows"] = event_windows
+    return result
 
 
 def boundary_preview(
