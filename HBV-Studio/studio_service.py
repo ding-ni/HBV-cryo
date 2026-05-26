@@ -2043,7 +2043,7 @@ def validate_forcing_bundle(
         "profile": active_profile,
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
-        "event_windows": event_info,
+        "event_windows": event_windows_ui_summary(event_info, step_hours) if event_info is not None else None,
     }
 
 
@@ -4337,6 +4337,41 @@ def _format_time_for_check(value: Any, step_hours: float) -> str:
     return ts.strftime("%Y-%m-%d %H:%M")
 
 
+def event_windows_ui_summary(event_info: dict[str, Any] | None, step_hours: float) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    events = list(event_info.get("events", []) or [])
+    valid_events = list(event_info.get("valid_events", []) or [])
+
+    def convert_event(event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "event_id": event.get("event_id", ""),
+            "name": event.get("name", "") or event.get("event_id", ""),
+            "purpose": event.get("purpose", ""),
+            "weight": event.get("weight"),
+            "valid": bool(event.get("valid")),
+            "run_start": _format_time_for_check(event.get("run_start"), step_hours),
+            "score_start": _format_time_for_check(event.get("score_start"), step_hours),
+            "score_end": _format_time_for_check(event.get("score_end"), step_hours),
+            "run_end": _format_time_for_check(event.get("run_end"), step_hours),
+            "time_steps_run": int(event.get("time_steps_run", 0) or 0),
+            "time_steps_score": int(event.get("time_steps_score", 0) or 0),
+        }
+
+    return {
+        "enabled": bool(event_info.get("enabled")),
+        "source_file": str(event_info.get("source_file", "") or ""),
+        "event_count": int(event_info.get("event_count", 0) or 0),
+        "valid_event_count": int(event_info.get("valid_event_count", 0) or 0),
+        "purpose_counts": dict(event_info.get("purpose_counts", {}) or {}),
+        "warnings": [str(item) for item in list(event_info.get("warnings", []) or [])],
+        "errors": [str(item) for item in list(event_info.get("errors", []) or [])],
+        "events": [convert_event(item) for item in events if isinstance(item, dict)],
+        "valid_events": [convert_event(item) for item in valid_events if isinstance(item, dict)],
+        "time_basis": TIME_BASIS_EVENT_WINDOWS,
+    }
+
+
 def _load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:
     frame = _read_station_csv(path)
     if frame.empty:
@@ -5587,6 +5622,7 @@ def validate_workspace_fields(
         "object_type": object_type,
         "stage": stage,
         "focus_checks": focus_checks,
+        "event_windows": event_windows_ui_summary(event_window_info, step_hours) if event_window_info is not None else None,
     }
 
 

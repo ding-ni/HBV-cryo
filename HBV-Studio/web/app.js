@@ -5457,6 +5457,13 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
       html += `<div class="hint-box status-warn" style="margin-bottom:12px"><strong>注意事项：</strong><ul>${warnItems}</ul></div>`;
     }
 
+    if (validation.event_windows && window.HBVStudioEventMode?.renderEventWindowSummary) {
+      html += window.HBVStudioEventMode.renderEventWindowSummary(validation.event_windows, {
+        escapeHtml,
+        statusClass: focusStatusClass,
+      });
+    }
+
     if (validation.focus_checks?.length) {
       html += `<div style="margin-bottom:12px"><strong style="display:block;margin-bottom:8px">专项工程检查</strong>${renderEngineeringFocusChecks(validation.focus_checks, { title: "专项工程检查" })}</div>`;
     }

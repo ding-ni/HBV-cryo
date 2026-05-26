@@ -14,6 +14,10 @@
     return Number.isFinite(number) ? `${defaultFormatNumber(number, digits)}${suffix}` : "—";
   }
 
+  function defaultStatusClass(status) {
+    return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
+  }
+
   function floodEventEvaluation(meta = {}) {
     return meta?.flood_event_evaluation || meta?.diagnostics?.flood_event_evaluation || {};
   }
@@ -143,9 +147,74 @@
     window.Plotly.newPlot(host, traces, layout, plotCfg);
   }
 
+  function purposeLabel(value) {
+    const key = String(value || "").trim().toLowerCase();
+    if (key === "calibration") return "率定";
+    if (key === "validation") return "验证";
+    if (key === "diagnostic") return "诊断";
+    return key || "未记录";
+  }
+
+  function renderEventWindowSummary(eventInfo = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const statusClass = helpers.statusClass || defaultStatusClass;
+    if (!eventInfo || !Number(eventInfo.event_count || 0)) return "";
+    const events = Array.isArray(eventInfo.events) ? eventInfo.events : [];
+    const counts = eventInfo.purpose_counts || {};
+    const validCount = Number(eventInfo.valid_event_count || 0);
+    const eventCount = Number(eventInfo.event_count || events.length);
+    const status = validCount > 0 && !(eventInfo.errors || []).length ? "ok" : "fail";
+    const issueItems = [
+      ...(Array.isArray(eventInfo.errors) ? eventInfo.errors.map(item => ({ item, cls: "status-fail" })) : []),
+      ...(Array.isArray(eventInfo.warnings) ? eventInfo.warnings.map(item => ({ item, cls: "status-warn" })) : []),
+    ];
+    const rows = events.slice(0, 30).map(event => {
+      const rowStatus = event.valid ? "ok" : "fail";
+      const runWindow = `${event.run_start || "—"} ~ ${event.run_end || "—"}`;
+      const scoreWindow = `${event.score_start || "—"} ~ ${event.score_end || "—"}`;
+      return `
+        <div class="event-window-row ${statusClass(rowStatus)}">
+          <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
+          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
+          <span>${escapeHtml(runWindow)}</span>
+          <span>${escapeHtml(scoreWindow)}</span>
+          <span>${escapeHtml(`${event.time_steps_run || 0}/${event.time_steps_score || 0}`)}</span>
+          <span class="${statusClass(rowStatus)}">${escapeHtml(event.valid ? "有效" : "需修正")}</span>
+        </div>
+      `;
+    }).join("");
+    const more = events.length > 30
+      ? `<div class="event-window-more">还有 ${events.length - 30} 场事件未展开，完整信息见输入检查返回结果。</div>`
+      : "";
+    const issues = issueItems.length
+      ? `<ul class="event-window-issues">${issueItems.slice(0, 8).map(({ item, cls }) => `<li class="${cls}">${escapeHtml(item)}</li>`).join("")}</ul>`
+      : "";
+    return `
+      <div class="event-window-summary">
+        <div class="event-window-title">
+          <strong>洪水事件表解析结果</strong>
+          <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效；率定 ${counts.calibration || 0}、验证 ${counts.validation || 0}、诊断 ${counts.diagnostic || 0}`)}</span>
+        </div>
+        ${eventInfo.source_file ? `<div class="event-window-source">事件表：${escapeHtml(eventInfo.source_file)}</div>` : ""}
+        <div class="event-window-row event-window-head">
+          <span>事件</span>
+          <span>用途</span>
+          <span>运行窗口</span>
+          <span>评分窗口</span>
+          <span>运行/评分步数</span>
+          <span>结论</span>
+        </div>
+        ${rows}
+        ${more}
+        ${issues}
+      </div>
+    `;
+  }
+
   window.HBVStudioEventMode = {
     floodEventEvaluation,
     eventChartEvents,
     renderFloodEventChart,
+    renderEventWindowSummary,
   };
 })();
