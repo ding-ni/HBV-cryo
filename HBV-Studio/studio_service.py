@@ -88,9 +88,34 @@ DEFAULT_MANUAL_START_VECTOR = [
 RUN_KIND_LABELS = {
     "manual_starter": "手调起点",
     "manual_result": "手调结果",
-    "forecast_restart": "状态接续预报",
+    "forecast_restart": "连续状态预报",
     "calibration": "正式率定",
     "legacy": "历史结果",
+}
+TIME_BASIS_CONTINUOUS = "continuous"
+TIME_BASIS_EVENT_WINDOWS = "event_windows"
+TIME_BASIS_FORECAST_WINDOW = "forecast_window"
+TIME_BASIS_LABELS = {
+    TIME_BASIS_CONTINUOUS: "连续时段",
+    TIME_BASIS_EVENT_WINDOWS: "洪水事件窗口",
+    TIME_BASIS_FORECAST_WINDOW: "预报窗口",
+}
+EVENT_PURPOSE_ALIASES = {
+    "calibration": "calibration",
+    "calib": "calibration",
+    "train": "calibration",
+    "training": "calibration",
+    "率定": "calibration",
+    "训练": "calibration",
+    "validation": "validation",
+    "valid": "validation",
+    "val": "validation",
+    "verify": "validation",
+    "验证": "validation",
+    "diagnostic": "diagnostic",
+    "diag": "diagnostic",
+    "诊断": "diagnostic",
+    "复核": "diagnostic",
 }
 SYSTEM_RESULT_TITLES = frozenset({"手调起点", "手调结果"})
 RUN_EXPORT_FIELD_LABELS = {
@@ -141,6 +166,10 @@ WORKSPACE_DIR = _env_path("HBV_STUDIO_WORKSPACE_DIR", GUI_ROOT / "workspaces")
 TEMPLATE_DIR = _env_path("HBV_STUDIO_TEMPLATE_DIR", GUI_ROOT / "templates")
 DOCS_DIR = _env_path("HBV_STUDIO_DOCS_DIR", GUI_ROOT / "docs")
 PROJECT_RUNTIME_DIR = _env_path("HBV_STUDIO_RUNTIME_ROOT", PROJECT_ROOT / "运行目录")
+GLOBAL_PARAMETER_LIBRARY_PATH = _env_path(
+    "HBV_STUDIO_PARAMETER_LIBRARY",
+    PROJECT_RUNTIME_DIR / "parameter_library" / "global_parameter_sets.json",
+)
 DATA_PREP_DIR = PROJECT_ROOT / "数据准备"
 BUILTIN_DEM_1KM = shared_builtin_dem_path("1km")
 BUILTIN_DEM_0P1 = shared_builtin_dem_path("0p1deg")
@@ -867,20 +896,34 @@ def _normalize_manual_preset_source_run(
     return to_portable_path(str(fallback or source_run_path)), source_run_name
 
 
-def manual_preset_store_path(config_path_raw: str) -> Path:
+def manual_preset_store_path(config_path_raw: str, scope: str = "workspace") -> Path:
+    if str(scope or "").strip().lower() in {"global", "shared", "公共", "public"}:
+        return GLOBAL_PARAMETER_LIBRARY_PATH
     cfg_path = resolve_any_path(config_path_raw, must_exist=True)
     config = read_runtime_config(cfg_path)
     results_root = Path(build_workspace_paths(config)["results_root"])
     return results_root / "manual_calibration_presets.json"
 
 
-def load_manual_preset_store(config_path_raw: str) -> dict[str, Any]:
-    store_path = manual_preset_store_path(config_path_raw)
+def _normalize_preset_scope(scope: Any) -> str:
+    raw = str(scope or "workspace").strip().lower()
+    if raw in {"global", "shared", "公共", "public"}:
+        return "global"
+    if raw in {"all", "both", "全部"}:
+        return "all"
+    return "workspace"
+
+
+def load_manual_preset_store(config_path_raw: str, scope: str = "workspace") -> dict[str, Any]:
+    normalized_scope = _normalize_preset_scope(scope)
+    if normalized_scope == "all":
+        raise ValueError("load_manual_preset_store 不支持 scope=all，请使用 list_manual_presets。")
+    store_path = manual_preset_store_path(config_path_raw, normalized_scope)
     if not store_path.exists():
-        return {"presets": []}
+        return {"presets": [], "scope": normalized_scope}
     data = read_json_file(store_path)
     if not isinstance(data, dict):
-        return {"presets": []}
+        return {"presets": [], "scope": normalized_scope}
     presets = data.get("presets", [])
     if not isinstance(presets, list):
         presets = []
@@ -897,20 +940,42 @@ def load_manual_preset_store(config_path_raw: str) -> dict[str, Any]:
             current["source_run_path"] = source_run_path
         if source_run_name:
             current["source_run_name"] = source_run_name
+        current["scope"] = str(current.get("scope", normalized_scope) or normalized_scope)
         normalized_presets.append(current)
     data["presets"] = normalized_presets
+    data["scope"] = normalized_scope
     return data
 
 
-def write_manual_preset_store(config_path_raw: str, data: dict[str, Any]) -> Path:
-    store_path = manual_preset_store_path(config_path_raw)
+def write_manual_preset_store(config_path_raw: str, data: dict[str, Any], scope: str = "workspace") -> Path:
+    normalized_scope = _normalize_preset_scope(scope)
+    if normalized_scope == "all":
+        raise ValueError("写入参数集时必须指定 workspace 或 global。")
+    store_path = manual_preset_store_path(config_path_raw, normalized_scope)
     write_json_file(store_path, data)
     return store_path
 
 
-def list_manual_presets(config_path_raw: str, calibration_profile: str | None = None) -> dict[str, Any]:
+def list_manual_presets(config_path_raw: str, calibration_profile: str | None = None, scope: str = "workspace") -> dict[str, Any]:
     cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-    data = load_manual_preset_store(str(cfg_path))
+    normalized_scope = _normalize_preset_scope(scope)
+    if normalized_scope == "all":
+        workspace_presets = list_manual_presets(str(cfg_path), calibration_profile, scope="workspace")
+        global_presets = list_manual_presets(str(cfg_path), calibration_profile, scope="global")
+        presets = sorted(
+            list(workspace_presets.get("presets", [])) + list(global_presets.get("presets", [])),
+            key=lambda item: float(item.get("updated_at", 0.0)),
+            reverse=True,
+        )
+        return {
+            "config_path": str(cfg_path),
+            "scope": "all",
+            "store_path": workspace_presets.get("store_path"),
+            "global_store_path": global_presets.get("store_path"),
+            "calibration_profile": str(calibration_profile or "").strip().lower() or None,
+            "presets": presets,
+        }
+    data = load_manual_preset_store(str(cfg_path), normalized_scope)
     profile_filter = str(calibration_profile or "").strip().lower()
     presets = list(data.get("presets", []))
     if profile_filter:
@@ -922,7 +987,8 @@ def list_manual_presets(config_path_raw: str, calibration_profile: str | None = 
     presets = sorted(presets, key=lambda item: float(item.get("updated_at", 0.0)), reverse=True)
     return {
         "config_path": str(cfg_path),
-        "store_path": str(manual_preset_store_path(str(cfg_path))),
+        "store_path": str(manual_preset_store_path(str(cfg_path), normalized_scope)),
+        "scope": normalized_scope,
         "calibration_profile": profile_filter or None,
         "presets": presets,
     }
@@ -937,6 +1003,9 @@ def save_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("缺少参数集名称。")
     config_path = resolve_any_path(config_path_raw, must_exist=True)
     config = read_runtime_config(config_path)
+    scope = _normalize_preset_scope(payload.get("scope", "workspace"))
+    if scope == "all":
+        scope = "workspace"
     calibration_profile = resolve_profile(config, str(payload.get("calibration_profile", "")).strip().lower() or None)
     raw_params = dict(payload.get("params", {}))
     params = sanitize_param_values(raw_params)
@@ -967,7 +1036,7 @@ def save_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         params_adjusted = False
     now = time.time()
-    data = load_manual_preset_store(config_path_raw)
+    data = load_manual_preset_store(config_path_raw, scope)
     presets = list(data.get("presets", []))
     source_run_path, source_run_name = _normalize_manual_preset_source_run(payload.get("run_path", ""))
     existing = next(
@@ -975,6 +1044,7 @@ def save_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
             item for item in presets
             if str(item.get("name", "")).strip() == name
             and str(item.get("calibration_profile", "")).strip().lower() == calibration_profile
+            and str(item.get("scope", scope)).strip().lower() == scope
         ),
         None,
     )
@@ -984,6 +1054,7 @@ def save_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
     existing.update(
         {
             "name": name,
+            "scope": scope,
             "params": params,
             "calibration_profile": calibration_profile,
             "params_adjusted": bool(params_adjusted),
@@ -999,18 +1070,28 @@ def save_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
             "source_run_path": source_run_path,
             "source_run_name": source_run_name,
             "notes": str(payload.get("notes", "")).strip(),
+            "context": {
+                "workspace_name": str(config.get("流域名称", "") or Path(config_path).stem),
+                "workspace_config": str(config_path.resolve(strict=False)),
+                "time_step_hours": normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
+                "task_time_basis": task_time_basis(config, context="calibration"),
+                "precipitation_mode": str(dict(config.get(METEO_KEY, {}) or {}).get(METEO_PRECIP_MODE_KEY, "grid_only")),
+            },
         }
     )
     data["presets"] = presets
-    store_path = write_manual_preset_store(config_path_raw, data)
+    store_path = write_manual_preset_store(config_path_raw, data, scope)
     return {"saved": True, "preset": existing, "store_path": str(store_path)}
 
 
 def find_manual_preset(config_path_raw: str, preset_id: str) -> dict[str, Any]:
-    data = load_manual_preset_store(config_path_raw)
-    for item in data.get("presets", []):
-        if str(item.get("id", "")).strip() == preset_id:
-            return item
+    for scope in ("workspace", "global"):
+        data = load_manual_preset_store(config_path_raw, scope)
+        for item in data.get("presets", []):
+            if str(item.get("id", "")).strip() == preset_id:
+                item = dict(item)
+                item["scope"] = str(item.get("scope", scope) or scope)
+                return item
     raise FileNotFoundError(f"未找到参数集：{preset_id}")
 
 
@@ -1019,10 +1100,14 @@ def delete_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
     preset_id = str(payload.get("preset_id", "")).strip()
     if not config_path_raw or not preset_id:
         raise ValueError("缺少 config_path 或 preset_id。")
-    data = load_manual_preset_store(config_path_raw)
+    scope = _normalize_preset_scope(payload.get("scope", "workspace"))
+    if scope == "all":
+        existing = find_manual_preset(config_path_raw, preset_id)
+        scope = _normalize_preset_scope(existing.get("scope", "workspace"))
+    data = load_manual_preset_store(config_path_raw, scope)
     presets = [item for item in data.get("presets", []) if str(item.get("id", "")).strip() != preset_id]
     data["presets"] = presets
-    store_path = write_manual_preset_store(config_path_raw, data)
+    store_path = write_manual_preset_store(config_path_raw, data, scope)
     return {"deleted": True, "preset_id": preset_id, "store_path": str(store_path)}
 
 
@@ -1426,6 +1511,255 @@ def time_sequence_messages(time_values: dict[str, pd.Timestamp], step_hours: flo
     return messages
 
 
+def _truthy_config(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on", "启用", "是"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off", "禁用", "否"}:
+        return False
+    return default
+
+
+def _read_csv_flexible(path: Path) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return pd.read_csv(path)
+
+
+def _read_event_table_file(path: Path) -> list[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix in {".json", ".geojson"}:
+        raw = read_json_file(path)
+        if isinstance(raw, dict):
+            events = raw.get("事件表", raw.get("events", []))
+        else:
+            events = raw
+        return [dict(item) for item in events if isinstance(item, dict)] if isinstance(events, list) else []
+    if suffix in {".xlsx", ".xls"}:
+        frame = pd.read_excel(path)
+    else:
+        frame = _read_csv_flexible(path)
+    return [
+        {str(key).strip(): value for key, value in row.items() if str(key).strip()}
+        for row in frame.to_dict(orient="records")
+    ]
+
+
+def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get("洪水事件率定", {})
+    if isinstance(raw, list):
+        return {"启用": bool(raw), "事件表": raw}
+    if isinstance(raw, dict):
+        cfg = dict(raw)
+    else:
+        cfg = {}
+    event_mode = config.get("事件资料模式", {})
+    if isinstance(event_mode, dict):
+        for key, value in event_mode.items():
+            cfg.setdefault(key, value)
+    for key in ("事件表", "events"):
+        if key in config and key not in cfg:
+            cfg[key] = config.get(key)
+    return cfg
+
+
+def _event_field(event: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in event and event.get(name) not in (None, ""):
+            return event.get(name)
+    lower_map = {str(key).strip().lower(): value for key, value in event.items()}
+    for name in names:
+        value = lower_map.get(str(name).strip().lower())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _parse_event_timestamp(value: Any, *, end: bool, step_hours: float) -> pd.Timestamp | None:
+    if value in (None, ""):
+        return None
+    ts = pd.to_datetime(value)
+    if end and step_hours < 24.0 and is_date_only_string(value):
+        ts = ts + pd.Timedelta(days=1) - pd.Timedelta(hours=step_hours)
+    return pd.Timestamp(ts)
+
+
+def _event_date_range(start: pd.Timestamp, end: pd.Timestamp, step_hours: float) -> pd.DatetimeIndex:
+    if end < start:
+        return pd.DatetimeIndex([])
+    return pd.date_range(start, end, freq=pd.Timedelta(hours=step_hours))
+
+
+def task_time_basis(config: dict[str, Any], *, context: str = "calibration") -> str:
+    if context == "forecast":
+        return TIME_BASIS_FORECAST_WINDOW
+    raw = str(
+        config.get("任务时段模式")
+        or config.get("time_basis")
+        or config.get("资料时段模式")
+        or ""
+    ).strip().lower()
+    if raw in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
+        return TIME_BASIS_EVENT_WINDOWS
+    if raw in {"forecast", "forecast_window", "预报", "预报窗口"}:
+        return TIME_BASIS_FORECAST_WINDOW
+    event_cfg = _flood_event_raw_config(config)
+    event_mode = config.get("事件资料模式", {})
+    event_enabled = _truthy_config(event_cfg.get("启用", event_cfg.get("enabled")), default=False)
+    event_data_enabled = _truthy_config(
+        event_cfg.get("事件窗口资料", event_cfg.get("event_windows_enabled")),
+        default=False,
+    )
+    if isinstance(event_mode, dict):
+        event_data_enabled = _truthy_config(
+            event_mode.get("启用", event_mode.get("enabled")),
+            default=event_data_enabled,
+        )
+    has_events = bool(event_cfg.get("事件表") or event_cfg.get("events") or event_cfg.get("事件表路径") or event_cfg.get("events_file"))
+    if event_enabled and (event_data_enabled or raw in {"event_segments", "事件资料模式"}):
+        return TIME_BASIS_EVENT_WINDOWS
+    if raw in {"continuous", "full", "连续", "连续时段", ""}:
+        return TIME_BASIS_CONTINUOUS
+    return TIME_BASIS_EVENT_WINDOWS if event_data_enabled and has_events else TIME_BASIS_CONTINUOUS
+
+
+def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None = None) -> dict[str, Any]:
+    step = normalize_time_step_hours(step_hours if step_hours is not None else config.get("时间步长_小时", 24.0))
+    cfg = _flood_event_raw_config(config)
+    raw_events = cfg.get("事件表", cfg.get("events", []))
+    warnings: list[str] = []
+    errors: list[str] = []
+    event_file_raw = str(cfg.get("事件表路径", cfg.get("events_file", cfg.get("event_file", ""))) or "").strip()
+    event_file = _resolve_config_related_path(config, event_file_raw) if event_file_raw else None
+    if event_file_raw:
+        if event_file is None or not event_file.exists():
+            errors.append(f"洪水事件表文件不存在：{event_file_raw}")
+            raw_events = []
+        else:
+            try:
+                raw_events = _read_event_table_file(event_file)
+            except Exception as exc:
+                errors.append(f"洪水事件表读取失败：{exc}")
+                raw_events = []
+    if isinstance(raw_events, dict):
+        raw_events = raw_events.get("events", raw_events.get("事件表", []))
+    if not isinstance(raw_events, list):
+        raw_events = []
+
+    events: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw_event in enumerate(raw_events, start=1):
+        if not isinstance(raw_event, dict):
+            warnings.append(f"第 {index} 条事件不是对象，已跳过。")
+            continue
+        event = dict(raw_event)
+        token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        event_id = str(_event_field(event, "event_id", "id", "编号") or "").strip()
+        name = str(_event_field(event, "name", "名称", "事件名称") or "").strip()
+        if not event_id:
+            event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+        purpose_raw = str(_event_field(event, "purpose", "用途", "类型", "type") or "calibration").strip()
+        purpose = EVENT_PURPOSE_ALIASES.get(purpose_raw.lower(), purpose_raw.lower() or "calibration")
+        if purpose not in {"calibration", "validation", "diagnostic"}:
+            warnings.append(f"事件 {event_id} 的用途 {purpose_raw} 未识别，按 diagnostic 处理。")
+            purpose = "diagnostic"
+        if event_id in seen_ids:
+            errors.append(f"洪水事件编号重复：{event_id}")
+        seen_ids.add(event_id)
+        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "start")
+        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "end")
+        run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
+        run_end_raw = _event_field(event, "run_end", "运行结束", "退水结束") or score_end_raw
+        event_errors: list[str] = []
+        try:
+            run_start = _parse_event_timestamp(run_start_raw, end=False, step_hours=step)
+            score_start = _parse_event_timestamp(score_start_raw, end=False, step_hours=step)
+            score_end = _parse_event_timestamp(score_end_raw, end=True, step_hours=step)
+            run_end = _parse_event_timestamp(run_end_raw, end=True, step_hours=step)
+        except Exception as exc:
+            run_start = score_start = score_end = run_end = None
+            event_errors.append(f"事件时间无法解析：{exc}")
+        if run_start is None or score_start is None or score_end is None or run_end is None:
+            event_errors.append("事件缺少运行窗口或评分窗口时间。")
+        elif not (run_start <= score_start <= score_end <= run_end):
+            event_errors.append("事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
+        weight = _event_field(event, "weight", "权重")
+        try:
+            weight_value = float(weight) if weight not in (None, "") else 1.0
+        except Exception:
+            weight_value = 1.0
+            warnings.append(f"事件 {event_id} 的权重无法解析，按 1 处理。")
+        if weight_value <= 0:
+            warnings.append(f"事件 {event_id} 的权重小于等于 0，按 1 处理。")
+            weight_value = 1.0
+        if event_errors:
+            errors.extend(f"{event_id}: {item}" for item in event_errors)
+        events.append(
+            {
+                "event_id": event_id,
+                "name": name or event_id,
+                "purpose": purpose,
+                "weight": weight_value,
+                "run_start": run_start,
+                "score_start": score_start,
+                "score_end": score_end,
+                "run_end": run_end,
+                "raw": event,
+                "valid": not event_errors,
+                "time_steps_run": int(len(_event_date_range(run_start, run_end, step))) if run_start is not None and run_end is not None and run_end >= run_start else 0,
+                "time_steps_score": int(len(_event_date_range(score_start, score_end, step))) if score_start is not None and score_end is not None and score_end >= score_start else 0,
+            }
+        )
+
+    valid_events = sorted(
+        [event for event in events if event.get("valid")],
+        key=lambda item: (pd.Timestamp(item["run_start"]), str(item.get("event_id", ""))),
+    )
+    for left, right in zip(valid_events, valid_events[1:]):
+        if left["run_end"] >= right["run_start"]:
+            warnings.append(f"事件运行窗口可能重叠：{left['event_id']} 与 {right['event_id']}。")
+    purpose_counts = {
+        "calibration": sum(1 for event in valid_events if event.get("purpose") == "calibration"),
+        "validation": sum(1 for event in valid_events if event.get("purpose") == "validation"),
+        "diagnostic": sum(1 for event in valid_events if event.get("purpose") == "diagnostic"),
+    }
+    return {
+        "enabled": _truthy_config(cfg.get("启用", cfg.get("enabled")), default=bool(events)),
+        "source_file": str(event_file.resolve(strict=False)) if event_file is not None and event_file.exists() else "",
+        "events": events,
+        "valid_events": valid_events,
+        "event_count": len(events),
+        "valid_event_count": len(valid_events),
+        "purpose_counts": purpose_counts,
+        "warnings": warnings,
+        "errors": errors,
+        "time_basis": TIME_BASIS_EVENT_WINDOWS,
+    }
+
+
+def _event_window_index(events: list[dict[str, Any]], start_key: str, end_key: str, step_hours: float) -> pd.DatetimeIndex:
+    values: list[pd.Timestamp] = []
+    for event in events:
+        start = event.get(start_key)
+        end = event.get(end_key)
+        if start is None or end is None or end < start:
+            continue
+        values.extend(list(_event_date_range(pd.Timestamp(start), pd.Timestamp(end), step_hours)))
+    if not values:
+        return pd.DatetimeIndex([])
+    return pd.DatetimeIndex(sorted(set(pd.Timestamp(item) for item in values)))
+
+
 def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:
     time_cfg = dict(config.get("时间", {}))
     start_raw = time_cfg.get("预热开始") or time_cfg.get("率定开始")
@@ -1441,7 +1775,23 @@ def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None
     return pd.date_range(start_ts, end_ts, freq=step)
 
 
-def build_expected_observation_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:
+def build_expected_forcing_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
+    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    if task_time_basis(config, context=context) == TIME_BASIS_EVENT_WINDOWS:
+        event_info = normalized_flood_events(config, step_hours=step_hours)
+        index = _event_window_index(event_info.get("valid_events", []), "run_start", "run_end", step_hours)
+        if len(index) > 0:
+            return index
+    return build_expected_time_index(config)
+
+
+def build_expected_observation_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
+    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    if task_time_basis(config, context=context) == TIME_BASIS_EVENT_WINDOWS:
+        event_info = normalized_flood_events(config, step_hours=step_hours)
+        index = _event_window_index(event_info.get("valid_events", []), "score_start", "score_end", step_hours)
+        if len(index) > 0:
+            return index
     time_cfg = dict(config.get("时间", {}))
     start_raw = time_cfg.get("率定开始")
     end_raw = time_cfg.get("验证结束") or time_cfg.get("率定结束")
@@ -1601,6 +1951,7 @@ def validate_tif_time_series(
     directory: Path,
     step_hours: float,
     expected_index: pd.DatetimeIndex | None = None,
+    time_basis_label: str = "当前配置时间范围",
 ) -> dict[str, Any]:
     result = scan_tif_time_series(directory)
     errors: list[str] = []
@@ -1633,7 +1984,7 @@ def validate_tif_time_series(
             errors.append(f"{label}时间覆盖不完整，缺少 {len(missing_steps)} 个时间步，例如：{sample}")
         if out_of_range_steps:
             sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in out_of_range_steps[:3])
-            warnings.append(f"{label}有 {len(out_of_range_steps)} 个时间步落在当前配置时间范围之外，例如：{sample}")
+            warnings.append(f"{label}有 {len(out_of_range_steps)} 个时间步落在{time_basis_label}之外，例如：{sample}")
 
     result.update(
         {
@@ -1656,13 +2007,16 @@ def validate_forcing_bundle(
     active_profile = profile or current_profile(config)
     paths = build_profile_paths(config, active_profile)
     step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    expected_index = build_expected_time_index(config)
+    time_basis = task_time_basis(config, context="calibration")
+    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
+    expected_index = build_expected_forcing_index(config, context="calibration")
+    event_info = normalized_flood_events(config, step_hours=step_hours) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
     _, precip_dir, selected_source = effective_precip_paths(config, active_profile, precip_source=precip_source)
     precip_label = "降水（本地栅格）" if selected_source == "custom_tif" else "降水"
     directories = {
-        "prec": validate_tif_time_series(precip_label, Path(precip_dir), step_hours, expected_index),
-        "temp": validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours, expected_index),
-        "evap": validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours, expected_index),
+        "prec": validate_tif_time_series(precip_label, Path(precip_dir), step_hours, expected_index, time_basis_label),
+        "temp": validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours, expected_index, time_basis_label),
+        "evap": validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours, expected_index, time_basis_label),
     }
     errors: list[str] = []
     warnings: list[str] = []
@@ -1687,6 +2041,9 @@ def validate_forcing_bundle(
         "grid_checks": grid_checks,
         "total_valid_steps": sum(int(item["valid_time_steps"]) for item in directories.values()),
         "profile": active_profile,
+        "time_basis": time_basis,
+        "time_basis_label": time_basis_label,
+        "event_windows": event_info,
     }
 
 
@@ -2806,10 +3163,12 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
 PATH_FIELDS = ("运行目录", "流域边界_shp", "DEM_tif", OBSERVED_FLOW_KEY, "冰川边界_shp")
 METEO_PATH_FIELDS = ("站点降水_csv", "站点信息_csv", "原始小时降水目录", "自带温度tif目录", "自带降水tif目录", "自带蒸散发tif目录")
 BOUNDARY_PATH_FIELDS = ("上游边界入流_csv",)
+EVENT_PATH_FIELDS = ("事件表路径", "events_file", "event_file")
 WIZARD_STALE_KEYS = frozenset({
     "name", "timescale", "object", "basin_shp", "obs_csv", "dem_tif", "glacier_shp",
     "warmup_start", "warmup_end", "calib_start", "calib_end", "valid_start", "valid_end",
     "cfmax", "fao_elev", "boundary_csv", "gap_fill", "boundary_date", "boundary_flow",
+    "time_basis", "event_file",
 })
 
 
@@ -2825,6 +3184,16 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path) -> dict[
     config["时间步长_小时"] = 1.0 if profile == PROFILE_HOURLY else 24.0
     config["目标函数模式"] = profile_runner.normalize_objective_mode(config.get("目标函数模式", "auto"))
     config["观测口径模式"] = config.get("观测口径模式", "full_year") or "full_year"
+    raw_time_basis = str(
+        config.get("任务时段模式")
+        or config.get("资料时段模式")
+        or config.get("time_basis")
+        or ""
+    ).strip().lower()
+    if raw_time_basis in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
+        config["任务时段模式"] = TIME_BASIS_EVENT_WINDOWS
+    else:
+        config["任务时段模式"] = TIME_BASIS_CONTINUOUS
     if not config.get("DEM_tif"):
         config["DEM_tif"] = str(BUILTIN_DEM.resolve())
     if (not str(config.get("冰川边界_shp", "")).strip()) and BUILTIN_GLACIER_SHP.exists():
@@ -2872,6 +3241,32 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path) -> dict[
     boundary.setdefault("缺失填补", "zero")
     config["边界条件"] = boundary
 
+    event_mode = dict(config.get("事件资料模式", {}) or {})
+    flood_events = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+    event_file = str(
+        event_mode.get("事件表路径")
+        or event_mode.get("events_file")
+        or flood_events.get("事件表路径")
+        or flood_events.get("events_file")
+        or ""
+    ).strip()
+    if event_file:
+        event_mode["事件表路径"] = event_file
+        flood_events["事件表路径"] = event_file
+    if config["任务时段模式"] == TIME_BASIS_EVENT_WINDOWS:
+        event_mode["启用"] = True
+        event_mode["事件窗口资料"] = True
+        event_mode.setdefault("允许事件间断", True)
+        event_mode.setdefault("初始条件策略", "event_warmup")
+        flood_events.setdefault("启用", True)
+        flood_events["事件窗口资料"] = True
+        flood_events.setdefault("模式", "diagnostic")
+    else:
+        event_mode.setdefault("启用", False)
+        event_mode.setdefault("事件窗口资料", False)
+    config["事件资料模式"] = event_mode
+    config["洪水事件率定"] = flood_events
+
     meteo = dict(config.get(METEO_KEY, {}))
     meteo.setdefault(METEO_PRECIP_MODE_KEY, "grid_only")
     source_value = configured_precip_source(config)
@@ -2904,6 +3299,16 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path) -> dict[
         if boundary.get(key):
             boundary[key] = to_portable_path(boundary[key])
     config["边界条件"] = boundary
+    event_mode = dict(config.get("事件资料模式", {}))
+    for key in EVENT_PATH_FIELDS:
+        if event_mode.get(key):
+            event_mode[key] = to_portable_path(event_mode[key])
+    config["事件资料模式"] = event_mode
+    flood_events = dict(config.get("洪水事件率定", {})) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+    for key in EVENT_PATH_FIELDS:
+        if flood_events.get(key):
+            flood_events[key] = to_portable_path(flood_events[key])
+    config["洪水事件率定"] = flood_events
     meteo = dict(config.get(METEO_KEY, {}))
     for key in METEO_PATH_FIELDS:
         if meteo.get(key):
@@ -2927,6 +3332,7 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFI
         "项目对象": OBJECT_FULL_UPSTREAM,
         "率定模式": profile,
         "目标函数模式": "auto",
+        "任务时段模式": TIME_BASIS_CONTINUOUS,
         "运行目录": str(runtime_root_for_workspace(name)),
         "流域名称": name,
         "流域编号": slugify_workspace_name(name),
@@ -2934,6 +3340,19 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFI
         "DEM_tif": str(BUILTIN_DEM.resolve()),
         OBSERVED_FLOW_KEY: "",
         "观测口径模式": "full_year",
+        "事件资料模式": {
+            "启用": False,
+            "事件窗口资料": False,
+            "事件表路径": "",
+            "允许事件间断": True,
+            "初始条件策略": "event_warmup",
+        },
+        "洪水事件率定": {
+            "启用": False,
+            "事件窗口资料": False,
+            "事件表路径": "",
+            "模式": "diagnostic",
+        },
         "边界条件": {
             "上游边界入流_csv": "",
             "时间字段": "date",
@@ -4046,22 +4465,66 @@ def analyze_station_precip_inputs(config: dict[str, Any], *, step_hours: float |
         warnings.append("站点信息未识别到经纬度或坐标字段，执行降水方案时会失败。")
 
     matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
-    start, end = _time_range_from_config(config)
+    time_basis = task_time_basis(config, context="calibration")
+    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
+    event_info = normalized_flood_events(config, step_hours=step) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
+    expected_index = build_expected_forcing_index(config, context="calibration")
     expected_count = 0
     covered_count = 0
     coverage_ratio: float | None = None
-    if start is not None and end is not None and end >= start:
-        freq = "h" if abs(step - 1.0) < 1e-9 else f"{int(round(step))}h"
-        expected_index = pd.date_range(start=start, end=end, freq=freq)
+    event_coverage: list[dict[str, Any]] = []
+    zero_available_steps = 0
+    if expected_index is not None and len(expected_index) > 0:
         expected_count = int(len(expected_index))
         if expected_count > 0 and not matched_series.empty:
             present = matched_series.reindex(expected_index)
             covered_count = int(present.notna().any(axis=1).sum())
             coverage_ratio = covered_count / expected_count
+            zero_available_steps = int((present.notna().sum(axis=1) == 0).sum())
             if covered_count == 0:
-                missing.append("站点降水时间范围与当前模型时段完全不重叠。")
+                missing.append(f"站点降水时间范围与{time_basis_label}完全不重叠。")
             elif coverage_ratio < 0.99:
-                warnings.append(f"站点降水时间覆盖不足：覆盖 {coverage_ratio * 100:.1f}%。")
+                message = f"站点降水在{time_basis_label}内覆盖不足：覆盖 {coverage_ratio * 100:.1f}%。"
+                if mode == "thiessen_station_only":
+                    missing.append(message)
+                else:
+                    warnings.append(message)
+    if event_info:
+        for event in event_info.get("valid_events", []):
+            event_index = _event_date_range(event["run_start"], event["run_end"], step)
+            if len(event_index) <= 0 or matched_series.empty:
+                covered_event = 0
+                zero_event = int(len(event_index))
+            else:
+                event_present = matched_series.reindex(event_index)
+                covered_event = int(event_present.notna().any(axis=1).sum())
+                zero_event = int((event_present.notna().sum(axis=1) == 0).sum())
+            event_steps = int(len(event_index))
+            event_ratio = covered_event / event_steps if event_steps else None
+            event_status = "ok" if event_ratio is not None and event_ratio >= 0.99 else "fail" if covered_event == 0 else "warn"
+            event_coverage.append(
+                {
+                    "event_id": event.get("event_id"),
+                    "name": event.get("name"),
+                    "purpose": event.get("purpose"),
+                    "run_start": _format_time_for_check(event.get("run_start"), step),
+                    "run_end": _format_time_for_check(event.get("run_end"), step),
+                    "expected_steps": event_steps,
+                    "covered_steps": covered_event,
+                    "coverage_ratio": event_ratio,
+                    "zero_available_steps": zero_event,
+                    "status": event_status,
+                }
+            )
+        uncovered_events = [item for item in event_coverage if int(item.get("zero_available_steps", 0) or 0) > 0]
+        if uncovered_events:
+            sample = "、".join(str(item.get("event_id") or item.get("name")) for item in uncovered_events[:3])
+            message = f"有 {len(uncovered_events)} 场事件运行窗口内存在无可用站点时间步，例如：{sample}。"
+            if mode == "thiessen_station_only":
+                if message not in missing:
+                    missing.append(message)
+            elif message not in warnings:
+                warnings.append(message)
 
     numeric_values = matched_series.to_numpy(dtype="float64") if not matched_series.empty else np.empty((0, 0), dtype="float64")
     negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0
@@ -4069,12 +4532,10 @@ def analyze_station_precip_inputs(config: dict[str, Any], *, step_hours: float |
     extreme_count = int(np.sum(numeric_values > extreme_threshold)) if numeric_values.size else 0
     all_zero_count = 0
     max_missing_rate = 0.0
-    zero_available_steps = 0
     if matched_ids:
         all_zero_count = int(sum(bool(np.nanmax(np.abs(matched_series[col].to_numpy(dtype="float64"))) <= 1e-9) for col in matched_ids if matched_series[col].notna().any()))
         missing_rates = matched_series[matched_ids].isna().mean(axis=0)
         max_missing_rate = float(missing_rates.max()) if not missing_rates.empty else 0.0
-        zero_available_steps = int((matched_series[matched_ids].notna().sum(axis=1) == 0).sum())
     if negative_count > 0:
         warnings.append(f"站点降水存在 {negative_count} 条负值记录。")
     if extreme_count > 0:
@@ -4100,16 +4561,28 @@ def analyze_station_precip_inputs(config: dict[str, Any], *, step_hours: float |
     items.extend(
         [
             {"label": "降水方案", "value": "格点+站点偏差订正" if mode == "grid_plus_station_bias" else "站点泰森分配", "status": "ok"},
+            {"label": "资料口径", "value": time_basis_label, "status": "ok"},
             {"label": "站号匹配", "value": f"{len(matched_ids)}/{len(meta_id_set)}", "status": "ok" if matched_ids and not missing_in_precip else "warn" if matched_ids else "fail"},
             {"label": "降水表额外站号", "value": str(len(missing_in_meta)), "status": "ok" if not missing_in_meta else "warn"},
             {"label": "资料格式", "value": station_format, "status": "ok"},
             {"label": "时间范围", "value": f"{_format_time_for_check(station_start, step)} 至 {_format_time_for_check(station_end, step)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": "模型时段覆盖", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未配置完整时段", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": f"{time_basis_label}覆盖", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未配置完整时段", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "无可用站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
             {"label": "单站最大缺测率", "value": f"{max_missing_rate * 100:.1f}%", "status": "warn" if max_missing_rate > 0.20 else "ok"},
             {"label": "负降水记录", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
             {"label": "异常大值记录", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
         ]
     )
+    for event_item in event_coverage[:5]:
+        ratio = event_item.get("coverage_ratio")
+        value = f"{float(ratio) * 100:.1f}% / 无站点 {int(event_item.get('zero_available_steps', 0) or 0)} 步" if ratio is not None else "未覆盖"
+        items.append(
+            {
+                "label": f"事件 {event_item.get('event_id')}",
+                "value": value,
+                "status": str(event_item.get("status", "warn")),
+            }
+        )
     return {
         "enabled": True,
         "mode": mode,
@@ -4127,6 +4600,9 @@ def analyze_station_precip_inputs(config: dict[str, Any], *, step_hours: float |
         "covered_time_steps": covered_count,
         "coverage_ratio": coverage_ratio,
         "zero_available_steps": zero_available_steps,
+        "time_basis": time_basis,
+        "time_basis_label": time_basis_label,
+        "event_coverage": event_coverage,
     }
 
 
@@ -4689,6 +5165,7 @@ def build_engineering_focus_checks(
         resampled_to_daily = bool(obs_info.get("resampled_to_daily")) if obs_info else False
         forcing_ok = bool(forcing.get("ok")) if forcing is not None else None
         expected_steps = int(forcing.get("expected_steps") or 0) if forcing is not None and forcing.get("expected_steps") is not None else None
+        time_basis_label = str(forcing.get("time_basis_label", "连续时段") if forcing else "连续时段")
         if step_hours != 24.0:
             status = "fail"
             summary = "当前设置为日尺度，但项目时间步长不是 24 小时。"
@@ -4700,10 +5177,10 @@ def build_engineering_focus_checks(
             summary = "观测径流原始时步为小时尺度，已按自然日聚合为日平均流量后用于日尺度项目。"
         elif forcing is not None and not forcing_ok:
             status = "warn"
-            summary = "日尺度主流程已选定，但气象驱动时间覆盖或文件命名仍有问题。"
+            summary = f"日尺度主流程已选定，但气象驱动在{time_basis_label}内的覆盖或文件命名仍有问题。"
         else:
             status = "ok"
-            summary = "日尺度主流程基本合理，重点继续检查时间覆盖和气象驱动完整性。"
+            summary = f"日尺度主流程基本合理，重点继续检查{time_basis_label}和气象驱动完整性。"
         items = [
             {"label": "项目时间步长", "value": f"{int(step_hours)} 小时", "status": "ok" if step_hours == 24.0 else "fail"},
             {
@@ -4735,10 +5212,20 @@ def build_engineering_focus_checks(
             items.append(
                 {
                     "label": "气象驱动状态",
-                    "value": "已覆盖当前时间范围" if forcing_ok else "仍有覆盖或命名问题",
+                    "value": f"已覆盖{time_basis_label}" if forcing_ok else "仍有覆盖或命名问题",
                     "status": "ok" if forcing_ok else "warn",
                 }
             )
+            items.append({"label": "资料口径", "value": time_basis_label, "status": "ok"})
+            event_windows = dict(forcing.get("event_windows") or {})
+            if event_windows:
+                items.append(
+                    {
+                        "label": "洪水事件",
+                        "value": f"{int(event_windows.get('valid_event_count', 0) or 0)}/{int(event_windows.get('event_count', 0) or 0)} 场有效",
+                        "status": "ok" if int(event_windows.get("valid_event_count", 0) or 0) > 0 else "fail",
+                    }
+                )
         checks.append(
             {
                 "id": "daily_profile",
@@ -4875,6 +5362,8 @@ def validate_workspace_fields(
     object_type = detect_object_type(config)
     paths = build_profile_paths(config, profile)
     step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    time_basis = task_time_basis(config, context="calibration")
+    event_window_info = normalized_flood_events(config, step_hours=step_hours) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
     runtime_stage = str(stage or "calibration").strip().lower() or "calibration"
     require_observed_flow = runtime_stage != "quick_test"
     obs_info: dict[str, Any] | None = None
@@ -4926,19 +5415,38 @@ def validate_workspace_fields(
         missing.append("率定模式=小时尺度 但 时间步长_小时 不是 1")
 
     time_cfg = config.get("时间", {})
-    for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
-        if not time_cfg.get(key):
-            missing.append(f"时间.{key}")
-    time_values: dict[str, pd.Timestamp] = {}
-    for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
-        value = time_cfg.get(key)
-        if not value:
-            continue
-        try:
-            time_values[key] = pd.to_datetime(value)
-        except Exception:
-            missing.append(f"时间.{key} 无法解析：{value}")
-    missing.extend(time_sequence_messages(time_values, step_hours))
+    if time_basis == TIME_BASIS_EVENT_WINDOWS:
+        warnings.append("当前工作区采用洪水事件窗口资料口径，输入检查按事件运行窗口和评分窗口核验。")
+    else:
+        for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
+            if not time_cfg.get(key):
+                missing.append(f"时间.{key}")
+        time_values: dict[str, pd.Timestamp] = {}
+        for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
+            value = time_cfg.get(key)
+            if not value:
+                continue
+            try:
+                time_values[key] = pd.to_datetime(value)
+            except Exception:
+                missing.append(f"时间.{key} 无法解析：{value}")
+        missing.extend(time_sequence_messages(time_values, step_hours))
+    if event_window_info is not None:
+        for item in list(event_window_info.get("errors", []) or []):
+            missing.append(str(item))
+        for item in list(event_window_info.get("warnings", []) or []):
+            warnings.append(str(item))
+        if not event_window_info.get("valid_event_count"):
+            missing.append("事件资料模式已启用，但没有可用的洪水事件窗口。")
+        else:
+            counts = dict(event_window_info.get("purpose_counts", {}) or {})
+            warnings.append(
+                "当前按洪水事件窗口检查资料："
+                f"{int(event_window_info.get('valid_event_count', 0) or 0)} 场有效，"
+                f"率定 {int(counts.get('calibration', 0) or 0)}、"
+                f"验证 {int(counts.get('validation', 0) or 0)}、"
+                f"诊断 {int(counts.get('diagnostic', 0) or 0)}。"
+            )
 
     init_state = dict(config.get("初始状态", {}) or {})
     for key, default_value in profile_runner.DEFAULT_INIT_STATE.items():
@@ -4959,7 +5467,7 @@ def validate_workspace_fields(
         try:
             obs_info = inspect_observed_csv(
                 str(obs_file),
-                expected_index=build_expected_observation_index(config),
+                expected_index=build_expected_observation_index(config, context="calibration"),
                 target_step_hours=step_hours,
             )
             obs_missing, obs_warnings = observed_window_messages(config, obs_info)
@@ -4996,7 +5504,7 @@ def validate_workspace_fields(
                     str(boundary_file),
                     date_field=boundary_date_field,
                     flow_field=boundary_flow_field,
-                    expected_index=build_expected_time_index(config),
+                    expected_index=build_expected_forcing_index(config, context="calibration"),
                     expected_step_hours=step_hours,
                 )
                 boundary_missing, boundary_warnings = boundary_info_messages(
@@ -5860,6 +6368,8 @@ def _build_run_summary(
         "optimized_params_available": False,
         "state_snapshot_available": False,
         "state_snapshot_time": "",
+        "source_state_snapshot_time": "",
+        "forecast_input_archive": {},
         "forecast_source_ready": False,
     }
     if metadata is None:
@@ -5908,12 +6418,23 @@ def _build_run_summary(
     ).strip()
     summary["hydrology_summary"] = _build_hydrology_summary(metadata, run_dir)
     initial_state = dict(metadata.get("initial_state", {}) or {})
+    forecast_result = dict(metadata.get("forecast_result", {}) or {})
     snapshot_file = str(initial_state.get("state_snapshot_file", "") or "").strip()
     snapshot_path = run_dir / snapshot_file if snapshot_file else run_dir / "state_snapshot.npz"
     optimized_params = metadata.get("optimized_params", {})
     summary["optimized_params_available"] = bool(isinstance(optimized_params, dict) and optimized_params)
     summary["state_snapshot_available"] = bool(snapshot_path.exists() or initial_state.get("state_snapshot_available"))
     summary["state_snapshot_time"] = str(initial_state.get("state_snapshot_time", "") or "").strip()
+    summary["source_state_snapshot_time"] = str(
+        initial_state.get("source_state_snapshot_time")
+        or forecast_result.get("source_state_time")
+        or ""
+    ).strip()
+    summary["forecast_input_archive"] = dict(
+        forecast_result.get("forecast_input_archive")
+        or dict(metadata.get("data_sources", {}) or {}).get("forecast_input_archive")
+        or {}
+    )
     summary["forecast_source_ready"] = bool(summary["optimized_params_available"] and summary["state_snapshot_available"])
     summary.update(_display_run_title(run_dir, metadata, resolved_config, studio_compatible, updated_at=updated_at))
     source_run_path, source_run_name = _source_run_meta(metadata)
@@ -7117,7 +7638,7 @@ def cdsapi_status() -> dict[str, Any]:
 
 WIZARD_STEP_KEYS: dict[int, list[str]] = {
     1: ["项目对象", "率定模式", "流域名称", "流域编号", "运行目录", "时间步长_小时"],
-    2: ["流域边界_shp", OBSERVED_FLOW_KEY, "DEM_tif", "冰川边界_shp", "时间", "CFMAX分区阈值_m", "FAO56平均海拔_m"],
+    2: ["流域边界_shp", OBSERVED_FLOW_KEY, "DEM_tif", "冰川边界_shp", "时间", "任务时段模式", "事件资料模式", "洪水事件率定", "CFMAX分区阈值_m", "FAO56平均海拔_m"],
     3: ["边界条件"],
     4: ["气象策略", "默认降水源"],
 }
@@ -7168,6 +7689,39 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
                 config["冰川边界_shp"] = str(
                     stage_vector_shapefile(config, BUILTIN_GLACIER_SHP, role="glacier", config_path=path)
                 )
+        raw_time_basis = str(step_data.get("time_basis", step_data.get("任务时段模式", "")) or "").strip().lower()
+        time_basis = (
+            TIME_BASIS_EVENT_WINDOWS
+            if raw_time_basis in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}
+            else TIME_BASIS_CONTINUOUS
+        )
+        config["任务时段模式"] = time_basis
+        event_file = str(step_data.get("event_file", step_data.get("事件表路径", "")) or "").strip()
+        event_mode = dict(config.get("事件资料模式", {}) or {})
+        flood_events = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+        if event_file:
+            event_mode["事件表路径"] = event_file
+            flood_events["事件表路径"] = event_file
+        if time_basis == TIME_BASIS_EVENT_WINDOWS:
+            event_mode.update(
+                {
+                    "启用": True,
+                    "事件窗口资料": True,
+                    "允许事件间断": True,
+                    "初始条件策略": event_mode.get("初始条件策略", "event_warmup") or "event_warmup",
+                }
+            )
+            flood_events["启用"] = True
+            flood_events["事件窗口资料"] = True
+            flood_events.setdefault("模式", "diagnostic")
+        else:
+            event_mode["启用"] = False
+            event_mode["事件窗口资料"] = False
+            if "启用" not in flood_events:
+                flood_events["启用"] = False
+            flood_events["事件窗口资料"] = False
+        config["事件资料模式"] = event_mode
+        config["洪水事件率定"] = flood_events
         time_map = {
             "warmup_start": "预热开始", "warmup_end": "预热结束",
             "calib_start": "率定开始", "calib_end": "率定结束",
@@ -7242,28 +7796,47 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
             obs_file = _resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))
             if obs_file is None or not obs_file.exists():
                 missing.append(f"观测径流文件不存在：{config[OBSERVED_FLOW_KEY]}")
-        time_cfg = config.get("时间", {})
-        for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
-            if not time_cfg.get(key):
-                missing.append(f"时间.{key}")
-        time_values: dict[str, pd.Timestamp] = {}
-        for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
-            value = time_cfg.get(key)
-            if not value:
-                continue
-            try:
-                time_values[key] = pd.to_datetime(value)
-            except Exception:
-                missing.append(f"时间.{key} 无法解析：{value}")
         step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-        missing.extend(time_sequence_messages(time_values, step_hours))
+        time_basis = task_time_basis(config, context="calibration")
+        if time_basis == TIME_BASIS_EVENT_WINDOWS:
+            event_info = normalized_flood_events(config, step_hours=step_hours)
+            for item in list(event_info.get("errors", []) or []):
+                missing.append(str(item))
+            for item in list(event_info.get("warnings", []) or []):
+                warnings.append(str(item))
+            if not event_info.get("valid_event_count"):
+                missing.append("洪水事件窗口模式需要至少一场合法事件。")
+            else:
+                counts = dict(event_info.get("purpose_counts", {}) or {})
+                warnings.append(
+                    "当前按洪水事件窗口组织资料："
+                    f"{int(event_info.get('valid_event_count', 0) or 0)} 场有效，"
+                    f"率定 {int(counts.get('calibration', 0) or 0)}、"
+                    f"验证 {int(counts.get('validation', 0) or 0)}、"
+                    f"诊断 {int(counts.get('diagnostic', 0) or 0)}。"
+                )
+        else:
+            time_cfg = config.get("时间", {})
+            for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
+                if not time_cfg.get(key):
+                    missing.append(f"时间.{key}")
+            time_values: dict[str, pd.Timestamp] = {}
+            for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
+                value = time_cfg.get(key)
+                if not value:
+                    continue
+                try:
+                    time_values[key] = pd.to_datetime(value)
+                except Exception:
+                    missing.append(f"时间.{key} 无法解析：{value}")
+            missing.extend(time_sequence_messages(time_values, step_hours))
         obs_path = str(config.get(OBSERVED_FLOW_KEY, "")).strip()
         obs_file = _resolve_config_related_path(config, obs_path)
         if obs_path and obs_file is not None and obs_file.exists():
             try:
                 obs_info = inspect_observed_csv(
                     str(obs_file),
-                    expected_index=build_expected_observation_index(config),
+                    expected_index=build_expected_observation_index(config, context="calibration"),
                     target_step_hours=normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
                 )
                 obs_missing, obs_warnings = observed_window_messages(config, obs_info)
@@ -7291,7 +7864,7 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
                         str(boundary_file),
                         date_field=str(boundary.get("时间字段", "date")).strip() or "date",
                         flow_field=str(boundary.get("流量字段", "inflow_m3s")).strip() or "inflow_m3s",
-                        expected_index=build_expected_time_index(config),
+                        expected_index=build_expected_forcing_index(config, context="calibration"),
                         expected_step_hours=step_hours,
                     )
                     boundary_missing, boundary_warnings = boundary_info_messages(
@@ -8053,7 +8626,18 @@ def workspace_detailed_check(config_path_raw: str, precip_source: Any = None) ->
             }
         )
     if forcing["expected_steps"] is not None:
+        summary.append({"group": "气象数据", "label": "资料口径", "value": str(forcing.get("time_basis_label", "连续时段")), "ok": True})
         summary.append({"group": "气象数据", "label": "期望时间步数", "value": str(forcing["expected_steps"]), "ok": True})
+    event_windows = dict(forcing.get("event_windows") or {})
+    if event_windows:
+        summary.append(
+            {
+                "group": "气象数据",
+                "label": "洪水事件窗口",
+                "value": f"{int(event_windows.get('valid_event_count', 0) or 0)}/{int(event_windows.get('event_count', 0) or 0)} 场有效",
+                "ok": int(event_windows.get("valid_event_count", 0) or 0) > 0,
+            }
+        )
     for key, label in (("prec", "降水"), ("temp", "气温"), ("evap", "蒸散发")):
         item = forcing["directories"][key]
         summary.append(
@@ -8099,7 +8683,7 @@ def workspace_detailed_check(config_path_raw: str, precip_source: Any = None) ->
                 {
                     "group": "气象数据",
                     "label": f"{label}时间覆盖",
-                    "value": f"已覆盖 {forcing['expected_steps']} 个时间步",
+                    "value": f"已覆盖{forcing.get('time_basis_label', '当前任务时段')} {forcing['expected_steps']} 个时间步",
                     "ok": item["ok"],
                 }
             )
@@ -8404,7 +8988,9 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
     gis_dir = Path(paths["gis_dir"])
     dem_file = _workspace_dem_path(gis_dir, prefer=_configured_dem_kind(config))
     precip_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
-    expected_index = build_expected_time_index(config)
+    time_basis = task_time_basis(config, context="calibration")
+    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
+    expected_index = build_expected_forcing_index(config, context="calibration")
     expected_time_set = set(expected_index) if expected_index is not None else None
     dir_map = {
         "prec_dir": (
@@ -8475,7 +9061,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
             out_of_range_count = len(ordered_files) - len(filtered_files)
             ordered_files = filtered_files
             if not ordered_files:
-                raise ValueError(f"{label_map[key]}目录没有落在当前配置时间范围内的 tif 文件。请检查时间设置或重新选择目录。")
+                raise ValueError(f"{label_map[key]}目录没有落在{time_basis_label}内的 tif 文件。请检查时间设置、事件表或重新选择目录。")
         target_path = Path(target_dir)
         reuse_existing = same_path(src_dir, target_path)
         start_label = format_timestamp_for_display(ordered_files[0][0], config.get("时间步长_小时", 24.0))
@@ -8485,7 +9071,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         else:
             log(f"[扫描] {label_map[key]}：识别 {len(ordered_files)} 个时间步，范围 {start_label} -> {end_label}，将按时间顺序导入。")
         if out_of_range_count > 0:
-            log(f"[筛选] {label_map[key]}：已自动忽略 {out_of_range_count} 个落在当前时间范围之外的 tif 文件。")
+            log(f"[筛选] {label_map[key]}：已自动忽略 {out_of_range_count} 个落在{time_basis_label}之外的 tif 文件。")
         prepared_inputs.append(
             {
                 "key": key,
@@ -8606,6 +9192,8 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "validation_warnings": forcing["warnings"][:5],
         "expected_steps": forcing["expected_steps"],
         "valid_steps": forcing["total_valid_steps"],
+        "time_basis": forcing.get("time_basis"),
+        "time_basis_label": forcing.get("time_basis_label"),
         "import_order": "timestamp_asc",
         "source_dirs": {str(item["key"]).replace("_dir", ""): str(Path(item["src_dir"]).resolve()) for item in prepared_inputs},
         "target_dirs": {str(item["key"]).replace("_dir", ""): str(Path(item["target_dir"]).resolve()) for item in prepared_inputs},
@@ -8631,6 +9219,8 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "out_of_range_ignored": {str(item["key"]).replace("_dir", ""): int(item.get("out_of_range_count", 0)) for item in prepared_inputs},
         "expected_steps": forcing["expected_steps"],
         "valid_steps": forcing["total_valid_steps"],
+        "time_basis": forcing.get("time_basis"),
+        "time_basis_label": forcing.get("time_basis_label"),
         "import_order": "timestamp_asc",
         "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -9752,19 +10342,25 @@ def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
     return forecast_run.run_forecast(_forecast_restart_args(payload))
 
 
+def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Callable[[str, str | None], None]) -> dict[str, Any]:
+    import forecast_run
+
+    return forecast_run.run_forecast(_forecast_restart_args(payload), stage_callback=stage_callback)
+
+
 def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
     last_stage = ""
 
     def report(stage: str, message: str | None = None) -> None:
         nonlocal last_stage
         last_stage = stage
-        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "状态接续预报"})
+        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "连续状态预报"})
         if message:
             add_task_output(task_id, message)
 
     try:
-        report("准备启动", "[阶段] 准备状态接续预报")
-        result = forecast_restart(payload)
+        report("准备启动", "[阶段] 准备连续状态预报")
+        result = forecast_restart_with_progress(payload, report)
         if result.get("run_path"):
             set_task_metadata(task_id, run_path=result["run_path"])
             with TASK_LOCK:
@@ -9774,7 +10370,7 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=True, return_code=0, result=result)
     except Exception as exc:
         if last_stage:
-            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "状态接续预报"})
+            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
         add_task_output(task_id, f"[失败] {exc}")
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
@@ -9811,7 +10407,7 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     record = TaskRecord(
         id=task_id,
         task_type="forecast_restart",
-        label=f"状态接续预报 | {source_run.name}",
+        label=f"连续状态预报 | {source_run.name}",
         command=["forecast_restart"],
         cwd=str(PROJECT_ROOT),
         metadata={
@@ -9821,7 +10417,7 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
             "forecast_end": args.forecast_end,
             "runtime_prec_source": args.prec_source,
             "glacier_mode": args.glacier_mode,
-            "ui_progress": {"stage": "准备启动", "label": "状态接续预报"},
+            "ui_progress": {"stage": "准备启动", "label": "连续状态预报"},
         },
     )
     with TASK_LOCK:
@@ -10071,6 +10667,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                         "data": list_manual_presets(
                             unquote(query.get("config_path", [""])[0]),
                             unquote(query.get("calibration_profile", [""])[0]),
+                            scope=unquote(query.get("scope", ["workspace"])[0]),
                         ),
                     }
                 )

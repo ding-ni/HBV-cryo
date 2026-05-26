@@ -5039,15 +5039,21 @@ def flood_event_diagnostic_objective(metrics, weights, peak_time_tolerance_hours
 
 def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weights, peak_time_tolerance_hours):
     event_config = dict(event_config or {}) if isinstance(event_config, dict) else {}
-    event_name = str(event_config.get("名称", event_config.get("name", "")) or "").strip()
-    event_type = str(event_config.get("类型", event_config.get("type", "calibration")) or "calibration").strip()
+    event_name = str(event_config.get("名称", event_config.get("name", event_config.get("event_id", ""))) or "").strip()
+    event_type = str(
+        event_config.get(
+            "类型",
+            event_config.get("type", event_config.get("purpose", event_config.get("用途", "calibration"))),
+        )
+        or "calibration"
+    ).strip()
     if not event_name:
         token = json.dumps(event_config, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         event_name = f"event_{hashlib.sha1(token).hexdigest()[:8]}"
 
     warnings = []
-    event_start_raw = event_config.get("事件开始", event_config.get("start"))
-    event_end_raw = event_config.get("事件结束", event_config.get("end"))
+    event_start_raw = event_config.get("score_start", event_config.get("评分开始", event_config.get("事件开始", event_config.get("start"))))
+    event_end_raw = event_config.get("score_end", event_config.get("评分结束", event_config.get("事件结束", event_config.get("end"))))
     if event_start_raw in (None, "") or event_end_raw in (None, ""):
         return {
             "name": event_name,
@@ -5078,8 +5084,10 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
             "warnings": ["事件结束时间早于事件开始时间。"],
         }
 
-    warmup_start_raw = event_config.get("预热开始", event_config.get("warmup_start"))
+    warmup_start_raw = event_config.get("run_start", event_config.get("运行开始", event_config.get("预热开始", event_config.get("warmup_start"))))
+    run_end_raw = event_config.get("run_end", event_config.get("运行结束", event_config.get("退水结束")))
     warmup_start = None
+    run_end = None
     if warmup_start_raw:
         try:
             warmup_start = normalize_time_value(warmup_start_raw)
@@ -5087,6 +5095,13 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
                 warnings.append("预热开始晚于事件开始；当前仅按连续模拟结果进行事件评价。")
         except Exception as exc:
             warnings.append(f"预热开始无法解析：{exc}")
+    if run_end_raw:
+        try:
+            run_end = normalize_time_value(run_end_raw, is_end=True)
+            if run_end < event_end:
+                warnings.append("运行结束早于事件结束；当前仅按评分窗口评价洪水事件。")
+        except Exception as exc:
+            warnings.append(f"运行结束无法解析：{exc}")
 
     date_index = pd.DatetimeIndex(dates)
     q_obs = np.asarray(q_obs, dtype=np.float64)
@@ -5116,6 +5131,10 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
             "event_start": _event_time_text(event_start),
             "event_end": _event_time_text(event_end),
             "warmup_start": _event_time_text(warmup_start),
+            "run_start": _event_time_text(warmup_start),
+            "score_start": _event_time_text(event_start),
+            "score_end": _event_time_text(event_end),
+            "run_end": _event_time_text(run_end),
             "warnings": warnings,
         }
 
@@ -5134,6 +5153,10 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
         "event_start": _event_time_text(event_start),
         "event_end": _event_time_text(event_end),
         "warmup_start": _event_time_text(warmup_start),
+        "run_start": _event_time_text(warmup_start),
+        "score_start": _event_time_text(event_start),
+        "score_end": _event_time_text(event_end),
+        "run_end": _event_time_text(run_end),
         "window_start_used": _event_time_text(event_dates[0]),
         "window_end_used": _event_time_text(event_dates[-1]),
         "total_steps": total_steps,

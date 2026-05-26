@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 import uuid
@@ -37,8 +38,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def log_stage(message: str) -> None:
+def log_stage(message: str, stage_callback: Any = None) -> None:
     print(f"[阶段] {message}", file=sys.stderr, flush=True)
+    if callable(stage_callback):
+        stage_callback(message, f"[阶段] {message}")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -118,6 +121,95 @@ def apply_forecast_window(module: Any, forecast_start: str, forecast_end: str) -
     module.SIM_END = end_text
 
 
+def forecast_time_index(module: Any, forecast_start: str, forecast_end: str) -> pd.DatetimeIndex:
+    dates = module.build_time_index(time_text(module, forecast_start), time_text(module, forecast_end))
+    return pd.DatetimeIndex(dates)
+
+
+def archive_forecast_inputs(
+    module: Any,
+    output_dir: Path,
+    source_dirs: dict[str, str],
+    forecast_start: str,
+    forecast_end: str,
+) -> dict[str, Any]:
+    expected_index = forecast_time_index(module, forecast_start, forecast_end)
+    expected_set = set(expected_index)
+    archive_root = output_dir / "forecast_inputs"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {
+        "schema": "forecast_input_manifest_v1",
+        "forecast_start": time_text(module, forecast_start),
+        "forecast_end": time_text(module, forecast_end),
+        "expected_steps": int(len(expected_index)),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "variables": {},
+    }
+    archived_dirs: dict[str, str] = {}
+    label_map = {"prec": "降水", "temp": "气温", "evap": "潜在蒸散发"}
+    for key, label in label_map.items():
+        src_dir = Path(str(source_dirs.get(key, "") or "")).resolve(strict=False)
+        if not src_dir.exists():
+            raise FileNotFoundError(f"预报{label}目录不存在：{src_dir}")
+        tif_files = sorted(src_dir.glob("*.tif"))
+        if not tif_files:
+            raise FileNotFoundError(f"预报{label}目录中没有 .tif 文件：{src_dir}")
+        time_to_file: dict[pd.Timestamp, Path] = {}
+        invalid_files: list[str] = []
+        duplicate_times: dict[str, list[str]] = {}
+        for tif_path in tif_files:
+            timestamp = module.parse_time_from_name(str(tif_path))
+            if timestamp is None:
+                invalid_files.append(tif_path.name)
+                continue
+            timestamp = pd.Timestamp(timestamp)
+            if timestamp in time_to_file:
+                duplicate_times.setdefault(module.format_time_value(timestamp), [time_to_file[timestamp].name]).append(tif_path.name)
+            else:
+                time_to_file[timestamp] = tif_path
+        if invalid_files:
+            raise ValueError(f"预报{label}目录存在无法解析时间的文件，例如：{'、'.join(invalid_files[:3])}")
+        if duplicate_times:
+            first_time, names = next(iter(duplicate_times.items()))
+            raise ValueError(f"预报{label}目录存在重复时间 {first_time}，例如：{'、'.join(names[:3])}")
+        missing = [timestamp for timestamp in expected_index if timestamp not in time_to_file]
+        if missing:
+            sample = "、".join(module.format_time_value(item) for item in missing[:3])
+            raise ValueError(f"预报{label}目录缺少 {len(missing)} 个时间步，例如：{sample}")
+        out_of_window = [timestamp for timestamp in time_to_file if timestamp not in expected_set]
+        target_dir = archive_root / key
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        copied_files: list[str] = []
+        for timestamp in expected_index:
+            src_file = time_to_file[pd.Timestamp(timestamp)]
+            target_file = target_dir / src_file.name
+            shutil.copy2(src_file, target_file)
+            copied_files.append(target_file.name)
+        archived_dirs[key] = str(target_dir.resolve(strict=False))
+        manifest["variables"][key] = {
+            "label": label,
+            "source_dir": str(src_dir),
+            "archive_dir": archived_dirs[key],
+            "expected_steps": int(len(expected_index)),
+            "archived_files": int(len(copied_files)),
+            "out_of_window_files": int(len(out_of_window)),
+            "first_time": module.format_time_value(expected_index[0]) if len(expected_index) else "",
+            "last_time": module.format_time_value(expected_index[-1]) if len(expected_index) else "",
+            "files": copied_files,
+        }
+    manifest_path = archive_root / "input_manifest.json"
+    manifest_path.write_text(json.dumps(clean_for_json(manifest), ensure_ascii=False, indent=2, default=json_default), encoding="utf-8")
+    return {
+        "enabled": True,
+        "archive_root": str(archive_root.resolve(strict=False)),
+        "manifest_path": str(manifest_path.resolve(strict=False)),
+        "manifest": manifest,
+        "archived_dirs": archived_dirs,
+    }
+
+
 def series_values(values: Any, count: int) -> list[float | None]:
     if values is None:
         return [None] * count
@@ -137,6 +229,7 @@ def write_forecast_outputs(
     profile: str,
     objective_mode: str,
     forecast_dirs: dict[str, str],
+    input_archive: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -172,25 +265,29 @@ def write_forecast_outputs(
         np.savez_compressed(output_dir / forecast_state_file, **state_arrays)
 
     restart = dict(sim.get("forecast_restart", {}) or {})
+    source_initial = dict(read_json(source_run / "metadata.json").get("initial_state", {}) or {})
+    source_state_time = str(source_initial.get("state_snapshot_time", "") or "").strip()
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
         "run_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "result_title": "状态接续预报",
+        "result_title": "连续状态预报",
         "run_class": "forecast_restart",
         "forecast_result": {
             "enabled": True,
-            "label": "状态接续预报",
+            "label": "连续状态预报",
             "schema": restart.get("schema", "continuous_state_forecast_v1"),
             "status": restart.get("status", "ok"),
             "source_run_path": str(source_run.resolve(strict=False)),
             "source_run_name": source_run.name,
             "source_snapshot_file": str(snapshot_path.resolve(strict=False)),
+            "source_state_time": source_state_time,
             "forecast_state_snapshot_file": forecast_state_file if state_arrays else None,
             "forecast_start": frame["date"].iloc[0] if count else "",
             "forecast_end": frame["date"].iloc[-1] if count else "",
             "time_steps": int(count),
             "routing_state_available": bool(restart.get("routing_state_available")),
+            "forecast_input_archive": clean_for_json(input_archive or {}),
         },
         "workspace_config": str(config_path.resolve(strict=False)),
         "calibration_profile": profile,
@@ -212,6 +309,7 @@ def write_forecast_outputs(
             "hot_start_supported": True,
             "hot_start_enabled": True,
             "source_state_snapshot_file": str(snapshot_path.resolve(strict=False)),
+            "source_state_snapshot_time": source_state_time,
             "state_snapshot_available": bool(state_arrays),
             "state_snapshot_file": forecast_state_file if state_arrays else None,
             "state_snapshot_schema": "per_cell_branch_states_v1",
@@ -227,6 +325,7 @@ def write_forecast_outputs(
             "forecast_prec_dir": forecast_dirs.get("prec", ""),
             "forecast_temp_dir": forecast_dirs.get("temp", ""),
             "forecast_evap_dir": forecast_dirs.get("evap", ""),
+            "forecast_input_archive": clean_for_json(input_archive or {}),
             "glacier_mode": str(getattr(module.args, "glacier_mode", "") or ""),
         },
         "optional_modules": {
@@ -243,8 +342,8 @@ def write_forecast_outputs(
     }
 
 
-def run_forecast(args: argparse.Namespace) -> dict[str, Any]:
-    log_stage("读取工作区与源结果")
+def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[str, Any]:
+    log_stage("读取工作区与源结果", stage_callback)
     config = profile_runner.read_config(args.config)
     config = profile_runner.normalize_legacy_project_paths(config)
     config_path = Path(str(config.get("_config_path", args.config) or args.config)).resolve(strict=False)
@@ -260,7 +359,7 @@ def run_forecast(args: argparse.Namespace) -> dict[str, Any]:
     paths = profile_runner.build_profile_paths(config, profile)
     runtime_prec_dir = str(args.forecast_prec_dir or paths["aligned_prec_custom_dir"])
 
-    log_stage("加载 HBV 核心")
+    log_stage("加载 HBV 核心", stage_callback)
     module = profile_runner.load_legacy_module(profile_runner.old_script_path(config, "model", "calibrate_hbv_cryo.py"))
     cli_args = build_runtime_cli_args(config_path, profile, objective_mode, runtime_prec_source, runtime_prec_dir, args.glacier_mode)
     patch_runtime_environment(module, config, profile, cli_args)
@@ -273,29 +372,41 @@ def run_forecast(args: argparse.Namespace) -> dict[str, Any]:
 
     forecast_start = args.forecast_start or infer_forecast_start(module, source_run, source_metadata)
     apply_forecast_window(module, forecast_start, args.forecast_end)
-    module.PREC_DIR = str(Path(args.forecast_prec_dir or runtime_prec_dir).resolve(strict=False))
-    if args.forecast_temp_dir:
-        module.TEMP_DIR = str(Path(args.forecast_temp_dir).resolve(strict=False))
-    if args.forecast_evap_dir:
-        module.EVAP_DIR = str(Path(args.forecast_evap_dir).resolve(strict=False))
+    output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
+        Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    )
+    source_forecast_dirs = {
+        "prec": str(Path(args.forecast_prec_dir or runtime_prec_dir).resolve(strict=False)),
+        "temp": str(Path(args.forecast_temp_dir or paths["aligned_temp_dir"]).resolve(strict=False)),
+        "evap": str(Path(args.forecast_evap_dir or paths["aligned_evap_dir"]).resolve(strict=False)),
+    }
+    log_stage("检查并归档预报气象输入", stage_callback)
+    input_archive = archive_forecast_inputs(
+        module,
+        output_dir,
+        source_forecast_dirs,
+        forecast_start,
+        args.forecast_end,
+    )
+    archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
+    module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
+    module.TEMP_DIR = archived_dirs.get("temp", source_forecast_dirs["temp"])
+    module.EVAP_DIR = archived_dirs.get("evap", source_forecast_dirs["evap"])
 
-    log_stage("加载未来气象与地理数据")
+    log_stage("加载未来气象与地理数据", stage_callback)
     module.load_all_data(end_date_override=module.SIM_END, skip_obs=True)
 
-    log_stage("读取参数并从状态快照重启")
+    log_stage("读取参数并从状态快照重启", stage_callback)
     param_vector, params_adjusted = build_param_vector(module, params)
     sim = module.run_forecast_from_state(param_vector, snapshot_path=snapshot_path)
     sim["glacier_enabled"] = module.glacier_feature_enabled()
 
-    output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
-        Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-    )
     forecast_dirs = {
         "prec": module.PREC_DIR,
         "temp": module.TEMP_DIR,
         "evap": module.EVAP_DIR,
     }
-    log_stage("写出预报结果")
+    log_stage("写出预报结果", stage_callback)
     result = write_forecast_outputs(
         module,
         output_dir,
@@ -307,6 +418,7 @@ def run_forecast(args: argparse.Namespace) -> dict[str, Any]:
         profile=profile,
         objective_mode=objective_mode,
         forecast_dirs=forecast_dirs,
+        input_archive=input_archive,
     )
     result["params_adjusted"] = bool(params_adjusted)
     return result
