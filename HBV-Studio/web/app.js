@@ -3167,6 +3167,47 @@ function forecastParameterSourceSummary(source = {}, fallback = {}) {
   };
 }
 
+function forecastParameterContextHtml(run = {}) {
+  const builder = window.HBVStudioParameterLibrary?.forecastParameterContext;
+  if (!builder) return "";
+  const currentProfile = normalizeCalibrationProfile(state.currentWorkspace?.率定模式, "");
+  const currentContext = {
+    workspace_config: state.wizardWorkspacePath || "",
+    workspace_name: workspaceLabelByPath(state.wizardWorkspacePath),
+    profile: currentProfile,
+    time_step_hours: Number(state.currentWorkspace?.时间步长_小时 || (currentProfile === "hourly" ? 1 : 24)),
+    objective_mode: $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY,
+    prec_source: getTaskRuntimePrecipSource(),
+    precipitation_mode: getSelectedRadio("wz-precip-mode") || state.currentWorkspace?.气象策略?.降水方案 || "",
+  };
+  const info = builder(run, currentContext, {
+    profileLabel,
+    objectiveLabel,
+    precipSourceLabel: getConfiguredPrecipSourceLabel,
+    stationPrecipModeLabel,
+    formatNumber,
+    samePath,
+  });
+  const rows = Array.isArray(info?.rows) ? info.rows : [];
+  const statusClass = focusStatusClass(info?.status || "ok");
+  return `
+    <div class="forecast-parameter-context ${statusClass}">
+      <div class="forecast-parameter-context-head">
+        <span>参数适用性</span>
+        <strong>${escapeHtml(info?.source_workspace || "未记录来源工作区")}</strong>
+      </div>
+      ${rows.length ? `
+        <div class="forecast-parameter-context-grid">
+          ${rows.map(([label, value]) => `
+            <span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "—")}</strong>
+          `).join("")}
+        </div>
+      ` : ""}
+      <small>${escapeHtml(info?.note || "连续状态预报读取源结果参数和起报状态，不重新率定参数。")}</small>
+    </div>
+  `;
+}
+
 function restartStateRows(meta = {}) {
   const initial = meta?.initial_state || {};
   const forecast = meta?.forecast_result || {};
@@ -6597,6 +6638,7 @@ function renderForecastSourceSummary() {
         <span>参数来源</span><strong title="${escapeHtml(parameterSource.detail)}">${escapeHtml(parameterSource.value)}</strong>
         <span>预报气象</span><strong title="${escapeHtml(archiveDetail)}">${escapeHtml(archiveText)}</strong>
       </div>
+      ${forecastParameterContextHtml(run)}
       <small>${escapeHtml(run.workspace_name || runWorkspaceName(run) || "未关联工作区")}</small>
     </div>
   `;

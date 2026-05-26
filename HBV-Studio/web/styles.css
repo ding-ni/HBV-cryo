@@ -522,6 +522,54 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   overflow-wrap: anywhere;
 }
 
+.forecast-parameter-context {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.forecast-parameter-context-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.forecast-parameter-context-head span,
+.forecast-parameter-context small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.forecast-parameter-context-head strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.forecast-parameter-context-grid {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 4px 12px;
+  margin-top: 8px;
+}
+
+.forecast-parameter-context-grid span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.forecast-parameter-context-grid strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.forecast-parameter-context small {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
 .forecast-input-summary {
   margin-top: 12px;
 }

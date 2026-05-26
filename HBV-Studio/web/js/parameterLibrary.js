@@ -147,6 +147,53 @@
     }
   }
 
+  function forecastParameterContext(run = {}, current = {}, helpers = {}) {
+    const profileLabel = helpers.profileLabel || (value => value || "未记录");
+    const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
+    const precipSourceLabel = helpers.precipSourceLabel || (value => value || "未记录");
+    const stationPrecipModeLabel = helpers.stationPrecipModeLabel || (value => value || "未记录");
+    const formatNumber = helpers.formatNumber || ((value, digits = 0) => Number(value).toFixed(digits));
+    const samePath = helpers.samePath || ((a, b) => normalizeKey(a) === normalizeKey(b));
+    const context = run.parameter_context || {};
+    const source = Object.keys(context).length ? context : (run.source_parameter_summary || {});
+    const sourceWorkspace = source.source_workspace || run.workspace_name || current.workspace_name || "未记录来源工作区";
+    const sourceConfig = source.source_workspace_config || run.workspace_config || "";
+    const currentConfig = current.workspace_config || "";
+    const rows = [];
+
+    const profile = source.calibration_profile || run.calibration_profile || "";
+    if (profile) rows.push(["计算尺度", profileLabel(profile)]);
+    const step = Number(source.time_step_hours || run.time_step_hours || run.time_config?.time_step_hours || 0);
+    if (Number.isFinite(step) && step > 0) rows.push(["时间步长", `${formatNumber(step, 0)} 小时`]);
+    const objective = source.objective_mode || run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "";
+    if (objective) rows.push(["率定目标", objectiveLabel(objective)]);
+    const precip = source.prec_source || run.runtime_prec_source || run.prec_source || "";
+    if (precip) rows.push(["降水驱动", precipSourceLabel(precip)]);
+    const precipMode = source.precipitation_strategy || source.precipitation_mode || "";
+    if (precipMode) rows.push(["降水方案", stationPrecipModeLabel(precipMode)]);
+    const glacierMode = source.glacier_mode || "";
+    if (glacierMode) rows.push(["冰川模式", glacierMode === "off" ? "关闭" : "开启"]);
+    const paramCount = Number(source.parameter_count || run.optimized_param_count || 0);
+    if (Number.isFinite(paramCount) && paramCount > 0) rows.push(["参数数量", `${formatNumber(paramCount, 0)} 项`]);
+
+    const warnings = [];
+    if (sourceConfig && currentConfig && !samePath(sourceConfig, currentConfig)) {
+      warnings.push("当前打开工作区与源结果工作区不同，本次预报仍以源结果保存的参数和起报状态为准");
+    }
+    const status = warnings.length ? "warn" : "ok";
+    const note = warnings.length
+      ? `${warnings.join("；")}。公共参数集适合用于新模拟或手调起点，不在连续状态预报中单独替换源结果状态。`
+      : "连续状态预报读取同一源结果中的参数和起报状态，不重新率定参数。";
+    return {
+      status,
+      source_workspace: sourceWorkspace,
+      source_workspace_config: sourceConfig,
+      rows,
+      warnings,
+      note,
+    };
+  }
+
   window.HBVStudioParameterLibrary = {
     normalizeKey,
     scopeLabel,
@@ -154,5 +201,6 @@
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,
+    forecastParameterContext,
   };
 })();

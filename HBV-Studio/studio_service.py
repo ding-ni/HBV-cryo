@@ -6701,6 +6701,60 @@ def _display_run_title(
     }
 
 
+def _run_parameter_context(
+    run_dir: Path,
+    metadata: dict[str, Any],
+    resolved_config: Path | None,
+) -> dict[str, Any]:
+    data_sources = dict(metadata.get("data_sources", {}) or {})
+    time_config = dict(metadata.get("time_config", {}) or {})
+    initial_state = dict(metadata.get("initial_state", {}) or {})
+    parameter_profile = dict(metadata.get("parameter_profile", {}) or {})
+    optimized_params = metadata.get("optimized_params", {})
+    bounds_profile = str(
+        metadata.get("param_bounds_profile")
+        or parameter_profile.get("bounds_profile")
+        or ""
+    ).strip()
+    bounds_label = str(
+        metadata.get("param_bounds_profile_label")
+        or parameter_profile.get("bounds_profile_label")
+        or getattr(profile_runner, "PARAM_BOUNDS_PROFILE_LABELS", {}).get(bounds_profile, "")
+        or ""
+    ).strip()
+    workspace_config = str(metadata.get("workspace_config", "") or (resolved_config or "")).strip()
+    return {
+        "schema": "run_parameter_context_v1",
+        "parameter_source": "source_result",
+        "parameter_source_label": "源结果参数",
+        "source_run_path": str(run_dir.resolve(strict=False)),
+        "source_run_name": run_dir.name,
+        "source_workspace": _workspace_name_for_summary(metadata, resolved_config),
+        "source_workspace_config": workspace_config,
+        "calibration_profile": str(metadata.get("calibration_profile") or "").strip(),
+        "time_step_hours": time_config.get("time_step_hours"),
+        "objective_mode": _metadata_objective_family(metadata),
+        "prec_source": str(
+            data_sources.get("runtime_prec_source")
+            or data_sources.get("prec_source")
+            or data_sources.get("configured_precip_source")
+            or ""
+        ).strip(),
+        "precipitation_strategy": str(
+            data_sources.get("precipitation_strategy")
+            or data_sources.get("precipitation_mode")
+            or data_sources.get("station_precip_mode")
+            or ""
+        ).strip(),
+        "glacier_mode": str(data_sources.get("glacier_mode", "") or "").strip(),
+        "glacier_enabled": bool(metadata.get("optional_modules", {}).get("glacier", {}).get("enabled")),
+        "param_bounds_profile": bounds_profile,
+        "param_bounds_profile_label": bounds_label,
+        "state_snapshot_time": str(initial_state.get("state_snapshot_time", "") or "").strip(),
+        "parameter_count": int(len(optimized_params)) if isinstance(optimized_params, dict) else 0,
+    }
+
+
 def _build_run_summary(
     run_dir: Path,
     metadata: dict[str, Any] | None = None,
@@ -6755,6 +6809,7 @@ def _build_run_summary(
         "source_state_snapshot_time": "",
         "source_state_summary": {},
         "source_parameter_summary": {},
+        "parameter_context": {},
         "forecast_input_archive": {},
         "forecast_source_ready": False,
     }
@@ -6832,6 +6887,7 @@ def _build_run_summary(
         or dict(metadata.get("data_sources", {}) or {}).get("forecast_input_archive")
         or {}
     )
+    summary["parameter_context"] = _run_parameter_context(run_dir, metadata, resolved_config)
     summary["forecast_source_ready"] = bool(summary["optimized_params_available"] and summary["state_snapshot_available"])
     summary.update(_display_run_title(run_dir, metadata, resolved_config, studio_compatible, updated_at=updated_at))
     source_run_path, source_run_name = _source_run_meta(metadata)
