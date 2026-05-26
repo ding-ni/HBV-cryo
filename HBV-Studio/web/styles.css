@@ -1232,6 +1232,29 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   font-size: 13px;
   white-space: nowrap;
 }
+.input-time-summary-detail {
+  margin-top: 6px;
+  color: inherit;
+  font-size: 12px;
+}
+.input-time-summary-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 10px;
+  margin-top: 10px;
+}
+.input-time-summary-items span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.input-time-summary-items strong {
+  font-size: 11px;
+  opacity: 0.78;
+}
 .task-debug-details {
   border-top: 1px dashed var(--line);
   padding-top: 8px;
