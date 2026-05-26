@@ -1417,25 +1417,20 @@ function renderManualPresetDiff() {
 function manualPresetContextWarning(preset, data = state._runData) {
   if (!preset || !data?.metadata) return "";
   const meta = data.metadata || {};
-  const currentObjective = effectiveObjectiveMode(meta);
-  const currentPrecip = String(meta.data_sources?.runtime_prec_source || meta.data_sources?.prec_source || meta.data_sources?.configured_precip_source || "").trim().toLowerCase();
-  const currentGlacier = String(meta.data_sources?.glacier_mode || "").trim().toLowerCase();
-  const currentBoundsProfile = String(meta.param_bounds_profile || meta.parameter_profile?.bounds_profile || "").trim().toLowerCase();
-  const warnings = [];
-  if (preset.objective_mode && currentObjective && String(preset.objective_mode).trim().toLowerCase() !== currentObjective) {
-    warnings.push(`目标函数模式不同（参数集 ${objectiveLabel(preset.objective_mode)}，当前 ${objectiveLabel(currentObjective)}）`);
-  }
-  if (preset.prec_source && currentPrecip && String(preset.prec_source).trim().toLowerCase() !== currentPrecip) {
-    warnings.push(`降水驱动不同（参数集 ${getConfiguredPrecipSourceLabel(preset.prec_source)}，当前 ${getConfiguredPrecipSourceLabel(currentPrecip)}）`);
-  }
-  if (preset.glacier_mode && currentGlacier && String(preset.glacier_mode).trim().toLowerCase() !== currentGlacier) {
-    warnings.push(`冰川模式不同（参数集 ${preset.glacier_mode}，当前 ${currentGlacier}）`);
-  }
-  if (preset.param_bounds_profile && currentBoundsProfile && String(preset.param_bounds_profile).trim().toLowerCase() !== currentBoundsProfile) {
-    warnings.push(`参数范围不同（参数集 ${PARAM_BOUNDS_PROFILE_LABELS[preset.param_bounds_profile] || preset.param_bounds_profile}，当前 ${PARAM_BOUNDS_PROFILE_LABELS[currentBoundsProfile] || currentBoundsProfile}）`);
-  }
-  if (!warnings.length) return "";
-  return `注意：${warnings.join("；")}。`;
+  return window.HBVStudioParameterLibrary?.manualContextWarning(
+    preset,
+    {
+      objective_mode: effectiveObjectiveMode(meta),
+      prec_source: String(meta.data_sources?.runtime_prec_source || meta.data_sources?.prec_source || meta.data_sources?.configured_precip_source || "").trim().toLowerCase(),
+      glacier_mode: String(meta.data_sources?.glacier_mode || "").trim().toLowerCase(),
+      param_bounds_profile: String(meta.param_bounds_profile || meta.parameter_profile?.bounds_profile || "").trim().toLowerCase(),
+    },
+    {
+      objectiveLabel,
+      precipSourceLabel: getConfiguredPrecipSourceLabel,
+      boundsLabel: value => PARAM_BOUNDS_PROFILE_LABELS[value] || value,
+    },
+  ) || "";
 }
 
 function timeBasisLabel(value) {
@@ -1443,10 +1438,6 @@ function timeBasisLabel(value) {
   if (key === "event_windows") return "洪水事件窗口";
   if (key === "forecast_window") return "预报窗口";
   return "连续时段";
-}
-
-function normalizeComparableKey(value) {
-  return String(value || "").trim().toLowerCase();
 }
 
 function selectedTaskManualPreset() {
@@ -1475,80 +1466,31 @@ function currentTaskPresetContext() {
 }
 
 function taskPresetContextWarnings(preset, current = currentTaskPresetContext()) {
-  if (!preset) return [];
-  const ctx = preset.context || {};
-  const warnings = [];
-  const presetProfile = normalizeComparableKey(preset.calibration_profile || ctx.calibration_profile || "");
-  if (presetProfile && current.profile && presetProfile !== normalizeComparableKey(current.profile)) {
-    warnings.push(`时间尺度不同（参数集 ${profileLabel(presetProfile)}，当前 ${profileLabel(current.profile)}）`);
-  }
-  const presetStep = Number(ctx.time_step_hours || preset.time_step_hours || 0);
-  const currentStep = Number(current.time_step_hours || 0);
-  if (Number.isFinite(presetStep) && presetStep > 0 && Number.isFinite(currentStep) && currentStep > 0 && Math.abs(presetStep - currentStep) > 0.01) {
-    warnings.push(`时间步长不同（参数集 ${formatNumber(presetStep, 0)} 小时，当前 ${formatNumber(currentStep, 0)} 小时）`);
-  }
-  const presetObjective = normalizeComparableKey(preset.objective_mode || "");
-  if (presetObjective && normalizeComparableKey(current.objective_mode) && presetObjective !== normalizeComparableKey(current.objective_mode)) {
-    warnings.push(`率定目标不同（参数集 ${objectiveLabel(presetObjective)}，当前 ${objectiveLabel(current.objective_mode)}）`);
-  }
-  const presetPrecip = normalizeComparableKey(preset.prec_source || "");
-  if (presetPrecip && normalizeComparableKey(current.prec_source) && presetPrecip !== normalizeComparableKey(current.prec_source)) {
-    warnings.push(`降水驱动不同（参数集 ${getConfiguredPrecipSourceLabel(presetPrecip)}，当前 ${getConfiguredPrecipSourceLabel(current.prec_source)}）`);
-  }
-  const presetGlacier = normalizeComparableKey(preset.glacier_mode || "");
-  if (presetGlacier && normalizeComparableKey(current.glacier_mode) && presetGlacier !== normalizeComparableKey(current.glacier_mode)) {
-    warnings.push(`冰川模式不同（参数集 ${presetGlacier === "off" ? "关闭" : "开启"}，当前 ${current.glacier_mode === "off" ? "关闭" : "开启"}）`);
-  }
-  const presetBounds = normalizeComparableKey(preset.param_bounds_profile || "");
-  if (presetBounds && normalizeComparableKey(current.param_bounds_profile) && presetBounds !== normalizeComparableKey(current.param_bounds_profile)) {
-    warnings.push(`参数范围不同（参数集 ${PARAM_BOUNDS_PROFILE_LABELS[presetBounds] || presetBounds}，当前 ${PARAM_BOUNDS_PROFILE_LABELS[current.param_bounds_profile] || current.param_bounds_profile}）`);
-  }
-  const presetPrecipMode = normalizeComparableKey(ctx.precipitation_mode || "");
-  if (presetPrecipMode && normalizeComparableKey(current.precipitation_mode) && presetPrecipMode !== normalizeComparableKey(current.precipitation_mode)) {
-    warnings.push(`降水方案不同（参数集 ${stationPrecipModeLabel(presetPrecipMode)}，当前 ${stationPrecipModeLabel(current.precipitation_mode)}）`);
-  }
-  const presetTimeBasis = normalizeComparableKey(ctx.task_time_basis || "");
-  if (presetTimeBasis && normalizeComparableKey(current.task_time_basis) && presetTimeBasis !== normalizeComparableKey(current.task_time_basis)) {
-    warnings.push(`资料时段口径不同（参数集 ${timeBasisLabel(presetTimeBasis)}，当前 ${timeBasisLabel(current.task_time_basis)}）`);
-  }
-  return warnings;
+  return window.HBVStudioParameterLibrary?.taskContextWarnings(preset, current, {
+    profileLabel,
+    objectiveLabel,
+    precipSourceLabel: getConfiguredPrecipSourceLabel,
+    stationPrecipModeLabel,
+    timeBasisLabel,
+    formatNumber,
+    paramBoundsProfileLabels: PARAM_BOUNDS_PROFILE_LABELS,
+  }) || [];
 }
 
 function renderTaskPresetContextHint() {
   const host = $("#task-init-preset-context");
   if (!host) return;
   const preset = selectedTaskManualPreset();
-  if (!preset) {
-    host.style.display = "none";
-    host.textContent = "";
-    return;
-  }
-  const current = currentTaskPresetContext();
-  const ctx = preset.context || {};
-  const warnings = taskPresetContextWarnings(preset, current);
-  const sourceWorkspace = ctx.workspace_name || preset.source_workspace || "未记录来源工作区";
-  const scopeLabel = normalizeComparableKey(preset.scope) === "global" ? "公共参数库" : "当前工作区参数集";
-  const currentText = [
-    profileLabel(current.profile),
-    objectiveLabel(current.objective_mode),
-    getConfiguredPrecipSourceLabel(current.prec_source),
-    stationPrecipModeLabel(current.precipitation_mode),
-  ].join("，");
-  host.style.display = "";
-  if (warnings.length) {
-    host.className = "hint-box status-warn";
-    host.innerHTML = `
-      <strong>${escapeHtml(scopeLabel)}：${escapeHtml(preset.name || "未命名参数集")}</strong><br>
-      来源工作区：${escapeHtml(sourceWorkspace)}。当前率定设置：${escapeHtml(currentText)}。<br>
-      注意：${warnings.map(item => escapeHtml(item)).join("；")}。可以作为初值继续试算，但建议保留适度初值搜索范围，并在结果页复核径流过程和水量偏差。
-    `;
-  } else {
-    host.className = "hint-box status-ok";
-    host.innerHTML = `
-      <strong>${escapeHtml(scopeLabel)}：${escapeHtml(preset.name || "未命名参数集")}</strong><br>
-      来源工作区：${escapeHtml(sourceWorkspace)}。参数集上下文与当前率定设置基本一致，可作为本次自动率定初值；仍建议保留适度初值搜索范围。
-    `;
-  }
+  window.HBVStudioParameterLibrary?.renderTaskContextHint(host, preset, currentTaskPresetContext(), {
+    escapeHtml,
+    profileLabel,
+    objectiveLabel,
+    precipSourceLabel: getConfiguredPrecipSourceLabel,
+    stationPrecipModeLabel,
+    timeBasisLabel,
+    formatNumber,
+    paramBoundsProfileLabels: PARAM_BOUNDS_PROFILE_LABELS,
+  });
 }
 
 function clearManualPresetComparison({ silent = false } = {}) {
@@ -3538,14 +3480,7 @@ function resolveManualPresetProfile(configPath = "", explicitProfile = "") {
 function renderPresetOptions(selector, presets, placeholder) {
   const el = $(selector);
   if (!el) return;
-  const presetOptions = presets.map(p => {
-    const scope = String(p.scope || "workspace").toLowerCase() === "global" ? "公共" : "本工作区";
-    return `<option value="${escapeHtml(p.id)}">${escapeHtml(scope)} · ${escapeHtml(p.name)}</option>`;
-  }).join("");
-  const current = el.value;
-  el.innerHTML = `<option value="">${placeholder}</option>${presetOptions}`;
-  const hasCurrent = presets.some(p => p.id === current);
-  el.value = hasCurrent ? current : "";
+  window.HBVStudioParameterLibrary?.renderPresetOptions(el, presets, placeholder, { escapeHtml });
 }
 
 function renderManualPresetOptions() {
