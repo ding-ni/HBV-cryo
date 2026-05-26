@@ -6682,24 +6682,28 @@ async function refreshForecastInputCheck({ loading = false } = {}) {
   const run = selectedForecastRun();
   if (!run?.path) {
     renderForecastInputSummary(null);
-    return;
+    return null;
   }
   const requestId = ++state.activeForecastInputCheckRequestId;
   if (loading) renderForecastInputSummary(null, "loading");
   try {
     const response = await apiPost("/api/forecast/input-check", forecastInputPayload(run));
     if (requestId !== state.activeForecastInputCheckRequestId) return;
-    renderForecastInputSummary(response.data || null);
+    const check = response.data || null;
+    renderForecastInputSummary(check);
+    return check;
   } catch (err) {
     if (requestId !== state.activeForecastInputCheckRequestId) return;
-    renderForecastInputSummary({
+    const check = {
       status: "fail",
       headline: "预报气象输入检查失败。",
       errors: [err.message],
       warnings: [],
       items: [],
       variables: [],
-    });
+    };
+    renderForecastInputSummary(check);
+    return check;
   }
 }
 
@@ -6925,6 +6929,19 @@ async function startForecastRestart() {
     showToast("请完整选择预报降水、气温和潜在蒸散发栅格目录。", true);
     return;
   }
+  const startButton = $("#forecast-start-button");
+  if (startButton) startButton.disabled = true;
+  const inputCheck = await refreshForecastInputCheck({ loading: true });
+  if (!inputCheck || inputCheck.status === "fail") {
+    const firstIssue = inputCheck?.errors?.[0] || "预报气象输入检查未通过。";
+    showToast(firstIssue, true);
+    renderForecastSourceSummary();
+    return;
+  }
+  if (inputCheck.status === "warn") {
+    const firstWarning = inputCheck?.warnings?.[0] || "预报气象目录存在提示，系统将按预报窗口筛选归档。";
+    showToast(firstWarning);
+  }
   const payload = {
     source_run: run.path,
     config_path: run.workspace_config || state.wizardWorkspacePath || "",
@@ -6945,6 +6962,8 @@ async function startForecastRestart() {
     renderForecastView();
   } catch (err) {
     showToast(err.message, true);
+  } finally {
+    renderForecastSourceSummary();
   }
 }
 
