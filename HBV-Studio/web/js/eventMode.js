@@ -155,6 +155,15 @@
     return key || "未记录";
   }
 
+  function initialStatePolicyLabel(value) {
+    const key = String(value || "").trim().toLowerCase();
+    if (key === "event_warmup" || key === "warmup" || key === "event_preheat") return "事件预热";
+    if (key === "fixed_initial" || key === "fixed" || key === "default_initial") return "固定初值";
+    if (key === "source_state" || key === "restart_state" || key === "snapshot") return "来源状态";
+    if (key === "continuous_state" || key === "continuous" || key === "carryover") return "连续状态";
+    return value ? String(value) : "事件预热";
+  }
+
   function renderEventWindowSummary(eventInfo = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const statusClass = helpers.statusClass || defaultStatusClass;
@@ -163,7 +172,9 @@
     const counts = eventInfo.purpose_counts || {};
     const validCount = Number(eventInfo.valid_event_count || 0);
     const eventCount = Number(eventInfo.event_count || events.length);
-    const status = validCount > 0 && !(eventInfo.errors || []).length ? "ok" : "fail";
+    const hasErrors = Boolean((eventInfo.errors || []).length);
+    const hasWarnings = Boolean((eventInfo.warnings || []).length || eventInfo.initial_state_warning);
+    const status = validCount <= 0 || hasErrors ? "fail" : hasWarnings ? "warn" : "ok";
     const issueItems = [
       ...(Array.isArray(eventInfo.errors) ? eventInfo.errors.map(item => ({ item, cls: "status-fail" })) : []),
       ...(Array.isArray(eventInfo.warnings) ? eventInfo.warnings.map(item => ({ item, cls: "status-warn" })) : []),
@@ -189,6 +200,13 @@
     const issues = issueItems.length
       ? `<ul class="event-window-issues">${issueItems.slice(0, 8).map(({ item, cls }) => `<li class="${cls}">${escapeHtml(item)}</li>`).join("")}</ul>`
       : "";
+    const initialPolicy = eventInfo.initial_state_policy_label
+      || initialStatePolicyLabel(eventInfo.initial_state_policy);
+    const continuityText = eventInfo.state_continuity_between_events === true
+      ? "事件之间传递状态"
+      : "事件之间不传递状态";
+    const initialNote = eventInfo.initial_state_note || continuityText;
+    const initialWarning = eventInfo.initial_state_warning || "";
     return `
       <div class="event-window-summary">
         <div class="event-window-title">
@@ -196,6 +214,11 @@
           <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效；率定 ${counts.calibration || 0}、验证 ${counts.validation || 0}、诊断 ${counts.diagnostic || 0}`)}</span>
         </div>
         ${eventInfo.source_file ? `<div class="event-window-source">事件表：${escapeHtml(eventInfo.source_file)}</div>` : ""}
+        <div class="event-window-policy">
+          <strong>初始条件：${escapeHtml(initialPolicy)}</strong>
+          <span>${escapeHtml(initialNote)}</span>
+          ${initialWarning ? `<span class="status-warn">${escapeHtml(initialWarning)}</span>` : ""}
+        </div>
         <div class="event-window-row event-window-head">
           <span>事件</span>
           <span>用途</span>
@@ -214,6 +237,7 @@
   window.HBVStudioEventMode = {
     floodEventEvaluation,
     eventChartEvents,
+    initialStatePolicyLabel,
     renderFloodEventChart,
     renderEventWindowSummary,
   };

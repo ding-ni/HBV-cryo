@@ -117,6 +117,62 @@ EVENT_PURPOSE_ALIASES = {
     "诊断": "diagnostic",
     "复核": "diagnostic",
 }
+EVENT_INITIAL_STATE_POLICY_ALIASES = {
+    "event_warmup": "event_warmup",
+    "event-preheat": "event_warmup",
+    "event_preheat": "event_warmup",
+    "independent_warmup": "event_warmup",
+    "warmup_each_event": "event_warmup",
+    "warmup": "event_warmup",
+    "事件预热": "event_warmup",
+    "逐场预热": "event_warmup",
+    "fixed_initial": "fixed_initial",
+    "fixed": "fixed_initial",
+    "default_initial": "fixed_initial",
+    "constant": "fixed_initial",
+    "固定初值": "fixed_initial",
+    "固定初始状态": "fixed_initial",
+    "默认初值": "fixed_initial",
+    "source_state": "source_state",
+    "restart_state": "source_state",
+    "snapshot": "source_state",
+    "hot_start": "source_state",
+    "来源状态": "source_state",
+    "状态快照": "source_state",
+    "起报状态": "source_state",
+    "continuous_state": "continuous_state",
+    "continuous": "continuous_state",
+    "carryover": "continuous_state",
+    "carry_over": "continuous_state",
+    "连续状态": "continuous_state",
+    "事件间连续": "continuous_state",
+}
+EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
+    "event_warmup": {
+        "label": "事件预热",
+        "state_continuity_between_events": False,
+        "note": "每场事件从运行开始独立预热至评分开始，事件之间不传递状态。",
+        "warning": "",
+    },
+    "fixed_initial": {
+        "label": "固定初值",
+        "state_continuity_between_events": False,
+        "note": "每场事件使用默认或指定初始状态，事件之间不传递状态。",
+        "warning": "固定初值对前期含水量、积雪和汇流记忆的不确定性较高，宜仅用于资料极短的次洪复核。",
+    },
+    "source_state": {
+        "label": "来源状态",
+        "state_continuity_between_events": False,
+        "note": "每场事件使用外部连续模拟状态作为初值，事件之间不直接传递状态。",
+        "warning": "",
+    },
+    "continuous_state": {
+        "label": "连续状态",
+        "state_continuity_between_events": True,
+        "note": "事件间按连续过程传递状态，要求事件之间强迫资料连续。",
+        "warning": "连续状态策略不适合事件之间存在资料缺口的事件窗口集合。",
+    },
+}
 SYSTEM_RESULT_TITLES = frozenset({"手调起点", "手调结果"})
 RUN_EXPORT_FIELD_LABELS = {
     "q_sim": "模拟总径流(m3/s)",
@@ -1707,6 +1763,28 @@ def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
+def normalize_event_initial_state_policy(value: Any) -> str:
+    raw = str(value or "event_warmup").strip()
+    if not raw:
+        return "event_warmup"
+    key = raw.lower()
+    return EVENT_INITIAL_STATE_POLICY_ALIASES.get(key, EVENT_INITIAL_STATE_POLICY_ALIASES.get(raw, key))
+
+
+def event_initial_state_policy_summary(value: Any) -> dict[str, Any]:
+    policy = normalize_event_initial_state_policy(value)
+    summary = dict(EVENT_INITIAL_STATE_POLICY_SUMMARIES.get(policy, {}))
+    if not summary:
+        summary = {
+            "label": str(value or policy or "未记录"),
+            "state_continuity_between_events": False,
+            "note": "按配置的事件初始条件策略处理。",
+            "warning": "",
+        }
+    summary["policy"] = policy
+    return summary
+
+
 def _event_field(event: dict[str, Any], *names: str) -> Any:
     for name in names:
         if name in event and event.get(name) not in (None, ""):
@@ -1773,6 +1851,14 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
     raw_events = cfg.get("事件表", cfg.get("events", []))
     warnings: list[str] = []
     errors: list[str] = []
+    initial_state = event_initial_state_policy_summary(
+        cfg.get(
+            "初始条件策略",
+            cfg.get("initial_state_policy", cfg.get("event_initial_state_policy", "event_warmup")),
+        )
+    )
+    if initial_state.get("warning"):
+        warnings.append(str(initial_state["warning"]))
     event_file_raw = str(cfg.get("事件表路径", cfg.get("events_file", cfg.get("event_file", ""))) or "").strip()
     event_file = _resolve_config_related_path(config, event_file_raw) if event_file_raw else None
     if event_file_raw:
@@ -1878,6 +1964,11 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
         "warnings": warnings,
         "errors": errors,
         "time_basis": TIME_BASIS_EVENT_WINDOWS,
+        "initial_state_policy": initial_state.get("policy", "event_warmup"),
+        "initial_state_policy_label": initial_state.get("label", "事件预热"),
+        "state_continuity_between_events": bool(initial_state.get("state_continuity_between_events")),
+        "initial_state_note": initial_state.get("note", ""),
+        "initial_state_warning": initial_state.get("warning", ""),
     }
 
 
@@ -4503,6 +4594,11 @@ def event_windows_ui_summary(event_info: dict[str, Any] | None, step_hours: floa
         "events": [convert_event(item) for item in events if isinstance(item, dict)],
         "valid_events": [convert_event(item) for item in valid_events if isinstance(item, dict)],
         "time_basis": TIME_BASIS_EVENT_WINDOWS,
+        "initial_state_policy": str(event_info.get("initial_state_policy", "event_warmup") or "event_warmup"),
+        "initial_state_policy_label": str(event_info.get("initial_state_policy_label", "事件预热") or "事件预热"),
+        "state_continuity_between_events": bool(event_info.get("state_continuity_between_events")),
+        "initial_state_note": str(event_info.get("initial_state_note", "") or ""),
+        "initial_state_warning": str(event_info.get("initial_state_warning", "") or ""),
     }
 
 
@@ -4529,7 +4625,9 @@ def input_time_basis_ui_summary(
         event_count = int(info.get("event_count", 0) or 0)
         valid_event_count = int(info.get("valid_event_count", 0) or 0)
         counts = dict(info.get("purpose_counts", {}) or {})
-        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") else "ok"
+        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") or info.get("warnings") else "ok"
+        initial_label = str(info.get("initial_state_policy_label", "事件预热") or "事件预热")
+        initial_note = str(info.get("initial_state_note", "") or "")
         headline = (
             f"当前按 {valid_event_count} 场洪水事件窗口检查，事件之间允许资料间断。"
             if valid_event_count > 0
@@ -4539,7 +4637,8 @@ def input_time_basis_ui_summary(
             "time_basis": time_basis,
             "time_basis_label": label,
             "headline": headline,
-            "detail": "气象强迫按运行窗口检查，观测径流按评分窗口检查；事件内部资料必须连续。",
+            "detail": "气象强迫按运行窗口检查，观测径流按评分窗口检查；事件内部资料必须连续。"
+            + (f" {initial_note}" if initial_note else ""),
             "start": start,
             "end": end,
             "expected_steps": expected_steps,
@@ -4552,8 +4651,13 @@ def input_time_basis_ui_summary(
                 {"label": "有效事件", "value": f"{valid_event_count}/{event_count} 场"},
                 {"label": "事件用途", "value": f"率定 {int(counts.get('calibration', 0) or 0)}、验证 {int(counts.get('validation', 0) or 0)}、诊断 {int(counts.get('diagnostic', 0) or 0)}"},
                 {"label": "运行窗口", "value": f"{start} 至 {end}" if start and end else "未形成有效运行窗口"},
+                {"label": "初始条件", "value": initial_label},
                 {"label": "目标时间步", "value": str(expected_steps) if expected_steps else "未形成"},
             ],
+            "initial_state_policy": str(info.get("initial_state_policy", "event_warmup") or "event_warmup"),
+            "initial_state_policy_label": initial_label,
+            "state_continuity_between_events": bool(info.get("state_continuity_between_events")),
+            "initial_state_note": initial_note,
         }
 
     try:

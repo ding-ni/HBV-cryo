@@ -3051,10 +3051,14 @@ function floodEventRows(meta = {}) {
   if (eventMode?.enabled) {
     const modeText = eventMode.runtime_mode === "independent_event_windows" ? "事件窗口独立运行" : "事件窗口资料";
     const stateText = eventMode.state_continuity_between_events === false ? "事件之间不传递状态" : "按配置处理事件间状态";
+    const initialPolicy = eventMode.initial_state_policy_label
+      || window.HBVStudioEventMode?.initialStatePolicyLabel?.(eventMode.initial_state_policy)
+      || eventMode.initial_state_policy
+      || "事件预热";
     rows.push([
       "事件资料模式",
       `${modeText}，${Number(eventMode.event_count || 0)} 场`,
-      `${stateText}；初始条件：${eventMode.initial_state_policy || "event_warmup"}`,
+      `${stateText}；初始条件：${initialPolicy}`,
     ]);
   }
   const events = Array.isArray(evaluation.events) ? evaluation.events : [];
