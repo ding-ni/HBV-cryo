@@ -78,7 +78,7 @@ def source_snapshot_path(source_run: Path, metadata: dict[str, Any]) -> Path:
     snapshot_file = str(initial_state.get("state_snapshot_file", "") or "").strip() or "state_snapshot.npz"
     candidate = source_run / snapshot_file
     if not candidate.exists():
-        raise FileNotFoundError("源结果目录缺少状态快照 state_snapshot.npz，请先用新版率定或手调结果生成状态。")
+        raise FileNotFoundError("源结果目录缺少可用于起报的状态文件 state_snapshot.npz，请先用新版率定或手调结果生成状态。")
     return candidate
 
 
@@ -167,7 +167,7 @@ def validate_forecast_window(
     end_text = time_text(module, forecast_end)
     if pd.Timestamp(start_text) != pd.Timestamp(expected_start):
         raise ValueError(
-            "连续状态预报起报时间必须紧接源状态快照："
+            "连续状态预报起报时间必须紧接源结果保存状态："
             f"源状态时刻为 {time_text(module, source_time)}，当前应从 {expected_start} 起报。"
             f"如果需要从 {start_text} 起报，请先补充源状态后至该时刻前的历史气象强迫，"
             "完成状态滚动更新后再启动预报。"
@@ -403,7 +403,7 @@ def write_forecast_outputs(
             "state_snapshot_routing_state": bool(state_arrays),
             "notes": [
                 "本结果从上一轮结果的 SP/SM/WC/UZ/LZ 与水源分支状态继续运行。",
-                "预报运行不重新率定参数，只读取源结果参数、状态快照和未来气象输入。",
+                "预报运行不重新率定参数，只读取源结果参数、保存状态和未来气象输入。",
             ],
         },
         "data_sources": {
@@ -435,7 +435,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     config_path = Path(str(config.get("_config_path", args.config) or args.config)).resolve(strict=False)
     source_run = resolve_input_path(args.source_run, config_path.parent)
     source_metadata = read_json(source_run / "metadata.json")
-    log_stage("读取源状态快照", stage_callback)
+    log_stage("读取源结果保存状态", stage_callback)
     snapshot_path = source_snapshot_path(source_run, source_metadata)
     log_stage("读取源结果参数", stage_callback)
     params = params_from_source(source_metadata)
@@ -502,7 +502,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     log_stage("加载未来气象与地理数据", stage_callback)
     module.load_all_data(end_date_override=module.SIM_END, skip_obs=True)
 
-    log_stage("整理参数与源状态快照", stage_callback)
+    log_stage("整理参数与起报状态", stage_callback)
     param_vector, params_adjusted = build_param_vector(module, params)
     log_stage("执行连续状态预报", stage_callback)
     sim = module.run_forecast_from_state(param_vector, snapshot_path=snapshot_path)

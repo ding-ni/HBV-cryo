@@ -2497,8 +2497,8 @@ function forecastRestartStageEntries(task) {
   else if (/检查预报时段|连续性/.test(stageText)) phase = 4;
   else if (/加载 HBV|加载模型|核心/.test(stageText)) phase = 3;
   else if (/源结果参数/.test(stageText)) phase = 2;
-  else if (/状态快照|源状态/.test(stageText)) phase = 1;
-  return ["读取源结果", "读取状态", "读取参数", "加载模型", "检查起报", "检查气象", "归档气象", "加载数据", "整理起报", "执行预报", "写出结果", "生成元数据", "完成"].map((label, idx) => {
+  else if (/保存状态|状态快照|源状态/.test(stageText)) phase = 1;
+  return ["读取源结果", "读取起报状态", "读取参数", "加载模型", "检查起报", "检查气象", "归档气象", "加载数据", "整理起报", "执行预报", "写出结果", "生成元数据", "完成"].map((label, idx) => {
     let status = "pending";
     if (task?.status === "completed") status = "completed";
     else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
@@ -3171,9 +3171,9 @@ function restartStateRows(meta = {}) {
   const rows = [];
   if (initial?.state_snapshot_available || initial?.hot_start_supported || forecast?.enabled) {
     rows.push([
-      "状态热启动",
+      "起报状态",
       initial?.hot_start_enabled || forecast?.enabled ? "可用" : "未启用",
-      initial?.state_snapshot_file ? `状态文件：${initial.state_snapshot_file}` : "当前结果未记录状态文件",
+      initial?.state_snapshot_file ? `起报状态文件：${initial.state_snapshot_file}` : "当前结果未记录可用于预报的起报状态",
     ]);
     rows.push([
       "状态时刻",
@@ -3185,7 +3185,7 @@ function restartStateRows(meta = {}) {
     rows.push([
       "预报来源",
       forecast?.source_run_name || "源结果",
-      forecast?.source_run_path ? shortPath(forecast.source_run_path) : "读取源结果参数与状态快照",
+      forecast?.source_run_path ? shortPath(forecast.source_run_path) : "读取源结果参数与起报状态",
     ]);
     const parameterSource = forecastParameterSourceSummary(
       forecast?.source_parameter_summary || meta?.source_parameter_summary || {},
@@ -5958,7 +5958,7 @@ function renderRunDetail(data) {
       ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
       ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
     ]),
-    restartRows.length ? metadataSection("状态重启与预报", restartRows) : "",
+    restartRows.length ? metadataSection("起报状态与预报", restartRows) : "",
     floodRows.length ? metadataSection("洪水事件评价", floodRows) : "",
     `
       <section class="metadata-section">
@@ -6480,9 +6480,9 @@ function forecastRunReady(run) {
 
 function forecastRunReadinessText(run) {
   if (!run) return "未选择源结果";
-  if (forecastRunReady(run)) return "可接续";
+  if (forecastRunReady(run)) return "可起报";
   if (run.optimized_params_available === false) return "缺少率定参数";
-  if (run.state_snapshot_available === false) return "缺少状态快照";
+  if (run.state_snapshot_available === false) return "缺少起报状态";
   return "需用新版结果";
 }
 
@@ -6607,8 +6607,8 @@ function renderForecastSourceSummary() {
   if (startInput && suggestedStart && !startInput.value) startInput.value = suggestedStart;
   if (hint) {
     hint.textContent = ready
-      ? `预报运行将读取源结果的参数与末端状态，不重新率定；建议从 ${suggestedStart ? suggestedStart.replace("T", " ") : "源状态后一时间步"} 起报。若要从更晚时间起报，需要先补充历史气象强迫滚动更新状态。`
-      : "该源结果不能直接接续，请优先使用新版率定、手调结果或已生成状态快照的预报结果。";
+      ? `预报运行将读取源结果的参数与末端状态，不重新率定；建议从 ${suggestedStart ? suggestedStart.replace("T", " ") : "源结果状态后一时间步"} 起报。若要从更晚时间起报，需要先补充历史气象强迫滚动更新状态。`
+      : "该源结果不能直接用于预报，请优先使用新版率定、手调结果或已保存起报状态的预报结果。";
     hint.className = `hint-box ${ready ? "status-ok" : "status-warn"}`;
   }
 }
@@ -6800,7 +6800,7 @@ function renderForecastView() {
 function selectLatestForecastSource() {
   const run = forecastCandidateRuns().find(forecastRunReady) || forecastCandidateRuns()[0] || null;
   if (!run) {
-    showToast("当前没有可接续的源结果。", true);
+    showToast("当前没有可用于预报的源结果。", true);
     renderForecastView();
     return;
   }
@@ -6811,7 +6811,7 @@ function selectLatestForecastSource() {
 async function startForecastRestart() {
   const run = selectedForecastRun();
   if (!run) { showToast("请先选择源结果。", true); return; }
-  if (!forecastRunReady(run)) { showToast("源结果缺少率定参数或状态快照，不能启动连续状态预报。", true); return; }
+  if (!forecastRunReady(run)) { showToast("源结果缺少率定参数或起报状态，不能启动连续状态预报。", true); return; }
   const forecastEnd = $("#forecast-end")?.value.trim() || "";
   const forecastStart = $("#forecast-start")?.value.trim() || "";
   const precDir = $("#forecast-prec-dir")?.value.trim() || "";
@@ -6820,7 +6820,7 @@ async function startForecastRestart() {
   if (!forecastEnd) { showToast("请填写预报结束时间。", true); return; }
   const expectedStart = forecastSuggestedStart(run);
   if (forecastStart && expectedStart && forecastTimeComparable(forecastStart, run) !== forecastTimeComparable(expectedStart, run)) {
-    showToast(`预报开始时间必须紧接源状态快照，当前应从 ${expectedStart.replace("T", " ")} 起报。`, true);
+    showToast(`预报开始时间必须紧接源结果保存状态，当前应从 ${expectedStart.replace("T", " ")} 起报。`, true);
     return;
   }
   if (!precDir || !tempDir || !evapDir) {

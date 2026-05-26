@@ -62,7 +62,7 @@
     const rows = [
       ["结果名称", runDisplayName(run), run.path ? shortPath(run.path) : ""],
       ["预报时段", timeRangeText(forecast.forecast_start || metadata.time_config?.forecast_start, forecast.forecast_end || metadata.time_config?.forecast_end, metadata.time_config?.time_step_hours || 24), `${profileLabel(metadata.calibration_profile)}，${metadata.time_config?.time_step_hours || 24} 小时步长`],
-      ["起报状态", forecast.source_state_time || initial.source_state_snapshot_time || "未记录", forecast.source_snapshot_file ? `源状态文件：${shortPath(forecast.source_snapshot_file)}` : "读取源结果状态快照"],
+      ["起报状态", forecast.source_state_time || initial.source_state_snapshot_time || "未记录", forecast.source_snapshot_file ? `起报状态文件：${shortPath(forecast.source_snapshot_file)}` : "读取源结果保存状态"],
       ["参数来源", parameterSource.value || "源结果参数", parameterSource.detail || "预报不重新率定参数"],
       ["未来气象", forecastArchiveSummaryText(archive), forecastArchiveDetailText(archive)],
     ];
