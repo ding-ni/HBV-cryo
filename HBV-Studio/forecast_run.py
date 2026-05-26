@@ -89,6 +89,47 @@ def params_from_source(metadata: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("源结果缺少 optimized_params，不能进行不重新率定的预报运行。")
 
 
+def build_source_parameter_summary(
+    source_run: Path,
+    source_metadata: dict[str, Any],
+    params: dict[str, Any],
+    profile: str,
+    objective_mode: str,
+) -> dict[str, Any]:
+    data_sources = dict(source_metadata.get("data_sources", {}) or {})
+    time_config = dict(source_metadata.get("time_config", {}) or {})
+    initial_state = dict(source_metadata.get("initial_state", {}) or {})
+    optimization = dict(source_metadata.get("optimization", {}) or {})
+    return {
+        "schema": "forecast_source_parameter_summary_v1",
+        "parameter_source": "source_result",
+        "parameter_source_label": "源结果参数",
+        "source_run_path": str(source_run.resolve(strict=False)),
+        "source_run_name": source_run.name,
+        "source_run_title": str(source_metadata.get("result_title", "") or "").strip(),
+        "source_run_class": str(source_metadata.get("run_class", "") or "").strip(),
+        "source_run_time": str(source_metadata.get("run_time", "") or "").strip(),
+        "parameter_count": int(len(params)),
+        "calibration_profile": str(profile or source_metadata.get("calibration_profile") or "").strip(),
+        "objective_mode": str(
+            objective_mode
+            or source_metadata.get("effective_objective_mode")
+            or optimization.get("effective_objective_mode")
+            or optimization.get("objective_mode")
+            or ""
+        ).strip(),
+        "state_snapshot_time": str(initial_state.get("state_snapshot_time", "") or "").strip(),
+        "time_step_hours": time_config.get("time_step_hours"),
+        "prec_source": str(
+            data_sources.get("runtime_prec_source")
+            or data_sources.get("prec_source")
+            or data_sources.get("configured_precip_source")
+            or ""
+        ).strip(),
+        "glacier_mode": str(data_sources.get("glacier_mode", "") or "").strip(),
+    }
+
+
 def time_text(module: Any, value: Any) -> str:
     return module.format_time_value(pd.to_datetime(value))
 
@@ -268,6 +309,7 @@ def write_forecast_outputs(
     forecast_dirs: dict[str, str],
     input_archive: dict[str, Any] | None = None,
     source_state_summary: dict[str, Any] | None = None,
+    source_parameter_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -306,6 +348,7 @@ def write_forecast_outputs(
     source_initial = dict(read_json(source_run / "metadata.json").get("initial_state", {}) or {})
     source_state_time = str(source_initial.get("state_snapshot_time", "") or "").strip()
     source_state_summary = dict(source_state_summary or {})
+    source_parameter_summary = dict(source_parameter_summary or {})
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
@@ -322,6 +365,7 @@ def write_forecast_outputs(
             "source_snapshot_file": str(snapshot_path.resolve(strict=False)),
             "source_state_time": source_state_time,
             "source_state_summary": clean_for_json(source_state_summary),
+            "source_parameter_summary": clean_for_json(source_parameter_summary),
             "forecast_state_snapshot_file": forecast_state_file if state_arrays else None,
             "forecast_start": frame["date"].iloc[0] if count else "",
             "forecast_end": frame["date"].iloc[-1] if count else "",
@@ -345,6 +389,7 @@ def write_forecast_outputs(
             "warmup_steps": 0,
         },
         "source_state_summary": clean_for_json(source_state_summary),
+        "source_parameter_summary": clean_for_json(source_parameter_summary),
         "initial_state": {
             "mode": "state_snapshot_restart",
             "hot_start_supported": True,
@@ -421,6 +466,13 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     )
     forecast_start = str(source_state_summary["forecast_start"])
     forecast_end = str(source_state_summary["forecast_end"])
+    source_parameter_summary = build_source_parameter_summary(
+        source_run,
+        source_metadata,
+        params,
+        profile,
+        objective_mode,
+    )
     apply_forecast_window(module, forecast_start, forecast_end)
     output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
         Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -470,6 +522,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         forecast_dirs=forecast_dirs,
         input_archive=input_archive,
         source_state_summary=source_state_summary,
+        source_parameter_summary=source_parameter_summary,
     )
     result["params_adjusted"] = bool(params_adjusted)
     return result

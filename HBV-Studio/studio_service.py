@@ -6366,10 +6366,12 @@ def _build_run_summary(
         "flow_guard_status": "",
         "hydrology_summary": {},
         "optimized_params_available": False,
+        "optimized_param_count": 0,
         "state_snapshot_available": False,
         "state_snapshot_time": "",
         "source_state_snapshot_time": "",
         "source_state_summary": {},
+        "source_parameter_summary": {},
         "forecast_input_archive": {},
         "forecast_source_ready": False,
     }
@@ -6424,6 +6426,7 @@ def _build_run_summary(
     snapshot_path = run_dir / snapshot_file if snapshot_file else run_dir / "state_snapshot.npz"
     optimized_params = metadata.get("optimized_params", {})
     summary["optimized_params_available"] = bool(isinstance(optimized_params, dict) and optimized_params)
+    summary["optimized_param_count"] = int(len(optimized_params)) if isinstance(optimized_params, dict) else 0
     summary["state_snapshot_available"] = bool(snapshot_path.exists() or initial_state.get("state_snapshot_available"))
     summary["state_snapshot_time"] = str(initial_state.get("state_snapshot_time", "") or "").strip()
     summary["source_state_snapshot_time"] = str(
@@ -6434,6 +6437,11 @@ def _build_run_summary(
     summary["source_state_summary"] = dict(
         forecast_result.get("source_state_summary")
         or metadata.get("source_state_summary")
+        or {}
+    )
+    summary["source_parameter_summary"] = dict(
+        forecast_result.get("source_parameter_summary")
+        or metadata.get("source_parameter_summary")
         or {}
     )
     summary["forecast_input_archive"] = dict(

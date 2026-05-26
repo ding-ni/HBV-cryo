@@ -2956,6 +2956,81 @@ function floodEventRows(meta = {}) {
   return rows;
 }
 
+function forecastArchiveManifest(archive = {}) {
+  return archive?.manifest || {};
+}
+
+function forecastArchiveVariables(archive = {}) {
+  return forecastArchiveManifest(archive).variables || archive?.variables || {};
+}
+
+function forecastArchiveVariableItems(archive = {}) {
+  const manifest = forecastArchiveManifest(archive);
+  const variables = forecastArchiveVariables(archive);
+  const labels = { prec: "降水", temp: "气温", evap: "潜在蒸散发" };
+  return ["prec", "temp", "evap"].map(key => {
+    const item = variables?.[key] || {};
+    if (!item || !Object.keys(item).length) return null;
+    const label = item.label || labels[key] || key;
+    const expected = Number(item.expected_steps ?? manifest.expected_steps ?? 0);
+    const archived = Number(item.archived_files ?? item.file_count ?? 0);
+    const outside = Number(item.out_of_window_files ?? 0);
+    const value = expected > 0
+      ? `${archived || 0}/${expected} 个时步`
+      : archived > 0 ? `${archived} 个文件` : "已归档";
+    const detailParts = [];
+    if (item.first_time || item.last_time) detailParts.push(`时段：${timeRangeText(item.first_time, item.last_time)}`);
+    if (outside > 0) detailParts.push(`窗口外 ${outside} 个文件未纳入`);
+    if (item.archive_dir) detailParts.push(`归档：${shortPath(item.archive_dir)}`);
+    return { key, label, value, detail: detailParts.join("；") || "已纳入本次预报计算" };
+  }).filter(Boolean);
+}
+
+function forecastArchiveSummaryText(archive = {}, fallback = "未记录预报气象归档") {
+  const manifest = forecastArchiveManifest(archive);
+  const items = forecastArchiveVariableItems(archive);
+  if (!archive?.manifest_path && !items.length) return fallback;
+  const expected = Number(manifest.expected_steps || items[0]?.value?.match(/\d+\/(\d+)/)?.[1] || 0);
+  if (expected > 0) return `已归档 ${expected} 个预报时步`;
+  return "已归档预报气象";
+}
+
+function forecastArchiveDetailText(archive = {}, fallback = "预报完成后将归档实际使用的降水、气温和潜在蒸散发栅格") {
+  const items = forecastArchiveVariableItems(archive);
+  if (!archive?.manifest_path && !items.length) return fallback;
+  const manifest = forecastArchiveManifest(archive);
+  const parts = [];
+  if (manifest.forecast_start || manifest.forecast_end) {
+    parts.push(`窗口：${timeRangeText(manifest.forecast_start, manifest.forecast_end)}`);
+  }
+  if (items.length) {
+    parts.push(items.map(item => `${item.label}${item.value}`).join("，"));
+  }
+  if (archive?.manifest_path) {
+    parts.push(`清单：${shortPath(archive.manifest_path)}`);
+  }
+  return parts.join("；") || "已保存本次预报实际使用的气象输入";
+}
+
+function forecastParameterSourceSummary(source = {}, fallback = {}) {
+  const params = fallback?.optimized_params || {};
+  const count = Number(source.parameter_count ?? fallback.optimized_param_count ?? (params && typeof params === "object" ? Object.keys(params).length : 0));
+  const label = source.parameter_source_label || "源结果参数";
+  const objectiveRaw = source.objective_mode || fallback.effective_objective_mode || fallback.objective_family || fallback.recorded_objective_family || "";
+  const objective = objectiveRaw ? objectiveLabel(objectiveRaw) : "";
+  const profile = source.calibration_profile || fallback.calibration_profile || "";
+  const sourceName = source.source_run_name || fallback.source_run_name || "";
+  const detailParts = [];
+  if (sourceName) detailParts.push(`来源结果：${sourceName}`);
+  if (profile) detailParts.push(profileLabel(profile));
+  if (objective) detailParts.push(`目标函数：${objective}`);
+  if (source.state_snapshot_time) detailParts.push(`状态时刻：${source.state_snapshot_time}`);
+  return {
+    value: `${label}${count > 0 ? `（${count} 项）` : ""}`,
+    detail: detailParts.join("；") || "读取源结果保存的最优参数，不重新率定",
+  };
+}
+
 function restartStateRows(meta = {}) {
   const initial = meta?.initial_state || {};
   const forecast = meta?.forecast_result || {};
@@ -2978,11 +3053,33 @@ function restartStateRows(meta = {}) {
       forecast?.source_run_name || "源结果",
       forecast?.source_run_path ? shortPath(forecast.source_run_path) : "读取源结果参数与状态快照",
     ]);
+    const parameterSource = forecastParameterSourceSummary(
+      forecast?.source_parameter_summary || meta?.source_parameter_summary || {},
+      meta,
+    );
+    rows.push([
+      "参数来源",
+      parameterSource.value,
+      parameterSource.detail,
+    ]);
     rows.push([
       "预报时段",
       timeRangeText(forecast?.forecast_start, forecast?.forecast_end, meta?.time_config?.time_step_hours || 24),
       "不重新率定参数，直接接续未来气象输入",
     ]);
+    const archive = forecast?.forecast_input_archive || meta?.data_sources?.forecast_input_archive || {};
+    rows.push([
+      "预报气象",
+      forecastArchiveSummaryText(archive),
+      forecastArchiveDetailText(archive),
+    ]);
+    forecastArchiveVariableItems(archive).forEach(item => {
+      rows.push([
+        item.label,
+        item.value,
+        item.detail,
+      ]);
+    });
   }
   return rows;
 }
@@ -6338,7 +6435,9 @@ function renderForecastSourceSummary() {
   const sourceType = runTypeLabel(runTypeValue(run));
   const objective = objectiveLabel(run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "");
   const archive = run.forecast_input_archive || {};
-  const archiveText = archive?.manifest_path ? "已归档预报气象" : runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成";
+  const parameterSource = forecastParameterSourceSummary(run.source_parameter_summary || {}, run);
+  const archiveText = forecastArchiveSummaryText(archive, runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成");
+  const archiveDetail = forecastArchiveDetailText(archive);
   const suggestedStart = forecastSuggestedStart(run);
   host.innerHTML = `
     <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
@@ -6353,7 +6452,8 @@ function renderForecastSourceSummary() {
         ${suggestedStart ? `<span>建议起报</span><strong>${escapeHtml(suggestedStart.replace("T", " "))}</strong>` : ""}
         ${sourceStateTime ? `<span>来源状态</span><strong>${escapeHtml(sourceStateTime)}</strong>` : ""}
         <span>目标函数</span><strong>${escapeHtml(objective)}</strong>
-        <span>气象归档</span><strong>${escapeHtml(archiveText)}</strong>
+        <span>参数来源</span><strong title="${escapeHtml(parameterSource.detail)}">${escapeHtml(parameterSource.value)}</strong>
+        <span>预报气象</span><strong title="${escapeHtml(archiveDetail)}">${escapeHtml(archiveText)}</strong>
       </div>
       <small>${escapeHtml(run.workspace_name || runWorkspaceName(run) || "未关联工作区")}</small>
     </div>
