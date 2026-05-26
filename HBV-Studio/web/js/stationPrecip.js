@@ -25,6 +25,44 @@
     return Number.isFinite(ratio) ? `${formatNumber(ratio * 100, 1)}%` : "未覆盖";
   }
 
+  function renderTaskScopeSummary(check = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
+    const focusStatusLabel = helpers.focusStatusLabel || defaultStatusLabel;
+    const scope = check.task_context || {};
+    if (!scope || !scope.headline) return "";
+    const status = String(scope.status || check.status || "warn");
+    const items = Array.isArray(scope.items) ? scope.items.slice(0, 6) : [];
+    const stationRange = scope.station_time_range || {};
+    const stationRangeText = stationRange.start || stationRange.end
+      ? `${stationRange.start || "—"} 至 ${stationRange.end || "—"}`
+      : "";
+    return `
+      <div class="station-scope-summary ${focusStatusClass(status)}">
+        <div class="station-scope-head">
+          <strong>站点降水检查口径</strong>
+          <span class="status-badge ${focusStatusClass(status)}">${escapeHtml(focusStatusLabel(status))}</span>
+        </div>
+        <div class="station-scope-headline">${escapeHtml(scope.headline)}</div>
+        <div class="station-scope-detail">${escapeHtml(scope.detail || "")}</div>
+        <div class="station-scope-items">
+          ${items.map(item => `
+            <div class="station-scope-item">
+              <span>${escapeHtml(item.label || "")}</span>
+              <strong class="${focusStatusClass(item.status)}">${escapeHtml(item.value || "—")}</strong>
+            </div>
+          `).join("")}
+          ${stationRangeText ? `
+            <div class="station-scope-item">
+              <span>站点资料范围</span>
+              <strong>${escapeHtml(stationRangeText)}</strong>
+            </div>
+          ` : ""}
+        </div>
+      </div>
+    `;
+  }
+
   function renderEventCoverageMatrix(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -78,6 +116,7 @@
   }
 
   window.HBVStudioStationPrecip = {
+    renderTaskScopeSummary,
     renderEventCoverageMatrix,
   };
 })();

@@ -1961,14 +1961,17 @@ function focusStatusClass(status) {
 }
 
 function renderStationEventCoverageMatrix(check = {}) {
-  const renderer = window.HBVStudioStationPrecip?.renderEventCoverageMatrix;
-  if (!renderer) return "";
-  return renderer(check, {
+  const module = window.HBVStudioStationPrecip;
+  if (!module) return "";
+  const helpers = {
     escapeHtml,
     focusStatusClass,
     focusStatusLabel,
     formatNumber,
-  });
+  };
+  const scope = module.renderTaskScopeSummary ? module.renderTaskScopeSummary(check, helpers) : "";
+  const matrix = module.renderEventCoverageMatrix ? module.renderEventCoverageMatrix(check, helpers) : "";
+  return `${scope}${matrix}`;
 }
 
 function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emptyText = "暂无专项检查。" } = {}) {
