@@ -11666,9 +11666,10 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
         warnings.extend(str(msg) for msg in list(item.get("warnings", []) or []))
     expected_steps = int(len(expected_index)) if expected_index is not None else 0
     status = "fail" if errors else "warn" if warnings or expected_steps <= 0 else "ok"
+    coverage_complete = not errors and expected_steps > 0
     headline = (
         f"预报气象覆盖完整：{forecast_start} 至 {forecast_end}，共 {expected_steps} 个时间步。"
-        if status == "ok"
+        if coverage_complete
         else "预报气象输入仍需核对。"
     )
     output_preview = _forecast_output_preview(
