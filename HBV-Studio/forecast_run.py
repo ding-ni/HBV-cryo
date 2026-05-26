@@ -94,6 +94,12 @@ def time_text(module: Any, value: Any) -> str:
 
 
 def infer_forecast_start(module: Any, source_run: Path, metadata: dict[str, Any]) -> str:
+    snapshot_time = source_state_time(source_run, metadata)
+    next_time = pd.to_datetime(snapshot_time) + module.time_step_timedelta()
+    return time_text(module, next_time)
+
+
+def source_state_time(source_run: Path, metadata: dict[str, Any]) -> str:
     initial_state = dict(metadata.get("initial_state", {}) or {})
     snapshot_time = str(initial_state.get("state_snapshot_time", "") or "").strip()
     if not snapshot_time:
@@ -104,8 +110,39 @@ def infer_forecast_start(module: Any, source_run: Path, metadata: dict[str, Any]
                 snapshot_time = str(frame["date"].iloc[-1])
     if not snapshot_time:
         raise ValueError("无法从源结果推断状态日期，请显式提供 forecast_start。")
-    next_time = pd.to_datetime(snapshot_time) + module.time_step_timedelta()
-    return time_text(module, next_time)
+    return snapshot_time
+
+
+def validate_forecast_window(
+    module: Any,
+    source_run: Path,
+    metadata: dict[str, Any],
+    forecast_start: str,
+    forecast_end: str,
+) -> dict[str, Any]:
+    source_time = source_state_time(source_run, metadata)
+    expected_start = time_text(module, pd.to_datetime(source_time) + module.time_step_timedelta())
+    start_text = time_text(module, forecast_start)
+    end_text = time_text(module, forecast_end)
+    if pd.Timestamp(start_text) != pd.Timestamp(expected_start):
+        raise ValueError(
+            "连续状态预报起报时间必须紧接源状态快照："
+            f"源状态时刻为 {time_text(module, source_time)}，当前应从 {expected_start} 起报。"
+            f"如果需要从 {start_text} 起报，请先补充源状态后至该时刻前的历史气象强迫，"
+            "完成状态滚动更新后再启动预报。"
+        )
+    if pd.Timestamp(end_text) < pd.Timestamp(start_text):
+        raise ValueError(f"预报结束时间不能早于起报时间：{start_text} 至 {end_text}")
+    return {
+        "strict_continuity": True,
+        "source_state_time": time_text(module, source_time),
+        "expected_forecast_start": expected_start,
+        "requested_forecast_start": start_text,
+        "forecast_start": start_text,
+        "forecast_end": end_text,
+        "time_step_hours": float(module.TIME_STEP_HOURS),
+        "gap_steps": 0,
+    }
 
 
 def apply_forecast_window(module: Any, forecast_start: str, forecast_end: str) -> None:
@@ -230,6 +267,7 @@ def write_forecast_outputs(
     objective_mode: str,
     forecast_dirs: dict[str, str],
     input_archive: dict[str, Any] | None = None,
+    source_state_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -267,6 +305,7 @@ def write_forecast_outputs(
     restart = dict(sim.get("forecast_restart", {}) or {})
     source_initial = dict(read_json(source_run / "metadata.json").get("initial_state", {}) or {})
     source_state_time = str(source_initial.get("state_snapshot_time", "") or "").strip()
+    source_state_summary = dict(source_state_summary or {})
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
@@ -282,6 +321,7 @@ def write_forecast_outputs(
             "source_run_name": source_run.name,
             "source_snapshot_file": str(snapshot_path.resolve(strict=False)),
             "source_state_time": source_state_time,
+            "source_state_summary": clean_for_json(source_state_summary),
             "forecast_state_snapshot_file": forecast_state_file if state_arrays else None,
             "forecast_start": frame["date"].iloc[0] if count else "",
             "forecast_end": frame["date"].iloc[-1] if count else "",
@@ -304,6 +344,7 @@ def write_forecast_outputs(
             "forecast_end": frame["date"].iloc[-1] if count else "",
             "warmup_steps": 0,
         },
+        "source_state_summary": clean_for_json(source_state_summary),
         "initial_state": {
             "mode": "state_snapshot_restart",
             "hot_start_supported": True,
@@ -371,7 +412,16 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     module.configure_time_step()
 
     forecast_start = args.forecast_start or infer_forecast_start(module, source_run, source_metadata)
-    apply_forecast_window(module, forecast_start, args.forecast_end)
+    source_state_summary = validate_forecast_window(
+        module,
+        source_run,
+        source_metadata,
+        forecast_start,
+        args.forecast_end,
+    )
+    forecast_start = str(source_state_summary["forecast_start"])
+    forecast_end = str(source_state_summary["forecast_end"])
+    apply_forecast_window(module, forecast_start, forecast_end)
     output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
         Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     )
@@ -386,7 +436,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         output_dir,
         source_forecast_dirs,
         forecast_start,
-        args.forecast_end,
+        forecast_end,
     )
     archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
     module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
@@ -419,6 +469,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         objective_mode=objective_mode,
         forecast_dirs=forecast_dirs,
         input_archive=input_archive,
+        source_state_summary=source_state_summary,
     )
     result["params_adjusted"] = bool(params_adjusted)
     return result

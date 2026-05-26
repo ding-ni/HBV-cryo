@@ -6369,6 +6369,7 @@ def _build_run_summary(
         "state_snapshot_available": False,
         "state_snapshot_time": "",
         "source_state_snapshot_time": "",
+        "source_state_summary": {},
         "forecast_input_archive": {},
         "forecast_source_ready": False,
     }
@@ -6430,6 +6431,11 @@ def _build_run_summary(
         or forecast_result.get("source_state_time")
         or ""
     ).strip()
+    summary["source_state_summary"] = dict(
+        forecast_result.get("source_state_summary")
+        or metadata.get("source_state_summary")
+        or {}
+    )
     summary["forecast_input_archive"] = dict(
         forecast_result.get("forecast_input_archive")
         or dict(metadata.get("data_sources", {}) or {}).get("forecast_input_archive")

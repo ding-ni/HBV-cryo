@@ -6259,6 +6259,45 @@ function forecastInputType(run) {
   return stepHours <= 1.5 ? "datetime-local" : "date";
 }
 
+function parseForecastTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 0, 0, 0, 0);
+  }
+  const normalized = raw.replace(" ", "T");
+  const dt = new Date(normalized);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatForecastInputTime(date, stepHours) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const pad = value => String(value).padStart(2, "0");
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  if (Number(stepHours || 24) <= 1.5) {
+    return `${y}-${m}-${d}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  return `${y}-${m}-${d}`;
+}
+
+function forecastSuggestedStart(run) {
+  const stepHours = Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
+  const stateTime = run?.state_snapshot_time || run?.time_config?.forecast_end || run?.time_config?.valid_end || run?.time_config?.calib_end || "";
+  const dt = parseForecastTime(stateTime);
+  if (!dt) return "";
+  dt.setMinutes(dt.getMinutes() + Math.round(stepHours * 60));
+  return formatForecastInputTime(dt, stepHours);
+}
+
+function forecastTimeComparable(value, run) {
+  const stepHours = Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
+  const dt = parseForecastTime(value);
+  return dt ? formatForecastInputTime(dt, stepHours) : String(value || "").trim();
+}
+
 function renderForecastSourceOptions() {
   const select = $("#forecast-source-run");
   if (!select) return;
@@ -6300,6 +6339,7 @@ function renderForecastSourceSummary() {
   const objective = objectiveLabel(run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "");
   const archive = run.forecast_input_archive || {};
   const archiveText = archive?.manifest_path ? "已归档预报气象" : runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成";
+  const suggestedStart = forecastSuggestedStart(run);
   host.innerHTML = `
     <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
       <div class="forecast-source-card-head">
@@ -6310,6 +6350,7 @@ function renderForecastSourceSummary() {
         <span>结果类型</span><strong>${escapeHtml(sourceType)}</strong>
         <span>计算尺度</span><strong>${escapeHtml(profileLabel(runProfileValue(run)))}</strong>
         <span>状态时间</span><strong>${escapeHtml(stateTime || "未记录")}</strong>
+        ${suggestedStart ? `<span>建议起报</span><strong>${escapeHtml(suggestedStart.replace("T", " "))}</strong>` : ""}
         ${sourceStateTime ? `<span>来源状态</span><strong>${escapeHtml(sourceStateTime)}</strong>` : ""}
         <span>目标函数</span><strong>${escapeHtml(objective)}</strong>
         <span>气象归档</span><strong>${escapeHtml(archiveText)}</strong>
@@ -6322,9 +6363,11 @@ function renderForecastSourceSummary() {
     const input = document.getElementById(id);
     if (input && input.type !== inputType) input.type = inputType;
   });
+  const startInput = $("#forecast-start");
+  if (startInput && suggestedStart && !startInput.value) startInput.value = suggestedStart;
   if (hint) {
     hint.textContent = ready
-      ? "预报运行将读取源结果的参数与末端状态，不重新率定；未来降水、气温和潜在蒸散发会按预报窗口筛选并归档到本次结果目录。"
+      ? `预报运行将读取源结果的参数与末端状态，不重新率定；建议从 ${suggestedStart ? suggestedStart.replace("T", " ") : "源状态后一时间步"} 起报。若要从更晚时间起报，需要先补充历史气象强迫滚动更新状态。`
       : "该源结果不能直接接续，请优先使用新版率定、手调结果或已生成状态快照的预报结果。";
     hint.className = `hint-box ${ready ? "status-ok" : "status-warn"}`;
   }
@@ -6393,6 +6436,11 @@ async function startForecastRestart() {
   const tempDir = $("#forecast-temp-dir")?.value.trim() || "";
   const evapDir = $("#forecast-evap-dir")?.value.trim() || "";
   if (!forecastEnd) { showToast("请填写预报结束时间。", true); return; }
+  const expectedStart = forecastSuggestedStart(run);
+  if (forecastStart && expectedStart && forecastTimeComparable(forecastStart, run) !== forecastTimeComparable(expectedStart, run)) {
+    showToast(`预报开始时间必须紧接源状态快照，当前应从 ${expectedStart.replace("T", " ")} 起报。`, true);
+    return;
+  }
   if (!precDir || !tempDir || !evapDir) {
     showToast("请完整选择预报降水、气温和潜在蒸散发栅格目录。", true);
     return;
