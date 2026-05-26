@@ -422,6 +422,50 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   grid-column: 1 / -1;
 }
 
+.forecast-result-panel {
+  grid-column: 1 / -1;
+}
+
+.forecast-result-select {
+  margin-bottom: 12px;
+  max-width: 620px;
+}
+
+.forecast-result-summary {
+  margin-bottom: 12px;
+}
+
+.forecast-result-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.forecast-result-summary-item {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.86);
+}
+
+.forecast-result-summary-item span,
+.forecast-result-summary-item small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.forecast-result-summary-item strong {
+  display: block;
+  margin: 4px 0 3px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+#forecast-result-chart {
+  min-height: 380px;
+}
+
 .forecast-source-summary {
   margin-top: 12px;
 }

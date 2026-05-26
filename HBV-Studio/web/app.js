@@ -167,6 +167,11 @@ const state = {
   taskManualPresetConfigPath: "",
   activeTaskManualPresetRequestId: 0,
   forecastSourceRunPath: "",
+  forecastResultRunPath: "",
+  forecastResultData: null,
+  forecastResultLoadingPath: "",
+  activeForecastResultRequestId: 0,
+  lastForecastExportPath: "",
   activeCompareRequestId: 0,
   prepSteps: [],
   prepStatus: {},
@@ -444,6 +449,11 @@ function nextRunManualPresetRequestId() {
 function nextTaskManualPresetRequestId() {
   state.activeTaskManualPresetRequestId = Number(state.activeTaskManualPresetRequestId || 0) + 1;
   return state.activeTaskManualPresetRequestId;
+}
+
+function nextForecastResultRequestId() {
+  state.activeForecastResultRequestId = Number(state.activeForecastResultRequestId || 0) + 1;
+  return state.activeForecastResultRequestId;
 }
 
 function nextCompareRequestId() {
@@ -6651,11 +6661,153 @@ function renderForecastTaskList() {
   restoreVisibleLogViewports("#forecast-task-list [data-log-key]");
 }
 
+function forecastResultRuns() {
+  return state.runs
+    .filter(run => runTypeValue(run) === "forecast_restart" && run?.path)
+    .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+}
+
+function selectedForecastResultRun() {
+  const selectedPath = $("#forecast-result-run")?.value || state.forecastResultRunPath || "";
+  return forecastResultRuns().find(run => samePath(run.path, selectedPath)) || forecastResultRuns()[0] || null;
+}
+
+function setForecastResultButtons(run) {
+  const hasRun = Boolean(run?.path);
+  if ($("#forecast-open-result")) $("#forecast-open-result").disabled = !hasRun;
+  if ($("#forecast-open-result-dir")) $("#forecast-open-result-dir").disabled = !hasRun;
+  if ($("#forecast-export-excel")) $("#forecast-export-excel").disabled = !hasRun;
+  if ($("#forecast-open-export-file")) $("#forecast-open-export-file").disabled = !state.lastForecastExportPath;
+}
+
+function renderForecastResultDetail(data = state.forecastResultData) {
+  const run = data?.run || selectedForecastResultRun();
+  setForecastResultButtons(run);
+  if (!window.HBVStudioForecastView) return;
+  if (!data?.run?.path) {
+    window.HBVStudioForecastView.renderForecastResultEmpty("完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。");
+    return;
+  }
+  window.HBVStudioForecastView.renderForecastResultDetail(data, {
+    escapeHtml,
+    runDisplayName,
+    shortPath,
+    timeRangeText,
+    forecastArchiveSummaryText,
+    forecastArchiveDetailText,
+    forecastParameterSourceSummary,
+    profileLabel,
+  });
+}
+
+async function loadForecastResultDetail(path) {
+  const targetPath = String(path || "").trim();
+  if (!targetPath) return;
+  const requestId = nextForecastResultRequestId();
+  state.forecastResultRunPath = targetPath;
+  state.forecastResultLoadingPath = targetPath;
+  state.lastForecastExportPath = "";
+  if (window.HBVStudioForecastView) {
+    window.HBVStudioForecastView.renderForecastResultLoading("正在读取连续状态预报结果。");
+  }
+  setForecastResultButtons({ path: targetPath });
+  try {
+    const payload = await apiGet(`/api/run?path=${encodeURIComponent(targetPath)}`);
+    if (requestId !== state.activeForecastResultRequestId || !samePath(targetPath, state.forecastResultRunPath)) return;
+    state.forecastResultData = payload.data;
+    state.forecastResultLoadingPath = "";
+    renderForecastResultDetail(payload.data);
+  } catch (err) {
+    if (requestId !== state.activeForecastResultRequestId) return;
+    state.forecastResultData = null;
+    state.forecastResultLoadingPath = "";
+    if (window.HBVStudioForecastView) {
+      window.HBVStudioForecastView.renderForecastResultEmpty(`预报结果读取失败：${err.message}`);
+    }
+    setForecastResultButtons(null);
+  }
+}
+
+function renderForecastResultPanel() {
+  const select = $("#forecast-result-run");
+  if (!select) return;
+  const runs = forecastResultRuns();
+  if (!runs.length) {
+    state.forecastResultRunPath = "";
+    state.forecastResultData = null;
+    state.forecastResultLoadingPath = "";
+    select.disabled = true;
+    select.innerHTML = '<option value="">暂无连续状态预报结果</option>';
+    state.lastForecastExportPath = "";
+    setForecastResultButtons(null);
+    if (window.HBVStudioForecastView) {
+      window.HBVStudioForecastView.renderForecastResultEmpty("完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。");
+    }
+    return;
+  }
+  let selected = runs.find(run => samePath(run.path, state.forecastResultRunPath)) || runs[0];
+  state.forecastResultRunPath = selected.path;
+  select.disabled = false;
+  select.innerHTML = runs.map(run => `
+    <option value="${escapeHtml(run.path)}" ${samePath(run.path, selected.path) ? "selected" : ""}>
+      ${escapeHtml(`${runDisplayName(run)} · ${timeRangeText(run.time_config?.forecast_start, run.time_config?.forecast_end, run.time_step_hours || run.time_config?.time_step_hours || 24)}`)}
+    </option>
+  `).join("");
+  setForecastResultButtons(selected);
+  if (state.forecastResultData?.run?.path && samePath(state.forecastResultData.run.path, selected.path)) {
+    renderForecastResultDetail(state.forecastResultData);
+  } else if (samePath(state.forecastResultLoadingPath, selected.path)) {
+    if (window.HBVStudioForecastView) {
+      window.HBVStudioForecastView.renderForecastResultLoading("正在读取连续状态预报结果。");
+    }
+  } else {
+    loadForecastResultDetail(selected.path).catch(err => showToast(err.message, true));
+  }
+}
+
+async function openForecastResultAnalysis() {
+  const run = selectedForecastResultRun();
+  if (!run?.path) return;
+  setView("results");
+  await loadRun(run.path);
+}
+
+async function exportForecastResultExcel() {
+  const run = selectedForecastResultRun();
+  const data = state.forecastResultData;
+  const runPath = String(data?.run?.path || run?.path || "").trim();
+  if (!runPath) {
+    showToast("当前没有可导出的预报结果。", true);
+    return;
+  }
+  const meta = data?.metadata || {};
+  const series = data?.series || {};
+  const start = meta.time_config?.forecast_start || meta.forecast_result?.forecast_start || series.dates?.[0] || "";
+  const end = meta.time_config?.forecast_end || meta.forecast_result?.forecast_end || (series.dates || []).slice(-1)[0] || "";
+  const fields = ["q_sim", "q_rain", "q_snow", "q_ice"];
+  if (boundaryEnabledFromMeta(meta)) fields.push("q_boundary_inflow");
+  const payload = await apiPost("/api/run/export-excel", {
+    path: runPath,
+    start_date: start,
+    end_date: end,
+    fields,
+  });
+  state.lastForecastExportPath = payload.data?.path || "";
+  setForecastResultButtons(run || data?.run);
+  const hint = $("#forecast-result-hint");
+  if (hint) {
+    hint.textContent = `已导出 ${payload.data?.row_count || 0} 行到 ${payload.data?.display_path || shortPath(state.lastForecastExportPath)}。`;
+    hint.className = "hint-box status-ok";
+  }
+  showToast(`预报结果 Excel 已导出：${payload.data?.row_count || 0} 行`);
+}
+
 function renderForecastView() {
   if (!$("#forecast-source-run")) return;
   renderForecastSourceOptions();
   renderForecastSourceSummary();
   renderForecastTaskList();
+  renderForecastResultPanel();
 }
 
 function selectLatestForecastSource() {
@@ -7108,8 +7260,11 @@ async function loadTasks() {
       const runPath = newlyCompletedForecast.result?.run_path || newlyCompletedForecast.run_path || newlyCompletedForecast.detected_runs?.[0] || "";
       if (runPath) {
         await loadRuns().catch(() => {});
+        state.forecastResultRunPath = runPath;
+        state.forecastResultData = null;
+        renderForecastResultPanel();
         if (state.currentView === "forecast") {
-          showToast("连续状态预报已完成，可在预报任务或结果分析中查看。");
+          showToast("连续状态预报已完成，已更新预报结果。");
         }
       }
     }
@@ -7611,6 +7766,26 @@ function bindEvents() {
   $("#forecast-open-source")?.addEventListener("click", () => {
     const run = selectedForecastRun();
     if (run?.path) openLocalPath(run.path, "源结果目录").catch(err => showToast(err.message, true));
+  });
+  $("#forecast-result-run")?.addEventListener("change", () => {
+    state.forecastResultRunPath = $("#forecast-result-run")?.value || "";
+    state.forecastResultData = null;
+    state.forecastResultLoadingPath = "";
+    state.lastForecastExportPath = "";
+    renderForecastResultPanel();
+  });
+  $("#forecast-open-result")?.addEventListener("click", () => {
+    openForecastResultAnalysis().catch(err => showToast(err.message, true));
+  });
+  $("#forecast-open-result-dir")?.addEventListener("click", () => {
+    const run = selectedForecastResultRun();
+    if (run?.path) openLocalPath(run.path, "预报结果目录").catch(err => showToast(err.message, true));
+  });
+  $("#forecast-export-excel")?.addEventListener("click", () => {
+    exportForecastResultExcel().catch(err => showToast(err.message, true));
+  });
+  $("#forecast-open-export-file")?.addEventListener("click", () => {
+    if (state.lastForecastExportPath) openLocalPath(state.lastForecastExportPath, "导出文件").catch(err => showToast(err.message, true));
   });
   $("#forecast-start-button")?.addEventListener("click", () => startForecastRestart());
   $("#forecast-task-list")?.addEventListener("click", e => {

@@ -749,6 +749,25 @@
               <div class="panel-head"><h3>预报任务</h3><span class="panel-note">查看连续状态预报进度与结果</span></div>
               <div class="list-stack" id="forecast-task-list"></div>
             </section>
+
+            <section class="panel forecast-result-panel">
+              <div class="panel-head">
+                <h3>最近预报结果</h3>
+                <div class="workspace-card-actions">
+                  <button class="ghost-button" id="forecast-open-result" disabled>查看结果分析</button>
+                  <button class="ghost-button" id="forecast-open-result-dir" disabled>打开结果目录</button>
+                  <button class="ghost-button" id="forecast-open-export-file" disabled>打开导出文件</button>
+                  <button class="primary-button" id="forecast-export-excel" disabled>导出 Excel</button>
+                </div>
+              </div>
+              <div class="field-group forecast-result-select">
+                <label>预报结果</label>
+                <select id="forecast-result-run"></select>
+              </div>
+              <div id="forecast-result-summary" class="forecast-result-summary"></div>
+              <div class="chart-host" id="forecast-result-chart"></div>
+              <div class="hint-box" id="forecast-result-hint">完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。</div>
+            </section>
           </div>
         </section>
 
@@ -889,6 +908,7 @@
 
   <script src="./js/stationPrecip.js"></script>
   <script src="./js/eventMode.js"></script>
+  <script src="./js/forecastView.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
