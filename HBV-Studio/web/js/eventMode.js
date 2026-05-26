@@ -284,6 +284,56 @@
     `;
   }
 
+  function renderEventObservationCoverage(coverage = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const statusClass = helpers.statusClass || defaultStatusClass;
+    if (!coverage?.enabled) return "";
+    const events = Array.isArray(coverage.events) ? coverage.events : [];
+    const status = String(coverage.status || "warn").toLowerCase();
+    const rows = events.slice(0, 30).map(event => {
+      const expected = Number(event.expected_steps || 0);
+      const covered = Number(event.covered_steps || 0);
+      const missing = Number(event.missing_steps || 0);
+      const ratio = expected > 0 ? `${((covered / expected) * 100).toFixed(1)}%` : "—";
+      const preview = Array.isArray(event.missing_preview) && event.missing_preview.length
+        ? `；缺测示例：${event.missing_preview.slice(0, 3).join("、")}`
+        : "";
+      const conclusion = event.status === "ok" ? "完整" : event.status === "fail" ? "需补齐" : "需复核";
+      return `
+        <div class="event-window-row ${statusClass(event.status || "warn")}">
+          <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
+          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
+          <span>${escapeHtml(`${event.score_start || "—"} ~ ${event.score_end || "—"}`)}</span>
+          <span>${escapeHtml(`${covered}/${expected}`)}</span>
+          <span>${escapeHtml(`覆盖率 ${ratio}${missing > 0 ? `，缺 ${missing}` : ""}${preview}`)}</span>
+          <span class="${statusClass(event.status || "warn")}">${escapeHtml(conclusion)}</span>
+        </div>
+      `;
+    }).join("");
+    const more = events.length > 30
+      ? `<div class="event-window-more">还有 ${events.length - 30} 场事件未展开。</div>`
+      : "";
+    return `
+      <div class="event-window-summary">
+        <div class="event-window-title">
+          <strong>事件评分窗口观测覆盖</strong>
+          <span class="${statusClass(status)}">${escapeHtml(`${Number(coverage.complete_event_count || 0)}/${Number(coverage.event_count || 0)} 场完整`)}</span>
+        </div>
+        <div class="event-window-source">按每场事件评分窗口核对实测流量；事件之间允许资料间断，事件内部缺测会影响洪峰、洪量和退水评价。</div>
+        <div class="event-window-row event-window-head">
+          <span>事件</span>
+          <span>用途</span>
+          <span>评分窗口</span>
+          <span>观测步数</span>
+          <span>覆盖情况</span>
+          <span>结论</span>
+        </div>
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的事件评分窗口。</div>'}
+        ${more}
+      </div>
+    `;
+  }
+
   window.HBVStudioEventMode = {
     floodEventEvaluation,
     eventChartEvents,
@@ -291,5 +341,6 @@
     renderFloodEventChart,
     renderEventWindowSummary,
     renderEventForcingCoverage,
+    renderEventObservationCoverage,
   };
 })();

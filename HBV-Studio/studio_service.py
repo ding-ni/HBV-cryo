@@ -1884,10 +1884,12 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
             continue
         event = dict(raw_event)
         token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        event_id = str(_event_field(event, "event_id", "id", "编号") or "").strip()
+        event_id_raw = str(_event_field(event, "event_id", "id", "编号") or "").strip()
+        event_id = event_id_raw
         name = str(_event_field(event, "name", "名称", "事件名称") or "").strip()
         if not event_id:
             event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+            warnings.append(f"第 {index} 条事件未填写 event_id，已临时使用 {event_id}；正式工程建议填写唯一事件编号。")
         purpose_raw = str(_event_field(event, "purpose", "用途", "类型", "type") or "calibration").strip()
         purpose = EVENT_PURPOSE_ALIASES.get(purpose_raw.lower(), purpose_raw.lower() or "calibration")
         if purpose not in {"calibration", "validation", "diagnostic"}:
@@ -1899,8 +1901,15 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
         score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "start")
         score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "end")
         run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
-        run_end_raw = _event_field(event, "run_end", "运行结束", "退水结束") or score_end_raw
+        run_end_value = _event_field(event, "run_end", "运行结束", "退水结束")
+        if run_end_value in (None, ""):
+            run_end_raw = score_end_raw
+            warnings.append(f"事件 {event_id} 未填写 run_end，已按评分结束作为运行结束；建议显式给出退水结束时间。")
+        else:
+            run_end_raw = run_end_value
         event_errors: list[str] = []
+        time_steps_run = 0
+        time_steps_score = 0
         try:
             run_start = _parse_event_timestamp(run_start_raw, end=False, step_hours=step)
             score_start = _parse_event_timestamp(score_start_raw, end=False, step_hours=step)
@@ -1913,6 +1922,13 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
             event_errors.append("事件缺少运行窗口或评分窗口时间。")
         elif not (run_start <= score_start <= score_end <= run_end):
             event_errors.append("事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
+        else:
+            time_steps_run = int(len(_event_date_range(run_start, run_end, step)))
+            time_steps_score = int(len(_event_date_range(score_start, score_end, step)))
+            min_score_steps = 3 if step >= 24.0 else 6
+            if time_steps_score < min_score_steps:
+                unit = "天" if step >= 24.0 else "小时"
+                event_errors.append(f"事件评分窗口过短：当前 {time_steps_score} 步，至少需要 {min_score_steps} 步（{unit}尺度）。")
         weight = _event_field(event, "weight", "权重")
         try:
             weight_value = float(weight) if weight not in (None, "") else 1.0
@@ -1936,8 +1952,8 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
                 "run_end": run_end,
                 "raw": event,
                 "valid": not event_errors,
-                "time_steps_run": int(len(_event_date_range(run_start, run_end, step))) if run_start is not None and run_end is not None and run_end >= run_start else 0,
-                "time_steps_score": int(len(_event_date_range(score_start, score_end, step))) if score_start is not None and score_end is not None and score_end >= score_start else 0,
+                "time_steps_run": time_steps_run,
+                "time_steps_score": time_steps_score,
             }
         )
 
@@ -2295,6 +2311,120 @@ def event_forcing_coverage_summary(
     }
 
 
+def event_observation_coverage_summary(
+    event_info: dict[str, Any] | None,
+    observed_series: Any,
+    step_hours: float,
+) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    valid_events = [item for item in list(event_info.get("valid_events", []) or []) if isinstance(item, dict)]
+    if not valid_events:
+        return {
+            "enabled": True,
+            "status": "fail",
+            "event_count": 0,
+            "complete_event_count": 0,
+            "required_event_count": 0,
+            "events": [],
+        }
+    if observed_series is None:
+        actual_index = pd.DatetimeIndex([])
+    else:
+        try:
+            actual_index = pd.DatetimeIndex(observed_series.dropna().index)
+        except Exception:
+            actual_index = pd.DatetimeIndex([])
+    actual_set = set(pd.Timestamp(ts) for ts in actual_index.tolist())
+
+    rows: list[dict[str, Any]] = []
+    complete_count = 0
+    required_count = 0
+    required_complete_count = 0
+    diagnostic_warn_count = 0
+    for event in valid_events:
+        score_start = pd.Timestamp(event.get("score_start"))
+        score_end = pd.Timestamp(event.get("score_end"))
+        score_index = _event_date_range(score_start, score_end, step_hours)
+        expected_steps = int(len(score_index))
+        missing_steps = [ts for ts in score_index if pd.Timestamp(ts) not in actual_set]
+        missing_count = int(len(missing_steps))
+        covered_steps = max(0, expected_steps - missing_count)
+        coverage_ratio = (covered_steps / expected_steps) if expected_steps > 0 else None
+        purpose = str(event.get("purpose", "") or "").strip().lower()
+        is_required = purpose in {"calibration", "validation", ""}
+        if is_required:
+            required_count += 1
+        if missing_count == 0 and expected_steps > 0:
+            status = "ok"
+            complete_count += 1
+            if is_required:
+                required_complete_count += 1
+        elif is_required:
+            status = "fail"
+        else:
+            status = "warn"
+            diagnostic_warn_count += 1
+        rows.append(
+            {
+                "event_id": str(event.get("event_id", "") or ""),
+                "name": str(event.get("name", "") or event.get("event_id", "") or ""),
+                "purpose": purpose,
+                "score_start": _format_time_for_check(score_start, step_hours),
+                "score_end": _format_time_for_check(score_end, step_hours),
+                "expected_steps": expected_steps,
+                "covered_steps": covered_steps,
+                "missing_steps": missing_count,
+                "coverage_ratio": coverage_ratio,
+                "status": status,
+                "missing_preview": [
+                    _format_time_for_check(ts, step_hours)
+                    for ts in missing_steps[:5]
+                ],
+            }
+        )
+
+    if required_complete_count < required_count:
+        status = "fail"
+    elif diagnostic_warn_count > 0:
+        status = "warn"
+    else:
+        status = "ok"
+    return {
+        "enabled": True,
+        "status": status,
+        "event_count": len(valid_events),
+        "complete_event_count": complete_count,
+        "required_event_count": required_count,
+        "required_complete_event_count": required_complete_count,
+        "events": rows,
+    }
+
+
+def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(coverage, dict) or not coverage.get("enabled"):
+        return issues, warnings
+    for event in list(coverage.get("events", []) or []):
+        if not isinstance(event, dict):
+            continue
+        status = str(event.get("status", "") or "").lower()
+        if status == "ok":
+            continue
+        name = str(event.get("name") or event.get("event_id") or "未命名事件")
+        missing_steps = int(event.get("missing_steps", 0) or 0)
+        expected_steps = int(event.get("expected_steps", 0) or 0)
+        preview = "、".join(str(item) for item in list(event.get("missing_preview", []) or [])[:3])
+        suffix = f"；例如 {preview}" if preview else ""
+        message = f"事件 {name} 评分窗口观测径流缺测 {missing_steps}/{expected_steps} 步{suffix}。"
+        if status == "fail":
+            issues.append(message)
+        else:
+            warnings.append(message)
+    return issues, warnings
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -2349,6 +2479,7 @@ def inspect_observed_csv(
     date_field: str | None = None,
     expected_index: pd.DatetimeIndex | None = None,
     target_step_hours: float | None = None,
+    return_series: bool = False,
 ) -> dict[str, Any]:
     path = resolve_any_path(csv_path, must_exist=True)
     return inspect_observed_discharge(
@@ -2358,7 +2489,7 @@ def inspect_observed_csv(
         target_step_hours=target_step_hours,
         allow_hourly_to_daily=True,
         min_daily_hours=DEFAULT_MIN_DAILY_HOURS,
-        return_series=False,
+        return_series=return_series,
     )
 
 
@@ -2388,6 +2519,9 @@ def observed_window_messages(config: dict[str, Any], obs_info: dict[str, Any]) -
             issues.append(f"观测径流在当前模拟时段内覆盖率只有 {coverage_ratio * 100:.1f}%，无法支撑稳定率定。")
         elif coverage_ratio < 0.95:
             warnings.append(f"观测径流在当前模拟时段内覆盖率只有 {coverage_ratio * 100:.1f}%，目标函数会只在部分时间步上计算。")
+
+    if task_time_basis(config, context="calibration") == TIME_BASIS_EVENT_WINDOWS:
+        return issues, warnings
 
     obs_start = pd.to_datetime(obs_info.get("start"))
     obs_end = pd.to_datetime(obs_info.get("end"))
@@ -6107,6 +6241,7 @@ def validate_workspace_fields(
     runtime_stage = str(stage or "calibration").strip().lower() or "calibration"
     require_observed_flow = runtime_stage != "quick_test"
     obs_info: dict[str, Any] | None = None
+    event_observation_coverage: dict[str, Any] | None = None
     boundary_info: dict[str, Any] | None = None
     forcing: dict[str, Any] | None = None
     station_precip_info: dict[str, Any] | None = None
@@ -6209,13 +6344,27 @@ def validate_workspace_fields(
                 str(obs_file),
                 expected_index=build_expected_observation_index(config, context="calibration"),
                 target_step_hours=step_hours,
+                return_series=time_basis == TIME_BASIS_EVENT_WINDOWS,
             )
+            observed_series = obs_info.pop("series", None)
             obs_missing, obs_warnings = observed_window_messages(config, obs_info)
             if require_observed_flow:
                 missing.extend(obs_missing)
             else:
                 warnings.extend(obs_missing)
             warnings.extend(obs_warnings)
+            if event_window_info is not None:
+                event_observation_coverage = event_observation_coverage_summary(
+                    event_window_info,
+                    observed_series,
+                    step_hours,
+                )
+                event_obs_missing, event_obs_warnings = event_observation_coverage_messages(event_observation_coverage)
+                if require_observed_flow:
+                    missing.extend(event_obs_missing)
+                else:
+                    warnings.extend(event_obs_missing)
+                warnings.extend(event_obs_warnings)
             duplicate_count = int(obs_info.get("duplicate_count", 0) or 0)
             if duplicate_count > 0:
                 sample = "、".join(
@@ -6330,6 +6479,7 @@ def validate_workspace_fields(
         "time_basis_label": TIME_BASIS_LABELS.get(time_basis, "当前任务时段"),
         "event_windows": event_windows_ui_summary(event_window_info, step_hours) if event_window_info is not None else None,
         "event_forcing_coverage": dict(forcing.get("event_forcing_coverage") or {}) if forcing else None,
+        "event_observation_coverage": event_observation_coverage,
     }
 
 
@@ -8599,6 +8749,7 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
         return {"step": step, "valid": False, "missing": [str(exc)], "warnings": []}
     runtime_prec_source = resolve_precip_source(config, precip_source)
     event_windows: dict[str, Any] | None = None
+    event_observation_coverage: dict[str, Any] | None = None
 
     if step == 1:
         if not config.get("流域名称"):
@@ -8661,10 +8812,22 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
                     str(obs_file),
                     expected_index=build_expected_observation_index(config, context="calibration"),
                     target_step_hours=normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
+                    return_series=time_basis == TIME_BASIS_EVENT_WINDOWS,
                 )
+                observed_series = obs_info.pop("series", None)
                 obs_missing, obs_warnings = observed_window_messages(config, obs_info)
                 missing.extend(obs_missing)
                 warnings.extend(obs_warnings)
+                if time_basis == TIME_BASIS_EVENT_WINDOWS:
+                    event_info = normalized_flood_events(config, step_hours=step_hours)
+                    event_observation_coverage = event_observation_coverage_summary(
+                        event_info,
+                        observed_series,
+                        step_hours,
+                    )
+                    event_obs_missing, event_obs_warnings = event_observation_coverage_messages(event_observation_coverage)
+                    missing.extend(event_obs_missing)
+                    warnings.extend(event_obs_warnings)
             except Exception as exc:
                 warnings.append(f"观测径流检查失败：{exc}")
     elif step == 3:
@@ -8740,6 +8903,8 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
     result = {"step": step, "valid": len(missing) == 0, "missing": missing, "warnings": warnings}
     if event_windows is not None:
         result["event_windows"] = event_windows
+    if event_observation_coverage is not None:
+        result["event_observation_coverage"] = event_observation_coverage
     return result
 
 

@@ -2238,17 +2238,24 @@ function clearWizardEventSummary() {
   if (host) host.innerHTML = "";
 }
 
-function renderWizardEventSummary(eventInfo = null) {
+function renderWizardEventSummary(eventInfo = null, observationCoverage = null) {
   const host = $("#wz-event-file-summary");
   if (!host) return;
   if (!eventInfo || !window.HBVStudioEventMode?.renderEventWindowSummary) {
     host.innerHTML = "";
     return;
   }
-  host.innerHTML = window.HBVStudioEventMode.renderEventWindowSummary(eventInfo, {
+  let html = window.HBVStudioEventMode.renderEventWindowSummary(eventInfo, {
     escapeHtml,
     statusClass: focusStatusClass,
   });
+  if (observationCoverage && window.HBVStudioEventMode?.renderEventObservationCoverage) {
+    html += window.HBVStudioEventMode.renderEventObservationCoverage(observationCoverage, {
+      escapeHtml,
+      statusClass: focusStatusClass,
+    });
+  }
+  host.innerHTML = html;
 }
 
 function renderInputTimeSummary(summary = {}) {
@@ -4051,7 +4058,10 @@ async function saveCurrentWizardStep() {
           $("#wz-event-file").value = eventMode.事件表路径 || floodMode.事件表路径 || $("#wz-event-file").value;
         }
         updateEventModeHint();
-        renderWizardEventSummary(result.validation?.event_windows || null);
+        renderWizardEventSummary(
+          result.validation?.event_windows || null,
+          result.validation?.event_observation_coverage || null,
+        );
       }
     }
     if (step === 1) {
@@ -4075,7 +4085,7 @@ async function saveCurrentWizardStep() {
 function enforceWizardValidation(validation, step = state.wizardStep) {
   if (!validation || validation.valid) return true;
   if (step === 2) {
-    renderWizardEventSummary(validation.event_windows || null);
+    renderWizardEventSummary(validation.event_windows || null, validation.event_observation_coverage || null);
     const issues = (validation.missing || []).slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("");
     const warns = (validation.warnings || []).slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join("");
     $("#wz-obs-hint").innerHTML = `<strong>第 2 步未通过。</strong>${issues ? `<ul>${issues}</ul>` : ""}${warns ? `<div style="margin-top:6px">提示：</div><ul>${warns}</ul>` : ""}`;
@@ -5491,6 +5501,12 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     }
     if (validation.event_forcing_coverage && window.HBVStudioEventMode?.renderEventForcingCoverage) {
       html += window.HBVStudioEventMode.renderEventForcingCoverage(validation.event_forcing_coverage, {
+        escapeHtml,
+        statusClass: focusStatusClass,
+      });
+    }
+    if (validation.event_observation_coverage && window.HBVStudioEventMode?.renderEventObservationCoverage) {
+      html += window.HBVStudioEventMode.renderEventObservationCoverage(validation.event_observation_coverage, {
         escapeHtml,
         statusClass: focusStatusClass,
       });
