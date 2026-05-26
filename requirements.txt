@@ -12,3 +12,4 @@ netCDF4
 fiona
 pyproj
 whitebox
+plotly

@@ -149,6 +149,15 @@ BUILTIN_GLACIER_SHP = default_builtin_glacier_path()
 MODEL_RUNNER = GUI_ROOT / "profile_runner.py"
 
 
+def bundled_plotly_js_path() -> Path | None:
+    try:
+        import plotly  # type: ignore
+    except Exception:
+        return None
+    path = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
+    return path if path.exists() else None
+
+
 def _workspace_dem_path(gis_dir: Path | str, prefer: str | None = None) -> Path:
     return resolve_workspace_dem_path(Path(gis_dir), prefer=prefer)
 
@@ -10151,6 +10160,10 @@ class StudioHandler(BaseHTTPRequestHandler):
         local_path = ensure_within(WEB_ROOT, WEB_ROOT / request_path.lstrip("/"))
         if local_path.is_dir():
             local_path = local_path / "index.html"
+        if not local_path.exists() and request_path == "/plotly.min.js":
+            bundled_plotly = bundled_plotly_js_path()
+            if bundled_plotly is not None:
+                local_path = bundled_plotly
         if not local_path.exists():
             self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
             return

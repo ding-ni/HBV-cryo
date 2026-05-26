@@ -1657,6 +1657,7 @@ function objectiveLabel(value) {
   return ({
     auto: "自动选择",
     daily_unified_professional_v1: "统一日尺度专业目标函数",
+    flood_event_calibration_v1: "洪水事件率定",
     weighted_multi_criteria: "旧版多指标目标函数（历史结果）",
     weighted_daily_universal: "旧版日尺度加权目标函数（历史结果）",
     single_objective_nse: "单指标纳什效率系数",
@@ -1679,6 +1680,9 @@ function objectiveDetail(meta) {
   const mode = effectiveObjectiveMode(meta) || meta?.objective_family || meta?.objective_profile?.type || meta?.objective?.type;
   if (String(mode || "").toLowerCase() === "daily_unified_professional_v1") {
     return "流量拟合优先，结合融雪、融冰、洪峰和退水过程进行综合评价";
+  }
+  if (String(mode || "").toLowerCase() === FLOOD_EVENT_OBJECTIVE_FAMILY) {
+    return "连续模拟基础上按事件窗口评价洪峰、峰现时间、洪量、退水和高流量过程";
   }
   if (LEGACY_OBJECTIVE_FAMILIES.has(String(mode || "").toLowerCase())) {
     return "历史结果，仅作兼容查看，建议用当前口径重算后再解释冰雪融水过程";
@@ -1719,6 +1723,7 @@ function updateCalibrationPlainGuide() {
   if (!host) return;
   const kind = $("#task-kind")?.value || "calibration";
   const method = $("#task-method")?.value || "mc_screen_de";
+  const objectiveMode = $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY;
   const loadInfo = estimateCalibrationLoad();
   if (kind === "self_check") {
     host.textContent = "系统自检仅核对本地环境、依赖和关键脚本状态，不读取率定参数。";
@@ -1740,7 +1745,10 @@ function updateCalibrationPlainGuide() {
     : method === "mc_only"
       ? "当前策略仅快速筛选，用来快速看参数敏感性和候选区间。"
       : "当前策略先快速筛选，再把更好的候选送入精细搜索，是默认更稳妥的方案。";
-  host.textContent = `运行说明：快速筛选样本数表示前期候选参数组数；搜索轮数表示后续优化轮数；每轮候选数倍率=${loadInfo.popsize}，每轮样本数约为参数数 ${CALIBRATION_PARAM_COUNT} × ${loadInfo.popsize} = ${loadInfo.population}。${methodText}`;
+  const objectiveText = objectiveMode === FLOOD_EVENT_OBJECTIVE_FAMILY
+    ? "当前评分标准为洪水事件率定，模型仍连续运行，但优化只在事件窗口内综合考察洪峰、峰现时间、洪量、退水和高流量过程。"
+    : "当前评分标准为综合水文目标函数，优先保证连续径流拟合，并兼顾冰雪融水过程。";
+  host.textContent = `运行说明：快速筛选样本数表示前期候选参数组数；搜索轮数表示后续优化轮数；每轮候选数倍率=${loadInfo.popsize}，每轮样本数约为参数数 ${CALIBRATION_PARAM_COUNT} × ${loadInfo.popsize} = ${loadInfo.population}。${objectiveText}${methodText}`;
   host.className = "hint-box";
 }
 
@@ -1786,6 +1794,7 @@ function updateCalibrationGuidance() {
     return;
   }
   const configuredSource = getConfiguredPrecipSource();
+  const objectiveMode = $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY;
   if (precSelect) {
     const locked = configuredSource === "custom_tif";
     precSelect.disabled = locked;
@@ -1851,7 +1860,8 @@ function updateCalibrationGuidance() {
   const boundsProfile = $("#task-param-bounds-profile")?.value || "qtp_alpine_default";
   const boundsLabel = PARAM_BOUNDS_PROFILE_LABELS[boundsProfile] || boundsProfile;
   const boundsText = (state.currentWorkspace?.率定模式 || "daily") === "daily" ? `参数范围：${boundsLabel}。` : "";
-  load.textContent = `${loadInfo.label}：参数数约 ${CALIBRATION_PARAM_COUNT}，搜索种群 ${loadInfo.population}，预计总评估约 ${Math.round(loadInfo.estimated)} 次，折算到 ${loadInfo.workers} 线程约每线程 ${Math.round(loadInfo.perWorker)} 次。${boundsText}${forcingText}`;
+  const objectiveText = `评分标准：${objectiveLabel(objectiveMode)}。`;
+  load.textContent = `${loadInfo.label}：参数数约 ${CALIBRATION_PARAM_COUNT}，搜索种群 ${loadInfo.population}，预计总评估约 ${Math.round(loadInfo.estimated)} 次，折算到 ${loadInfo.workers} 线程约每线程 ${Math.round(loadInfo.perWorker)} 次。${objectiveText}${boundsText}${forcingText}`;
   load.className = `hint-box ${loadInfo.level === "heavy" ? "status-warn" : loadInfo.level === "medium" ? "" : "status-ok"}`.trim();
 }
 
@@ -5190,8 +5200,7 @@ function toggleCalibrationMethodFields() {
   };
   show("#task-method-group", isCalibration);
   const profile = state.currentWorkspace?.率定模式 || "daily";
-  if ($("#task-objective-mode")) $("#task-objective-mode").value = "daily_unified_professional_v1";
-  show("#task-objective-mode-group", isCalibration && profile !== "daily");
+  show("#task-objective-mode-group", isCalibration);
   show("#task-param-bounds-profile-group", isCalibration && profile === "daily");
   show("#task-mc-samples-group", isCalibration && method !== "de");
   show("#task-init-preset-group", isCalibration);
