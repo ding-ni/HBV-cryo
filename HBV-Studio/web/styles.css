@@ -356,6 +356,128 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   background: var(--accent-light);
 }
 
+.task-objective-mode-field {
+  grid-column: 1 / -1;
+}
+
+.objective-mode-card-group {
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+}
+
+.workflow-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.workflow-signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 118px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.workflow-signal-card strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.workflow-signal-card span {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.workflow-signal-card small {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.workflow-signal-card.status-ok {
+  border-color: rgba(45,124,82,0.22);
+  background: var(--success-light);
+}
+
+.workflow-signal-card.status-warn {
+  border-color: rgba(179,106,40,0.24);
+  background: var(--warm-light);
+}
+
+.workflow-signal-card.status-fail {
+  border-color: rgba(181,69,56,0.24);
+  background: var(--danger-light);
+}
+
+.forecast-layout {
+  grid-template-columns: minmax(300px, 0.95fr) minmax(420px, 1.35fr);
+  align-items: start;
+}
+
+.forecast-task-panel {
+  grid-column: 1 / -1;
+}
+
+.forecast-source-summary {
+  margin-top: 12px;
+}
+
+.forecast-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.forecast-source-card.status-ok {
+  border-color: rgba(45,124,82,0.22);
+  background: linear-gradient(180deg, rgba(45,124,82,0.08), rgba(255,255,255,0.92));
+}
+
+.forecast-source-card.status-warn {
+  border-color: rgba(179,106,40,0.24);
+  background: linear-gradient(180deg, rgba(179,106,40,0.08), rgba(255,255,255,0.92));
+}
+
+.forecast-source-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.forecast-source-card-head strong {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.forecast-source-meta {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 5px 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(20,79,84,0.05);
+}
+
+.forecast-source-meta span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.forecast-source-meta strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* ===== Conditional Blocks & Global Hidden ===== */
 .hidden { display: none !important; }
 .conditional-block { transition: all 200ms; }
@@ -1449,8 +1571,10 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   .nav-list { flex-direction: row; }
   .sidebar-panel { border-top: none; border-left: 1px solid var(--line); padding: 0 12px; }
   .card-grid.two { grid-template-columns: 1fr; }
+  .forecast-layout { grid-template-columns: 1fr; }
   .field-grid.two { grid-template-columns: 1fr; }
   .field-grid.three { grid-template-columns: 1fr 1fr; }
+  .workflow-signal-grid { grid-template-columns: 1fr; }
   .workspace-layout-grid { grid-template-columns: 1fr; }
   .run-card-head { flex-direction: column; }
   .run-card-score { width: 100%; text-align: left; }
@@ -1464,11 +1588,14 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   .content-shell { padding: 16px; }
   .topbar { padding: 14px 16px 10px; }
   .radio-card-group { grid-template-columns: 1fr; }
+  .objective-mode-card-group { grid-template-columns: 1fr; }
   .bootstrap-status { grid-template-columns: 1fr; }
   .metric-strip { grid-template-columns: 1fr; }
   .workspace-layout-summary { grid-template-columns: 1fr; }
   .workspace-card-meta { grid-template-columns: 1fr; }
   .run-card-meta { grid-template-columns: 1fr; }
+  .forecast-source-card-head { flex-direction: column; }
+  .forecast-source-meta { grid-template-columns: 1fr; }
   .results-filter-group { width: 100%; }
   .task-card-hero { flex-direction: column; }
   .task-card-topline .status-badge { margin-left: 0; }

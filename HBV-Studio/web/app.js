@@ -14,6 +14,7 @@ const viewMeta = {
   dashboard: { title: "项目管理", subtitle: "管理工作区与内置模板" },
   wizard:    { title: "建模向导", subtitle: "按步骤配置流域模型" },
   calibration: { title: "率定运行", subtitle: "配置并启动率定任务" },
+  forecast: { title: "状态接续预报", subtitle: "复用率定参数与保存状态，接入未来气象驱动" },
   results:   { title: "结果分析", subtitle: "查看率定结果与诊断图表" },
 };
 
@@ -106,7 +107,7 @@ const MANUAL_GROUP_META = {
 const RUN_TYPE_LABELS = {
   manual_starter: "手调起点",
   manual_result: "手调结果",
-  forecast_restart: "连续状态预报",
+  forecast_restart: "状态接续预报",
   calibration: "正式率定",
   legacy: "历史结果",
 };
@@ -165,6 +166,7 @@ const state = {
   taskManualPresets: [],
   taskManualPresetConfigPath: "",
   activeTaskManualPresetRequestId: 0,
+  forecastSourceRunPath: "",
   activeCompareRequestId: 0,
   prepSteps: [],
   prepStatus: {},
@@ -513,7 +515,7 @@ function renderTaskFilterToolbar() {
     { value: "all", label: "全部类型" },
     { value: "calibration", label: "率定" },
     { value: "prep", label: "数据准备" },
-    { value: "simulate", label: "手调/重算" },
+    { value: "simulate", label: "手调/预报" },
     { value: "support", label: "自检/辅助" },
   ];
   host.innerHTML = `
@@ -589,6 +591,7 @@ function renderResultsFilterToolbar() {
     { label: "正式率定", value: "calibration" },
     { label: "手调起点", value: "manual_starter" },
     { label: "手调结果", value: "manual_result" },
+    { label: "状态接续预报", value: "forecast_restart" },
     { label: "历史结果", value: "legacy" },
   ];
   const editabilityOptions = [
@@ -644,6 +647,7 @@ function renderResultsFilterToolbar() {
     counts.calibration ? `正式率定 ${counts.calibration}` : "",
     counts.manual_starter ? `手调起点 ${counts.manual_starter}` : "",
     counts.manual_result ? `手调结果 ${counts.manual_result}` : "",
+    counts.forecast_restart ? `状态接续预报 ${counts.forecast_restart}` : "",
     counts.legacy ? `历史结果 ${counts.legacy}` : "",
   ].filter(Boolean).join(" / ");
   if (!state.runWorkspaceFilterPath && !state.runProfileFilter && !state.runTypeFilter && state.runEditabilityFilter === "all") {
@@ -1611,7 +1615,7 @@ function taskTypeLabel(taskType) {
     meteo_import: "气象导入",
     manual_start: "手调起点",
     forward_sim: "保存并重算",
-    forecast_restart: "连续状态预报",
+    forecast_restart: "状态接续预报",
     self_check: "系统自检",
     sync: "模板同步",
   })[String(taskType || "").toLowerCase()] || "任务";
@@ -1657,7 +1661,7 @@ function objectiveLabel(value) {
   return ({
     auto: "自动选择",
     daily_unified_professional_v1: "统一日尺度专业目标函数",
-    flood_event_calibration_v1: "洪水事件率定",
+    flood_event_calibration_v1: "洪水事件率定（次洪）",
     weighted_multi_criteria: "旧版多指标目标函数（历史结果）",
     weighted_daily_universal: "旧版日尺度加权目标函数（历史结果）",
     single_objective_nse: "单指标纳什效率系数",
@@ -1910,6 +1914,90 @@ function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emp
       `).join("")}
     </div>
   `;
+}
+
+function stationPrecipModeLabel(mode) {
+  return ({
+    grid_only: "格点直接使用",
+    grid_plus_station_bias: "格点 + 站点偏差订正",
+    thiessen_station_only: "纯泰森多边形插值",
+  })[String(mode || "").toLowerCase()] || "格点直接使用";
+}
+
+function stationPrecipModeDescription(mode) {
+  if (mode === "grid_plus_station_bias") {
+    return "按时段在站点位置抽取格点降水，采用比值订正与残差订正并进行空间插值，形成逐栅格订正降水。";
+  }
+  if (mode === "thiessen_station_only") {
+    return "直接以站点降水控制目标格网，按最近控制站形成面雨量场，适合作为站点资料主导的基线方案。";
+  }
+  return "不启用站点订正或泰森分配，降水输入来自当前格点数据源。";
+}
+
+function renderPrecipStrategyStatus() {
+  const host = $("#wz-precip-strategy-status");
+  if (!host) return;
+  const mode = getSelectedRadio("wz-precip-mode") || "grid_only";
+  const stationPrec = $("#wz-station-prec")?.value.trim() || "";
+  const stationMeta = $("#wz-station-meta")?.value.trim() || "";
+  const needsStation = mode !== "grid_only";
+  const stationReady = Boolean(stationPrec && stationMeta);
+  const statusClass = !needsStation ? "status-ok" : stationReady ? "status-ok" : "status-warn";
+  const statusText = !needsStation ? "未启用站点资料" : stationReady ? "站点资料已登记" : "待登记站点资料";
+  host.innerHTML = `
+    <div class="workflow-signal-card ${statusClass}">
+      <strong>${escapeHtml(stationPrecipModeLabel(mode))}</strong>
+      <span>${escapeHtml(statusText)}</span>
+      <small>${escapeHtml(stationPrecipModeDescription(mode))}</small>
+    </div>
+    <div class="workflow-signal-card ${needsStation ? (stationPrec ? "status-ok" : "status-warn") : ""}">
+      <strong>站点降水表</strong>
+      <span>${escapeHtml(needsStation ? (stationPrec ? shortPath(stationPrec) : "未选择") : "不需要")}</span>
+      <small>用于站点时间序列、站号匹配、缺测率和异常降水检查。</small>
+    </div>
+    <div class="workflow-signal-card ${needsStation ? (stationMeta ? "status-ok" : "status-warn") : ""}">
+      <strong>站点空间信息</strong>
+      <span>${escapeHtml(needsStation ? (stationMeta ? shortPath(stationMeta) : "未选择") : "不需要")}</span>
+      <small>用于经纬度定位、格点抽样、空间权重和目标栅格分配。</small>
+    </div>
+  `;
+}
+
+function stationPrecipCheckFromValidation(validation) {
+  const checks = validation?.focus_checks || [];
+  return checks.find(check => String(check?.id || "").toLowerCase() === "station_precip")
+    || checks.find(check => String(check?.title || "").includes("站点降水"))
+    || null;
+}
+
+function renderStationPrecipCheckOverview(validation = null) {
+  const host = $("#wz-station-check-overview");
+  if (!host) return;
+  const mode = getSelectedRadio("wz-precip-mode") || state.currentWorkspace?.气象策略?.降水方案 || "grid_only";
+  const check = stationPrecipCheckFromValidation(validation);
+  if (check) {
+    host.innerHTML = renderEngineeringFocusChecks([check], { title: "站点降水专项检查" });
+    return;
+  }
+  const stationPrec = $("#wz-station-prec")?.value.trim() || state.currentWorkspace?.气象策略?.站点降水_csv || "";
+  const stationMeta = $("#wz-station-meta")?.value.trim() || state.currentWorkspace?.气象策略?.站点信息_csv || "";
+  const needsStation = mode !== "grid_only";
+  const status = !needsStation ? "ok" : (stationPrec && stationMeta ? "warn" : "fail");
+  const summary = !needsStation
+    ? "当前为格点基线模式，输入检查不会执行站点降水订正专项分析。"
+    : (stationPrec && stationMeta
+      ? "站点降水资料已登记，运行检查后会输出站号匹配、时间覆盖、缺测率和异常值。"
+      : "当前降水方案需要站点降水表和站点空间信息，资料未完整登记。");
+  host.innerHTML = renderEngineeringFocusChecks([{
+    title: "站点降水专项检查",
+    summary,
+    status,
+    items: [
+      { label: "降水方案", value: stationPrecipModeLabel(mode), status: needsStation ? "ok" : "warn" },
+      { label: "站点降水表", value: stationPrec ? shortPath(stationPrec) : (needsStation ? "缺失" : "不需要"), status: !needsStation || stationPrec ? "ok" : "fail" },
+      { label: "站点空间信息", value: stationMeta ? shortPath(stationMeta) : (needsStation ? "缺失" : "不需要"), status: !needsStation || stationMeta ? "ok" : "fail" },
+    ],
+  }], { title: "站点降水专项检查" });
 }
 
 function updateProjectFocusHint() {
@@ -2261,7 +2349,7 @@ function forecastRestartStageEntries(task) {
   else if (/重启|预报/.test(stageText)) phase = 3;
   else if (/加载未来气象|加载/.test(stageText)) phase = 2;
   else if (/读取|准备/.test(stageText)) phase = 1;
-  return ["读取源结果", "校验状态快照", "加载未来气象", "状态重启预报", "写出预报结果"].map((label, idx) => {
+  return ["读取源结果", "校验状态快照", "加载未来气象", "状态接续预报", "写出预报结果"].map((label, idx) => {
     let status = "pending";
     if (task?.status === "completed") status = "completed";
     else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
@@ -2407,7 +2495,7 @@ function manualStartTaskSummary(task) {
 
 function forecastRestartTaskSummary(task) {
   if (task?.status === "running") {
-    const stage = task?.ui_progress?.stage || "正在执行连续状态预报。";
+    const stage = task?.ui_progress?.stage || "正在执行状态接续预报。";
     const lastLog = taskLastMeaningfulLog(task);
     return lastLog && lastLog !== stage ? `${stage} · ${lastLog}` : stage;
   }
@@ -2415,9 +2503,9 @@ function forecastRestartTaskSummary(task) {
     const result = task.result || {};
     const meta = result.metadata?.forecast_result || {};
     const range = meta.forecast_start && meta.forecast_end ? `${meta.forecast_start} 至 ${meta.forecast_end}` : "未来时段";
-    return result.run_path ? `连续状态预报已生成：${range}。` : "连续状态预报已完成。";
+    return result.run_path ? `状态接续预报已生成：${range}。` : "状态接续预报已完成。";
   }
-  return taskLastMeaningfulLog(task) || "连续状态预报失败。";
+  return taskLastMeaningfulLog(task) || "状态接续预报失败。";
 }
 
 function selfCheckTaskSummary(task) {
@@ -2989,11 +3077,13 @@ function setServiceState(ok, msg) {
 // --------------- view switching ---------------
 
 function setView(view) {
+  if (!viewMeta[view]) view = "dashboard";
   state.currentView = view;
   $all(".view").forEach(n => n.classList.toggle("active", n.dataset.view === view));
   $all(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.viewTarget === view));
   $("#page-title").textContent    = viewMeta[view].title;
   $("#page-subtitle").textContent = viewMeta[view].subtitle;
+  if (view === "forecast") renderForecastView();
 }
 
 // --------------- sidebar ---------------
@@ -3503,6 +3593,8 @@ function updateConditionalFields() {
   syncWizardTimeInputMode();
   syncCustomMeteoImportInputs();
   updateMeteoMode();
+  renderPrecipStrategyStatus();
+  renderStationPrecipCheckOverview();
   updateProjectFocusHint();
   updateBoundaryGuidance();
   updateObservationHint();
@@ -3757,6 +3849,7 @@ function populateWizardFromConfig(cfg, path) {
   // calibration defaults
   $("#task-prec-source").value = workspaceConfiguredPrecipSource(cfg);
   if ($("#task-objective-mode")) $("#task-objective-mode").value = "daily_unified_professional_v1";
+  syncObjectiveModeCards("daily_unified_professional_v1");
   if ($("#task-param-bounds-profile")) $("#task-param-bounds-profile").value = "qtp_alpine_default";
 
   applyStep6MeteoDefaults({ force: true, switchMode: true });
@@ -3864,6 +3957,7 @@ function resetWizard() {
   if ($("#task-quick-days")) $("#task-quick-days").value = "30";
   if ($("#task-method")) $("#task-method").value = "mc_screen_de";
   if ($("#task-objective-mode")) $("#task-objective-mode").value = "daily_unified_professional_v1";
+  syncObjectiveModeCards("daily_unified_professional_v1");
   if ($("#task-param-bounds-profile")) $("#task-param-bounds-profile").value = "qtp_alpine_default";
   if ($("#task-mc-samples")) $("#task-mc-samples").value = "300";
   if ($("#task-init-preset")) $("#task-init-preset").value = "";
@@ -5005,6 +5099,7 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     const validation = validationResp.data || {};
     const detailData = detailResp.data;
     const advice = adviceResp.data;
+    renderStationPrecipCheckOverview(validation);
     const comp = {
       ready: Boolean(validation.valid),
       ready_for_calibration: Boolean(validation.valid),
@@ -5189,6 +5284,23 @@ function renderTemplates() {
 //  CALIBRATION
 // ===============================================================
 
+function syncObjectiveModeCards(value = "") {
+  const mode = String(value || $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY).trim() || CURRENT_OBJECTIVE_FAMILY;
+  const select = $("#task-objective-mode");
+  if (select && select.value !== mode) select.value = mode;
+  document.querySelectorAll('input[name="task-objective-mode-radio"]').forEach(input => {
+    const checked = input.value === mode;
+    input.checked = checked;
+    input.closest(".radio-card")?.classList.toggle("selected", checked);
+  });
+}
+
+function setObjectiveMode(value) {
+  const mode = String(value || CURRENT_OBJECTIVE_FAMILY).trim() || CURRENT_OBJECTIVE_FAMILY;
+  syncObjectiveModeCards(mode);
+  refreshCalibrationControls();
+}
+
 function toggleCalibrationMethodFields() {
   const kind = $("#task-kind")?.value || "calibration";
   const method = $("#task-method")?.value || "de";
@@ -5205,6 +5317,7 @@ function toggleCalibrationMethodFields() {
   show("#task-mc-samples-group", isCalibration && method !== "de");
   show("#task-init-preset-group", isCalibration);
   show("#task-init-bound-shrink-group", isCalibration && hasPreset);
+  syncObjectiveModeCards();
 }
 
 function refreshCalibrationControls() {
@@ -6056,6 +6169,227 @@ function renderTasks() {
 }
 
 // ===============================================================
+//  FORECAST RESTART
+// ===============================================================
+
+function forecastCandidateRuns() {
+  const allowed = new Set(["calibration", "manual_result", "manual_starter", "forecast_restart"]);
+  return state.runs.filter(run => {
+    const type = runTypeValue(run);
+    return Boolean(run?.path) && allowed.has(type);
+  });
+}
+
+function forecastRunReady(run) {
+  if (!run) return false;
+  if (run.forecast_source_ready !== undefined) return Boolean(run.forecast_source_ready);
+  return Boolean(run.path && run.studio_compatible);
+}
+
+function forecastRunReadinessText(run) {
+  if (!run) return "未选择源结果";
+  if (forecastRunReady(run)) return "可接续";
+  if (run.optimized_params_available === false) return "缺少率定参数";
+  if (run.state_snapshot_available === false) return "缺少状态快照";
+  return "需用新版结果";
+}
+
+function selectedForecastRun() {
+  const selectedPath = $("#forecast-source-run")?.value || state.forecastSourceRunPath || "";
+  return forecastCandidateRuns().find(run => samePath(run.path, selectedPath)) || null;
+}
+
+function forecastInputType(run) {
+  const stepHours = Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
+  return stepHours <= 1.5 ? "datetime-local" : "date";
+}
+
+function renderForecastSourceOptions() {
+  const select = $("#forecast-source-run");
+  if (!select) return;
+  const candidates = forecastCandidateRuns();
+  const current = state.forecastSourceRunPath || currentSelectedRunPath() || "";
+  let selected = candidates.find(run => samePath(run.path, current));
+  if (!selected) selected = candidates.find(forecastRunReady) || candidates[0] || null;
+  state.forecastSourceRunPath = selected?.path || "";
+  select.disabled = !candidates.length;
+  select.innerHTML = candidates.length
+    ? candidates.map(run => {
+      const label = `${runDisplayName(run)} · ${runTypeLabel(runTypeValue(run))} · ${forecastRunReadinessText(run)}`;
+      return `<option value="${escapeHtml(run.path)}" ${samePath(run.path, state.forecastSourceRunPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("")
+    : '<option value="">暂无可选源结果</option>';
+}
+
+function renderForecastSourceSummary() {
+  const host = $("#forecast-source-summary");
+  const openBtn = $("#forecast-open-source");
+  const startBtn = $("#forecast-start-button");
+  const hint = $("#forecast-hint");
+  if (!host) return;
+  const run = selectedForecastRun();
+  if (openBtn) openBtn.disabled = !run?.path;
+  if (startBtn) startBtn.disabled = !run?.path || !forecastRunReady(run);
+  if (!run) {
+    host.innerHTML = '<div class="hint-box status-warn" style="margin-top:12px">当前没有可作为预报起点的率定或手调结果。</div>';
+    if (hint) {
+      hint.textContent = "完成一次新版率定或手调重算后，可在这里直接接入未来气象驱动。";
+      hint.className = "hint-box status-warn";
+    }
+    return;
+  }
+  const ready = forecastRunReady(run);
+  const stateTime = run.state_snapshot_time || run.time_config?.forecast_end || run.time_config?.valid_end || run.time_config?.calib_end || "";
+  const sourceType = runTypeLabel(runTypeValue(run));
+  const objective = objectiveLabel(run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "");
+  host.innerHTML = `
+    <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
+      <div class="forecast-source-card-head">
+        <strong>${escapeHtml(runDisplayName(run))}</strong>
+        <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(forecastRunReadinessText(run))}</span>
+      </div>
+      <div class="forecast-source-meta">
+        <span>结果类型</span><strong>${escapeHtml(sourceType)}</strong>
+        <span>计算尺度</span><strong>${escapeHtml(profileLabel(runProfileValue(run)))}</strong>
+        <span>状态时间</span><strong>${escapeHtml(stateTime || "未记录")}</strong>
+        <span>目标函数</span><strong>${escapeHtml(objective)}</strong>
+      </div>
+      <small>${escapeHtml(run.workspace_name || runWorkspaceName(run) || "未关联工作区")}</small>
+    </div>
+  `;
+  const inputType = forecastInputType(run);
+  ["forecast-start", "forecast-end"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input && input.type !== inputType) input.type = inputType;
+  });
+  if (hint) {
+    hint.textContent = ready
+      ? "预报运行将读取源结果的参数与末端状态，不重新率定；未来降水、气温和潜在蒸散发目录需要覆盖起报至结束时段。"
+      : "该源结果不能直接接续，请优先使用新版率定、手调结果或已生成状态快照的预报结果。";
+    hint.className = `hint-box ${ready ? "status-ok" : "status-warn"}`;
+  }
+}
+
+function renderForecastTaskList() {
+  const host = $("#forecast-task-list");
+  if (!host) return;
+  const tasks = state.tasks
+    .filter(task => task.task_type === "forecast_restart")
+    .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+  if (!tasks.length) {
+    host.innerHTML = '<div class="hint-box">暂无状态接续预报任务。</div>';
+    return;
+  }
+  host.innerHTML = tasks.slice(0, 8).map(task => {
+    const isRunning = task.status === "running";
+    const summaryLine = taskSummaryLine(task);
+    const summaryClass = task.status === "completed" ? "status-ok" : task.status === "failed" ? "status-fail" : "";
+    return `
+      <div class="list-item task-card ${isRunning ? "task-running" : ""}">
+        <div class="task-card-topline">
+          <span class="task-kicker">${escapeHtml(taskTypeLabel(task.task_type))}</span>
+          <span class="task-updated">最近更新 ${escapeHtml(formatDateTime(task.updated_at))}</span>
+          <span class="status-badge ${taskStatusClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}${isRunning ? "..." : ""}</span>
+        </div>
+        <div class="task-card-title">
+          <strong>${escapeHtml(taskPrimaryTitle(task))}</strong>
+          ${task.forecast_end ? `<small class="task-meta-line">预报至 ${escapeHtml(task.forecast_end)}</small>` : ""}
+        </div>
+        ${renderTaskMilestones(task)}
+        <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
+        ${renderTaskActions(task)}
+        ${taskDebugDetails(task, { lines: isRunning ? 80 : 40 })}
+      </div>
+    `;
+  }).join("");
+  restoreVisibleLogViewports("#forecast-task-list [data-log-key]");
+}
+
+function renderForecastView() {
+  if (!$("#forecast-source-run")) return;
+  renderForecastSourceOptions();
+  renderForecastSourceSummary();
+  renderForecastTaskList();
+}
+
+function selectLatestForecastSource() {
+  const run = forecastCandidateRuns().find(forecastRunReady) || forecastCandidateRuns()[0] || null;
+  if (!run) {
+    showToast("当前没有可接续的源结果。", true);
+    renderForecastView();
+    return;
+  }
+  state.forecastSourceRunPath = run.path;
+  renderForecastView();
+}
+
+async function startForecastRestart() {
+  const run = selectedForecastRun();
+  if (!run) { showToast("请先选择源结果。", true); return; }
+  if (!forecastRunReady(run)) { showToast("源结果缺少率定参数或状态快照，不能启动状态接续预报。", true); return; }
+  const forecastEnd = $("#forecast-end")?.value.trim() || "";
+  const forecastStart = $("#forecast-start")?.value.trim() || "";
+  const precDir = $("#forecast-prec-dir")?.value.trim() || "";
+  const tempDir = $("#forecast-temp-dir")?.value.trim() || "";
+  const evapDir = $("#forecast-evap-dir")?.value.trim() || "";
+  if (!forecastEnd) { showToast("请填写预报结束时间。", true); return; }
+  if (!precDir || !tempDir || !evapDir) {
+    showToast("请完整选择预报降水、气温和潜在蒸散发栅格目录。", true);
+    return;
+  }
+  const payload = {
+    source_run: run.path,
+    config_path: run.workspace_config || state.wizardWorkspacePath || "",
+    forecast_start: forecastStart,
+    forecast_end: forecastEnd,
+    forecast_prec_dir: precDir,
+    forecast_temp_dir: tempDir,
+    forecast_evap_dir: evapDir,
+    profile: runProfileValue(run) || state.currentWorkspace?.率定模式 || "",
+    objective_mode: run.effective_objective_mode || run.objective_family || run.recorded_objective_family || CURRENT_OBJECTIVE_FAMILY,
+    prec_source: "custom_tif",
+    glacier_mode: $("#forecast-glacier-mode")?.value || "inline",
+  };
+  try {
+    const response = await apiPost("/api/forecast/restart/start", payload);
+    showToast(`已启动：${response.task?.label || "状态接续预报"}`);
+    await loadTasks();
+    renderForecastView();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function handleTaskActionClick(e) {
+  const openWorkspaceBtn = e.target.closest("[data-task-open-workspace]");
+  if (openWorkspaceBtn) {
+    loadWorkspace(openWorkspaceBtn.dataset.taskOpenWorkspace)
+      .then(workflow => {
+        navigateWizardStep(preferredWorkspaceLandingStep(workflow));
+        setView("wizard");
+      })
+      .catch(er => showToast(er.message, true));
+    return true;
+  }
+  const openResultBtn = e.target.closest("[data-task-open-result]");
+  if (openResultBtn) {
+    openLatestRunAndSwitch(openResultBtn.dataset.taskOpenResult).catch(er => showToast(er.message, true));
+    return true;
+  }
+  const openRunDirBtn = e.target.closest("[data-task-open-run-dir]");
+  if (openRunDirBtn) {
+    openLocalPath(openRunDirBtn.dataset.taskOpenRunDir, "结果目录").catch(er => showToast(er.message, true));
+    return true;
+  }
+  const copyTaskLogBtn = e.target.closest("[data-copy-task-log]");
+  if (copyTaskLogBtn) {
+    copyTextToClipboard(taskLogText(copyTaskLogBtn.dataset.copyTaskLog || ""), "日志").catch(err => showToast(err.message, true));
+    return true;
+  }
+  return false;
+}
+
+// ===============================================================
 //  DATA LOADING
 // ===============================================================
 
@@ -6091,6 +6425,7 @@ async function loadDashboard() {
   renderDashboardWorkspaceLayout();
   renderRunList();
   renderTasks();
+  renderForecastView();
   updateCounts();
   updateSidebar();
   if (state.wizardWorkspacePath && state.workspaces.some(w => w.path === state.wizardWorkspacePath)) {
@@ -6205,6 +6540,7 @@ async function loadRuns() {
   }
   renderResultsFilterToolbar();
   renderRunList();
+  renderForecastView();
   updateCounts();
   const refreshedSelected = selectionStable && previousSelected && state.runs.find(run => samePath(run.path, previousSelected));
   const selectedStillCurrent =
@@ -6327,6 +6663,7 @@ async function loadTasks() {
   const p = await apiGet("/api/tasks");
   state.tasks = p.data;
   renderTasks();
+  renderForecastView();
   updateCounts();
   updateManualStarterButtons();
   const finishedTaskIds = state.tasks
@@ -6389,6 +6726,11 @@ async function loadTasks() {
     task.status === "completed" &&
     previousTasks.get(task.id)?.status === "running"
   );
+  const newlyCompletedForecast = state.tasks.find(task =>
+    task.task_type === "forecast_restart" &&
+    task.status === "completed" &&
+    previousTasks.get(task.id)?.status === "running"
+  );
   if (finishedTaskIds.length > 0) {
     clearInputCheckCache();
     await loadRuns();
@@ -6409,6 +6751,15 @@ async function loadTasks() {
       if (runPath) {
         await openLatestRunAndSwitch(runPath, { workspacePath: newlyCompletedCalibration.result?.workspace_config || newlyCompletedCalibration.config_path || "" });
         showToast("率定完成，已打开结果页，可继续手动调参。");
+      }
+    }
+    if (newlyCompletedForecast) {
+      const runPath = newlyCompletedForecast.result?.run_path || newlyCompletedForecast.run_path || newlyCompletedForecast.detected_runs?.[0] || "";
+      if (runPath) {
+        await loadRuns().catch(() => {});
+        if (state.currentView === "forecast") {
+          showToast("状态接续预报已完成，可在预报任务或结果分析中查看。");
+        }
       }
     }
   }
@@ -6871,6 +7222,9 @@ function bindEvents() {
   $("#start-task-button").addEventListener("click", () => startCalibration());
   $("#apply-recommended-calibration")?.addEventListener("click", () => applyRecommendedCalibrationSettings());
   $("#task-kind").addEventListener("change", refreshCalibrationControls);
+  document.querySelectorAll('input[name="task-objective-mode-radio"]').forEach(input => {
+    input.addEventListener("change", () => setObjectiveMode(input.value));
+  });
   ["#task-glacier-mode", "#task-param-bounds-profile", "#task-quick-days", "#task-method", "#task-objective-mode",
    "#task-workers", "#task-maxiter", "#task-popsize", "#task-seed",
    "#task-mc-samples", "#task-init-preset", "#task-init-bound-shrink"
@@ -6882,6 +7236,28 @@ function bindEvents() {
     }
   });
   $("#task-prec-source")?.addEventListener("change", handleTaskPrecipSourceChange);
+
+  // --- forecast restart ---
+  $("#forecast-source-run")?.addEventListener("change", () => {
+    state.forecastSourceRunPath = $("#forecast-source-run")?.value || "";
+    renderForecastSourceSummary();
+  });
+  $("#forecast-use-latest")?.addEventListener("click", selectLatestForecastSource);
+  $("#forecast-open-source")?.addEventListener("click", () => {
+    const run = selectedForecastRun();
+    if (run?.path) openLocalPath(run.path, "源结果目录").catch(err => showToast(err.message, true));
+  });
+  $("#forecast-start-button")?.addEventListener("click", () => startForecastRestart());
+  $("#forecast-task-list")?.addEventListener("click", e => {
+    handleTaskActionClick(e);
+  });
+  $("#forecast-task-list")?.addEventListener("toggle", e => {
+    const details = e.target.closest?.("[data-task-debug-id]");
+    if (!details) return;
+    const taskId = details.dataset.taskDebugId || "";
+    if (!taskId) return;
+    state.taskDebugOpen[taskId] = details.open;
+  }, true);
 
   // --- results ---
   $("#results-filter-toolbar")?.addEventListener("click", e => {
@@ -7008,30 +7384,7 @@ function bindEvents() {
     openLocalPath(state.lastRunExportPath, "导出文件").catch(err => showToast(err.message, true));
   });
   $("#task-list")?.addEventListener("click", e => {
-    const openWorkspaceBtn = e.target.closest("[data-task-open-workspace]");
-    if (openWorkspaceBtn) {
-      loadWorkspace(openWorkspaceBtn.dataset.taskOpenWorkspace)
-        .then(workflow => {
-          navigateWizardStep(preferredWorkspaceLandingStep(workflow));
-          setView("wizard");
-        })
-        .catch(er => showToast(er.message, true));
-      return;
-    }
-    const openResultBtn = e.target.closest("[data-task-open-result]");
-    if (openResultBtn) {
-      openLatestRunAndSwitch(openResultBtn.dataset.taskOpenResult).catch(er => showToast(er.message, true));
-      return;
-    }
-    const openRunDirBtn = e.target.closest("[data-task-open-run-dir]");
-    if (openRunDirBtn) {
-      openLocalPath(openRunDirBtn.dataset.taskOpenRunDir, "结果目录").catch(er => showToast(er.message, true));
-      return;
-    }
-    const copyTaskLogBtn = e.target.closest("[data-copy-task-log]");
-    if (copyTaskLogBtn) {
-      copyTextToClipboard(taskLogText(copyTaskLogBtn.dataset.copyTaskLog || ""), "日志").catch(err => showToast(err.message, true));
-    }
+    handleTaskActionClick(e);
   });
   $("#task-list")?.addEventListener("toggle", e => {
     const details = e.target.closest?.("[data-task-debug-id]");
@@ -7082,6 +7435,19 @@ function bindEvents() {
   if (petSelect) petSelect.addEventListener("change", updateConditionalFields);
   const precSelect = $("#wz-prec-source");
   if (precSelect) precSelect.addEventListener("change", updateConditionalFields);
+  ["#wz-station-prec", "#wz-station-meta"].forEach(sel => {
+    const el = $(sel);
+    if (el) {
+      el.addEventListener("input", () => {
+        renderPrecipStrategyStatus();
+        renderStationPrecipCheckOverview();
+      });
+      el.addEventListener("change", () => {
+        renderPrecipStrategyStatus();
+        renderStationPrecipCheckOverview();
+      });
+    }
+  });
 
   // radio cards
   setupRadioCards();
@@ -7131,7 +7497,7 @@ function startPolling() {
 
   const pollRuns = async () => {
     const hasRunning = state.tasks.some(t => t.status === "running");
-    const shouldRefreshRuns = hasRunning || state.currentView === "dashboard" || state.currentView === "results";
+    const shouldRefreshRuns = hasRunning || state.currentView === "dashboard" || state.currentView === "forecast" || state.currentView === "results";
     if (shouldRefreshRuns) {
       try {
         await loadRuns();

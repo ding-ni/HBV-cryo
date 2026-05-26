@@ -176,11 +176,11 @@ def write_forecast_outputs(
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
         "run_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "result_title": "连续状态预报",
+        "result_title": "状态接续预报",
         "run_class": "forecast_restart",
         "forecast_result": {
             "enabled": True,
-            "label": "连续状态预报",
+            "label": "状态接续预报",
             "schema": restart.get("schema", "continuous_state_forecast_v1"),
             "status": restart.get("status", "ok"),
             "source_run_path": str(source_run.resolve(strict=False)),

@@ -88,7 +88,7 @@ DEFAULT_MANUAL_START_VECTOR = [
 RUN_KIND_LABELS = {
     "manual_starter": "手调起点",
     "manual_result": "手调结果",
-    "forecast_restart": "连续状态预报",
+    "forecast_restart": "状态接续预报",
     "calibration": "正式率定",
     "legacy": "历史结果",
 }
@@ -5857,6 +5857,10 @@ def _build_run_summary(
         "effective_objective_mode": "",
         "flow_guard_status": "",
         "hydrology_summary": {},
+        "optimized_params_available": False,
+        "state_snapshot_available": False,
+        "state_snapshot_time": "",
+        "forecast_source_ready": False,
     }
     if metadata is None:
         return summary
@@ -5903,6 +5907,14 @@ def _build_run_summary(
         or ""
     ).strip()
     summary["hydrology_summary"] = _build_hydrology_summary(metadata, run_dir)
+    initial_state = dict(metadata.get("initial_state", {}) or {})
+    snapshot_file = str(initial_state.get("state_snapshot_file", "") or "").strip()
+    snapshot_path = run_dir / snapshot_file if snapshot_file else run_dir / "state_snapshot.npz"
+    optimized_params = metadata.get("optimized_params", {})
+    summary["optimized_params_available"] = bool(isinstance(optimized_params, dict) and optimized_params)
+    summary["state_snapshot_available"] = bool(snapshot_path.exists() or initial_state.get("state_snapshot_available"))
+    summary["state_snapshot_time"] = str(initial_state.get("state_snapshot_time", "") or "").strip()
+    summary["forecast_source_ready"] = bool(summary["optimized_params_available"] and summary["state_snapshot_available"])
     summary.update(_display_run_title(run_dir, metadata, resolved_config, studio_compatible, updated_at=updated_at))
     source_run_path, source_run_name = _source_run_meta(metadata)
     summary["source_run_path"] = source_run_path
@@ -9746,12 +9758,12 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
     def report(stage: str, message: str | None = None) -> None:
         nonlocal last_stage
         last_stage = stage
-        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "连续状态预报"})
+        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "状态接续预报"})
         if message:
             add_task_output(task_id, message)
 
     try:
-        report("准备启动", "[阶段] 准备连续状态预报")
+        report("准备启动", "[阶段] 准备状态接续预报")
         result = forecast_restart(payload)
         if result.get("run_path"):
             set_task_metadata(task_id, run_path=result["run_path"])
@@ -9762,7 +9774,7 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=True, return_code=0, result=result)
     except Exception as exc:
         if last_stage:
-            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
+            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "状态接续预报"})
         add_task_output(task_id, f"[失败] {exc}")
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
@@ -9799,7 +9811,7 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     record = TaskRecord(
         id=task_id,
         task_type="forecast_restart",
-        label=f"连续状态预报 | {source_run.name}",
+        label=f"状态接续预报 | {source_run.name}",
         command=["forecast_restart"],
         cwd=str(PROJECT_ROOT),
         metadata={
@@ -9809,7 +9821,7 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
             "forecast_end": args.forecast_end,
             "runtime_prec_source": args.prec_source,
             "glacier_mode": args.glacier_mode,
-            "ui_progress": {"stage": "准备启动", "label": "连续状态预报"},
+            "ui_progress": {"stage": "准备启动", "label": "状态接续预报"},
         },
     )
     with TASK_LOCK:

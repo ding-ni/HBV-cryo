@@ -23,6 +23,7 @@
         <button class="nav-item active" data-view-target="dashboard">项目管理</button>
         <button class="nav-item" data-view-target="wizard">建模向导</button>
         <button class="nav-item" data-view-target="calibration">率定运行</button>
+        <button class="nav-item" data-view-target="forecast">状态接续预报</button>
         <button class="nav-item" data-view-target="results">结果分析</button>
       </nav>
 
@@ -282,6 +283,7 @@
                   </label>
                 </div>
               </div>
+              <div id="wz-precip-strategy-status" class="workflow-signal-grid" style="margin-top:12px"></div>
               <div id="wz-station-fields" class="conditional-block hidden">
                 <div class="field-grid two" style="margin-top:12px">
                   <div class="field-group">
@@ -517,6 +519,7 @@
           <div class="wizard-panel" data-wizard-step="7">
             <div class="panel">
               <div class="panel-head"><h3>输入完整性检查</h3><span class="panel-note">确认所有率定所需数据已就位</span></div>
+              <div id="wz-station-check-overview" style="margin-bottom:12px"></div>
               <div id="wz-check-results"></div>
               <div class="action-row">
                 <button class="ghost-button" id="wz-run-check">运行检查</button>
@@ -576,11 +579,23 @@
                     <option value="mc_only">仅快速筛选</option>
                   </select>
                 </div>
-                <div class="field-group hidden" id="task-objective-mode-group">
-                  <label>评分标准</label>
-                  <select id="task-objective-mode">
+                <div class="field-group task-objective-mode-field" id="task-objective-mode-group">
+                  <label>率定目标</label>
+                  <div class="radio-card-group objective-mode-card-group" id="task-objective-mode-cards">
+                    <label class="radio-card selected" data-objective-mode="daily_unified_professional_v1">
+                      <input type="radio" name="task-objective-mode-radio" value="daily_unified_professional_v1" checked>
+                      <strong>连续期综合率定</strong>
+                      <small>面向完整连续径流过程，综合考察水量、过程线和水文响应稳定性。</small>
+                    </label>
+                    <label class="radio-card" data-objective-mode="flood_event_calibration_v1">
+                      <input type="radio" name="task-objective-mode-radio" value="flood_event_calibration_v1">
+                      <strong>洪水事件率定（次洪）</strong>
+                      <small>以洪水事件窗口为对象，突出洪峰、峰现时间、洪量、退水和高流量过程。</small>
+                    </label>
+                  </div>
+                  <select id="task-objective-mode" class="hidden" aria-hidden="true">
                     <option value="daily_unified_professional_v1">综合水文目标函数</option>
-                    <option value="flood_event_calibration_v1">洪水事件率定</option>
+                    <option value="flood_event_calibration_v1">洪水事件率定（次洪）</option>
                   </select>
                 </div>
                 <div class="field-group" id="task-mc-samples-group">
@@ -646,6 +661,75 @@
               <div class="phase-toolbar" id="task-filter-toolbar"></div>
               <div class="hint-box" id="task-filter-hint" style="margin-bottom:12px"></div>
               <div class="list-stack" id="task-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ==================== 状态接续预报 ==================== -->
+        <section class="view" data-view="forecast">
+          <div class="card-grid forecast-layout">
+            <section class="panel">
+              <div class="panel-head"><h3>预报起点</h3><span class="panel-note">复用率定参数与保存状态</span></div>
+              <div class="field-group">
+                <label>源结果</label>
+                <select id="forecast-source-run"></select>
+              </div>
+              <div id="forecast-source-summary" class="forecast-source-summary"></div>
+              <div class="action-row">
+                <button class="ghost-button" id="forecast-use-latest">选择最新可接续结果</button>
+                <button class="ghost-button" id="forecast-open-source" disabled>打开源结果目录</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head"><h3>未来气象输入</h3><span class="panel-note">按源结果时间步执行预报</span></div>
+              <div class="field-grid two">
+                <div class="field-group">
+                  <label>起报时间</label>
+                  <input id="forecast-start" type="date" placeholder="不填则自动接续源结果">
+                </div>
+                <div class="field-group">
+                  <label>预报结束时间</label>
+                  <input id="forecast-end" type="date">
+                </div>
+                <div class="field-group">
+                  <label>预报降水栅格目录</label>
+                  <div class="path-input">
+                    <input id="forecast-prec-dir" type="text" placeholder="未来降水 GeoTIFF 目录">
+                    <button class="browse-button" data-target="forecast-prec-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>预报气温栅格目录</label>
+                  <div class="path-input">
+                    <input id="forecast-temp-dir" type="text" placeholder="未来气温 GeoTIFF 目录">
+                    <button class="browse-button" data-target="forecast-temp-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>预报潜在蒸散发栅格目录</label>
+                  <div class="path-input">
+                    <input id="forecast-evap-dir" type="text" placeholder="未来 PET GeoTIFF 目录">
+                    <button class="browse-button" data-target="forecast-evap-dir" data-browse-kind="dir">选择</button>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>冰川模式</label>
+                  <select id="forecast-glacier-mode">
+                    <option value="inline">开启</option>
+                    <option value="off">关闭</option>
+                  </select>
+                </div>
+              </div>
+              <div class="hint-box" id="forecast-hint" style="margin-top:12px"></div>
+              <div class="action-row">
+                <button class="primary-button" id="forecast-start-button">启动状态接续预报</button>
+              </div>
+            </section>
+
+            <section class="panel forecast-task-panel">
+              <div class="panel-head"><h3>预报任务</h3><span class="panel-note">查看状态接续预报进度与结果</span></div>
+              <div class="list-stack" id="forecast-task-list"></div>
             </section>
           </div>
         </section>
