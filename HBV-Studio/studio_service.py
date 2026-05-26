@@ -5315,6 +5315,8 @@ def build_engineering_focus_checks(
                 }
             )
     if station_precip_info and station_precip_info.get("enabled"):
+        event_coverage = list(station_precip_info.get("event_coverage", []) or [])
+        event_ok_count = sum(1 for item in event_coverage if str(item.get("status", "") or "") == "ok")
         checks.append(
             {
                 "id": "station_precip",
@@ -5323,6 +5325,12 @@ def build_engineering_focus_checks(
                 "status": str(station_precip_info.get("status", "warn") or "warn"),
                 "target_step": 4,
                 "items": list(station_precip_info.get("items", []) or []),
+                "event_coverage": event_coverage,
+                "event_coverage_summary": {
+                    "enabled": bool(event_coverage),
+                    "ok_count": int(event_ok_count),
+                    "event_count": int(len(event_coverage)),
+                },
             }
         )
     return checks
