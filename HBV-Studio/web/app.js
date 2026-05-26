@@ -6696,74 +6696,16 @@ function forecastInputPayload(run = selectedForecastRun()) {
 }
 
 function renderForecastInputSummary(check = null, stateLabel = "") {
-  const host = $("#forecast-input-summary");
-  if (!host) return;
-  if (stateLabel === "loading") {
-    host.innerHTML = '<div class="hint-box">正在核对预报气象目录。</div>';
-    return;
-  }
-  if (!check) {
-    host.innerHTML = '<div class="hint-box status-warn">选择源结果并填写预报时段后，系统将在这里核对 P/T/PET 目录覆盖。</div>';
-    return;
-  }
-  const status = String(check.status || "warn").toLowerCase();
-  const cls = focusStatusClass(status);
-  const items = Array.isArray(check.items) ? check.items : [];
-  const variables = Array.isArray(check.variables) ? check.variables : [];
-  const messages = [
-    ...(Array.isArray(check.errors) ? check.errors.slice(0, 3).map(item => ({ item, status: "fail" })) : []),
-    ...(Array.isArray(check.warnings) ? check.warnings.slice(0, 3).map(item => ({ item, status: "warn" })) : []),
-  ];
-  const messageHtml = messages.length
-    ? `<ul class="event-window-issues">${messages.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}</ul>`
-    : "";
-  const parameterContext = check.parameter_context || check.source?.parameter_context || null;
-  const parameterContextHtml = parameterContext ? forecastParameterContextHtml({
-    parameter_context: parameterContext,
-    workspace_name: parameterContext.source_workspace || check.source?.source_run_name || "",
-    workspace_config: parameterContext.source_workspace_config || "",
-    optimized_param_count: check.source?.parameter_count || parameterContext.parameter_count || 0,
-    calibration_profile: parameterContext.calibration_profile || "",
-    time_step_hours: parameterContext.time_step_hours || check.window?.time_step_hours || "",
-    effective_objective_mode: parameterContext.objective_mode || "",
-  }) : "";
-  const stationPrecipHtml = check.station_precip?.enabled && window.HBVStudioStationPrecip?.renderTaskScopeSummary
-    ? window.HBVStudioStationPrecip.renderTaskScopeSummary(check.station_precip, {
-      escapeHtml,
-      focusStatusClass,
-      focusStatusLabel,
-      formatNumber,
-    })
-    : "";
-  host.innerHTML = `
-    <div class="hint-box forecast-input-box ${cls}">
-      <div class="forecast-input-head">
-        <strong>${escapeHtml(check.headline || "预报气象输入检查")}</strong>
-        <span class="status-badge ${cls}">${escapeHtml(focusStatusLabel(status))}</span>
-      </div>
-      <div class="forecast-input-grid">
-        ${items.map(item => `
-          <div class="forecast-input-item">
-            <span>${escapeHtml(item.label || "")}</span>
-            <strong class="${focusStatusClass(item.status || "ok")}" title="${escapeHtml(item.detail || "")}">${escapeHtml(item.value || "—")}</strong>
-            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
-          </div>
-        `).join("")}
-      </div>
-      ${parameterContextHtml}
-      ${stationPrecipHtml}
-      <div class="forecast-input-grid">
-        ${variables.map(item => `
-          <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">
-            <span>${escapeHtml(item.label || "")}</span>
-            <strong>${escapeHtml(item.summary || "未检查")}</strong>
-            <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : (item.path ? shortPath(item.path) : "未选择目录"))}</small>
-          </div>
-        `).join("")}
-      </div>
-      ${messageHtml}
-    </div>
-  `;
+  if (!window.HBVStudioForecastView?.renderForecastInputSummary) return;
+  window.HBVStudioForecastView.renderForecastInputSummary(check, stateLabel, {
+    escapeHtml,
+    focusStatusClass,
+    focusStatusLabel,
+    formatNumber,
+    shortPath,
+    renderParameterContextHtml: forecastParameterContextHtml,
+    renderStationScopeSummary: window.HBVStudioStationPrecip?.renderTaskScopeSummary,
+  });
 }
 
 async function refreshForecastInputCheck({ loading = false } = {}) {

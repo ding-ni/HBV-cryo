@@ -41,6 +41,96 @@
     setHint(message || "正在读取预报结果。");
   }
 
+  function defaultStatusClass(status) {
+    const key = String(status || "").toLowerCase();
+    return key === "ok" ? "status-ok" : key === "fail" ? "status-fail" : "status-warn";
+  }
+
+  function defaultStatusLabel(status) {
+    const key = String(status || "").toLowerCase();
+    if (key === "ok") return "通过";
+    if (key === "fail") return "未通过";
+    return "需复核";
+  }
+
+  function renderForecastInputSummary(check = null, stateLabel = "", helpers = {}) {
+    const host = document.getElementById("forecast-input-summary");
+    if (!host) return;
+    if (stateLabel === "loading") {
+      host.innerHTML = '<div class="hint-box">正在核对预报气象目录。</div>';
+      return;
+    }
+    if (!check) {
+      host.innerHTML = '<div class="hint-box status-warn">选择源结果并填写预报时段后，系统将在这里核对 P/T/PET 目录覆盖。</div>';
+      return;
+    }
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
+    const focusStatusLabel = helpers.focusStatusLabel || defaultStatusLabel;
+    const formatNumber = helpers.formatNumber || ((value, digits = 0) => Number(value).toFixed(digits));
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const renderParameterContextHtml = helpers.renderParameterContextHtml || (() => "");
+    const renderStationScopeSummary = helpers.renderStationScopeSummary || (() => "");
+    const status = String(check.status || "warn").toLowerCase();
+    const cls = focusStatusClass(status);
+    const items = Array.isArray(check.items) ? check.items : [];
+    const variables = Array.isArray(check.variables) ? check.variables : [];
+    const messages = [
+      ...(Array.isArray(check.errors) ? check.errors.slice(0, 3).map(item => ({ item, status: "fail" })) : []),
+      ...(Array.isArray(check.warnings) ? check.warnings.slice(0, 3).map(item => ({ item, status: "warn" })) : []),
+    ];
+    const messageHtml = messages.length
+      ? `<ul class="event-window-issues">${messages.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}</ul>`
+      : "";
+    const parameterContext = check.parameter_context || check.source?.parameter_context || null;
+    const parameterContextHtml = parameterContext ? renderParameterContextHtml({
+      parameter_context: parameterContext,
+      workspace_name: parameterContext.source_workspace || check.source?.source_run_name || "",
+      workspace_config: parameterContext.source_workspace_config || "",
+      optimized_param_count: check.source?.parameter_count || parameterContext.parameter_count || 0,
+      calibration_profile: parameterContext.calibration_profile || "",
+      time_step_hours: parameterContext.time_step_hours || check.window?.time_step_hours || "",
+      effective_objective_mode: parameterContext.objective_mode || "",
+    }) : "";
+    const stationPrecipHtml = check.station_precip?.enabled
+      ? renderStationScopeSummary(check.station_precip, {
+        escapeHtml,
+        focusStatusClass,
+        focusStatusLabel,
+        formatNumber,
+      })
+      : "";
+    host.innerHTML = `
+      <div class="hint-box forecast-input-box ${cls}">
+        <div class="forecast-input-head">
+          <strong>${escapeHtml(check.headline || "预报气象输入检查")}</strong>
+          <span class="status-badge ${cls}">${escapeHtml(focusStatusLabel(status))}</span>
+        </div>
+        <div class="forecast-input-grid">
+          ${items.map(item => `
+            <div class="forecast-input-item">
+              <span>${escapeHtml(item.label || "")}</span>
+              <strong class="${focusStatusClass(item.status || "ok")}" title="${escapeHtml(item.detail || "")}">${escapeHtml(item.value || "—")}</strong>
+              ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
+            </div>
+          `).join("")}
+        </div>
+        ${parameterContextHtml}
+        ${stationPrecipHtml}
+        <div class="forecast-input-grid">
+          ${variables.map(item => `
+            <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">
+              <span>${escapeHtml(item.label || "")}</span>
+              <strong>${escapeHtml(item.summary || "未检查")}</strong>
+              <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : (item.path ? shortPath(item.path) : "未选择目录"))}</small>
+            </div>
+          `).join("")}
+        </div>
+        ${messageHtml}
+      </div>
+    `;
+  }
+
   function renderForecastSummary(data = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const runDisplayName = helpers.runDisplayName || (run => run?.name || run?.title || "连续状态预报结果");
@@ -129,6 +219,7 @@
   window.HBVStudioForecastView = {
     renderForecastResultEmpty,
     renderForecastResultLoading,
+    renderForecastInputSummary,
     renderForecastResultDetail,
   };
 })();
