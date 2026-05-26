@@ -4577,6 +4577,27 @@ def check_precip_strategy_outputs(config: dict[str, Any], precip_source: Any = N
         return count > 0, label, count
     count = count_matching(corrected_dir)
     label = "站点订正降水" if mode == "grid_plus_station_bias" else "泰森插值降水"
+    summary_path = Path(corrected_dir) / "precipitation_strategy_summary.json"
+    if summary_path.exists():
+        try:
+            summary = read_json_file(summary_path)
+            time_basis_label = str(summary.get("time_basis_label", "") or "").strip()
+            selected_steps = int(summary.get("selected_steps", 0) or 0)
+            written_files = int(summary.get("written_files", 0) or 0)
+            zero_steps = int(summary.get("zero_available_station_steps", 0) or 0)
+            skipped_steps = int(summary.get("skipped_out_of_scope_steps", 0) or 0)
+            parts = [f"{label}文件数：{count}"]
+            if time_basis_label:
+                parts.append(f"资料口径：{time_basis_label}")
+            if selected_steps or written_files:
+                parts.append(f"参与时段：{written_files or selected_steps}/{selected_steps or count}")
+            if zero_steps:
+                parts.append(f"无可用站点时段：{zero_steps}")
+            if skipped_steps:
+                parts.append(f"已忽略口径外时段：{skipped_steps}")
+            return count > 0, "；".join(parts), count
+        except Exception:
+            pass
     return count > 0, f"{label}文件数：{count}", count
 
 
