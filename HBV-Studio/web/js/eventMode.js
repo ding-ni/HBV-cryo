@@ -234,11 +234,62 @@
     `;
   }
 
+  function renderEventForcingCoverage(coverage = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const statusClass = helpers.statusClass || defaultStatusClass;
+    if (!coverage?.enabled) return "";
+    const events = Array.isArray(coverage.events) ? coverage.events : [];
+    const status = String(coverage.status || "warn").toLowerCase();
+    const rows = events.slice(0, 30).map(event => {
+      const variables = event.variables || {};
+      const variableText = ["prec", "temp", "evap"].map(key => {
+        const item = variables[key] || {};
+        const label = item.label || key;
+        const value = `${Number(item.covered_steps || 0)}/${Number(item.expected_steps || 0)}`;
+        const missing = Number(item.missing_steps || 0);
+        return missing > 0 ? `${label} ${value}，缺 ${missing}` : `${label} ${value}`;
+      }).join("；");
+      return `
+        <div class="event-window-row ${statusClass(event.status || "warn")}">
+          <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
+          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
+          <span>${escapeHtml(`${event.run_start || "—"} ~ ${event.run_end || "—"}`)}</span>
+          <span>${escapeHtml(String(event.expected_steps || 0))}</span>
+          <span>${escapeHtml(variableText)}</span>
+          <span class="${statusClass(event.status || "warn")}">${escapeHtml(event.status === "ok" ? "完整" : "缺测")}</span>
+        </div>
+      `;
+    }).join("");
+    const more = events.length > 30
+      ? `<div class="event-window-more">还有 ${events.length - 30} 场事件未展开。</div>`
+      : "";
+    return `
+      <div class="event-window-summary">
+        <div class="event-window-title">
+          <strong>事件内气象覆盖</strong>
+          <span class="${statusClass(status)}">${escapeHtml(`${Number(coverage.complete_event_count || 0)}/${Number(coverage.event_count || 0)} 场完整`)}</span>
+        </div>
+        <div class="event-window-source">按每场事件运行窗口分别核对降水、气温和潜在蒸散发；事件之间允许资料间断。</div>
+        <div class="event-window-row event-window-head">
+          <span>事件</span>
+          <span>用途</span>
+          <span>运行窗口</span>
+          <span>时间步</span>
+          <span>P/T/PET 覆盖</span>
+          <span>结论</span>
+        </div>
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的事件运行窗口。</div>'}
+        ${more}
+      </div>
+    `;
+  }
+
   window.HBVStudioEventMode = {
     floodEventEvaluation,
     eventChartEvents,
     initialStatePolicyLabel,
     renderFloodEventChart,
     renderEventWindowSummary,
+    renderEventForcingCoverage,
   };
 })();

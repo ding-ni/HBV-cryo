@@ -2224,6 +2224,77 @@ def validate_tif_time_series(
     return result
 
 
+def event_forcing_coverage_summary(
+    event_info: dict[str, Any] | None,
+    directories: dict[str, dict[str, Any]],
+    step_hours: float,
+) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    valid_events = [item for item in list(event_info.get("valid_events", []) or []) if isinstance(item, dict)]
+    if not valid_events:
+        return {
+            "enabled": True,
+            "status": "fail",
+            "event_count": 0,
+            "complete_event_count": 0,
+            "events": [],
+        }
+    label_map = {"prec": "降水", "temp": "气温", "evap": "潜在蒸散发"}
+    timestamp_sets: dict[str, set[pd.Timestamp]] = {}
+    for key, item in directories.items():
+        timestamp_sets[key] = set(pd.Timestamp(ts) for ts in list(item.get("timestamps", []) or []))
+
+    rows: list[dict[str, Any]] = []
+    complete_count = 0
+    for event in valid_events:
+        run_start = pd.Timestamp(event.get("run_start"))
+        run_end = pd.Timestamp(event.get("run_end"))
+        run_index = _event_date_range(run_start, run_end, step_hours)
+        expected_steps = int(len(run_index))
+        variables: dict[str, Any] = {}
+        event_missing = 0
+        for key, label in label_map.items():
+            actual = timestamp_sets.get(key, set())
+            missing_steps = [ts for ts in run_index if pd.Timestamp(ts) not in actual]
+            missing_count = int(len(missing_steps))
+            event_missing += missing_count
+            variables[key] = {
+                "label": label,
+                "expected_steps": expected_steps,
+                "covered_steps": max(0, expected_steps - missing_count),
+                "missing_steps": missing_count,
+                "status": "ok" if missing_count == 0 and expected_steps > 0 else "fail",
+                "missing_preview": [
+                    _format_time_for_check(ts, step_hours)
+                    for ts in missing_steps[:3]
+                ],
+            }
+        status = "ok" if event_missing == 0 and expected_steps > 0 else "fail"
+        if status == "ok":
+            complete_count += 1
+        rows.append(
+            {
+                "event_id": str(event.get("event_id", "") or ""),
+                "name": str(event.get("name", "") or event.get("event_id", "") or ""),
+                "purpose": str(event.get("purpose", "") or ""),
+                "run_start": _format_time_for_check(run_start, step_hours),
+                "run_end": _format_time_for_check(run_end, step_hours),
+                "expected_steps": expected_steps,
+                "status": status,
+                "variables": variables,
+            }
+        )
+
+    return {
+        "enabled": True,
+        "status": "ok" if complete_count == len(valid_events) else "fail",
+        "event_count": len(valid_events),
+        "complete_event_count": complete_count,
+        "events": rows,
+    }
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -2269,6 +2340,7 @@ def validate_forcing_bundle(
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
         "event_windows": event_windows_ui_summary(event_info, step_hours) if event_info is not None else None,
+        "event_forcing_coverage": event_forcing_coverage_summary(event_info, directories, step_hours) if event_info is not None else None,
     }
 
 
@@ -5962,6 +6034,7 @@ def validate_workspace_fields(
         "time_basis": time_basis,
         "time_basis_label": TIME_BASIS_LABELS.get(time_basis, "当前任务时段"),
         "event_windows": event_windows_ui_summary(event_window_info, step_hours) if event_window_info is not None else None,
+        "event_forcing_coverage": dict(forcing.get("event_forcing_coverage") or {}) if forcing else None,
     }
 
 
@@ -9094,6 +9167,16 @@ def workspace_detailed_check(config_path_raw: str, precip_source: Any = None) ->
                 "label": "洪水事件窗口",
                 "value": f"{int(event_windows.get('valid_event_count', 0) or 0)}/{int(event_windows.get('event_count', 0) or 0)} 场有效",
                 "ok": int(event_windows.get("valid_event_count", 0) or 0) > 0,
+            }
+        )
+    event_coverage = dict(forcing.get("event_forcing_coverage") or {})
+    if event_coverage:
+        summary.append(
+            {
+                "group": "气象数据",
+                "label": "事件内气象覆盖",
+                "value": f"{int(event_coverage.get('complete_event_count', 0) or 0)}/{int(event_coverage.get('event_count', 0) or 0)} 场完整",
+                "ok": str(event_coverage.get("status", "")).lower() == "ok",
             }
         )
     for key, label in (("prec", "降水"), ("temp", "气温"), ("evap", "蒸散发")):
