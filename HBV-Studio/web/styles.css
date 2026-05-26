@@ -522,6 +522,57 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   overflow-wrap: anywhere;
 }
 
+.forecast-input-summary {
+  margin-top: 12px;
+}
+
+.forecast-input-summary .forecast-input-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.forecast-input-summary .forecast-input-head strong {
+  font-size: 13px;
+}
+
+.forecast-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.forecast-input-item,
+.forecast-input-variable {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  background: rgba(255,255,255,0.72);
+}
+
+.forecast-input-item span,
+.forecast-input-variable span,
+.forecast-input-variable small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.forecast-input-item strong,
+.forecast-input-variable strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.forecast-input-variable.status-ok { border-color: rgba(45,124,82,0.22); }
+.forecast-input-variable.status-warn { border-color: rgba(179,106,40,0.24); }
+.forecast-input-variable.status-fail { border-color: rgba(181,69,56,0.24); }
+
 /* ===== Conditional Blocks & Global Hidden ===== */
 .hidden { display: none !important; }
 .conditional-block { transition: all 200ms; }

@@ -171,6 +171,8 @@ const state = {
   forecastResultData: null,
   forecastResultLoadingPath: "",
   activeForecastResultRequestId: 0,
+  activeForecastInputCheckRequestId: 0,
+  forecastInputCheckTimer: null,
   lastForecastExportPath: "",
   activeCompareRequestId: 0,
   prepSteps: [],
@@ -6613,6 +6615,101 @@ function renderForecastSourceSummary() {
   }
 }
 
+function forecastInputPayload(run = selectedForecastRun()) {
+  return {
+    source_run: run?.path || "",
+    config_path: run?.workspace_config || state.wizardWorkspacePath || "",
+    forecast_start: $("#forecast-start")?.value.trim() || "",
+    forecast_end: $("#forecast-end")?.value.trim() || "",
+    forecast_prec_dir: $("#forecast-prec-dir")?.value.trim() || "",
+    forecast_temp_dir: $("#forecast-temp-dir")?.value.trim() || "",
+    forecast_evap_dir: $("#forecast-evap-dir")?.value.trim() || "",
+    time_step_hours: run?.time_step_hours || run?.time_config?.time_step_hours || 24,
+  };
+}
+
+function renderForecastInputSummary(check = null, stateLabel = "") {
+  const host = $("#forecast-input-summary");
+  if (!host) return;
+  if (stateLabel === "loading") {
+    host.innerHTML = '<div class="hint-box">正在核对预报气象目录。</div>';
+    return;
+  }
+  if (!check) {
+    host.innerHTML = '<div class="hint-box status-warn">选择源结果并填写预报时段后，系统将在这里核对 P/T/PET 目录覆盖。</div>';
+    return;
+  }
+  const status = String(check.status || "warn").toLowerCase();
+  const cls = focusStatusClass(status);
+  const items = Array.isArray(check.items) ? check.items : [];
+  const variables = Array.isArray(check.variables) ? check.variables : [];
+  const messages = [
+    ...(Array.isArray(check.errors) ? check.errors.slice(0, 3).map(item => ({ item, status: "fail" })) : []),
+    ...(Array.isArray(check.warnings) ? check.warnings.slice(0, 3).map(item => ({ item, status: "warn" })) : []),
+  ];
+  const messageHtml = messages.length
+    ? `<ul class="event-window-issues">${messages.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}</ul>`
+    : "";
+  host.innerHTML = `
+    <div class="hint-box forecast-input-box ${cls}">
+      <div class="forecast-input-head">
+        <strong>${escapeHtml(check.headline || "预报气象输入检查")}</strong>
+        <span class="status-badge ${cls}">${escapeHtml(focusStatusLabel(status))}</span>
+      </div>
+      <div class="forecast-input-grid">
+        ${items.map(item => `
+          <div class="forecast-input-item">
+            <span>${escapeHtml(item.label || "")}</span>
+            <strong class="${focusStatusClass(item.status || "ok")}">${escapeHtml(item.value || "—")}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <div class="forecast-input-grid">
+        ${variables.map(item => `
+          <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">
+            <span>${escapeHtml(item.label || "")}</span>
+            <strong>${escapeHtml(item.summary || "未检查")}</strong>
+            <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : (item.path ? shortPath(item.path) : "未选择目录"))}</small>
+          </div>
+        `).join("")}
+      </div>
+      ${messageHtml}
+    </div>
+  `;
+}
+
+async function refreshForecastInputCheck({ loading = false } = {}) {
+  const run = selectedForecastRun();
+  if (!run?.path) {
+    renderForecastInputSummary(null);
+    return;
+  }
+  const requestId = ++state.activeForecastInputCheckRequestId;
+  if (loading) renderForecastInputSummary(null, "loading");
+  try {
+    const response = await apiPost("/api/forecast/input-check", forecastInputPayload(run));
+    if (requestId !== state.activeForecastInputCheckRequestId) return;
+    renderForecastInputSummary(response.data || null);
+  } catch (err) {
+    if (requestId !== state.activeForecastInputCheckRequestId) return;
+    renderForecastInputSummary({
+      status: "fail",
+      headline: "预报气象输入检查失败。",
+      errors: [err.message],
+      warnings: [],
+      items: [],
+      variables: [],
+    });
+  }
+}
+
+function scheduleForecastInputCheck(delay = 350) {
+  clearTimeout(state.forecastInputCheckTimer);
+  state.forecastInputCheckTimer = setTimeout(() => {
+    refreshForecastInputCheck().catch(err => showToast(err.message, true));
+  }, delay);
+}
+
 function renderForecastTaskList() {
   const host = $("#forecast-task-list");
   if (!host) return;
@@ -6793,6 +6890,7 @@ function renderForecastView() {
   if (!$("#forecast-source-run")) return;
   renderForecastSourceOptions();
   renderForecastSourceSummary();
+  if (state.currentView === "forecast") scheduleForecastInputCheck(0);
   renderForecastTaskList();
   renderForecastResultPanel();
 }
@@ -7748,6 +7846,13 @@ function bindEvents() {
   $("#forecast-source-run")?.addEventListener("change", () => {
     state.forecastSourceRunPath = $("#forecast-source-run")?.value || "";
     renderForecastSourceSummary();
+    scheduleForecastInputCheck(0);
+  });
+  ["#forecast-start", "#forecast-end", "#forecast-prec-dir", "#forecast-temp-dir", "#forecast-evap-dir"].forEach(sel => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener("input", () => scheduleForecastInputCheck());
+    el.addEventListener("change", () => scheduleForecastInputCheck(0));
   });
   $("#forecast-use-latest")?.addEventListener("click", selectLatestForecastSource);
   $("#forecast-open-source")?.addEventListener("click", () => {
