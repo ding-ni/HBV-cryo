@@ -435,7 +435,9 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     config_path = Path(str(config.get("_config_path", args.config) or args.config)).resolve(strict=False)
     source_run = resolve_input_path(args.source_run, config_path.parent)
     source_metadata = read_json(source_run / "metadata.json")
+    log_stage("读取源状态快照", stage_callback)
     snapshot_path = source_snapshot_path(source_run, source_metadata)
+    log_stage("读取源结果参数", stage_callback)
     params = params_from_source(source_metadata)
 
     profile = resolve_profile(config, args.profile or source_metadata.get("calibration_profile") or None)
@@ -457,6 +459,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     module.configure_time_step()
 
     forecast_start = args.forecast_start or infer_forecast_start(module, source_run, source_metadata)
+    log_stage("检查预报时段与源状态连续性", stage_callback)
     source_state_summary = validate_forecast_window(
         module,
         source_run,
@@ -482,7 +485,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         "temp": str(Path(args.forecast_temp_dir or paths["aligned_temp_dir"]).resolve(strict=False)),
         "evap": str(Path(args.forecast_evap_dir or paths["aligned_evap_dir"]).resolve(strict=False)),
     }
-    log_stage("检查并归档预报气象输入", stage_callback)
+    log_stage("检查预报气象时间覆盖", stage_callback)
     input_archive = archive_forecast_inputs(
         module,
         output_dir,
@@ -490,6 +493,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         forecast_start,
         forecast_end,
     )
+    log_stage("归档预报气象输入", stage_callback)
     archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
     module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
     module.TEMP_DIR = archived_dirs.get("temp", source_forecast_dirs["temp"])
@@ -498,8 +502,9 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     log_stage("加载未来气象与地理数据", stage_callback)
     module.load_all_data(end_date_override=module.SIM_END, skip_obs=True)
 
-    log_stage("读取参数并从状态快照重启", stage_callback)
+    log_stage("整理参数与源状态快照", stage_callback)
     param_vector, params_adjusted = build_param_vector(module, params)
+    log_stage("执行连续状态预报", stage_callback)
     sim = module.run_forecast_from_state(param_vector, snapshot_path=snapshot_path)
     sim["glacier_enabled"] = module.glacier_feature_enabled()
 
@@ -524,7 +529,9 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         source_state_summary=source_state_summary,
         source_parameter_summary=source_parameter_summary,
     )
+    log_stage("生成预报元数据", stage_callback)
     result["params_adjusted"] = bool(params_adjusted)
+    log_stage("预报完成", stage_callback)
     return result
 
 

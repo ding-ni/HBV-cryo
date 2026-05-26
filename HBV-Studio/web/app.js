@@ -2496,12 +2496,19 @@ function manualStartStageEntries(task) {
 function forecastRestartStageEntries(task) {
   const stageText = String(task?.ui_progress?.stage || "");
   let phase = 0;
-  if (/写出|完成/.test(stageText)) phase = 5;
-  else if (/重启|预报/.test(stageText)) phase = 4;
-  else if (/加载未来气象|地理数据/.test(stageText)) phase = 3;
-  else if (/归档预报气象|归档/.test(stageText)) phase = 2;
-  else if (/读取|加载 HBV|准备/.test(stageText)) phase = 1;
-  return ["读取源结果", "加载模型", "归档预报气象", "加载未来气象", "连续状态预报", "写出预报结果"].map((label, idx) => {
+  if (/预报完成|完成/.test(stageText)) phase = 12;
+  else if (/生成预报元数据|元数据/.test(stageText)) phase = 11;
+  else if (/写出/.test(stageText)) phase = 10;
+  else if (/执行连续状态预报/.test(stageText)) phase = 9;
+  else if (/整理参数/.test(stageText)) phase = 8;
+  else if (/加载未来气象|加载模型数据|地理数据/.test(stageText)) phase = 7;
+  else if (/归档预报气象|归档/.test(stageText)) phase = 6;
+  else if (/检查预报气象|时间覆盖/.test(stageText)) phase = 5;
+  else if (/检查预报时段|连续性/.test(stageText)) phase = 4;
+  else if (/加载 HBV|加载模型|核心/.test(stageText)) phase = 3;
+  else if (/源结果参数/.test(stageText)) phase = 2;
+  else if (/状态快照|源状态/.test(stageText)) phase = 1;
+  return ["读取源结果", "读取状态", "读取参数", "加载模型", "检查起报", "检查气象", "归档气象", "加载数据", "整理起报", "执行预报", "写出结果", "生成元数据", "完成"].map((label, idx) => {
     let status = "pending";
     if (task?.status === "completed") status = "completed";
     else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
