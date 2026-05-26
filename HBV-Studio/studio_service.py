@@ -10851,6 +10851,51 @@ def _forecast_input_dir_summary(
     }
 
 
+def _forecast_output_preview(payload: dict[str, Any], source_run: Path) -> dict[str, Any]:
+    source_name = source_run.name or "source_result"
+    name_pattern = f"hbv_forecast_{source_name}_运行时间_编号"
+    output_dir_raw = str(payload.get("output_dir", "") or "").strip()
+    if output_dir_raw:
+        output_dir = resolve_any_path(output_dir_raw, must_exist=False)
+        archive_root = output_dir / "forecast_inputs"
+        manifest_path = archive_root / "input_manifest.json"
+        return {
+            "explicit": True,
+            "result_parent": str(output_dir.parent.resolve(strict=False)),
+            "result_dir": str(output_dir.resolve(strict=False)),
+            "result_name_pattern": output_dir.name,
+            "result_label": "指定结果目录",
+            "result_detail": str(output_dir.resolve(strict=False)),
+            "archive_label": "指定目录下的 forecast_inputs",
+            "archive_root": str(archive_root.resolve(strict=False)),
+            "manifest_path": str(manifest_path.resolve(strict=False)),
+            "archive_detail": str(manifest_path.resolve(strict=False)),
+        }
+
+    result_parent = source_run.parent
+    config_path_raw = str(payload.get("config_path", "") or "").strip()
+    if config_path_raw:
+        try:
+            cfg_path = resolve_any_path(config_path_raw, must_exist=True)
+            config = read_runtime_config(cfg_path)
+            result_parent = Path(build_workspace_paths(config)["results_root"]).resolve(strict=False)
+        except Exception:
+            result_parent = source_run.parent
+    result_detail = str((result_parent / name_pattern).resolve(strict=False))
+    return {
+        "explicit": False,
+        "result_parent": str(result_parent.resolve(strict=False)),
+        "result_dir": "",
+        "result_name_pattern": name_pattern,
+        "result_label": "运行时新建预报结果目录",
+        "result_detail": result_detail,
+        "archive_label": "结果目录下的 forecast_inputs",
+        "archive_root": "",
+        "manifest_path": "结果目录/forecast_inputs/input_manifest.json",
+        "archive_detail": f"{result_detail}\\forecast_inputs\\input_manifest.json",
+    }
+
+
 def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -10913,6 +10958,8 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
         if status == "ok"
         else "预报气象输入仍需核对。"
     )
+    output_preview = _forecast_output_preview(payload, source_run)
+    output_status = "ok" if expected_steps > 0 else "warn"
     return {
         "status": status,
         "headline": headline,
@@ -10932,6 +10979,7 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
             "time_step_hours": float(step_hours),
             "expected_steps": expected_steps,
         },
+        "output": output_preview,
         "variables": variables,
         "items": [
             {"label": "源结果", "value": source_run.name, "status": "ok"},
@@ -10940,6 +10988,8 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
             {"label": "预报时段", "value": f"{forecast_start} 至 {forecast_end}" if forecast_start and forecast_end else "未完整填写", "status": "ok" if expected_steps > 0 else "warn"},
             {"label": "参数来源", "value": f"源结果参数（{len(params)} 项）" if params else "缺少参数", "status": "ok" if params else "fail"},
             {"label": "归档方式", "value": "运行时仅归档预报窗口内 P/T/PET 栅格", "status": "ok" if expected_steps > 0 else "warn"},
+            {"label": "结果输出", "value": output_preview["result_label"], "detail": output_preview["result_detail"], "status": output_status},
+            {"label": "输入清单", "value": output_preview["archive_label"], "detail": output_preview["archive_detail"], "status": output_status},
         ],
     }
 

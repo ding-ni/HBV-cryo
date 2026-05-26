@@ -6660,7 +6660,8 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
         ${items.map(item => `
           <div class="forecast-input-item">
             <span>${escapeHtml(item.label || "")}</span>
-            <strong class="${focusStatusClass(item.status || "ok")}">${escapeHtml(item.value || "—")}</strong>
+            <strong class="${focusStatusClass(item.status || "ok")}" title="${escapeHtml(item.detail || "")}">${escapeHtml(item.value || "—")}</strong>
+            ${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}
           </div>
         `).join("")}
       </div>

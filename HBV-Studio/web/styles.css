@@ -554,11 +554,14 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
 }
 
 .forecast-input-item span,
+.forecast-input-item small,
 .forecast-input-variable span,
 .forecast-input-variable small {
   display: block;
   font-size: 12px;
   color: var(--muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .forecast-input-item strong,
