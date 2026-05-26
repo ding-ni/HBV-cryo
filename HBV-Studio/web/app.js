@@ -374,7 +374,7 @@ function objectiveVersionStatus(metaOrRun = {}) {
       state: "current",
       label: "事件口径",
       value: "事件洪水率定结果",
-      detail: "该结果采用连续模拟、事件窗口评分的洪水过程评价口径。",
+      detail: "该结果按洪水事件窗口评价；事件资料模式下每场事件独立预热。",
       badgeClass: "status-ok",
     };
   }
@@ -1688,7 +1688,7 @@ function objectiveDetail(meta) {
     return "流量拟合优先，结合融雪、融冰、洪峰和退水过程进行综合评价";
   }
   if (String(mode || "").toLowerCase() === FLOOD_EVENT_OBJECTIVE_FAMILY) {
-    return "连续模拟基础上按事件窗口评价洪峰、峰现时间、洪量、退水和高流量过程";
+    return "按洪水事件窗口评价洪峰、峰现时间、洪量、退水和高流量过程；事件资料模式下按场独立预热";
   }
   if (LEGACY_OBJECTIVE_FAMILIES.has(String(mode || "").toLowerCase())) {
     return "历史结果，仅作兼容查看，建议用当前口径重算后再解释冰雪融水过程";
@@ -1752,7 +1752,7 @@ function updateCalibrationPlainGuide() {
       ? "当前策略仅快速筛选，用来快速看参数敏感性和候选区间。"
       : "当前策略先快速筛选，再把更好的候选送入精细搜索，是默认更稳妥的方案。";
   const objectiveText = objectiveMode === FLOOD_EVENT_OBJECTIVE_FAMILY
-    ? "当前评分标准为洪水事件率定，模型仍连续运行，但优化只在事件窗口内综合考察洪峰、峰现时间、洪量、退水和高流量过程。"
+    ? "当前评分标准为洪水事件率定；连续资料按完整时段运行并在事件窗口评分，事件资料模式按场独立预热并只要求事件内资料完整。"
     : "当前评分标准为综合水文目标函数，优先保证连续径流拟合，并兼顾冰雪融水过程。";
   host.textContent = `运行说明：快速筛选样本数表示前期候选参数组数；搜索轮数表示后续优化轮数；每轮候选数倍率=${loadInfo.popsize}，每轮样本数约为参数数 ${CALIBRATION_PARAM_COUNT} × ${loadInfo.popsize} = ${loadInfo.population}。${objectiveText}${methodText}`;
   host.className = "hint-box";
@@ -2923,6 +2923,16 @@ function floodEventRows(meta = {}) {
     ["事件评价", floodEventStatusText(evaluation), `评价口径：${evaluation.evaluation_basis || "模拟流量"}`],
     ["事件目标值", floodEventObjectiveText(evaluation), evaluation.objective_enabled ? "数值越小表示事件综合偏差越小" : "当前为诊断值，不参与本次优化"],
   ];
+  const eventMode = meta?.event_mode || meta?.time_config?.event_runtime || {};
+  if (eventMode?.enabled) {
+    const modeText = eventMode.runtime_mode === "independent_event_windows" ? "事件窗口独立运行" : "事件窗口资料";
+    const stateText = eventMode.state_continuity_between_events === false ? "事件之间不传递状态" : "按配置处理事件间状态";
+    rows.push([
+      "事件资料模式",
+      `${modeText}，${Number(eventMode.event_count || 0)} 场`,
+      `${stateText}；初始条件：${eventMode.initial_state_policy || "event_warmup"}`,
+    ]);
+  }
   const events = Array.isArray(evaluation.events) ? evaluation.events : [];
   events.slice(0, 12).forEach(event => {
     const name = event?.name || "未命名事件";

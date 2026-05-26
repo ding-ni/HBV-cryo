@@ -215,6 +215,12 @@ OBS_MONTHLY_CALIB = None
 BASIN_GLACIER_AREA_FRACTION = float("nan")
 PROJECT_OBJECT_TYPE = "full_upstream_basin"
 FLOOD_EVENT_CONFIG = {}
+EVENT_RUNTIME_ENABLED = False
+EVENT_RUNTIME_MODE = "continuous"
+EVENT_RUNTIME_DATES = None
+EVENT_RUNTIME_WINDOWS = []
+EVENT_RUNTIME_META = {}
+EVENT_INITIAL_STATE_POLICY = "continuous_state"
 
 RUN_ID = None
 LOG_FILE = None
@@ -3428,6 +3434,76 @@ def load_raster_stack(directory, start_date, end_date, cache_label=None):
     return data, transform, crs
 
 
+def _is_contiguous_unique_index(dates):
+    dates = pd.DatetimeIndex(dates)
+    if len(dates) <= 1:
+        return True
+    if dates.has_duplicates:
+        return False
+    diffs = dates[1:] - dates[:-1]
+    return bool(np.all(diffs == time_step_timedelta()))
+
+
+def load_raster_stack_for_dates(directory, dates, cache_label=None):
+    dates = pd.DatetimeIndex(dates)
+    if len(dates) == 0:
+        raise ValueError(f"{cache_label or directory} 没有需要读取的时步。")
+    if _is_contiguous_unique_index(dates):
+        return load_raster_stack(directory, dates[0], dates[-1], cache_label=cache_label)
+
+    file_date_map, signature_entries = scan_time_file_entries(directory)
+    if not file_date_map:
+        raise ValueError(f"目录中未找到 .tif 文件：{directory}")
+
+    label = str(cache_label or os.path.basename(directory) or "stack")
+    ensure_expected_time_steps(label, dates, file_date_map, directory)
+
+    first_file = next(iter(file_date_map.values()))
+    with rasterio.open(first_file) as src:
+        rows, cols = src.height, src.width
+        transform = src.transform
+        crs = src.crs
+
+    data = np.full((rows, cols, len(dates)), np.nan, dtype=np.float32)
+    for i, date in enumerate(dates):
+        file_path = file_date_map[pd.Timestamp(date)]
+        with rasterio.open(file_path) as src:
+            ensure_raster_alignment(label, src, (rows, cols), transform, crs, file_path)
+            arr = src.read(1).astype(np.float32)
+            nodata = src.nodata
+            if nodata is not None:
+                arr[arr == nodata] = np.nan
+            arr[arr < -9000] = np.nan
+            arr[arr > 1e10] = np.nan
+            data[:, :, i] = arr
+
+    all_nan_steps = np.where(~np.isfinite(data).any(axis=(0, 1)))[0]
+    if len(all_nan_steps):
+        bad_dates = [dates[int(idx)] for idx in all_nan_steps[:5]]
+        raise ValueError(f"{label} 存在整步空白栅格：{summarize_time_samples(bad_dates)}")
+
+    _source_payload, source_token = stack_cache_source_token(directory, label, signature_entries)
+    record_data_cache(
+        label,
+        {
+            "cache_hit": False,
+            "cache_hit_type": "event_window_direct",
+            "cache_path": "",
+            "source_dir": directory,
+            "time_steps": int(len(dates)),
+            "source_files": int(len(signature_entries)),
+            "shape": [int(rows), int(cols), int(len(dates))],
+            "source_token": source_token,
+            "event_window_runtime": True,
+        },
+    )
+    log_msg(
+        f"[事件资料] {label} 按 {len(dates)} 个事件窗口时步读取，"
+        "事件之间不要求连续栅格。"
+    )
+    return data, transform, crs
+
+
 def trim_warmup(arr):
     if arr is None:
         return None
@@ -3455,7 +3531,17 @@ def glacier_reference_active_cells():
     return GLACIER_MASK & np.isfinite(FLOW_ACC)
 
 
-def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low_step, cfmax_high_step):
+def run_fractional_subgrid_simulation_arrays(
+    mode_name,
+    par_base,
+    ice_factor,
+    cfmax_low_step,
+    cfmax_high_step,
+    prec_cells,
+    temp_cells,
+    et_cells,
+    ll_temp_cells,
+):
     glacier_scale = (CELL_SCALE * GLACIER_FRACTION_CELLS).astype(np.float64, copy=False)
     nonglacier_scale = (CELL_SCALE * (1.0 - GLACIER_FRACTION_CELLS)).astype(np.float64, copy=False)
     glacier_cells = np.ascontiguousarray(GLACIER_FRACTION_CELLS > 0.0, dtype=np.bool_)
@@ -3463,13 +3549,13 @@ def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low
 
     if mode_name == "objective_total":
         q_total_glacier = run_all_cells_total_only_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_scale,
             glacier_cells, True, ice_factor, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
         )
         q_total_nonglacier = run_all_cells_total_only_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_scale,
             nonglacier_cells, False, ice_factor, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
@@ -3478,13 +3564,13 @@ def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low
 
     if mode_name == "objective_ice":
         q_total_glacier, q_ice_glacier = run_all_cells_total_ice_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_scale,
             glacier_cells, True, ice_factor, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
         )
         q_total_nonglacier, q_ice_nonglacier = run_all_cells_total_ice_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_scale,
             nonglacier_cells, False, ice_factor, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
@@ -3495,13 +3581,13 @@ def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low
         }
 
     q_total_glacier, q_rain_glacier, q_snow_glacier, q_ice_glacier = run_all_cells_flat(
-        PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+        prec_cells, temp_cells, et_cells, ll_temp_cells,
         par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_scale,
         glacier_cells, True, ice_factor, cfmax_low_step, cfmax_high_step,
         GLACIER_DELTA_T_CELLS,
     )
     q_total_nonglacier, q_rain_nonglacier, q_snow_nonglacier, q_ice_nonglacier = run_all_cells_flat(
-        PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+        prec_cells, temp_cells, et_cells, ll_temp_cells,
         par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_scale,
         nonglacier_cells, False, ice_factor, cfmax_low_step, cfmax_high_step,
         GLACIER_DELTA_T_CELLS,
@@ -3514,6 +3600,20 @@ def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low
         "q_snow_glacier": q_snow_glacier,
         "q_glacier_total": q_snow_glacier + q_ice_glacier,
     }
+
+
+def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low_step, cfmax_high_step):
+    return run_fractional_subgrid_simulation_arrays(
+        mode_name,
+        par_base,
+        ice_factor,
+        cfmax_low_step,
+        cfmax_high_step,
+        PREC_CELLS,
+        TEMP_CELLS,
+        ET_CELLS,
+        LL_TEMP_CELLS,
+    )
 
 
 def build_cfmax_grid(cfmax_low, cfmax_high):
@@ -3538,6 +3638,130 @@ def route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_mu
         "q_snow_raw": trim_warmup(q_snow),
         "q_ice_raw": trim_warmup(q_ice),
     }
+
+
+def event_runtime_independent_active():
+    return bool(
+        EVENT_RUNTIME_ENABLED
+        and EVENT_RUNTIME_WINDOWS
+        and str(EVENT_RUNTIME_MODE or "").strip().lower() in {"independent_event_windows", "event_windows", "event_segments"}
+    )
+
+
+def _event_runtime_slices(length):
+    if not event_runtime_independent_active():
+        return [slice(0, int(length))]
+    slices = []
+    for window in EVENT_RUNTIME_WINDOWS:
+        start = max(0, int(window.get("start_idx", 0) or 0))
+        end = min(int(length) - 1, int(window.get("end_idx", start) or start))
+        if end >= start:
+            slices.append(slice(start, end + 1))
+    return slices or [slice(0, int(length))]
+
+
+def route_event_window_series(q_in, k_musk, x_musk):
+    arr = np.asarray(q_in, dtype=np.float64)
+    if arr.size == 0:
+        return arr.copy()
+    routed = np.full(arr.shape, np.nan, dtype=np.float64)
+    for seg in _event_runtime_slices(len(arr)):
+        routed[seg] = muskingum_route(arr[seg], k_musk, x_musk, MUSK_DT)
+    return trim_warmup(routed)
+
+
+def route_runtime_series(q_in, k_musk, x_musk):
+    if event_runtime_independent_active():
+        return route_event_window_series(q_in, k_musk, x_musk)
+    return trim_warmup(muskingum_route(q_in, k_musk, x_musk, MUSK_DT))
+
+
+def route_event_window_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_musk):
+    q_total_in = q_total + boundary_full
+    return {
+        "q_total": route_event_window_series(q_total_in, k_musk, x_musk),
+        "q_local": route_event_window_series(q_total, k_musk, x_musk),
+        "q_boundary": route_event_window_series(boundary_full, k_musk, x_musk),
+        "q_rain": route_event_window_series(q_rain, k_musk, x_musk),
+        "q_snow": route_event_window_series(q_snow, k_musk, x_musk),
+        "q_ice": route_event_window_series(q_ice, k_musk, x_musk),
+        "q_local_raw": trim_warmup(q_total),
+        "q_boundary_raw": trim_warmup(boundary_full),
+        "q_rain_raw": trim_warmup(q_rain),
+        "q_snow_raw": trim_warmup(q_snow),
+        "q_ice_raw": trim_warmup(q_ice),
+    }
+
+
+def run_event_window_source_parts(
+    mode_name,
+    par_base,
+    ice_factor,
+    cfmax_low_step,
+    cfmax_high_step,
+    glacier_on,
+    use_fractional_subgrid,
+):
+    chunks = []
+    for seg in _event_runtime_slices(PREC_CELLS.shape[1]):
+        prec_seg = np.ascontiguousarray(PREC_CELLS[:, seg], dtype=np.float32)
+        temp_seg = np.ascontiguousarray(TEMP_CELLS[:, seg], dtype=np.float32)
+        et_seg = np.ascontiguousarray(ET_CELLS[:, seg], dtype=np.float32)
+        ll_temp_seg = np.ascontiguousarray(LL_TEMP_CELLS[:, seg], dtype=np.float32)
+        if use_fractional_subgrid:
+            parts = run_fractional_subgrid_simulation_arrays(
+                mode_name,
+                par_base,
+                ice_factor,
+                cfmax_low_step,
+                cfmax_high_step,
+                prec_seg,
+                temp_seg,
+                et_seg,
+                ll_temp_seg,
+            )
+        elif mode_name == "objective_total":
+            parts = {
+                "q_total": run_all_cells_total_only_flat(
+                    prec_seg, temp_seg, et_seg, ll_temp_seg,
+                    par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
+                    GLACIER_CELLS, glacier_on, ice_factor, cfmax_low_step, cfmax_high_step,
+                    GLACIER_DELTA_T_CELLS,
+                )
+            }
+        elif mode_name == "objective_ice":
+            q_total, q_ice = run_all_cells_total_ice_flat(
+                prec_seg, temp_seg, et_seg, ll_temp_seg,
+                par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
+                GLACIER_CELLS, glacier_on, ice_factor, cfmax_low_step, cfmax_high_step,
+                GLACIER_DELTA_T_CELLS,
+            )
+            parts = {"q_total": q_total, "q_ice": q_ice}
+        else:
+            q_total, q_rain, q_snow, q_ice = run_all_cells_flat(
+                prec_seg, temp_seg, et_seg, ll_temp_seg,
+                par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
+                GLACIER_CELLS, glacier_on, ice_factor, cfmax_low_step, cfmax_high_step,
+                GLACIER_DELTA_T_CELLS,
+            )
+            q_snow_glacier = np.asarray(q_snow, dtype=np.float64).copy() if glacier_on else np.zeros_like(q_total, dtype=np.float64)
+            parts = {
+                "q_total": q_total,
+                "q_rain": q_rain,
+                "q_snow": q_snow,
+                "q_ice": q_ice,
+                "q_snow_glacier": q_snow_glacier,
+                "q_glacier_total": q_snow_glacier + np.asarray(q_ice, dtype=np.float64),
+            }
+        chunks.append(parts)
+
+    keys = sorted({key for chunk in chunks for key in chunk.keys()})
+    combined = {}
+    for key in keys:
+        values = [np.asarray(chunk[key], dtype=np.float64) for chunk in chunks if key in chunk]
+        if values:
+            combined[key] = np.concatenate(values)
+    return combined
 
 
 def _last_finite_value(values):
@@ -4031,6 +4255,74 @@ def load_glacier_melt_reference_series(start_date, end_date):
     return series
 
 
+def load_glacier_melt_reference_series_for_dates(dates):
+    dates = pd.DatetimeIndex(dates)
+    if not os.path.isdir(GLACIER_MELT_DIR):
+        return None
+    if GLACIER_MASK is None or FLOW_ACC is None or PX_AREA is None:
+        return None
+
+    glacier_cells = glacier_reference_active_cells()
+    if glacier_cells is None or not np.any(glacier_cells):
+        return None
+
+    file_date_map, signature_entries = scan_time_file_entries(GLACIER_MELT_DIR)
+    if not file_date_map:
+        return None
+
+    ensure_expected_time_steps("glacier_ref", dates, file_date_map, GLACIER_MELT_DIR)
+    first_file = next(iter(file_date_map.values()))
+    with rasterio.open(first_file) as src:
+        rows, cols = src.height, src.width
+        transform = src.transform
+        crs = src.crs
+
+    weights = (PX_AREA[glacier_cells] * mm_km2_to_m3s_scale()).astype(np.float64)
+    series = np.full(len(dates), np.nan, dtype=np.float64)
+    for i, date in enumerate(dates):
+        file_path = file_date_map[pd.Timestamp(date)]
+        with rasterio.open(file_path) as src:
+            ensure_raster_alignment("glacier_ref", src, (rows, cols), transform, crs, file_path)
+            arr = src.read(1).astype(np.float32)
+            nodata = src.nodata
+            if nodata is not None:
+                arr[arr == nodata] = np.nan
+        arr[arr < 0.0] = 0.0
+        values = arr[glacier_cells]
+        if np.any(np.isfinite(values)):
+            series[i] = float(np.nansum(values * weights))
+
+    if np.any(~np.isfinite(series)):
+        bad_dates = [dates[int(idx)] for idx in np.where(~np.isfinite(series))[0][:5]]
+        raise ValueError(f"glacier_ref 存在空白时步：{summarize_time_samples(bad_dates)}")
+
+    source_payload = {
+        "version": STACK_CACHE_VERSION,
+        "label": "glacier_ref",
+        "directory": os.path.abspath(GLACIER_MELT_DIR),
+        "time_step_hours": float(TIME_STEP_HOURS),
+        "entries": signature_entries,
+    }
+    source_token = hashlib.sha1(
+        json.dumps(source_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    record_data_cache(
+        "glacier_ref",
+        {
+            "cache_hit": False,
+            "cache_hit_type": "event_window_direct",
+            "cache_path": "",
+            "source_dir": GLACIER_MELT_DIR,
+            "time_steps": int(len(dates)),
+            "source_files": int(len(signature_entries)),
+            "shape": [int(series.shape[0])],
+            "source_token": source_token,
+            "event_window_runtime": True,
+        },
+    )
+    return series
+
+
 def detect_obs_eval_mask():
     mode = str(OBS_MODE_OVERRIDE or "").strip().lower() or "full_year"
     if SIM_DATES is None:
@@ -4088,6 +4380,181 @@ def detect_obs_eval_mask():
     return default_mask, "all_valid"
 
 
+def _event_config_field(event, *names):
+    event = dict(event or {}) if isinstance(event, dict) else {}
+    for name in names:
+        if name in event and event.get(name) not in (None, ""):
+            return event.get(name)
+    lower_map = {str(key).strip().lower(): value for key, value in event.items()}
+    for name in names:
+        value = lower_map.get(str(name).strip().lower())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _event_purpose_key(event):
+    raw = str(
+        _event_config_field(event, "purpose", "用途", "类型", "type")
+        or "calibration"
+    ).strip().lower()
+    if raw in {"calibration", "calib", "train", "training", "率定", "训练"}:
+        return "calibration"
+    if raw in {"validation", "valid", "test", "验证", "检验"}:
+        return "validation"
+    if raw in {"diagnostic", "diag", "诊断"}:
+        return "diagnostic"
+    return raw or "calibration"
+
+
+def event_runtime_requested(config=None):
+    raw = FLOOD_EVENT_CONFIG if config is None else config
+    if isinstance(raw, list):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    if _config_bool(raw.get("事件窗口资料", raw.get("event_windows_enabled")), default=False):
+        return True
+    mode = str(raw.get("event_runtime_mode", raw.get("运行资料模式", raw.get("资料模式", ""))) or "").strip().lower()
+    return mode in {"event_windows", "independent_event_windows", "event_segments", "事件窗口", "事件资料"}
+
+
+def _event_runtime_time(value, *, end=False):
+    if value in (None, ""):
+        return None
+    return normalize_time_value(value, is_end=end)
+
+
+def _event_runtime_date_range(start, end):
+    return build_time_index(start, end)
+
+
+def _as_message_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
+
+
+def build_event_runtime_context(config=None):
+    parsed = parse_flood_event_config(config)
+    raw_config = dict(parsed.get("raw_config", {}) or {})
+    if not event_runtime_requested(raw_config):
+        return {"enabled": False, "dates": None, "windows": [], "warnings": [], "errors": []}
+
+    raw_events = list(parsed.get("events", []) or [])
+    objective_indices = selected_flood_event_indices_for_objective(raw_events, raw_config)
+    dates_parts = []
+    calib_parts = []
+    valid_parts = []
+    windows = []
+    warnings = _as_message_list(parsed.get("warnings", [])) + _as_message_list(raw_config.get("warnings", []))
+    errors = _as_message_list(raw_config.get("errors", []))
+    for idx, raw_event in enumerate(raw_events):
+        event = dict(raw_event or {}) if isinstance(raw_event, dict) else {}
+        token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        event_id = str(_event_config_field(event, "event_id", "id", "编号", "name", "名称") or "").strip()
+        if not event_id:
+            event_id = f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+        try:
+            score_start = _event_runtime_time(
+                _event_config_field(event, "score_start", "评分开始", "事件开始", "start"),
+                end=False,
+            )
+            score_end = _event_runtime_time(
+                _event_config_field(event, "score_end", "评分结束", "事件结束", "end"),
+                end=True,
+            )
+            run_start = _event_runtime_time(
+                _event_config_field(event, "run_start", "运行开始", "预热开始", "warmup_start")
+                or score_start,
+                end=False,
+            )
+            run_end = _event_runtime_time(
+                _event_config_field(event, "run_end", "运行结束", "退水结束")
+                or score_end,
+                end=True,
+            )
+        except Exception as exc:
+            errors.append(f"{event_id}: 事件时间无法解析：{exc}")
+            continue
+        if None in (run_start, score_start, score_end, run_end):
+            errors.append(f"{event_id}: 事件缺少运行窗口或评分窗口时间。")
+            continue
+        if not (run_start <= score_start <= score_end <= run_end):
+            errors.append(f"{event_id}: 事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
+            continue
+
+        event_dates = _event_runtime_date_range(run_start, run_end)
+        if len(event_dates) == 0:
+            errors.append(f"{event_id}: 事件运行窗口没有有效时间步。")
+            continue
+        start_idx = sum(len(part) for part in dates_parts)
+        end_idx = start_idx + len(event_dates) - 1
+        score_mask = (event_dates >= score_start) & (event_dates <= score_end)
+        purpose = _event_purpose_key(event)
+        in_objective = bool(idx in objective_indices)
+        dates_parts.append(event_dates)
+        calib_parts.append(np.asarray(score_mask & in_objective, dtype=bool))
+        valid_parts.append(np.asarray(score_mask & (purpose == "validation"), dtype=bool))
+        windows.append(
+            {
+                "index": int(idx),
+                "event_id": event_id,
+                "name": str(_event_config_field(event, "name", "名称") or event_id),
+                "purpose": purpose,
+                "used_in_objective": in_objective,
+                "start_idx": int(start_idx),
+                "end_idx": int(end_idx),
+                "time_steps_run": int(len(event_dates)),
+                "time_steps_score": int(np.sum(score_mask)),
+                "run_start": format_time_value(run_start),
+                "score_start": format_time_value(score_start),
+                "score_end": format_time_value(score_end),
+                "run_end": format_time_value(run_end),
+            }
+        )
+
+    if errors:
+        return {"enabled": True, "dates": None, "windows": windows, "warnings": warnings, "errors": errors}
+    if not dates_parts:
+        return {
+            "enabled": True,
+            "dates": None,
+            "windows": [],
+            "warnings": warnings,
+            "errors": ["事件窗口资料模式已启用，但事件表中没有可运行事件。"],
+        }
+
+    runtime_dates = pd.DatetimeIndex(np.concatenate([part.to_numpy() for part in dates_parts]))
+    calib_mask = np.concatenate(calib_parts).astype(bool)
+    valid_mask = np.concatenate(valid_parts).astype(bool)
+    if not np.any(calib_mask):
+        warnings.append("事件目标窗口为空，已把全部事件评分窗口作为率定目标窗口。")
+        calib_mask = np.concatenate([
+            np.asarray((part >= pd.Timestamp(win["score_start"])) & (part <= pd.Timestamp(win["score_end"])), dtype=bool)
+            for part, win in zip(dates_parts, windows)
+        ]).astype(bool)
+        for win in windows:
+            win["used_in_objective"] = True
+
+    return {
+        "enabled": True,
+        "dates": runtime_dates,
+        "calib_mask": calib_mask,
+        "valid_mask": valid_mask,
+        "windows": windows,
+        "warnings": warnings,
+        "errors": [],
+        "initial_state_policy": str(raw_config.get("初始条件策略", raw_config.get("event_initial_state_policy", "event_warmup")) or "event_warmup"),
+        "runtime_mode": str(raw_config.get("event_runtime_mode", "independent_event_windows") or "independent_event_windows"),
+        "event_count": int(len(windows)),
+        "objective_event_count": int(sum(1 for item in windows if item.get("used_in_objective"))),
+        "validation_event_count": int(sum(1 for item in windows if item.get("purpose") == "validation")),
+    }
+
+
 def load_observed_discharge_series(csv_path, target_index):
     info = inspect_observed_discharge(
         csv_path,
@@ -4135,16 +4602,55 @@ def load_all_data(end_date_override=None, skip_obs=False):
     global SIM_DATES, CALIB_MASK, VALID_MASK, Q_OBS_FULL, Q_OBS_OBJ, Q_OBS_CALIB, Q_OBS_VALID
     global WARMUP_STEPS, CATCHMENT_AREA, BOUNDARY_INFLOW_SERIES, BOUNDARY_INFLOW_ENABLED, GLACIER_MELT_REF_RAW, GLACIER_MODEL_MODE, GLACIER_ELEV_STATUS, RELIABILITY_FLAG, DATA_LOAD_SUMMARY, OBS_MODE_APPLIED
     global OBS_MONTHLY_CALIB, GLACIER_FRAC_WINDOW, BASIN_GLACIER_AREA_FRACTION
+    global EVENT_RUNTIME_ENABLED, EVENT_RUNTIME_MODE, EVENT_RUNTIME_DATES, EVENT_RUNTIME_WINDOWS, EVENT_RUNTIME_META, EVENT_INITIAL_STATE_POLICY
 
     load_end = end_date_override or SIM_END
     DATA_LOAD_SUMMARY = {}
     load_started = time.time()
 
-    PREC_3D, transform, forcing_crs = load_raster_stack(PREC_DIR, WARMUP_START, load_end, cache_label="prec")
+    event_context = build_event_runtime_context()
+    EVENT_RUNTIME_ENABLED = bool(event_context.get("enabled") and event_context.get("dates") is not None)
+    if event_context.get("errors"):
+        raise ValueError("洪水事件窗口资料模式无法启动：" + "；".join(str(item) for item in event_context["errors"][:5]))
+    if EVENT_RUNTIME_ENABLED:
+        runtime_dates = pd.DatetimeIndex(event_context["dates"])
+        EVENT_RUNTIME_DATES = runtime_dates
+        EVENT_RUNTIME_WINDOWS = list(event_context.get("windows", []) or [])
+        EVENT_RUNTIME_MODE = str(event_context.get("runtime_mode") or "independent_event_windows")
+        EVENT_INITIAL_STATE_POLICY = str(event_context.get("initial_state_policy") or "event_warmup")
+        EVENT_RUNTIME_META = {
+            "enabled": True,
+            "runtime_mode": EVENT_RUNTIME_MODE,
+            "initial_state_policy": EVENT_INITIAL_STATE_POLICY,
+            "event_count": int(event_context.get("event_count", len(EVENT_RUNTIME_WINDOWS)) or 0),
+            "objective_event_count": int(event_context.get("objective_event_count", 0) or 0),
+            "validation_event_count": int(event_context.get("validation_event_count", 0) or 0),
+            "time_steps": int(len(runtime_dates)),
+            "allows_gaps_between_events": True,
+            "state_continuity_between_events": False,
+            "windows": EVENT_RUNTIME_WINDOWS,
+            "warnings": list(event_context.get("warnings", []) or []),
+        }
+        if event_context.get("warnings"):
+            for warning in event_context.get("warnings", [])[:5]:
+                log_msg(f"[事件资料] {warning}")
+        log_msg(
+            f"[事件资料] 启用事件窗口资料模式：{len(EVENT_RUNTIME_WINDOWS)} 场，"
+            f"读取 {len(runtime_dates)} 个事件内时步；事件之间不作为连续状态演化。"
+        )
+    else:
+        runtime_dates = build_time_index(WARMUP_START, load_end)
+        EVENT_RUNTIME_DATES = None
+        EVENT_RUNTIME_WINDOWS = []
+        EVENT_RUNTIME_MODE = "continuous"
+        EVENT_INITIAL_STATE_POLICY = "continuous_state"
+        EVENT_RUNTIME_META = {"enabled": False, "runtime_mode": "continuous"}
+
+    PREC_3D, transform, forcing_crs = load_raster_stack_for_dates(PREC_DIR, runtime_dates, cache_label="prec")
     rows, cols, ts = PREC_3D.shape
-    TEMP_3D, temp_transform, temp_crs = load_raster_stack(TEMP_DIR, WARMUP_START, load_end, cache_label="temp")
+    TEMP_3D, temp_transform, temp_crs = load_raster_stack_for_dates(TEMP_DIR, runtime_dates, cache_label="temp")
     ensure_loaded_stack_alignment("temp", TEMP_3D.shape, temp_transform, temp_crs, PREC_3D.shape, transform, forcing_crs)
-    ET_3D, et_transform, et_crs = load_raster_stack(EVAP_DIR, WARMUP_START, load_end, cache_label="evap")
+    ET_3D, et_transform, et_crs = load_raster_stack_for_dates(EVAP_DIR, runtime_dates, cache_label="evap")
     ensure_loaded_stack_alignment("evap", ET_3D.shape, et_transform, et_crs, PREC_3D.shape, transform, forcing_crs)
 
     temp_valid = np.isfinite(TEMP_3D)
@@ -4324,15 +4830,20 @@ def load_all_data(end_date_override=None, skip_obs=False):
     ET_3D = None
     LL_TEMP_3D = None
 
-    full_run_dates = build_time_index(WARMUP_START, load_end)
+    full_run_dates = pd.DatetimeIndex(runtime_dates)
     SIM_DATES = full_run_dates
-    calib_start_ts = normalize_time_value(CALIB_START)
-    calib_end_ts = normalize_time_value(CALIB_END, is_end=True)
-    valid_start_ts = normalize_time_value(VALID_START)
-    valid_end_ts = normalize_time_value(VALID_END, is_end=True)
-    CALIB_MASK = (SIM_DATES >= calib_start_ts) & (SIM_DATES <= calib_end_ts)
-    VALID_MASK = (SIM_DATES >= valid_start_ts) & (SIM_DATES <= valid_end_ts)
-    WARMUP_STEPS = compute_warmup_steps()
+    if EVENT_RUNTIME_ENABLED:
+        CALIB_MASK = np.asarray(event_context.get("calib_mask"), dtype=bool)
+        VALID_MASK = np.asarray(event_context.get("valid_mask"), dtype=bool)
+        WARMUP_STEPS = 0
+    else:
+        calib_start_ts = normalize_time_value(CALIB_START)
+        calib_end_ts = normalize_time_value(CALIB_END, is_end=True)
+        valid_start_ts = normalize_time_value(VALID_START)
+        valid_end_ts = normalize_time_value(VALID_END, is_end=True)
+        CALIB_MASK = (SIM_DATES >= calib_start_ts) & (SIM_DATES <= calib_end_ts)
+        VALID_MASK = (SIM_DATES >= valid_start_ts) & (SIM_DATES <= valid_end_ts)
+        WARMUP_STEPS = compute_warmup_steps()
 
     if skip_obs or (not os.path.exists(OBS_FILE)):
         Q_OBS_FULL = np.full(len(SIM_DATES), np.nan, dtype=np.float64)
@@ -4373,7 +4884,10 @@ def load_all_data(end_date_override=None, skip_obs=False):
         expected_step_hours=TIME_STEP_HOURS,
     )
     BOUNDARY_INFLOW_ENABLED = bool(BOUNDARY_INFLOW_FILE)
-    GLACIER_MELT_REF_RAW = load_glacier_melt_reference_series(WARMUP_START, load_end)
+    if EVENT_RUNTIME_ENABLED:
+        GLACIER_MELT_REF_RAW = load_glacier_melt_reference_series_for_dates(full_run_dates)
+    else:
+        GLACIER_MELT_REF_RAW = load_glacier_melt_reference_series(WARMUP_START, load_end)
 
     try:
         if Q_OBS_CALIB is not None and SIM_DATES is not None and CALIB_MASK is not None:
@@ -4442,7 +4956,23 @@ def run_simulation(opt_params, mode="full"):
         and glacier_processing_mode() == "fractional_subgrid"
         and GLACIER_FRACTION_CELLS is not None
     )
-    if use_fractional_subgrid:
+    if event_runtime_independent_active():
+        sim_parts = run_event_window_source_parts(
+            mode_name,
+            par_base,
+            ICE_FACTOR,
+            cfmax_low_step,
+            cfmax_high_step,
+            glacier_on,
+            use_fractional_subgrid,
+        )
+        q_total = sim_parts["q_total"]
+        q_rain = sim_parts.get("q_rain")
+        q_snow = sim_parts.get("q_snow")
+        q_ice = sim_parts.get("q_ice")
+        q_snow_glacier = sim_parts.get("q_snow_glacier")
+        q_glacier_total = sim_parts.get("q_glacier_total")
+    elif use_fractional_subgrid:
         sim_parts = run_fractional_subgrid_simulation(
             mode_name,
             par_base,
@@ -4499,17 +5029,22 @@ def run_simulation(opt_params, mode="full"):
 
     if mode_name == "objective_total":
         sim = {
-            "q_total": trim_warmup(muskingum_route(q_total + boundary_full, K_MUSK, X_MUSK, MUSK_DT)),
+            "q_total": route_runtime_series(q_total + boundary_full, K_MUSK, X_MUSK),
         }
     elif mode_name == "objective_ice":
         sim = {
-            "q_total": trim_warmup(muskingum_route(q_total + boundary_full, K_MUSK, X_MUSK, MUSK_DT)),
-            "q_ice": trim_warmup(muskingum_route(q_ice, K_MUSK, X_MUSK, MUSK_DT)),
+            "q_total": route_runtime_series(q_total + boundary_full, K_MUSK, X_MUSK),
+            "q_ice": route_runtime_series(q_ice, K_MUSK, X_MUSK),
         }
     else:
-        sim = route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, K_MUSK, X_MUSK)
-        sim["q_snow_glacier"] = trim_warmup(muskingum_route(q_snow_glacier, K_MUSK, X_MUSK, MUSK_DT))
-        sim["q_glacier_total"] = trim_warmup(muskingum_route(q_glacier_total, K_MUSK, X_MUSK, MUSK_DT))
+        if event_runtime_independent_active():
+            sim = route_event_window_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, K_MUSK, X_MUSK)
+            sim["q_snow_glacier"] = route_event_window_series(q_snow_glacier, K_MUSK, X_MUSK)
+            sim["q_glacier_total"] = route_event_window_series(q_glacier_total, K_MUSK, X_MUSK)
+        else:
+            sim = route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, K_MUSK, X_MUSK)
+            sim["q_snow_glacier"] = trim_warmup(muskingum_route(q_snow_glacier, K_MUSK, X_MUSK, MUSK_DT))
+            sim["q_glacier_total"] = trim_warmup(muskingum_route(q_glacier_total, K_MUSK, X_MUSK, MUSK_DT))
     glacier_reference_available = bool(glacier_on and GLACIER_MELT_REF_RAW is not None)
     sim["glacier_enabled"] = glacier_on
     sim["glacier_model_mode"] = glacier_processing_mode()
@@ -4526,6 +5061,7 @@ def run_simulation(opt_params, mode="full"):
     sim["glacier_reference_enabled"] = glacier_reference_used_in_objective
     sim["glacier_reference_used_in_objective"] = glacier_reference_used_in_objective
     sim["boundary_enabled"] = bool(BOUNDARY_INFLOW_ENABLED)
+    sim["event_runtime"] = dict(EVENT_RUNTIME_META or {})
     sim["project_object_type"] = current_project_object_type()
     sim["q_score_basis"] = current_q_score_basis()
     sim["reliability_flag"] = RELIABILITY_FLAG
@@ -4742,8 +5278,24 @@ def compute_metrics(q_sim):
 def load_flood_event_config_file(path):
     if not path:
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    suffix = os.path.splitext(str(path))[1].lower()
+    if suffix == ".json":
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    if suffix in {".xlsx", ".xls"}:
+        frame = pd.read_excel(path)
+    else:
+        last_error = None
+        for encoding in ("utf-8-sig", "utf-8", "gbk"):
+            try:
+                frame = pd.read_csv(path, encoding=encoding)
+                break
+            except Exception as exc:
+                last_error = exc
+        else:
+            raise ValueError(f"洪水事件表读取失败：{last_error}")
+    events = frame.where(pd.notna(frame), None).to_dict(orient="records")
+    return {"启用": True, "事件表": events, "事件表路径": str(path)}
 
 
 def _config_bool(value, default=False):
@@ -4814,6 +5366,24 @@ def parse_flood_event_config(config=None):
         }
 
     events = cfg.get("事件表", cfg.get("events", []))
+    event_file = str(cfg.get("事件表路径", cfg.get("events_file", cfg.get("event_file", ""))) or "").strip()
+    if event_file and not events:
+        try:
+            loaded = load_flood_event_config_file(event_file)
+            if isinstance(loaded, dict):
+                events = loaded.get("事件表", loaded.get("events", []))
+                cfg.setdefault("事件表路径", event_file)
+            elif isinstance(loaded, list):
+                events = loaded
+        except Exception as exc:
+            return {
+                "enabled": _config_bool(cfg.get("启用", cfg.get("enabled")), default=True),
+                "events": [],
+                "weights": normalize_flood_event_weights(cfg.get("目标权重", cfg.get("weights", {}))),
+                "warnings": [f"洪水事件表读取失败：{exc}"],
+                "peak_time_tolerance_hours": max(float(TIME_STEP_HOURS), 24.0),
+                "raw_config": cfg,
+            }
     if not isinstance(events, list):
         events = []
     enabled_default = bool(events)
@@ -4887,7 +5457,7 @@ def selected_flood_event_indices_for_objective(events, raw_config=None):
     type_keys = []
     for item in events:
         event = dict(item or {}) if isinstance(item, dict) else {}
-        type_keys.append(_event_type_key(event.get("类型", event.get("type", ""))))
+        type_keys.append(_event_type_key(event.get("类型", event.get("type", event.get("purpose", event.get("用途", ""))))))
     if configured:
         selected = {idx for idx, item_type in enumerate(type_keys) if item_type in configured}
         return selected
@@ -6531,22 +7101,36 @@ def build_flood_event_objective_meta(profile_name=None):
     if profile_name not in {"daily", "hourly"}:
         profile_name = current_calibration_profile()
     parsed = parse_flood_event_config()
+    event_runtime = event_runtime_requested(parsed.get("raw_config", {}))
     return {
         "type": FLOOD_EVENT_OBJECTIVE_FAMILY,
         "profile": profile_name,
         "label": "事件洪水率定目标函数",
-        "summary": "连续运行模型，只在配置洪水事件窗口内合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。",
+        "summary": (
+            "按洪水事件窗口组织资料，每场事件独立预热并合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。"
+            if event_runtime
+            else "连续运行模型，只在配置洪水事件窗口内合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。"
+        ),
         "formula": "weighted_mean(|peak_error|, |peak_time_error|, |volume_error|, recession_error, 1 - high_flow_skill)",
         "weights": parsed.get("weights", {}).get("raw", dict(DEFAULT_FLOOD_EVENT_WEIGHTS)),
         "diagnostic_only_constraints": {
-            "continuous_state_evolution": True,
-            "non_event_period_state_update_only": True,
+            "continuous_state_evolution": not event_runtime,
+            "event_independent_warmup": bool(event_runtime),
+            "non_event_period_state_update_only": not event_runtime,
         },
-        "notes": [
-            "气象驱动和状态演化仍按完整连续时段运行，事件窗口只决定目标函数取样范围。",
-            "未显式启用事件目标函数时，洪水事件评价只作为结果诊断输出。",
-            "验证类事件可用于结果复核，默认不参与事件目标函数。"
-        ],
+        "notes": (
+            [
+                "事件窗口资料模式只读取各场事件运行窗口内的强迫资料，事件之间允许资料间断。",
+                "每场事件从统一初始状态进入自身预热段，事件之间不传递土壤、水库和汇流状态。",
+                "验证类事件可用于结果复核，默认不参与事件目标函数。",
+            ]
+            if event_runtime
+            else [
+                "气象驱动和状态演化仍按完整连续时段运行，事件窗口只决定目标函数取样范围。",
+                "未显式启用事件目标函数时，洪水事件评价只作为结果诊断输出。",
+                "验证类事件可用于结果复核，默认不参与事件目标函数。",
+            ]
+        ),
     }
 
 
@@ -6722,15 +7306,26 @@ def save_results(result):
         "cell_count": int(len(VALID_CELLS)) if VALID_CELLS is not None else 0,
         "time_steps": int(len(SIM_DATES)) if SIM_DATES is not None else 0,
     }
-    try:
-        snapshot_arrays, snapshot_meta = compute_state_snapshot(result.x)
-        append_routing_state_to_snapshot(snapshot_arrays, sim)
-        snapshot_meta["routing_state_available"] = True
-        state_snapshot_meta.update(snapshot_meta)
-        np.savez_compressed(state_snapshot_path, **snapshot_arrays)
-        state_snapshot_saved = True
-    except Exception as exc:
-        state_snapshot_error = str(exc)
+    if event_runtime_independent_active():
+        state_snapshot_error = "事件窗口独立运行不形成连续末状态，不作为连续状态预报起点。"
+        state_snapshot_meta.update(
+            {
+                "hot_start_supported": False,
+                "snapshot_time": "",
+                "routing_state_available": False,
+                "event_runtime_independent": True,
+            }
+        )
+    else:
+        try:
+            snapshot_arrays, snapshot_meta = compute_state_snapshot(result.x)
+            append_routing_state_to_snapshot(snapshot_arrays, sim)
+            snapshot_meta["routing_state_available"] = True
+            state_snapshot_meta.update(snapshot_meta)
+            np.savez_compressed(state_snapshot_path, **snapshot_arrays)
+            state_snapshot_saved = True
+        except Exception as exc:
+            state_snapshot_error = str(exc)
 
     profile_name = current_calibration_profile()
     requested_objective_mode = str(REQUESTED_OBJECTIVE_MODE or "").strip().lower() or "auto"
@@ -6854,9 +7449,11 @@ def save_results(result):
             "valid_start": VALID_START,
             "valid_end": VALID_END,
             "warmup_steps": int(WARMUP_STEPS),
+            "event_runtime": dict(EVENT_RUNTIME_META or {}),
         },
         "initial_state": {
             "mode": "uniform_vector",
+            "event_initial_state_policy": EVENT_INITIAL_STATE_POLICY,
             "vector": {
                 "SP": round(float(INIT_ST[0]), 6),
                 "SM": round(float(INIT_ST[1]), 6),
@@ -6877,15 +7474,22 @@ def save_results(result):
             "state_snapshot_error": state_snapshot_error,
             "hot_start_supported": bool(state_snapshot_saved),
             "hot_start_enabled": bool(state_snapshot_saved),
-            "notes": [
-                "当前核心支持统一初始状态向量 INIT_ST，也支持从结果末端按像元状态快照继续预报。",
-                (
-                    "当前结果已保存 SP/SM/WC/UZ/LZ 及雨、雪、冰水源分支状态，可作为未来预报热启动状态。"
-                    if state_snapshot_saved
-                    else "当前结果未成功保存按像元末状态快照。"
-                ),
-                "状态重启预报不重新率定参数；未来气象输入进入热启动预报运行。",
-            ],
+            "notes": (
+                [
+                    "事件窗口资料模式按场独立预热，不把事件之间的大缺口当作连续状态演化。",
+                    "该类结果可用于事件参数率定和逐场洪水评价，但不形成可直接接续未来预报的连续末状态。",
+                ]
+                if event_runtime_independent_active()
+                else [
+                    "当前核心支持统一初始状态向量 INIT_ST，也支持从结果末端按像元状态快照继续预报。",
+                    (
+                        "当前结果已保存 SP/SM/WC/UZ/LZ 及雨、雪、冰水源分支状态，可作为未来预报热启动状态。"
+                        if state_snapshot_saved
+                        else "当前结果未成功保存按像元末状态快照。"
+                    ),
+                    "状态重启预报不重新率定参数；未来气象输入进入热启动预报运行。",
+                ]
+            ),
         },
         "basin_info": {
             "catchment_area_km2": round(float(CATCHMENT_AREA), 6),
@@ -6921,6 +7525,9 @@ def save_results(result):
         "diagnostics": dict(objective_evaluation.get("diagnostics", {}) or {}) if objective_evaluation else {},
         "diagnostic_only_constraints": dict(objective_evaluation.get("diagnostic_only_constraints", {}) or {}) if objective_evaluation else {"glacier_fraction_window": True},
         "evidence_registry": dict(objective_evaluation.get("evidence_registry", {}) or {}) if objective_evaluation else {},
+        "event_mode": dict(EVENT_RUNTIME_META or {}),
+        "event_initial_state_policy": EVENT_INITIAL_STATE_POLICY,
+        "event_count": int(dict(EVENT_RUNTIME_META or {}).get("event_count", 0) or 0),
         "flood_event_evaluation": flood_event_evaluation,
         "optimization": {
             "method": str(getattr(args, "method", "de")),

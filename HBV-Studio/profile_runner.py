@@ -63,6 +63,7 @@ OBJECTIVE_MODE_AUTO = "auto"
 OBJECTIVE_MODE_SINGLE = "single_objective_nse"
 OBJECTIVE_MODE_MULTI = "daily_unified_professional_v1"
 OBJECTIVE_MODE_FLOOD_EVENT = "flood_event_calibration_v1"
+TIME_BASIS_EVENT_WINDOWS = "event_windows"
 CALIBRATION_WORKFLOW_SINGLE = "single_pass"
 CALIBRATION_WORKFLOW_STAGED = "staged_calibration_v1"
 PROFILE_LABELS = {
@@ -77,6 +78,23 @@ DEFAULT_INIT_STATE = {
     "LZ": 0.0,
     "WC": 0.0,
 }
+EVENT_PURPOSE_ALIASES = {
+    "calibration": "calibration",
+    "calib": "calibration",
+    "train": "calibration",
+    "training": "calibration",
+    "率定": "calibration",
+    "训练": "calibration",
+    "validation": "validation",
+    "valid": "validation",
+    "test": "validation",
+    "验证": "validation",
+    "检验": "validation",
+    "diagnostic": "diagnostic",
+    "diag": "diagnostic",
+    "诊断": "diagnostic",
+}
+EVENT_PATH_FIELDS = ("事件表路径", "events_file", "event_file")
 CALIBRATION_PARAM_NAMES = [
     "TT", "FC", "BETA", "LP",
     "RFCF", "SFCF",
@@ -119,6 +137,259 @@ def resolve_runtime_time_config(config: dict[str, Any]) -> tuple[dict[str, Any],
 
     time_cfg["预热结束"] = format_runtime_time_value(expected_warmup_end, step_hours)
     return time_cfg, step_hours
+
+
+def _runtime_truthy(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on", "启用", "是"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off", "禁用", "否"}:
+        return False
+    return default
+
+
+def _event_field(event: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in event and event.get(name) not in (None, ""):
+            return event.get(name)
+    lower_map = {str(key).strip().lower(): value for key, value in event.items()}
+    for name in names:
+        value = lower_map.get(str(name).strip().lower())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _parse_event_timestamp(value: Any, *, end: bool, step_hours: float) -> pd.Timestamp | None:
+    if value in (None, ""):
+        return None
+    ts = pd.to_datetime(value)
+    if end and abs(float(step_hours) - 24.0) < 1e-9 and ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+        return ts
+    return ts
+
+
+def _format_event_timestamp(value: Any, step_hours: float) -> str:
+    return format_runtime_time_value(pd.Timestamp(value), step_hours)
+
+
+def _read_event_table_file(path: Path) -> list[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        events = raw.get("事件表", raw.get("events", [])) if isinstance(raw, dict) else raw
+        return [dict(item) for item in events if isinstance(item, dict)] if isinstance(events, list) else []
+    if suffix in {".xlsx", ".xls"}:
+        frame = pd.read_excel(path)
+    else:
+        last_error: Exception | None = None
+        for encoding in ("utf-8-sig", "utf-8", "gbk"):
+            try:
+                frame = pd.read_csv(path, encoding=encoding)
+                break
+            except Exception as exc:
+                last_error = exc
+        else:
+            raise ValueError(f"事件表 CSV 读取失败：{last_error}")
+    return frame.where(pd.notna(frame), None).to_dict(orient="records")
+
+
+def _runtime_flood_event_config(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get("洪水事件率定", {})
+    if isinstance(raw, list):
+        cfg: dict[str, Any] = {"启用": True, "事件表": list(raw)}
+    elif isinstance(raw, dict):
+        cfg = dict(raw)
+    else:
+        cfg = {}
+    event_mode = config.get("事件资料模式", {})
+    if isinstance(event_mode, dict):
+        for key, value in event_mode.items():
+            cfg.setdefault(key, value)
+    for key in EVENT_PATH_FIELDS:
+        if not cfg.get(key) and config.get(key):
+            cfg[key] = config.get(key)
+    return cfg
+
+
+def _resolve_event_file(config: dict[str, Any], cfg: dict[str, Any]) -> Path | None:
+    raw = ""
+    for key in EVENT_PATH_FIELDS:
+        raw = str(cfg.get(key, "") or "").strip()
+        if raw:
+            break
+    if not raw:
+        return None
+    target = resolve_path(raw, base=config_base_dir(config))
+    return target.resolve(strict=False) if target is not None else Path(raw).expanduser().resolve(strict=False)
+
+
+def runtime_time_basis(config: dict[str, Any]) -> str:
+    raw = str(
+        config.get("任务时段模式")
+        or config.get("time_basis")
+        or config.get("资料时段模式")
+        or ""
+    ).strip().lower()
+    if raw in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
+        return TIME_BASIS_EVENT_WINDOWS
+    event_mode = config.get("事件资料模式", {})
+    flood_cfg = config.get("洪水事件率定", {})
+    if isinstance(event_mode, dict) and _runtime_truthy(event_mode.get("启用", event_mode.get("enabled")), default=False):
+        return TIME_BASIS_EVENT_WINDOWS
+    if isinstance(flood_cfg, dict) and _runtime_truthy(
+        flood_cfg.get("事件窗口资料", flood_cfg.get("event_windows_enabled")),
+        default=False,
+    ):
+        return TIME_BASIS_EVENT_WINDOWS
+    return "continuous"
+
+
+def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) -> dict[str, Any]:
+    cfg = _runtime_flood_event_config(config)
+    warnings: list[str] = []
+    errors: list[str] = []
+    raw_events = cfg.get("事件表", cfg.get("events", []))
+    if isinstance(raw_events, dict):
+        raw_events = raw_events.get("events", raw_events.get("事件表", []))
+    if not isinstance(raw_events, list):
+        raw_events = []
+
+    event_file = _resolve_event_file(config, cfg)
+    if event_file is not None:
+        if not event_file.exists():
+            errors.append(f"洪水事件表文件不存在：{event_file}")
+            raw_events = []
+        else:
+            raw_events = _read_event_table_file(event_file)
+
+    events: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw_event in enumerate(raw_events, start=1):
+        if not isinstance(raw_event, dict):
+            continue
+        event = dict(raw_event)
+        token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        event_id = str(_event_field(event, "event_id", "id", "编号") or "").strip()
+        name = str(_event_field(event, "name", "名称", "事件名称") or "").strip()
+        if not event_id:
+            event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+        if event_id in seen_ids:
+            errors.append(f"洪水事件编号重复：{event_id}")
+        seen_ids.add(event_id)
+
+        purpose_raw = str(_event_field(event, "purpose", "用途", "类型", "type") or "calibration").strip()
+        purpose = EVENT_PURPOSE_ALIASES.get(purpose_raw.lower(), purpose_raw.lower() or "calibration")
+        if purpose not in {"calibration", "validation", "diagnostic"}:
+            warnings.append(f"事件 {event_id} 的用途 {purpose_raw} 未识别，按 diagnostic 处理。")
+            purpose = "diagnostic"
+
+        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "start")
+        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "end")
+        run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
+        run_end_raw = _event_field(event, "run_end", "运行结束", "退水结束") or score_end_raw
+        event_errors: list[str] = []
+        try:
+            run_start = _parse_event_timestamp(run_start_raw, end=False, step_hours=step_hours)
+            score_start = _parse_event_timestamp(score_start_raw, end=False, step_hours=step_hours)
+            score_end = _parse_event_timestamp(score_end_raw, end=True, step_hours=step_hours)
+            run_end = _parse_event_timestamp(run_end_raw, end=True, step_hours=step_hours)
+        except Exception as exc:
+            run_start = score_start = score_end = run_end = None
+            event_errors.append(f"事件时间无法解析：{exc}")
+        if None in (run_start, score_start, score_end, run_end):
+            event_errors.append("事件缺少运行窗口或评分窗口时间。")
+        elif not (run_start <= score_start <= score_end <= run_end):
+            event_errors.append("事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
+
+        weight_raw = _event_field(event, "weight", "权重")
+        try:
+            weight = float(weight_raw) if weight_raw not in (None, "") else 1.0
+        except Exception:
+            weight = 1.0
+            warnings.append(f"事件 {event_id} 的权重无法解析，按 1 处理。")
+        if weight <= 0.0:
+            weight = 1.0
+            warnings.append(f"事件 {event_id} 的权重小于等于 0，按 1 处理。")
+        if event_errors:
+            errors.extend(f"{event_id}: {item}" for item in event_errors)
+            continue
+
+        events.append(
+            {
+                "event_id": event_id,
+                "id": event_id,
+                "name": name or event_id,
+                "purpose": purpose,
+                "type": purpose,
+                "类型": purpose,
+                "weight": float(weight),
+                "run_start": _format_event_timestamp(run_start, step_hours),
+                "score_start": _format_event_timestamp(score_start, step_hours),
+                "score_end": _format_event_timestamp(score_end, step_hours),
+                "run_end": _format_event_timestamp(run_end, step_hours),
+                "运行开始": _format_event_timestamp(run_start, step_hours),
+                "评分开始": _format_event_timestamp(score_start, step_hours),
+                "评分结束": _format_event_timestamp(score_end, step_hours),
+                "运行结束": _format_event_timestamp(run_end, step_hours),
+                "raw": event,
+                "source_row": index,
+            }
+        )
+
+    events.sort(key=lambda item: (pd.Timestamp(item["run_start"]), str(item["event_id"])))
+    for left, right in zip(events, events[1:]):
+        if pd.Timestamp(left["run_end"]) >= pd.Timestamp(right["run_start"]):
+            warnings.append(f"事件运行窗口可能重叠：{left['event_id']} 与 {right['event_id']}。")
+    return {
+        "config": cfg,
+        "events": events,
+        "event_count": len(events),
+        "source_file": str(event_file) if event_file is not None else "",
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+def prepare_runtime_flood_event_config(
+    config: dict[str, Any],
+    step_hours: float,
+    *,
+    objective_mode: str,
+) -> dict[str, Any]:
+    event_info = normalize_runtime_flood_events(config, step_hours)
+    strict_events = runtime_time_basis(config) == TIME_BASIS_EVENT_WINDOWS or objective_mode == OBJECTIVE_MODE_FLOOD_EVENT
+    if strict_events and event_info["errors"]:
+        raise ValueError("洪水事件表配置不合法：" + "；".join(event_info["errors"][:5]))
+    if strict_events and not event_info["events"]:
+        raise ValueError("已选择洪水事件率定或事件窗口资料模式，但事件表为空。")
+    cfg = dict(event_info["config"])
+    if event_info["source_file"]:
+        cfg["事件表路径"] = event_info["source_file"]
+        cfg["events_file"] = event_info["source_file"]
+    if event_info["events"]:
+        cfg["事件表"] = event_info["events"]
+        cfg["events"] = event_info["events"]
+        cfg.setdefault("启用", True)
+    if runtime_time_basis(config) == TIME_BASIS_EVENT_WINDOWS:
+        cfg["事件窗口资料"] = True
+        cfg["event_windows_enabled"] = True
+        cfg["允许事件间断"] = True
+        cfg["event_runtime_mode"] = "independent_event_windows"
+        cfg["初始条件策略"] = str(cfg.get("初始条件策略") or "event_warmup")
+    if objective_mode == OBJECTIVE_MODE_FLOOD_EVENT:
+        cfg["作为目标函数"] = True
+        cfg["objective_enabled"] = True
+        cfg["模式"] = "objective"
+    if event_info["warnings"]:
+        cfg["warnings"] = list(event_info["warnings"])
+    if event_info["errors"]:
+        cfg["errors"] = list(event_info["errors"])
+    return cfg
 
 
 def resolve_runtime_init_state(config: dict[str, Any]) -> list[float]:
@@ -1011,7 +1282,46 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
         ),
     )
     seeded_inputs = _seed_workspace_runtime_inputs(requested_paths, paths, profile)
-    time_cfg, step_hours = resolve_runtime_time_config(config)
+    step_hours = float(time_step_hours(config))
+    runtime_objective_mode = resolve_objective_mode(config, getattr(cli_args, "目标函数", None), profile)
+    flood_event_config = prepare_runtime_flood_event_config(
+        config,
+        step_hours,
+        objective_mode=runtime_objective_mode,
+    )
+    if runtime_time_basis(config) == TIME_BASIS_EVENT_WINDOWS:
+        events = list(flood_event_config.get("事件表", flood_event_config.get("events", [])) or [])
+        if not events:
+            raise ValueError("已选择洪水事件窗口资料模式，但没有可用事件。请检查事件表。")
+        objective_events = [item for item in events if str(item.get("purpose", item.get("type", ""))).lower() == "calibration"] or events
+        validation_events = [item for item in events if str(item.get("purpose", item.get("type", ""))).lower() == "validation"]
+        run_start = min(pd.Timestamp(item["run_start"]) for item in events)
+        run_end = max(pd.Timestamp(item["run_end"]) for item in events)
+        calib_start = min(pd.Timestamp(item["score_start"]) for item in objective_events)
+        calib_end = max(pd.Timestamp(item["score_end"]) for item in objective_events)
+        if validation_events:
+            valid_start = min(pd.Timestamp(item["score_start"]) for item in validation_events)
+            valid_end = max(pd.Timestamp(item["score_end"]) for item in validation_events)
+        else:
+            valid_start = calib_end
+            valid_end = calib_end
+        warmup_end = calib_start - pd.Timedelta(hours=step_hours)
+        if warmup_end < run_start:
+            warmup_end = run_start
+        time_cfg = dict(config.get("时间", {}) or {})
+        time_cfg.update(
+            {
+                "预热开始": format_runtime_time_value(run_start, step_hours),
+                "预热结束": format_runtime_time_value(warmup_end, step_hours),
+                "率定开始": format_runtime_time_value(calib_start, step_hours),
+                "率定结束": format_runtime_time_value(calib_end, step_hours),
+                "验证开始": format_runtime_time_value(valid_start, step_hours),
+                "验证结束": format_runtime_time_value(valid_end, step_hours),
+                "模拟结束": format_runtime_time_value(run_end, step_hours),
+            }
+        )
+    else:
+        time_cfg, step_hours = resolve_runtime_time_config(config)
     prec_source = resolve_runtime_precip_source(config, cli_args.降水源)
     prec_dir_override = str(getattr(cli_args, "prec_dir", "") or "").strip()
     if not prec_dir_override and prec_source == "custom_tif":
@@ -1019,10 +1329,6 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
     zone_threshold = cfmax_zone_threshold(config)
     obs_mode = config.get("观测口径模式", config.get("观测径流口径模式", "full_year"))
     init_state_vector = resolve_runtime_init_state(config)
-    flood_event_config = config.get("洪水事件率定", {})
-    if not isinstance(flood_event_config, (dict, list)):
-        flood_event_config = {}
-
     patch_module(
         module,
         {
