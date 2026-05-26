@@ -25,6 +25,14 @@
     return Number.isFinite(ratio) ? `${formatNumber(ratio * 100, 1)}%` : "未覆盖";
   }
 
+  function stationCountText(item = {}, formatNumber = defaultFormatNumber) {
+    const minCount = Number(item.available_station_min ?? item.min_available_station_count);
+    const meanCount = Number(item.available_station_mean ?? item.mean_available_station_count);
+    if (!Number.isFinite(minCount)) return "未形成";
+    if (!Number.isFinite(meanCount)) return `最少 ${minCount}`;
+    return `最少 ${minCount}，平均 ${formatNumber(meanCount, 1)}`;
+  }
+
   function renderTaskScopeSummary(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -81,13 +89,15 @@
       const expected = Number(item.expected_steps || 0);
       const covered = Number(item.covered_steps || 0);
       const zeroSteps = Number(item.zero_available_steps || 0);
+      const maxZero = Number(item.max_consecutive_zero_steps || 0);
       return `
         <div class="event-coverage-row ${focusStatusClass(status)}">
           <span><strong>${escapeHtml(eventName)}</strong><small>${escapeHtml(eventId)}</small></span>
           <span>${escapeHtml(windowText)}</span>
           <span>${escapeHtml(expected ? `${covered}/${expected}` : String(covered || 0))}</span>
           <span>${escapeHtml(coveragePercent(item.coverage_ratio, formatNumber))}</span>
-          <span>${escapeHtml(String(zeroSteps))}</span>
+          <span>${escapeHtml(stationCountText(item, formatNumber))}</span>
+          <span>${escapeHtml(`${zeroSteps} / 连续 ${maxZero}`)}</span>
           <span class="${focusStatusClass(status)}">${escapeHtml(focusStatusLabel(status))}</span>
         </div>
       `;
@@ -106,6 +116,7 @@
           <span>运行窗口</span>
           <span>覆盖步数</span>
           <span>覆盖率</span>
+          <span>可用站点</span>
           <span>无站点步</span>
           <span>结论</span>
         </div>

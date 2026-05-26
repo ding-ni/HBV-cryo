@@ -4836,6 +4836,26 @@ def _index_display_range(index: pd.DatetimeIndex | None, step_hours: float) -> t
     )
 
 
+def _max_consecutive_true(values: Any) -> int:
+    longest = 0
+    current = 0
+    for value in list(values):
+        if bool(value):
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return int(longest)
+
+
+def _station_count_text(min_count: int | None, mean_count: float | None) -> str:
+    if min_count is None:
+        return "未形成"
+    if mean_count is None:
+        return str(int(min_count))
+    return f"最少 {int(min_count)}，平均 {mean_count:.1f}"
+
+
 def _station_precip_task_context_summary(
     *,
     mode: str,
@@ -4848,6 +4868,9 @@ def _station_precip_task_context_summary(
     covered_count: int,
     coverage_ratio: float | None,
     zero_available_steps: int,
+    max_consecutive_zero_steps: int = 0,
+    min_available_station_count: int | None = None,
+    mean_available_station_count: float | None = None,
     station_start: Any = None,
     station_end: Any = None,
     event_info: dict[str, Any] | None = None,
@@ -4894,7 +4917,9 @@ def _station_precip_task_context_summary(
             {"label": "事件覆盖", "value": f"{event_ok_count}/{event_count} 场完整" if event_count else "未形成", "status": "ok" if event_count and event_ok_count == event_count else "fail" if event_valid_count <= 0 else "warn"},
             {"label": "运行窗口并集", "value": scope_value, "status": "ok" if expected_steps else "warn"},
             {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
             {"label": "无站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
         ]
     elif time_basis == TIME_BASIS_FORECAST_WINDOW or context == "forecast":
         headline = (
@@ -4910,6 +4935,8 @@ def _station_precip_task_context_summary(
             {"label": "检查口径", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
             {"label": "预报窗口", "value": f"{start} 至 {end}" if start and end else "未完整配置", "status": "ok" if expected_steps else "warn"},
             {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "warn"},
+            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "warn"},
             {"label": "降水处理", "value": "预报页使用目标栅格，站点雨量先在气象准备中制图", "status": "ok"},
         ]
     else:
@@ -4925,7 +4952,9 @@ def _station_precip_task_context_summary(
             {"label": "检查口径", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
             {"label": "连续时段", "value": f"{start} 至 {end}" if start and end else "未完整配置", "status": "ok" if expected_steps else "warn"},
             {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
             {"label": "无站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
         ]
 
     return {
@@ -4944,6 +4973,9 @@ def _station_precip_task_context_summary(
         "covered_steps": int(covered_count),
         "coverage_ratio": coverage_ratio,
         "zero_available_steps": int(zero_available_steps),
+        "max_consecutive_zero_steps": int(max_consecutive_zero_steps),
+        "min_available_station_count": min_available_station_count,
+        "mean_available_station_count": mean_available_station_count,
         "station_time_range": {
             "start": station_start_text,
             "end": station_end_text,
@@ -5084,13 +5116,23 @@ def analyze_station_precip_inputs(
     coverage_ratio: float | None = None
     event_coverage: list[dict[str, Any]] = []
     zero_available_steps = 0
+    max_consecutive_zero_steps = 0
+    min_available_station_count: int | None = None
+    mean_available_station_count: float | None = None
+    quality_series = matched_series
     if expected_index is not None and len(expected_index) > 0:
         expected_count = int(len(expected_index))
         if expected_count > 0 and not matched_series.empty:
             present = matched_series.reindex(expected_index)
-            covered_count = int(present.notna().any(axis=1).sum())
+            quality_series = present
+            available_counts = present.notna().sum(axis=1)
+            covered_count = int((available_counts > 0).sum())
             coverage_ratio = covered_count / expected_count
-            zero_available_steps = int((present.notna().sum(axis=1) == 0).sum())
+            zero_flags = available_counts == 0
+            zero_available_steps = int(zero_flags.sum())
+            max_consecutive_zero_steps = _max_consecutive_true(zero_flags.tolist())
+            min_available_station_count = int(available_counts.min()) if not available_counts.empty else None
+            mean_available_station_count = float(available_counts.mean()) if not available_counts.empty else None
             if covered_count == 0:
                 missing.append(f"站点降水时间范围与{time_basis_label}完全不重叠。")
             elif coverage_ratio < 0.99:
@@ -5105,13 +5147,28 @@ def analyze_station_precip_inputs(
             if len(event_index) <= 0 or matched_series.empty:
                 covered_event = 0
                 zero_event = int(len(event_index))
+                event_available_min = None if len(event_index) <= 0 else 0
+                event_available_mean = None if len(event_index) <= 0 else 0.0
+                event_max_zero = int(len(event_index))
             else:
                 event_present = matched_series.reindex(event_index)
-                covered_event = int(event_present.notna().any(axis=1).sum())
-                zero_event = int((event_present.notna().sum(axis=1) == 0).sum())
+                event_available_counts = event_present.notna().sum(axis=1)
+                event_zero_flags = event_available_counts == 0
+                covered_event = int((event_available_counts > 0).sum())
+                zero_event = int(event_zero_flags.sum())
+                event_available_min = int(event_available_counts.min()) if not event_available_counts.empty else None
+                event_available_mean = float(event_available_counts.mean()) if not event_available_counts.empty else None
+                event_max_zero = _max_consecutive_true(event_zero_flags.tolist())
             event_steps = int(len(event_index))
             event_ratio = covered_event / event_steps if event_steps else None
-            event_status = "ok" if event_ratio is not None and event_ratio >= 0.99 else "fail" if covered_event == 0 else "warn"
+            if event_ratio is not None and event_ratio >= 0.99 and zero_event == 0:
+                event_status = "ok"
+            elif mode == "thiessen_station_only" and zero_event > 0:
+                event_status = "fail"
+            elif covered_event == 0:
+                event_status = "fail"
+            else:
+                event_status = "warn"
             event_coverage.append(
                 {
                     "event_id": event.get("event_id"),
@@ -5122,7 +5179,11 @@ def analyze_station_precip_inputs(
                     "expected_steps": event_steps,
                     "covered_steps": covered_event,
                     "coverage_ratio": event_ratio,
+                    "missing_ratio": (1.0 - event_ratio) if event_ratio is not None else None,
                     "zero_available_steps": zero_event,
+                    "max_consecutive_zero_steps": event_max_zero,
+                    "available_station_min": event_available_min,
+                    "available_station_mean": event_available_mean,
                     "status": event_status,
                 }
             )
@@ -5136,16 +5197,24 @@ def analyze_station_precip_inputs(
             elif message not in warnings:
                 warnings.append(message)
 
-    numeric_values = matched_series.to_numpy(dtype="float64") if not matched_series.empty else np.empty((0, 0), dtype="float64")
+    numeric_values = quality_series.to_numpy(dtype="float64") if not quality_series.empty else np.empty((0, 0), dtype="float64")
     negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0
     extreme_threshold = 80.0 if abs(step - 1.0) < 1e-9 else 300.0
     extreme_count = int(np.sum(numeric_values > extreme_threshold)) if numeric_values.size else 0
     all_zero_count = 0
     max_missing_rate = 0.0
+    station_missing_rates: list[dict[str, Any]] = []
     if matched_ids:
-        all_zero_count = int(sum(bool(np.nanmax(np.abs(matched_series[col].to_numpy(dtype="float64"))) <= 1e-9) for col in matched_ids if matched_series[col].notna().any()))
-        missing_rates = matched_series[matched_ids].isna().mean(axis=0)
+        for col in matched_ids:
+            values = quality_series[col].dropna().to_numpy(dtype="float64") if col in quality_series.columns else np.array([], dtype="float64")
+            if values.size and bool(np.nanmax(np.abs(values)) <= 1e-9):
+                all_zero_count += 1
+        missing_rates = quality_series[matched_ids].isna().mean(axis=0) if not quality_series.empty else pd.Series(dtype="float64")
         max_missing_rate = float(missing_rates.max()) if not missing_rates.empty else 0.0
+        station_missing_rates = [
+            {"station_id": str(station_id), "missing_rate": float(rate)}
+            for station_id, rate in missing_rates.sort_values(ascending=False).head(20).items()
+        ]
     if negative_count > 0:
         warnings.append(f"站点降水存在 {negative_count} 条负值记录。")
     if extreme_count > 0:
@@ -5179,6 +5248,9 @@ def analyze_station_precip_inputs(
         covered_count=covered_count,
         coverage_ratio=coverage_ratio,
         zero_available_steps=zero_available_steps,
+        max_consecutive_zero_steps=max_consecutive_zero_steps,
+        min_available_station_count=min_available_station_count,
+        mean_available_station_count=mean_available_station_count,
         station_start=station_start,
         station_end=station_end,
         event_info=event_info,
@@ -5195,6 +5267,8 @@ def analyze_station_precip_inputs(
             {"label": "时间范围", "value": f"{_format_time_for_check(station_start, step)} 至 {_format_time_for_check(station_end, step)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
             {"label": f"{time_basis_label}覆盖", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未配置完整时段", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
             {"label": "无可用站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "可用站点数", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
             {"label": "单站最大缺测率", "value": f"{max_missing_rate * 100:.1f}%", "status": "warn" if max_missing_rate > 0.20 else "ok"},
             {"label": "负降水记录", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
             {"label": "异常大值记录", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
@@ -5202,7 +5276,11 @@ def analyze_station_precip_inputs(
     )
     for event_item in event_coverage[:5]:
         ratio = event_item.get("coverage_ratio")
-        value = f"{float(ratio) * 100:.1f}% / 无站点 {int(event_item.get('zero_available_steps', 0) or 0)} 步" if ratio is not None else "未覆盖"
+        station_text = _station_count_text(
+            event_item.get("available_station_min"),
+            event_item.get("available_station_mean"),
+        )
+        value = f"{float(ratio) * 100:.1f}% / {station_text} / 连续无站点 {int(event_item.get('max_consecutive_zero_steps', 0) or 0)} 步" if ratio is not None else "未覆盖"
         items.append(
             {
                 "label": f"事件 {event_item.get('event_id')}",
@@ -5227,6 +5305,10 @@ def analyze_station_precip_inputs(
         "covered_time_steps": covered_count,
         "coverage_ratio": coverage_ratio,
         "zero_available_steps": zero_available_steps,
+        "max_consecutive_zero_steps": max_consecutive_zero_steps,
+        "min_available_station_count": min_available_station_count,
+        "mean_available_station_count": mean_available_station_count,
+        "station_missing_rates": station_missing_rates,
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
         "task_context": task_context,

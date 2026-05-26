@@ -1518,10 +1518,10 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
 }
 .event-coverage-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.3fr) minmax(180px, 1.7fr) minmax(76px, 0.7fr) minmax(72px, 0.7fr) minmax(76px, 0.7fr) minmax(64px, 0.6fr);
+  grid-template-columns: minmax(120px, 1.3fr) minmax(180px, 1.7fr) minmax(76px, 0.7fr) minmax(72px, 0.7fr) minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(64px, 0.6fr);
   gap: 8px;
   align-items: center;
-  min-width: 700px;
+  min-width: 860px;
   padding: 8px 12px;
   border-top: 1px solid rgba(20,79,84,0.08);
   font-size: 12px;
