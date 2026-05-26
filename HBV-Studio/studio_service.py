@@ -10739,6 +10739,7 @@ def _forecast_restart_args(payload: dict[str, Any]) -> argparse.Namespace:
 
 
 def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
+    ensure_forecast_input_ready(payload)
     import forecast_run
 
     return forecast_run.run_forecast(_forecast_restart_args(payload))
@@ -10943,6 +10944,15 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def ensure_forecast_input_ready(payload: dict[str, Any]) -> dict[str, Any]:
+    check = forecast_input_check(payload)
+    if str(check.get("status", "")).lower() == "fail":
+        issues = [str(item) for item in list(check.get("errors", []) or []) if str(item).strip()]
+        message = "；".join(issues[:3]) if issues else "预报气象输入检查未通过。"
+        raise ValueError(f"连续状态预报输入检查未通过：{message}")
+    return check
+
+
 def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
     last_stage = ""
 
@@ -10998,6 +11008,7 @@ def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
 def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     args = _forecast_restart_args(payload)
     source_run = resolve_any_path(args.source_run, must_exist=True)
+    input_check = ensure_forecast_input_ready(payload)
     task_id = uuid.uuid4().hex[:10]
     record = TaskRecord(
         id=task_id,
@@ -11012,6 +11023,7 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
             "forecast_end": args.forecast_end,
             "runtime_prec_source": args.prec_source,
             "glacier_mode": args.glacier_mode,
+            "forecast_input_check": input_check,
             "ui_progress": {"stage": "准备启动", "label": "连续状态预报"},
         },
     )
