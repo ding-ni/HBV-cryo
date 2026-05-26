@@ -6717,6 +6717,16 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
   const messageHtml = messages.length
     ? `<ul class="event-window-issues">${messages.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}</ul>`
     : "";
+  const parameterContext = check.parameter_context || check.source?.parameter_context || null;
+  const parameterContextHtml = parameterContext ? forecastParameterContextHtml({
+    parameter_context: parameterContext,
+    workspace_name: parameterContext.source_workspace || check.source?.source_run_name || "",
+    workspace_config: parameterContext.source_workspace_config || "",
+    optimized_param_count: check.source?.parameter_count || parameterContext.parameter_count || 0,
+    calibration_profile: parameterContext.calibration_profile || "",
+    time_step_hours: parameterContext.time_step_hours || check.window?.time_step_hours || "",
+    effective_objective_mode: parameterContext.objective_mode || "",
+  }) : "";
   host.innerHTML = `
     <div class="hint-box forecast-input-box ${cls}">
       <div class="forecast-input-head">
@@ -6732,6 +6742,7 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
           </div>
         `).join("")}
       </div>
+      ${parameterContextHtml}
       <div class="forecast-input-grid">
         ${variables.map(item => `
           <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">

@@ -11495,6 +11495,46 @@ def _forecast_output_preview(payload: dict[str, Any], source_run: Path) -> dict[
     }
 
 
+def _forecast_parameter_check_context(
+    payload: dict[str, Any],
+    source_run: Path,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    config_path_raw = str(
+        payload.get("config_path")
+        or payload.get("config")
+        or metadata.get("workspace_config")
+        or ""
+    ).strip()
+    resolved_config: Path | None = None
+    if config_path_raw:
+        try:
+            resolved_config = resolve_any_path(config_path_raw, must_exist=True)
+        except Exception:
+            resolved_config = None
+    return _run_parameter_context(source_run, metadata, resolved_config)
+
+
+def _forecast_parameter_detail_text(context: dict[str, Any]) -> str:
+    parts: list[str] = []
+    workspace = str(context.get("source_workspace", "") or "").strip()
+    profile = str(context.get("calibration_profile", "") or "").strip()
+    objective = str(context.get("objective_mode", "") or "").strip()
+    prec_source = str(context.get("prec_source", "") or "").strip()
+    precipitation = str(context.get("precipitation_strategy", "") or context.get("precipitation_mode", "") or "").strip()
+    if workspace:
+        parts.append(f"来源工作区：{workspace}")
+    if profile:
+        parts.append(f"计算尺度：{PROFILE_LABELS.get(profile, profile)}")
+    if objective:
+        parts.append(f"率定目标：{_objective_label_zh({'effective_objective_mode': objective})}")
+    if prec_source:
+        parts.append(f"降水驱动：{display_precip_source_label(prec_source)}")
+    if precipitation:
+        parts.append(f"降水方案：{_station_precip_mode_label(precipitation)}")
+    return "；".join(parts)
+
+
 def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -11511,6 +11551,7 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     initial_state = dict(metadata.get("initial_state", {}) or {})
     time_config = dict(metadata.get("time_config", {}) or {})
     params = dict(metadata.get("optimized_params", {}) or {})
+    parameter_context = _forecast_parameter_check_context(payload, source_run, metadata)
     step_hours = normalize_time_step_hours(time_config.get("time_step_hours", payload.get("time_step_hours", 24.0)))
     source_state_time = _forecast_source_state_time(source_run, metadata)
     errors: list[str] = []
@@ -11559,6 +11600,7 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     )
     output_preview = _forecast_output_preview(payload, source_run)
     output_status = "ok" if expected_steps > 0 else "warn"
+    parameter_detail = _forecast_parameter_detail_text(parameter_context)
     return {
         "status": status,
         "headline": headline,
@@ -11571,7 +11613,10 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
             "state_available": state_available,
             "source_state_time": _format_time_for_check(source_state_time, step_hours),
             "expected_forecast_start": expected_start,
+            "parameter_context": parameter_context,
+            "source_parameter_summary": dict(metadata.get("source_parameter_summary") or {}),
         },
+        "parameter_context": parameter_context,
         "window": {
             "forecast_start": forecast_start,
             "forecast_end": forecast_end,
@@ -11585,7 +11630,7 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
             {"label": "起报状态", "value": _format_time_for_check(source_state_time, step_hours) or "未记录", "status": "ok" if source_state_time and state_available else "fail"},
             {"label": "建议起报", "value": expected_start or "未形成", "status": "ok" if expected_start else "fail"},
             {"label": "预报时段", "value": f"{forecast_start} 至 {forecast_end}" if forecast_start and forecast_end else "未完整填写", "status": "ok" if expected_steps > 0 else "warn"},
-            {"label": "参数来源", "value": f"源结果参数（{len(params)} 项）" if params else "缺少参数", "status": "ok" if params else "fail"},
+            {"label": "参数来源", "value": f"源结果参数（{len(params)} 项）" if params else "缺少参数", "detail": parameter_detail, "status": "ok" if params else "fail"},
             {"label": "归档方式", "value": "运行时仅归档预报窗口内 P/T/PET 栅格", "status": "ok" if expected_steps > 0 else "warn"},
             {"label": "结果输出", "value": output_preview["result_label"], "detail": output_preview["result_detail"], "status": output_status},
             {"label": "输入清单", "value": output_preview["archive_label"], "detail": output_preview["archive_detail"], "status": output_status},
