@@ -11450,7 +11450,12 @@ def _forecast_input_dir_summary(
     }
 
 
-def _forecast_output_preview(payload: dict[str, Any], source_run: Path) -> dict[str, Any]:
+def _forecast_output_preview(
+    payload: dict[str, Any],
+    source_run: Path,
+    *,
+    profile_hint: str = "",
+) -> dict[str, Any]:
     source_name = source_run.name or "source_result"
     name_pattern = f"hbv_forecast_{source_name}_运行时间_编号"
     output_dir_raw = str(payload.get("output_dir", "") or "").strip()
@@ -11477,7 +11482,14 @@ def _forecast_output_preview(payload: dict[str, Any], source_run: Path) -> dict[
         try:
             cfg_path = resolve_any_path(config_path_raw, must_exist=True)
             config = read_runtime_config(cfg_path)
-            result_parent = Path(build_workspace_paths(config)["results_root"]).resolve(strict=False)
+            requested_profile = str(
+                payload.get("profile")
+                or payload.get("calibration_mode")
+                or profile_hint
+                or ""
+            ).strip() or None
+            active_profile = resolve_profile(config, requested_profile)
+            result_parent = Path(build_profile_paths(config, active_profile)["runs_dir"]).resolve(strict=False)
         except Exception:
             result_parent = source_run.parent
     result_detail = str((result_parent / name_pattern).resolve(strict=False))
@@ -11659,7 +11671,11 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
         if status == "ok"
         else "预报气象输入仍需核对。"
     )
-    output_preview = _forecast_output_preview(payload, source_run)
+    output_preview = _forecast_output_preview(
+        payload,
+        source_run,
+        profile_hint=str(metadata.get("calibration_profile", "") or ""),
+    )
     output_status = "ok" if expected_steps > 0 else "warn"
     parameter_detail = _forecast_parameter_detail_text(parameter_context)
     station_precip_check = _forecast_station_precip_check(
