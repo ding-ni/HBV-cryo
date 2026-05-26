@@ -11535,6 +11535,67 @@ def _forecast_parameter_detail_text(context: dict[str, Any]) -> str:
     return "；".join(parts)
 
 
+def _forecast_station_precip_check(
+    payload: dict[str, Any],
+    metadata: dict[str, Any],
+    forecast_start: str,
+    forecast_end: str,
+    step_hours: float,
+) -> dict[str, Any] | None:
+    if not forecast_start or not forecast_end:
+        return None
+    config_path_raw = str(
+        payload.get("config_path")
+        or payload.get("config")
+        or metadata.get("workspace_config")
+        or ""
+    ).strip()
+    if not config_path_raw:
+        return None
+    try:
+        cfg_path = resolve_any_path(config_path_raw, must_exist=True)
+        config = read_runtime_config(cfg_path)
+    except Exception:
+        return None
+    meteo = dict(config.get(METEO_KEY, {}) or {})
+    precip_mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only") or "grid_only").strip()
+    if precip_mode not in {"grid_plus_station_bias", "thiessen_station_only"}:
+        return None
+    forecast_config = copy.deepcopy(config)
+    forecast_config["任务时段模式"] = TIME_BASIS_FORECAST_WINDOW
+    forecast_config["时间步长_小时"] = step_hours
+    time_cfg = dict(forecast_config.get("时间", {}) or {})
+    time_cfg.update(
+        {
+            "预热开始": forecast_start,
+            "率定开始": forecast_start,
+            "率定结束": forecast_end,
+            "验证开始": forecast_start,
+            "验证结束": forecast_end,
+        }
+    )
+    forecast_config["时间"] = time_cfg
+    try:
+        return analyze_station_precip_inputs(
+            forecast_config,
+            step_hours=step_hours,
+            context="forecast",
+        )
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "mode": precip_mode,
+            "status": "warn",
+            "summary": f"预报窗口站点降水资料检查失败：{exc}",
+            "items": [{"label": "检查状态", "value": str(exc), "status": "warn"}],
+            "warnings": [f"预报窗口站点降水资料检查失败：{exc}"],
+            "missing": [],
+            "matched_station_count": 0,
+            "time_basis": TIME_BASIS_FORECAST_WINDOW,
+            "time_basis_label": TIME_BASIS_LABELS[TIME_BASIS_FORECAST_WINDOW],
+        }
+
+
 def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -11601,6 +11662,13 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
     output_preview = _forecast_output_preview(payload, source_run)
     output_status = "ok" if expected_steps > 0 else "warn"
     parameter_detail = _forecast_parameter_detail_text(parameter_context)
+    station_precip_check = _forecast_station_precip_check(
+        payload,
+        metadata,
+        forecast_start,
+        forecast_end,
+        step_hours,
+    )
     return {
         "status": status,
         "headline": headline,
@@ -11625,6 +11693,7 @@ def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "output": output_preview,
         "variables": variables,
+        "station_precip": station_precip_check,
         "items": [
             {"label": "源结果", "value": source_run.name, "status": "ok"},
             {"label": "起报状态", "value": _format_time_for_check(source_state_time, step_hours) or "未记录", "status": "ok" if source_state_time and state_available else "fail"},

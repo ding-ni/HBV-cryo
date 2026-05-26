@@ -6727,6 +6727,14 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
     time_step_hours: parameterContext.time_step_hours || check.window?.time_step_hours || "",
     effective_objective_mode: parameterContext.objective_mode || "",
   }) : "";
+  const stationPrecipHtml = check.station_precip?.enabled && window.HBVStudioStationPrecip?.renderTaskScopeSummary
+    ? window.HBVStudioStationPrecip.renderTaskScopeSummary(check.station_precip, {
+      escapeHtml,
+      focusStatusClass,
+      focusStatusLabel,
+      formatNumber,
+    })
+    : "";
   host.innerHTML = `
     <div class="hint-box forecast-input-box ${cls}">
       <div class="forecast-input-head">
@@ -6743,6 +6751,7 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
         `).join("")}
       </div>
       ${parameterContextHtml}
+      ${stationPrecipHtml}
       <div class="forecast-input-grid">
         ${variables.map(item => `
           <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">
