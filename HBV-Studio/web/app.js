@@ -1426,6 +1426,119 @@ function manualPresetContextWarning(preset, data = state._runData) {
   return `注意：${warnings.join("；")}。`;
 }
 
+function timeBasisLabel(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (key === "event_windows") return "洪水事件窗口";
+  if (key === "forecast_window") return "预报窗口";
+  return "连续时段";
+}
+
+function normalizeComparableKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function selectedTaskManualPreset() {
+  const presetId = $("#task-init-preset")?.value || "";
+  return state.taskManualPresets.find(p => String(p.id || "") === String(presetId)) || null;
+}
+
+function currentTaskPresetContext() {
+  const profile = normalizeCalibrationProfile(state.currentWorkspace?.率定模式, "daily");
+  const meteo = state.currentWorkspace?.气象策略 || {};
+  const timeStepHours = Number(state.currentWorkspace?.时间步长_小时 || (profile === "hourly" ? 1 : 24));
+  const precipitationMode = getSelectedRadio("wz-precip-mode")
+    || meteo.降水方案
+    || meteo.precipitation_mode
+    || "grid_only";
+  return {
+    profile,
+    time_step_hours: Number.isFinite(timeStepHours) ? timeStepHours : (profile === "hourly" ? 1 : 24),
+    objective_mode: $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY,
+    prec_source: getTaskRuntimePrecipSource(),
+    glacier_mode: $("#task-glacier-mode")?.value || "inline",
+    param_bounds_profile: profile === "daily" ? ($("#task-param-bounds-profile")?.value || "qtp_alpine_default") : "hourly_step",
+    precipitation_mode: precipitationMode,
+    task_time_basis: $("#wz-time-basis")?.value || state.currentWorkspace?.任务时段模式 || state.currentWorkspace?.time_basis || "continuous",
+  };
+}
+
+function taskPresetContextWarnings(preset, current = currentTaskPresetContext()) {
+  if (!preset) return [];
+  const ctx = preset.context || {};
+  const warnings = [];
+  const presetProfile = normalizeComparableKey(preset.calibration_profile || ctx.calibration_profile || "");
+  if (presetProfile && current.profile && presetProfile !== normalizeComparableKey(current.profile)) {
+    warnings.push(`时间尺度不同（参数集 ${profileLabel(presetProfile)}，当前 ${profileLabel(current.profile)}）`);
+  }
+  const presetStep = Number(ctx.time_step_hours || preset.time_step_hours || 0);
+  const currentStep = Number(current.time_step_hours || 0);
+  if (Number.isFinite(presetStep) && presetStep > 0 && Number.isFinite(currentStep) && currentStep > 0 && Math.abs(presetStep - currentStep) > 0.01) {
+    warnings.push(`时间步长不同（参数集 ${formatNumber(presetStep, 0)} 小时，当前 ${formatNumber(currentStep, 0)} 小时）`);
+  }
+  const presetObjective = normalizeComparableKey(preset.objective_mode || "");
+  if (presetObjective && normalizeComparableKey(current.objective_mode) && presetObjective !== normalizeComparableKey(current.objective_mode)) {
+    warnings.push(`率定目标不同（参数集 ${objectiveLabel(presetObjective)}，当前 ${objectiveLabel(current.objective_mode)}）`);
+  }
+  const presetPrecip = normalizeComparableKey(preset.prec_source || "");
+  if (presetPrecip && normalizeComparableKey(current.prec_source) && presetPrecip !== normalizeComparableKey(current.prec_source)) {
+    warnings.push(`降水驱动不同（参数集 ${getConfiguredPrecipSourceLabel(presetPrecip)}，当前 ${getConfiguredPrecipSourceLabel(current.prec_source)}）`);
+  }
+  const presetGlacier = normalizeComparableKey(preset.glacier_mode || "");
+  if (presetGlacier && normalizeComparableKey(current.glacier_mode) && presetGlacier !== normalizeComparableKey(current.glacier_mode)) {
+    warnings.push(`冰川模式不同（参数集 ${presetGlacier === "off" ? "关闭" : "开启"}，当前 ${current.glacier_mode === "off" ? "关闭" : "开启"}）`);
+  }
+  const presetBounds = normalizeComparableKey(preset.param_bounds_profile || "");
+  if (presetBounds && normalizeComparableKey(current.param_bounds_profile) && presetBounds !== normalizeComparableKey(current.param_bounds_profile)) {
+    warnings.push(`参数范围不同（参数集 ${PARAM_BOUNDS_PROFILE_LABELS[presetBounds] || presetBounds}，当前 ${PARAM_BOUNDS_PROFILE_LABELS[current.param_bounds_profile] || current.param_bounds_profile}）`);
+  }
+  const presetPrecipMode = normalizeComparableKey(ctx.precipitation_mode || "");
+  if (presetPrecipMode && normalizeComparableKey(current.precipitation_mode) && presetPrecipMode !== normalizeComparableKey(current.precipitation_mode)) {
+    warnings.push(`降水方案不同（参数集 ${stationPrecipModeLabel(presetPrecipMode)}，当前 ${stationPrecipModeLabel(current.precipitation_mode)}）`);
+  }
+  const presetTimeBasis = normalizeComparableKey(ctx.task_time_basis || "");
+  if (presetTimeBasis && normalizeComparableKey(current.task_time_basis) && presetTimeBasis !== normalizeComparableKey(current.task_time_basis)) {
+    warnings.push(`资料时段口径不同（参数集 ${timeBasisLabel(presetTimeBasis)}，当前 ${timeBasisLabel(current.task_time_basis)}）`);
+  }
+  return warnings;
+}
+
+function renderTaskPresetContextHint() {
+  const host = $("#task-init-preset-context");
+  if (!host) return;
+  const preset = selectedTaskManualPreset();
+  if (!preset) {
+    host.style.display = "none";
+    host.textContent = "";
+    return;
+  }
+  const current = currentTaskPresetContext();
+  const ctx = preset.context || {};
+  const warnings = taskPresetContextWarnings(preset, current);
+  const sourceWorkspace = ctx.workspace_name || preset.source_workspace || "未记录来源工作区";
+  const scopeLabel = normalizeComparableKey(preset.scope) === "global" ? "公共参数库" : "当前工作区参数集";
+  const currentText = [
+    profileLabel(current.profile),
+    objectiveLabel(current.objective_mode),
+    getConfiguredPrecipSourceLabel(current.prec_source),
+    stationPrecipModeLabel(current.precipitation_mode),
+  ].join("，");
+  host.style.display = "";
+  if (warnings.length) {
+    host.className = "hint-box status-warn";
+    host.innerHTML = `
+      <strong>${escapeHtml(scopeLabel)}：${escapeHtml(preset.name || "未命名参数集")}</strong><br>
+      来源工作区：${escapeHtml(sourceWorkspace)}。当前率定设置：${escapeHtml(currentText)}。<br>
+      注意：${warnings.map(item => escapeHtml(item)).join("；")}。可以作为初值继续试算，但建议保留适度初值搜索范围，并在结果页复核径流过程和水量偏差。
+    `;
+  } else {
+    host.className = "hint-box status-ok";
+    host.innerHTML = `
+      <strong>${escapeHtml(scopeLabel)}：${escapeHtml(preset.name || "未命名参数集")}</strong><br>
+      来源工作区：${escapeHtml(sourceWorkspace)}。参数集上下文与当前率定设置基本一致，可作为本次自动率定初值；仍建议保留适度初值搜索范围。
+    `;
+  }
+}
+
 function clearManualPresetComparison({ silent = false } = {}) {
   nextCompareRequestId();
   state.compareSeries = null;
@@ -3382,6 +3495,7 @@ function renderPresetOptions(selector, presets, placeholder) {
 function renderManualPresetOptions() {
   renderPresetOptions("#manual-preset-select", state.runManualPresets, "选择已保存参数集");
   renderPresetOptions("#task-init-preset", state.taskManualPresets, "不使用手调初值");
+  renderTaskPresetContextHint();
 }
 
 function updateManualPresetControls() {
@@ -5472,6 +5586,7 @@ function toggleCalibrationMethodFields() {
 
 function refreshCalibrationControls() {
   toggleCalibrationMethodFields();
+  renderTaskPresetContextHint();
   updateCalibrationGuidance();
 }
 
