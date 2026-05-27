@@ -5609,7 +5609,8 @@ def flood_event_diagnostic_objective(metrics, weights, peak_time_tolerance_hours
 
 def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weights, peak_time_tolerance_hours):
     event_config = dict(event_config or {}) if isinstance(event_config, dict) else {}
-    event_name = str(event_config.get("名称", event_config.get("name", event_config.get("event_id", ""))) or "").strip()
+    event_id = str(event_config.get("event_id", event_config.get("id", event_config.get("编号", ""))) or "").strip()
+    event_name = str(event_config.get("名称", event_config.get("name", event_id)) or "").strip()
     event_type = str(
         event_config.get(
             "类型",
@@ -5620,14 +5621,26 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     if not event_name:
         token = json.dumps(event_config, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         event_name = f"event_{hashlib.sha1(token).hexdigest()[:8]}"
+    if not event_id:
+        event_id = event_name
+    event_weight = _finite_float(event_config.get("weight", event_config.get("权重", 1.0)), default=1.0)
+    if not np.isfinite(event_weight) or event_weight <= 0.0:
+        event_weight = 1.0
+    identity = {
+        "event_id": event_id,
+        "name": event_name,
+        "purpose": event_type,
+        "type": event_type,
+        "weight": float(event_weight),
+        "note": str(event_config.get("note", event_config.get("备注", "")) or ""),
+    }
 
     warnings = []
     event_start_raw = event_config.get("score_start", event_config.get("评分开始", event_config.get("事件开始", event_config.get("start"))))
     event_end_raw = event_config.get("score_end", event_config.get("评分结束", event_config.get("事件结束", event_config.get("end"))))
     if event_start_raw in (None, "") or event_end_raw in (None, ""):
         return {
-            "name": event_name,
-            "type": event_type,
+            **identity,
             "status": "missing_event_dates",
             "valid": False,
             "warnings": ["事件缺少开始或结束时间。"],
@@ -5637,16 +5650,14 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
         event_end = normalize_time_value(event_end_raw, is_end=True)
     except Exception as exc:
         return {
-            "name": event_name,
-            "type": event_type,
+            **identity,
             "status": "invalid_event_dates",
             "valid": False,
             "warnings": [f"事件起止时间无法解析：{exc}"],
         }
     if event_end < event_start:
         return {
-            "name": event_name,
-            "type": event_type,
+            **identity,
             "status": "invalid_event_order",
             "valid": False,
             "event_start": _event_time_text(event_start),
@@ -5682,8 +5693,7 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     q_sim = q_sim[:n]
     if n == 0:
         return {
-            "name": event_name,
-            "type": event_type,
+            **identity,
             "status": "empty_series",
             "valid": False,
             "warnings": warnings + ["模拟序列为空，无法评价洪水事件。"],
@@ -5694,8 +5704,7 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     window_mask = (date_index >= event_start) & (date_index <= event_end)
     if not np.any(window_mask):
         return {
-            "name": event_name,
-            "type": event_type,
+            **identity,
             "status": "outside_simulation_period",
             "valid": False,
             "event_start": _event_time_text(event_start),
@@ -5716,8 +5725,7 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     total_steps = int(len(obs_event))
     duration_hours = float((event_dates[-1] - event_dates[0]) / pd.Timedelta(hours=1) + TIME_STEP_HOURS)
     base = {
-        "name": event_name,
-        "type": event_type,
+        **identity,
         "status": "ok" if valid_count >= 2 else "insufficient_valid_points",
         "valid": bool(valid_count >= 2),
         "event_start": _event_time_text(event_start),
@@ -5877,7 +5885,11 @@ def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_
         ),
         "objective_only": bool(objective_only),
         "notes": [
-            "洪水事件评价基于连续模拟序列裁剪事件窗口计算。",
+            (
+                "事件窗口资料模式按场独立运行并评价评分窗口，事件之间不传递模型状态。"
+                if event_runtime_independent_active()
+                else "洪水事件评价基于连续模拟序列裁剪事件窗口计算。"
+            ),
             "只有显式启用事件目标函数时，事件指标才进入优化目标；默认仍作为诊断输出。",
         ],
     }
@@ -5919,11 +5931,19 @@ def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_
 def flatten_flood_event_record(event):
     diagnostic = dict(event.get("diagnostic_objective", {}) or {})
     return {
+        "event_id": event.get("event_id"),
         "name": event.get("name"),
+        "purpose": event.get("purpose", event.get("type")),
         "type": event.get("type"),
+        "weight": event.get("weight"),
+        "note": event.get("note"),
         "status": event.get("status"),
         "valid": event.get("valid"),
         "used_in_objective": event.get("used_in_objective"),
+        "run_start": event.get("run_start", event.get("warmup_start")),
+        "score_start": event.get("score_start", event.get("event_start")),
+        "score_end": event.get("score_end", event.get("event_end")),
+        "run_end": event.get("run_end"),
         "event_start": event.get("event_start"),
         "event_end": event.get("event_end"),
         "window_start_used": event.get("window_start_used"),
