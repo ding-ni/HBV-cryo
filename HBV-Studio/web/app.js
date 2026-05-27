@@ -6758,6 +6758,12 @@ function renderForecastTaskList() {
     const isRunning = task.status === "running";
     const summaryLine = taskSummaryLine(task);
     const summaryClass = task.status === "completed" ? "status-ok" : task.status === "failed" ? "status-fail" : "";
+    const inputCheckHtml = window.HBVStudioForecastView?.renderForecastTaskInputCheckSummary?.(task.forecast_input_check, {
+      escapeHtml,
+      focusStatusClass,
+      focusStatusLabel,
+      shortPath,
+    }) || "";
     return `
       <div class="list-item task-card ${isRunning ? "task-running" : ""}">
         <div class="task-card-topline">
@@ -6771,6 +6777,7 @@ function renderForecastTaskList() {
         </div>
         ${renderTaskMilestones(task)}
         <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
+        ${inputCheckHtml}
         ${renderTaskActions(task)}
         ${taskDebugDetails(task, { lines: isRunning ? 80 : 40 })}
       </div>

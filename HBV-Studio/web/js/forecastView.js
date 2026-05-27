@@ -131,6 +131,82 @@
     `;
   }
 
+  function renderForecastTaskInputCheckSummary(check = null, helpers = {}) {
+    if (!check) return "";
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
+    const focusStatusLabel = helpers.focusStatusLabel || defaultStatusLabel;
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const status = String(check.status || "warn").toLowerCase();
+    const cls = focusStatusClass(status);
+    const source = check.source || {};
+    const windowInfo = check.window || {};
+    const output = check.output || {};
+    const variables = Array.isArray(check.variables) ? check.variables : [];
+    const issues = [
+      ...(Array.isArray(check.errors) ? check.errors.slice(0, 2).map(item => ({ item, status: "fail" })) : []),
+      ...(Array.isArray(check.warnings) ? check.warnings.slice(0, 2).map(item => ({ item, status: "warn" })) : []),
+    ].slice(0, 3);
+    const range = windowInfo.forecast_start && windowInfo.forecast_end
+      ? `${windowInfo.forecast_start} 至 ${windowInfo.forecast_end}`
+      : "预报时段未完整填写";
+    const rows = [
+      {
+        label: "源状态",
+        value: source.source_state_time || "未记录",
+        detail: source.expected_forecast_start ? `建议起报：${source.expected_forecast_start}` : "",
+        status: source.state_available ? "ok" : "fail",
+      },
+      {
+        label: "预报窗口",
+        value: range,
+        detail: Number(windowInfo.expected_steps || 0) > 0 ? `${windowInfo.expected_steps} 个时间步` : "等待完整窗口",
+        status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
+      },
+      {
+        label: "结果输出",
+        value: output.result_label || "运行时新建预报结果目录",
+        detail: output.result_detail || output.result_parent || "",
+        status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
+      },
+      {
+        label: "输入归档",
+        value: output.archive_label || "结果目录下的 forecast_inputs",
+        detail: output.archive_detail || output.manifest_path || "",
+        status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
+      },
+    ];
+    return `
+      <div class="forecast-task-input-check ${cls}">
+        <div class="forecast-task-input-head">
+          <strong>${escapeHtml(check.headline || "预报输入检查")}</strong>
+          <span class="status-badge ${cls}">${escapeHtml(focusStatusLabel(status))}</span>
+        </div>
+        <div class="forecast-task-input-grid">
+          ${rows.map(row => `
+            <div class="forecast-task-input-item ${focusStatusClass(row.status || "warn")}">
+              <span>${escapeHtml(row.label)}</span>
+              <strong title="${escapeHtml(row.detail || row.value || "")}">${escapeHtml(row.value || "—")}</strong>
+              ${row.detail ? `<small>${escapeHtml(shortPath(row.detail))}</small>` : ""}
+            </div>
+          `).join("")}
+          ${variables.slice(0, 3).map(item => `
+            <div class="forecast-task-input-item ${focusStatusClass(item.status || "warn")}">
+              <span>${escapeHtml(item.label || "")}</span>
+              <strong>${escapeHtml(item.summary || "未检查")}</strong>
+              <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : shortPath(item.path || "未选择目录"))}</small>
+            </div>
+          `).join("")}
+        </div>
+        ${issues.length ? `
+          <ul class="forecast-task-input-issues">
+            ${issues.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        ` : ""}
+      </div>
+    `;
+  }
+
   function renderForecastSummary(data = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const runDisplayName = helpers.runDisplayName || (run => run?.name || run?.title || "连续状态预报结果");
@@ -220,6 +296,7 @@
     renderForecastResultEmpty,
     renderForecastResultLoading,
     renderForecastInputSummary,
+    renderForecastTaskInputCheckSummary,
     renderForecastResultDetail,
   };
 })();

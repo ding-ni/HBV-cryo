@@ -624,6 +624,81 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
 .forecast-input-variable.status-warn { border-color: rgba(179,106,40,0.24); }
 .forecast-input-variable.status-fail { border-color: rgba(181,69,56,0.24); }
 
+.forecast-task-input-check {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(20,79,84,0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.74);
+}
+
+.forecast-task-input-check.status-ok {
+  border-color: rgba(45,124,82,0.22);
+  background: rgba(45,124,82,0.06);
+}
+
+.forecast-task-input-check.status-warn {
+  border-color: rgba(179,106,40,0.24);
+  background: rgba(179,106,40,0.06);
+}
+
+.forecast-task-input-check.status-fail {
+  border-color: rgba(181,69,56,0.24);
+  background: rgba(181,69,56,0.06);
+}
+
+.forecast-task-input-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.forecast-task-input-head strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.forecast-task-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.forecast-task-input-item {
+  min-width: 0;
+  border: 1px solid rgba(20,79,84,0.1);
+  border-radius: var(--radius-sm);
+  padding: 8px 9px;
+  background: rgba(255,255,255,0.7);
+}
+
+.forecast-task-input-item span,
+.forecast-task-input-item small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.forecast-task-input-item strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.forecast-task-input-issues {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 /* ===== Conditional Blocks & Global Hidden ===== */
 .hidden { display: none !important; }
 .conditional-block { transition: all 200ms; }
