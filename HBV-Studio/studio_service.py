@@ -290,6 +290,34 @@ APP_VERSION = "2026-05-24-meteo-shp-staging"
 SERVER_STARTED_AT = time.time()
 
 
+def source_files_latest_mtime() -> tuple[float, str]:
+    candidates = [
+        GUI_ROOT / "studio_service.py",
+        GUI_ROOT / "launch.py",
+        GUI_ROOT / "forecast_run.py",
+        GUI_ROOT / "profile_runner.py",
+        GUI_ROOT / "precipitation_strategy_runner.py",
+        GUI_ROOT / "web" / "app.js",
+        GUI_ROOT / "web" / "index.html",
+        GUI_ROOT / "web" / "styles.css",
+        GUI_ROOT / "web" / "js" / "forecastView.js",
+        GUI_ROOT / "web" / "js" / "eventMode.js",
+        GUI_ROOT / "web" / "js" / "parameterLibrary.js",
+        GUI_ROOT / "web" / "js" / "stationPrecip.js",
+    ]
+    latest = 0.0
+    latest_file = ""
+    for path in candidates:
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if stamp > latest:
+            latest = stamp
+            latest_file = str(path)
+    return latest, latest_file
+
+
 def env_flag(name: str, default: bool = False) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
     if not raw:
@@ -6585,6 +6613,13 @@ def add_task_output(task_id: str, line: str) -> None:
             task.append(line)
 
 
+def add_task_exception_output(task_id: str, exc: BaseException, *, prefix: str = "[失败]") -> None:
+    add_task_output(task_id, f"{prefix} {exc}")
+    trace_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    for line in "".join(trace_lines).strip().splitlines()[-12:]:
+        add_task_output(task_id, f"[诊断] {line}")
+
+
 def set_task_metadata(task_id: str, **items: Any) -> None:
     with TASK_LOCK:
         task = TASKS.get(task_id)
@@ -10247,7 +10282,7 @@ def meteo_import_worker(task_id: str, payload: dict[str, Any]) -> None:
         result = perform_meteo_import(payload, task_id=task_id)
         _mark_task_finished(task_id, ok=True, return_code=0, result=result)
     except Exception as exc:
-        add_task_output(task_id, f"[失败] {exc}")
+        add_task_exception_output(task_id, exc)
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
@@ -11273,7 +11308,7 @@ def forward_sim_worker(task_id: str, payload: dict[str, Any]) -> None:
     except Exception as exc:
         if last_stage:
             set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "保存并重算"})
-        add_task_output(task_id, f"[失败] {exc}")
+        add_task_exception_output(task_id, exc)
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
@@ -11303,7 +11338,7 @@ def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
     except Exception as exc:
         if last_stage:
             set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "手调起点"})
-        add_task_output(task_id, f"[失败] {exc}")
+        add_task_exception_output(task_id, exc)
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
@@ -11763,7 +11798,7 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
     except Exception as exc:
         if last_stage:
             set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
-        add_task_output(task_id, f"[失败] {exc}")
+        add_task_exception_output(task_id, exc)
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
@@ -11898,6 +11933,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if parsed.path == "/api/health":
+                latest_source_mtime, latest_source_file = source_files_latest_mtime()
                 self.send_json({
                     "ok": True,
                     "time": time.time(),
@@ -11905,6 +11941,9 @@ class StudioHandler(BaseHTTPRequestHandler):
                     "server_started_at": SERVER_STARTED_AT,
                     "server_started_at_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(SERVER_STARTED_AT)),
                     "version": APP_VERSION,
+                    "source_latest_mtime": latest_source_mtime,
+                    "source_latest_file": latest_source_file,
+                    "source_stale": bool(latest_source_mtime and latest_source_mtime > SERVER_STARTED_AT + 1.0),
                 })
             elif parsed.path == "/api/dashboard":
                 self.send_json({"ok": True, "data": dashboard_payload()})

@@ -113,6 +113,19 @@ class ForecastInputCheckTests(unittest.TestCase):
             self.assertEqual(check["parameter_context"]["source_workspace"], "Basin_A")
             self.assertTrue(any(item["label"] == "参数来源" and item["status"] == "ok" for item in check["items"]))
 
+    def test_unicode_workspace_paths_are_preserved_for_forecast_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            basin_name = "\u672a\u6765\u6a21\u62df\u6d4b\u8bd5"
+            config_path = _write_workspace_config(root, name=basin_name)
+            source_run = _write_source_run(root / "\u6e90\u7ed3\u679c", config_path)
+
+            check = svc.forecast_input_check(_forecast_payload(root / "\u9884\u62a5\u8f93\u5165", config_path, source_run))
+
+            self.assertEqual(check["status"], "ok")
+            self.assertIn(basin_name, check["source"]["parameter_context"]["source_workspace"])
+            self.assertNotIn("?", check["source"]["source_run"])
+
     def test_out_of_window_forecast_files_warn_without_blocking_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
+import json
 import os
 import socket
 import sys
@@ -63,6 +64,15 @@ def port_is_open(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
+def find_available_port(host: str, preferred_port: int) -> int:
+    for port in range(int(preferred_port) + 1, int(preferred_port) + 40):
+        if not port_is_open(host, port):
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
 def apply_path_override(env_name: str, value: Optional[str]) -> None:
     if value:
         os.environ[env_name] = value
@@ -84,13 +94,53 @@ def browser_host(host: str) -> str:
     return "127.0.0.1" if value in {"0.0.0.0", "::"} else value
 
 
-def existing_hbv_service(url: str) -> bool:
+def existing_hbv_service(url: str) -> dict:
     health_url = f"{url.rstrip('/')}/api/health"
     try:
         with urllib.request.urlopen(health_url, timeout=1.5) as response:
-            return int(getattr(response, "status", 0) or 0) == 200
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return {}
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
+            return data if isinstance(data, dict) and data.get("ok") else {}
     except Exception:
-        return False
+        return {}
+
+
+def latest_source_mtime() -> tuple[float, str]:
+    root = Path(__file__).resolve().parent
+    candidates = [
+        root / "launch.py",
+        root / "studio_service.py",
+        root / "forecast_run.py",
+        root / "profile_runner.py",
+        root / "precipitation_strategy_runner.py",
+        root / "web" / "app.js",
+        root / "web" / "index.html",
+        root / "web" / "styles.css",
+        root / "web" / "js" / "forecastView.js",
+        root / "web" / "js" / "eventMode.js",
+        root / "web" / "js" / "parameterLibrary.js",
+        root / "web" / "js" / "stationPrecip.js",
+    ]
+    latest = 0.0
+    latest_file = ""
+    for path in candidates:
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if stamp > latest:
+            latest = stamp
+            latest_file = str(path)
+    return latest, latest_file
+
+
+def service_is_stale(health: dict, latest_mtime: float, *, tolerance_sec: float = 1.0) -> bool:
+    try:
+        started_at = float(health.get("server_started_at", 0) or 0)
+    except (TypeError, ValueError):
+        started_at = 0.0
+    return bool(started_at and latest_mtime and latest_mtime > started_at + tolerance_sec)
 
 
 def _interactive_console_stream(stream: Optional[TextIO]) -> Optional[TextIO]:
@@ -197,6 +247,20 @@ def main() -> None:
     print_result_roots()
 
     url = f"http://{browser_host(args.host)}:{args.port}/"
+    if port_is_open(args.host, args.port):
+        health = existing_hbv_service(url)
+        latest_mtime, latest_file = latest_source_mtime()
+        if health and service_is_stale(health, latest_mtime):
+            old_port = args.port
+            args.port = find_available_port(args.host, old_port)
+            url = f"http://{browser_host(args.host)}:{args.port}/"
+            print(
+                "[HBV-Studio] 检测到端口上的旧实例早于当前源码，"
+                f"为避免继续使用旧代码，已改用端口 {args.port} 启动新实例。",
+                flush=True,
+            )
+            if latest_file:
+                print(f"[HBV-Studio] 最新源码文件：{latest_file}", flush=True)
     print(f"[HBV-Studio] 准备连接至 {url}", flush=True)
     if port_is_open(args.host, args.port):
         print(f"[HBV-Studio] 端口 {args.port} 已被占用，疑似已有旧实例。", flush=True)
