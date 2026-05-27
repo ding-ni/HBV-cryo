@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--降水源", "--prec-source", dest="prec_source", choices=["era5", "mswep", "cmfd", "custom_tif"], default="custom_tif")
     parser.add_argument("--冰川模式", "--glacier-mode", dest="glacier_mode", choices=["inline", "off"], default="inline")
     parser.add_argument("--output-dir", dest="output_dir", default="")
+    parser.add_argument("--input-check-json", dest="input_check_json", default="")
     parser.add_argument("--output-json", dest="output_json", default="")
     return parser.parse_args()
 
@@ -46,6 +47,20 @@ def log_stage(message: str, stage_callback: Any = None) -> None:
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def input_check_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    direct = getattr(args, "forecast_input_check", None)
+    if isinstance(direct, dict):
+        return dict(direct)
+    raw_path = str(getattr(args, "input_check_json", "") or "").strip()
+    if not raw_path:
+        return {}
+    path = Path(raw_path).expanduser().resolve(strict=False)
+    if not path.exists():
+        raise FileNotFoundError(f"预报输入检查文件不存在：{path}")
+    data = read_json(path)
+    return dict(data) if isinstance(data, dict) else {}
 
 
 def json_default(value: Any) -> Any:
@@ -310,6 +325,7 @@ def write_forecast_outputs(
     input_archive: dict[str, Any] | None = None,
     source_state_summary: dict[str, Any] | None = None,
     source_parameter_summary: dict[str, Any] | None = None,
+    forecast_input_check: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -349,6 +365,7 @@ def write_forecast_outputs(
     source_state_time = str(source_initial.get("state_snapshot_time", "") or "").strip()
     source_state_summary = dict(source_state_summary or {})
     source_parameter_summary = dict(source_parameter_summary or {})
+    forecast_input_check = dict(forecast_input_check or {})
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
@@ -372,6 +389,7 @@ def write_forecast_outputs(
             "time_steps": int(count),
             "routing_state_available": bool(restart.get("routing_state_available")),
             "forecast_input_archive": clean_for_json(input_archive or {}),
+            "forecast_input_check": clean_for_json(forecast_input_check),
         },
         "workspace_config": str(config_path.resolve(strict=False)),
         "calibration_profile": profile,
@@ -390,6 +408,7 @@ def write_forecast_outputs(
         },
         "source_state_summary": clean_for_json(source_state_summary),
         "source_parameter_summary": clean_for_json(source_parameter_summary),
+        "forecast_input_check": clean_for_json(forecast_input_check),
         "initial_state": {
             "mode": "state_snapshot_restart",
             "hot_start_supported": True,
@@ -412,6 +431,7 @@ def write_forecast_outputs(
             "forecast_temp_dir": forecast_dirs.get("temp", ""),
             "forecast_evap_dir": forecast_dirs.get("evap", ""),
             "forecast_input_archive": clean_for_json(input_archive or {}),
+            "forecast_input_check": clean_for_json(forecast_input_check),
             "glacier_mode": str(getattr(module.args, "glacier_mode", "") or ""),
         },
         "optional_modules": {
@@ -476,6 +496,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         profile,
         objective_mode,
     )
+    forecast_input_check = input_check_from_args(args)
     apply_forecast_window(module, forecast_start, forecast_end)
     output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
         Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -528,6 +549,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         input_archive=input_archive,
         source_state_summary=source_state_summary,
         source_parameter_summary=source_parameter_summary,
+        forecast_input_check=forecast_input_check,
     )
     log_stage("生成预报元数据", stage_callback)
     result["params_adjusted"] = bool(params_adjusted)

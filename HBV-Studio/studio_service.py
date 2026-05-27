@@ -391,6 +391,7 @@ class TaskRecord:
             "detected_runs": self.detected_runs,
             "progress": progress,
             "ui_progress": self.metadata.get("ui_progress"),
+            "forecast_input_check": self.metadata.get("forecast_input_check"),
             "result": self.metadata.get("result"),
             "config_path": self.metadata.get("config_path"),
             "run_path": self.metadata.get("run_path"),
@@ -11333,21 +11334,27 @@ def _forecast_restart_args(payload: dict[str, Any]) -> argparse.Namespace:
         prec_source=str(payload.get("prec_source", "custom_tif") or "custom_tif").strip(),
         glacier_mode=str(payload.get("glacier_mode", "inline") or "inline").strip(),
         output_dir=str(payload.get("output_dir", "") or "").strip(),
+        forecast_input_check=dict(payload.get("_forecast_input_check") or payload.get("forecast_input_check") or {}),
         output_json="",
     )
 
 
 def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
-    ensure_forecast_input_ready(payload)
     import forecast_run
 
-    return forecast_run.run_forecast(_forecast_restart_args(payload))
+    input_check = ensure_forecast_input_ready(payload)
+    checked_payload = {**payload, "_forecast_input_check": input_check}
+    return forecast_run.run_forecast(_forecast_restart_args(checked_payload))
 
 
 def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Callable[[str, str | None], None]) -> dict[str, Any]:
     import forecast_run
 
-    return forecast_run.run_forecast(_forecast_restart_args(payload), stage_callback=stage_callback)
+    input_check = dict(payload.get("_forecast_input_check") or {})
+    if not input_check:
+        input_check = ensure_forecast_input_ready(payload)
+    checked_payload = {**payload, "_forecast_input_check": input_check}
+    return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
 def _forecast_source_state_time(source_run: Path, metadata: dict[str, Any]) -> str:
@@ -11809,7 +11816,8 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     )
     with TASK_LOCK:
         TASKS[task_id] = record
-    threading.Thread(target=forecast_restart_worker, args=(task_id, dict(payload)), daemon=True).start()
+    checked_payload = {**payload, "_forecast_input_check": input_check}
+    threading.Thread(target=forecast_restart_worker, args=(task_id, checked_payload), daemon=True).start()
     return record
 
 
