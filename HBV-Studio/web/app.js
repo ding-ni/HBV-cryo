@@ -309,6 +309,34 @@ function runDisplayName(run) {
     .trim();
 }
 
+function isGeneratedRunName(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /^hbv_(cryo|forecast|manual|calib|run)(_|$)/i.test(text)
+    || /_\d{8}_\d{6}(_|$)/.test(text);
+}
+
+function forecastFriendlyRunName(run) {
+  const raw = runDisplayName(run);
+  if (raw && !isGeneratedRunName(raw)) return raw;
+  const type = runTypeLabel(runTypeValue(run));
+  const stepHours = Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
+  const forecastRange = timeRangeText(run?.time_config?.forecast_start, run?.time_config?.forecast_end, stepHours);
+  if (runTypeValue(run) === "forecast_restart" && forecastRange !== "—") {
+    return `${type} · ${forecastRange}`;
+  }
+  const workspace = runWorkspaceName(run);
+  if (workspace && workspace !== "未命名工作区") return `${workspace} · ${type}`;
+  const stateTime = run?.state_snapshot_time || run?.time_config?.valid_end || run?.time_config?.calib_end || "";
+  return stateTime ? `${type} · 状态 ${compactTimeText(stateTime, stepHours)}` : type;
+}
+
+function readableRunReferenceName(value, fallback = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return String(fallback || "").trim();
+  return isGeneratedRunName(raw) ? String(fallback || "").trim() : raw;
+}
+
 function runDisplaySubtitle(run) {
   return String(run?.display_subtitle || "").trim();
 }
@@ -2248,6 +2276,7 @@ function renderWizardEventSummary(eventInfo = null, observationCoverage = null) 
   let html = window.HBVStudioEventMode.renderEventWindowSummary(eventInfo, {
     escapeHtml,
     statusClass: focusStatusClass,
+    shortPath,
   });
   if (observationCoverage && window.HBVStudioEventMode?.renderEventObservationCoverage) {
     html += window.HBVStudioEventMode.renderEventObservationCoverage(observationCoverage, {
@@ -3153,7 +3182,7 @@ function forecastArchiveDetailText(archive = {}, fallback = "预报完成后将�
     parts.push(items.map(item => `${item.label}${item.value}`).join("，"));
   }
   if (archive?.manifest_path) {
-    parts.push(`清单：${shortPath(archive.manifest_path)}`);
+    parts.push("输入归档清单已保存");
   }
   return parts.join("；") || "已保存本次预报实际使用的气象输入";
 }
@@ -3166,8 +3195,9 @@ function forecastParameterSourceSummary(source = {}, fallback = {}) {
   const objective = objectiveRaw ? objectiveLabel(objectiveRaw) : "";
   const profile = source.calibration_profile || fallback.calibration_profile || "";
   const sourceName = source.source_run_name || fallback.source_run_name || "";
+  const sourceLabel = readableRunReferenceName(sourceName, fallback.workspace_name || fallback.source_workspace || "");
   const detailParts = [];
-  if (sourceName) detailParts.push(`来源结果：${sourceName}`);
+  if (sourceLabel) detailParts.push(`来源：${sourceLabel}`);
   if (profile) detailParts.push(profileLabel(profile));
   if (objective) detailParts.push(`目标函数：${objective}`);
   if (source.state_snapshot_time) detailParts.push(`状态时刻：${source.state_snapshot_time}`);
@@ -5497,6 +5527,7 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
       html += window.HBVStudioEventMode.renderEventWindowSummary(validation.event_windows, {
         escapeHtml,
         statusClass: focusStatusClass,
+        shortPath,
       });
     }
     if (validation.event_forcing_coverage && window.HBVStudioEventMode?.renderEventForcingCoverage) {
@@ -6614,7 +6645,7 @@ function renderForecastSourceOptions() {
   select.disabled = !candidates.length;
   select.innerHTML = candidates.length
     ? candidates.map(run => {
-      const label = `${runDisplayName(run)} · ${runTypeLabel(runTypeValue(run))} · ${forecastRunReadinessText(run)}`;
+      const label = `${forecastFriendlyRunName(run)} · ${forecastRunReadinessText(run)}`;
       return `<option value="${escapeHtml(run.path)}" ${samePath(run.path, state.forecastSourceRunPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
     }).join("")
     : '<option value="">暂无可选源结果</option>';
@@ -6650,7 +6681,7 @@ function renderForecastSourceSummary() {
   host.innerHTML = `
     <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
       <div class="forecast-source-card-head">
-        <strong>${escapeHtml(runDisplayName(run))}</strong>
+        <strong title="${escapeHtml(runDisplayName(run))}">${escapeHtml(forecastFriendlyRunName(run))}</strong>
         <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(forecastRunReadinessText(run))}</span>
       </div>
       <div class="forecast-source-meta">
@@ -6815,7 +6846,7 @@ function renderForecastResultDetail(data = state.forecastResultData) {
   }
   window.HBVStudioForecastView.renderForecastResultDetail(data, {
     escapeHtml,
-    runDisplayName,
+    runDisplayName: forecastFriendlyRunName,
     shortPath,
     timeRangeText,
     forecastArchiveSummaryText,
@@ -6873,11 +6904,16 @@ function renderForecastResultPanel() {
   let selected = runs.find(run => samePath(run.path, state.forecastResultRunPath)) || runs[0];
   state.forecastResultRunPath = selected.path;
   select.disabled = false;
-  select.innerHTML = runs.map(run => `
-    <option value="${escapeHtml(run.path)}" ${samePath(run.path, selected.path) ? "selected" : ""}>
-      ${escapeHtml(`${runDisplayName(run)} · ${timeRangeText(run.time_config?.forecast_start, run.time_config?.forecast_end, run.time_step_hours || run.time_config?.time_step_hours || 24)}`)}
-    </option>
-  `).join("");
+  select.innerHTML = runs.map(run => {
+    const range = timeRangeText(run.time_config?.forecast_start, run.time_config?.forecast_end, run.time_step_hours || run.time_config?.time_step_hours || 24);
+    const friendly = forecastFriendlyRunName(run);
+    const label = range && range !== "—" && !friendly.includes(range) ? `${friendly} · ${range}` : friendly;
+    return `
+      <option value="${escapeHtml(run.path)}" ${samePath(run.path, selected.path) ? "selected" : ""}>
+        ${escapeHtml(label)}
+      </option>
+    `;
+  }).join("");
   setForecastResultButtons(selected);
   if (state.forecastResultData?.run?.path && samePath(state.forecastResultData.run.path, selected.path)) {
     renderForecastResultDetail(state.forecastResultData);

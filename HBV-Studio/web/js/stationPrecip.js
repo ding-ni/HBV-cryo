@@ -103,7 +103,7 @@
       `;
     }).join("");
     const more = events.length > 30
-      ? `<div class="event-coverage-more">还有 ${events.length - 30} 场事件未在此展开，完整信息见输入检查返回结果。</div>`
+      ? `<div class="event-coverage-more">还有 ${events.length - 30} 场事件未在此展开，可在站点覆盖明细中继续核对。</div>`
       : "";
     return `
       <div class="event-coverage-matrix">

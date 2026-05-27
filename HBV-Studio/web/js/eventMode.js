@@ -26,6 +26,11 @@
     return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
   }
 
+  function defaultShortPath(value) {
+    const text = String(value || "").replace(/\\/g, "/");
+    return text ? text.replace(/^.*\/([^/]+)$/, "$1") : "";
+  }
+
   function floodEventEvaluation(meta = {}) {
     return meta?.flood_event_evaluation || meta?.diagnostics?.flood_event_evaluation || {};
   }
@@ -175,6 +180,7 @@
   function renderEventWindowSummary(eventInfo = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const statusClass = helpers.statusClass || defaultStatusClass;
+    const shortPath = helpers.shortPath || defaultShortPath;
     if (!eventInfo || !Number(eventInfo.event_count || 0)) return "";
     const events = Array.isArray(eventInfo.events) ? eventInfo.events : [];
     const counts = eventInfo.purpose_counts || {};
@@ -203,7 +209,7 @@
       `;
     }).join("");
     const more = events.length > 30
-      ? `<div class="event-window-more">还有 ${events.length - 30} 场事件未展开，完整信息见输入检查返回结果。</div>`
+      ? `<div class="event-window-more">还有 ${events.length - 30} 场事件未展开，可在事件明细表中继续核对。</div>`
       : "";
     const issues = issueItems.length
       ? `<ul class="event-window-issues">${issueItems.slice(0, 8).map(({ item, cls }) => `<li class="${cls}">${escapeHtml(item)}</li>`).join("")}</ul>`
@@ -221,7 +227,7 @@
           <strong>洪水事件表解析结果</strong>
           <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效；率定 ${counts.calibration || 0}、验证 ${counts.validation || 0}、诊断 ${counts.diagnostic || 0}`)}</span>
         </div>
-        ${eventInfo.source_file ? `<div class="event-window-source">事件表：${escapeHtml(eventInfo.source_file)}</div>` : ""}
+        ${eventInfo.source_file ? `<div class="event-window-source" title="${escapeHtml(eventInfo.source_file)}">事件表：${escapeHtml(shortPath(eventInfo.source_file) || "已读取")}</div>` : ""}
         <div class="event-window-policy">
           <strong>初始条件：${escapeHtml(initialPolicy)}</strong>
           <span>${escapeHtml(initialNote)}</span>

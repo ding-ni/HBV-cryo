@@ -53,6 +53,93 @@
     return "需复核";
   }
 
+  function defaultShortPath(value) {
+    const text = String(value || "").replace(/\\/g, "/");
+    return text ? text.replace(/^.*\/([^/]+)$/, "$1") : "—";
+  }
+
+  function textOrDash(value, fallback = "—") {
+    const text = String(value ?? "").trim();
+    return text || fallback;
+  }
+
+  function rangeText(start, end) {
+    const left = String(start || "").trim();
+    const right = String(end || "").trim();
+    if (left && right) return `${left} 至 ${right}`;
+    return left || right || "未完整填写";
+  }
+
+  function isOkStatus(status) {
+    return String(status || "").toLowerCase() === "ok";
+  }
+
+  function stepText(count) {
+    const number = Number(count || 0);
+    return Number.isFinite(number) && number > 0 ? `${number} 个时间步` : "等待完整时段";
+  }
+
+  function variableLabel(key, fallback) {
+    return fallback || ({ prec: "降水", temp: "气温", evap: "潜在蒸散发" }[key] || key || "气象变量");
+  }
+
+  function variableDetailText(item = {}) {
+    if (item.first_time || item.last_time) return rangeText(item.first_time, item.last_time);
+    if (item.path) return "目录已选择，等待按预报窗口核对";
+    return "未选择目录";
+  }
+
+  function variableOverview(variables = [], expectedSteps = 0) {
+    const checked = variables.filter(item => item && typeof item === "object");
+    if (!checked.length) return { value: "尚未检查气象驱动", detail: "填写 P/T/PET 目录后自动核对", status: "warn" };
+    const complete = checked.every(item => isOkStatus(item.status));
+    const fail = checked.some(item => String(item.status || "").toLowerCase() === "fail");
+    const counts = checked.map(item => {
+      const label = variableLabel(item.key, item.label);
+      const covered = Number(item.covered_steps ?? item.valid_time_steps ?? 0);
+      const expected = Number(item.expected_steps ?? expectedSteps ?? 0);
+      return expected > 0 ? `${label}${covered}/${expected}` : `${label}${Number(item.valid_time_steps || 0)}步`;
+    }).join("，");
+    return {
+      value: complete ? "三类气象驱动完整" : fail ? "气象驱动需补齐" : "气象驱动需复核",
+      detail: counts || "按预报窗口核对降水、气温和潜在蒸散发",
+      status: complete ? "ok" : fail ? "fail" : "warn",
+    };
+  }
+
+  function renderTechnicalDetails(rows = [], escapeHtml = defaultEscapeHtml, title = "技术细节") {
+    const cleanRows = rows
+      .map(row => [String(row?.[0] || "").trim(), String(row?.[1] || "").trim()])
+      .filter(([label, value]) => label && value);
+    if (!cleanRows.length) return "";
+    return `
+      <details class="forecast-technical-details">
+        <summary>${escapeHtml(title)}</summary>
+        <dl>
+          ${cleanRows.map(([label, value]) => `
+            <dt>${escapeHtml(label)}</dt>
+            <dd title="${escapeHtml(value)}">${escapeHtml(value)}</dd>
+          `).join("")}
+        </dl>
+      </details>
+    `;
+  }
+
+  function forecastInputTechnicalRows(check = {}) {
+    const source = check.source || {};
+    const output = check.output || {};
+    const variables = Array.isArray(check.variables) ? check.variables : [];
+    const rows = [];
+    if (source.source_run_name) rows.push(["源结果目录名", source.source_run_name]);
+    if (source.source_run) rows.push(["源结果路径", source.source_run]);
+    if (output.result_detail || output.result_dir) rows.push(["结果目录预览", output.result_detail || output.result_dir]);
+    if (output.archive_detail || output.manifest_path) rows.push(["输入归档清单", output.archive_detail || output.manifest_path]);
+    variables.forEach(item => {
+      if (item?.path) rows.push([`${variableLabel(item.key, item.label)}目录`, item.path]);
+    });
+    return rows;
+  }
+
   function renderForecastInputSummary(check = null, stateLabel = "", helpers = {}) {
     const host = document.getElementById("forecast-input-summary");
     if (!host) return;
@@ -68,13 +155,57 @@
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
     const focusStatusLabel = helpers.focusStatusLabel || defaultStatusLabel;
     const formatNumber = helpers.formatNumber || ((value, digits = 0) => Number(value).toFixed(digits));
-    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const shortPath = helpers.shortPath || defaultShortPath;
     const renderParameterContextHtml = helpers.renderParameterContextHtml || (() => "");
     const renderStationScopeSummary = helpers.renderStationScopeSummary || (() => "");
     const status = String(check.status || "warn").toLowerCase();
     const cls = focusStatusClass(status);
-    const items = Array.isArray(check.items) ? check.items : [];
     const variables = Array.isArray(check.variables) ? check.variables : [];
+    const source = check.source || {};
+    const windowInfo = check.window || {};
+    const output = check.output || {};
+    const expectedSteps = Number(windowInfo.expected_steps || 0);
+    const meteoOverview = variableOverview(variables, expectedSteps);
+    const sourceState = textOrDash(source.source_state_time || "");
+    const suggestedStart = textOrDash(source.expected_forecast_start || windowInfo.forecast_start || "", "");
+    const rows = [
+      {
+        label: "起报依据",
+        value: source.state_available ? (suggestedStart ? `${sourceState} 接续 ${suggestedStart}` : sourceState) : "缺少保存状态",
+        detail: "读取源结果末端状态，不重新初始化产流与汇流记忆",
+        status: source.state_available ? "ok" : "fail",
+      },
+      {
+        label: "预报时段",
+        value: rangeText(windowInfo.forecast_start, windowInfo.forecast_end),
+        detail: stepText(expectedSteps),
+        status: expectedSteps > 0 ? "ok" : "warn",
+      },
+      {
+        label: "参数来源",
+        value: source.parameter_count ? `源结果参数（${source.parameter_count} 项）` : "缺少参数",
+        detail: "预报沿用源结果保存的最优参数",
+        status: source.parameter_count ? "ok" : "fail",
+      },
+      {
+        label: "气象资料",
+        value: meteoOverview.value,
+        detail: meteoOverview.detail,
+        status: meteoOverview.status,
+      },
+      {
+        label: "结果输出",
+        value: output.result_label || "运行时新建预报结果目录",
+        detail: "完成后可查看过程线并导出 Excel",
+        status: expectedSteps > 0 ? "ok" : "warn",
+      },
+      {
+        label: "输入归档",
+        value: expectedSteps > 0 ? "仅归档预报窗口内栅格" : "待形成预报窗口",
+        detail: "完整路径收纳在技术细节中",
+        status: expectedSteps > 0 ? "ok" : "warn",
+      },
+    ];
     const messages = [
       ...(Array.isArray(check.errors) ? check.errors.slice(0, 3).map(item => ({ item, status: "fail" })) : []),
       ...(Array.isArray(check.warnings) ? check.warnings.slice(0, 3).map(item => ({ item, status: "warn" })) : []),
@@ -106,8 +237,8 @@
           <strong>${escapeHtml(check.headline || "预报气象输入检查")}</strong>
           <span class="status-badge ${cls}">${escapeHtml(focusStatusLabel(status))}</span>
         </div>
-        <div class="forecast-input-grid">
-          ${items.map(item => `
+        <div class="forecast-input-grid forecast-input-overview">
+          ${rows.map(item => `
             <div class="forecast-input-item">
               <span>${escapeHtml(item.label || "")}</span>
               <strong class="${focusStatusClass(item.status || "ok")}" title="${escapeHtml(item.detail || "")}">${escapeHtml(item.value || "—")}</strong>
@@ -122,11 +253,12 @@
             <div class="forecast-input-variable ${focusStatusClass(item.status || "warn")}">
               <span>${escapeHtml(item.label || "")}</span>
               <strong>${escapeHtml(item.summary || "未检查")}</strong>
-              <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : (item.path ? shortPath(item.path) : "未选择目录"))}</small>
+              <small title="${escapeHtml(item.path || "")}">${escapeHtml(variableDetailText(item, shortPath))}</small>
             </div>
           `).join("")}
         </div>
         ${messageHtml}
+        ${renderTechnicalDetails(forecastInputTechnicalRows(check), escapeHtml)}
       </div>
     `;
   }
@@ -136,7 +268,7 @@
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
     const focusStatusLabel = helpers.focusStatusLabel || defaultStatusLabel;
-    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const shortPath = helpers.shortPath || defaultShortPath;
     const status = String(check.status || "warn").toLowerCase();
     const cls = focusStatusClass(status);
     const source = check.source || {};
@@ -166,13 +298,13 @@
       {
         label: "结果输出",
         value: output.result_label || "运行时新建预报结果目录",
-        detail: output.result_detail || output.result_parent || "",
+        detail: "完成后可查看过程线并导出 Excel",
         status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
       },
       {
         label: "输入归档",
-        value: output.archive_label || "结果目录下的 forecast_inputs",
-        detail: output.archive_detail || output.manifest_path || "",
+        value: "仅归档预报窗口内栅格",
+        detail: "完整路径收纳在技术细节中",
         status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
       },
     ];
@@ -194,7 +326,7 @@
             <div class="forecast-task-input-item ${focusStatusClass(item.status || "warn")}">
               <span>${escapeHtml(item.label || "")}</span>
               <strong>${escapeHtml(item.summary || "未检查")}</strong>
-              <small>${escapeHtml(item.first_time && item.last_time ? `${item.first_time} 至 ${item.last_time}` : shortPath(item.path || "未选择目录"))}</small>
+              <small title="${escapeHtml(item.path || "")}">${escapeHtml(variableDetailText(item, shortPath))}</small>
             </div>
           `).join("")}
         </div>
@@ -203,6 +335,7 @@
             ${issues.map(({ item, status: itemStatus }) => `<li class="${focusStatusClass(itemStatus)}">${escapeHtml(item)}</li>`).join("")}
           </ul>
         ` : ""}
+        ${renderTechnicalDetails(forecastInputTechnicalRows(check), escapeHtml)}
       </div>
     `;
   }
@@ -210,7 +343,7 @@
   function renderForecastSummary(data = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const runDisplayName = helpers.runDisplayName || (run => run?.name || run?.title || "连续状态预报结果");
-    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const shortPath = helpers.shortPath || defaultShortPath;
     const timeRangeText = helpers.timeRangeText || ((start, end) => [start, end].filter(Boolean).join(" 至 ") || "未记录");
     const forecastArchiveSummaryText = helpers.forecastArchiveSummaryText || (() => "未记录气象归档");
     const forecastArchiveDetailText = helpers.forecastArchiveDetailText || (() => "");
@@ -226,12 +359,18 @@
       metadata,
     );
     const rows = [
-      ["结果名称", runDisplayName(run), run.path ? shortPath(run.path) : ""],
+      ["结果名称", runDisplayName(run), run.path ? "预报结果目录已生成" : ""],
       ["预报时段", timeRangeText(forecast.forecast_start || metadata.time_config?.forecast_start, forecast.forecast_end || metadata.time_config?.forecast_end, metadata.time_config?.time_step_hours || 24), `${profileLabel(metadata.calibration_profile)}，${metadata.time_config?.time_step_hours || 24} 小时步长`],
       ["起报状态", forecast.source_state_time || initial.source_state_snapshot_time || "未记录", forecast.source_snapshot_file ? `起报状态文件：${shortPath(forecast.source_snapshot_file)}` : "读取源结果保存状态"],
       ["参数来源", parameterSource.value || "源结果参数", parameterSource.detail || "预报不重新率定参数"],
       ["未来气象", forecastArchiveSummaryText(archive), forecastArchiveDetailText(archive)],
     ];
+    const technicalRows = [
+      run.path ? ["预报结果目录", run.path] : null,
+      forecast.source_run_path ? ["源结果目录", forecast.source_run_path] : null,
+      forecast.source_snapshot_file ? ["起报状态文件", forecast.source_snapshot_file] : null,
+      archive.manifest_path ? ["输入归档清单", archive.manifest_path] : null,
+    ].filter(Boolean);
     const summary = document.getElementById("forecast-result-summary");
     if (!summary) return;
     summary.innerHTML = `
@@ -244,6 +383,7 @@
           </div>
         `).join("")}
       </div>
+      ${renderTechnicalDetails(technicalRows, escapeHtml, "结果技术细节")}
     `;
   }
 
