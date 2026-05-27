@@ -1,4 +1,12 @@
 (function () {
+  function defaultEscapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
   function defaultFiniteNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
