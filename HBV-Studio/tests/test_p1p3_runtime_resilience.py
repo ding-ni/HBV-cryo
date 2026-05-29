@@ -1,4 +1,6 @@
 import sys
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -56,6 +58,29 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         latest, path = svc.source_files_latest_mtime()
         self.assertGreater(latest, 0)
         self.assertTrue(path.endswith((".py", ".js", ".html", ".css")))
+
+    def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            barrier = threading.Barrier(8)
+            results: list[bool] = []
+            lock = threading.Lock()
+
+            def worker() -> None:
+                barrier.wait()
+                local = [svc.profile_runner._dir_is_writable(target) for _ in range(20)]
+                with lock:
+                    results.extend(local)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(len(results), 160)
+            self.assertTrue(all(results))
+            self.assertFalse(list(target.glob(".__codex_write_probe__*")))
 
 
 if __name__ == "__main__":

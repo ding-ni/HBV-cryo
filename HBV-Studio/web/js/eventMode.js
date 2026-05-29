@@ -157,7 +157,10 @@
     };
     try { window.Plotly.purge(host); } catch {}
     host.innerHTML = "";
-    window.Plotly.newPlot(host, traces, layout, plotCfg);
+    try {
+      const plot = window.Plotly.newPlot(host, traces, layout, plotCfg);
+      if (plot && typeof plot.catch === "function") plot.catch(() => {});
+    } catch {}
   }
 
   function purposeLabel(value) {

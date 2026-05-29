@@ -304,9 +304,20 @@ function runTypeLabel(value, fallback = "") {
 }
 
 function runDisplayName(run) {
-  return String(run?.display_name || run?.name || shortPath(run?.path) || "未命名结果")
-    .replace(/状态接续预报/g, "连续状态预报")
-    .trim();
+  const explicit = String(run?.result_title || run?.display_name || "").trim();
+  if (explicit && !isGeneratedRunName(explicit)) {
+    return explicit.replace(/状态接续预报/g, "连续状态预报").trim();
+  }
+  const rawName = String(run?.name || "").trim();
+  if (rawName && !isGeneratedRunName(rawName)) {
+    return rawName.replace(/状态接续预报/g, "连续状态预报").trim();
+  }
+  const workspace = runWorkspaceName(run);
+  const type = runTypeLabel(runTypeValue(run), "结果");
+  const time = runTimeText(run);
+  return [workspace && workspace !== "未命名工作区" ? workspace : "", type, time]
+    .filter(Boolean)
+    .join(" · ") || "未命名结果";
 }
 
 function isGeneratedRunName(value) {
@@ -338,7 +349,11 @@ function readableRunReferenceName(value, fallback = "") {
 }
 
 function runDisplaySubtitle(run) {
-  return String(run?.display_subtitle || "").trim();
+  const text = String(run?.display_subtitle || "").trim();
+  if (!text) return "";
+  const directoryName = text.replace(/^目录名[:：]\s*/i, "").trim();
+  if (isGeneratedRunName(directoryName)) return "";
+  return text;
 }
 
 function runWorkspaceName(run) {
@@ -6201,7 +6216,10 @@ function renderCharts(data) {
     if (!host || !window.Plotly) return;
     try { window.Plotly.purge(host); } catch {}
     host.innerHTML = "";
-    Plotly.newPlot(host, traces, layout, config);
+    try {
+      const plot = Plotly.newPlot(host, traces, layout, config);
+      if (plot && typeof plot.catch === "function") plot.catch(() => {});
+    } catch {}
   };
   const dates = data.series?.dates || [];
   const plotLayout = {
@@ -6493,11 +6511,14 @@ function renderTaskProgressCharts() {
     const stageHistory = histories?.[stage]?.history || task?.progress?.history || [];
     const chart = taskProgressChartData(stageHistory, taskStageLabel(stage));
     if (!chart) return;
-    Plotly.newPlot(host, chart.traces, chart.layout, {
-      responsive: true,
-      displayModeBar: false,
-      staticPlot: true,
-    });
+    try {
+      const plot = Plotly.newPlot(host, chart.traces, chart.layout, {
+        responsive: true,
+        displayModeBar: false,
+        staticPlot: true,
+      });
+      if (plot && typeof plot.catch === "function") plot.catch(() => {});
+    } catch {}
   });
 }
 

@@ -737,11 +737,14 @@ def _workspace_mirror_name(workspace_root: Path) -> str:
 
 
 def _dir_is_writable(path: Path) -> bool:
+    probe = path / f".__codex_write_probe__{os.getpid()}_{threading.get_ident()}_{time.time_ns()}"
     try:
         path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".__codex_write_probe__"
         probe.write_text("ok", encoding="utf-8")
-        probe.unlink()
+        try:
+            probe.unlink()
+        except FileNotFoundError:
+            pass
         return True
     except Exception:
         return False

@@ -126,6 +126,20 @@ class ForecastInputCheckTests(unittest.TestCase):
             self.assertIn(basin_name, check["source"]["parameter_context"]["source_workspace"])
             self.assertNotIn("?", check["source"]["source_run"])
 
+    def test_invalid_forecast_directory_path_fails_without_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = _write_workspace_config(root)
+            source_run = _write_source_run(root, config_path)
+            payload = _forecast_payload(root, config_path, source_run)
+            payload["forecast_prec_dir"] = str(root / "invalid?prec")
+
+            check = svc.forecast_input_check(payload)
+
+            self.assertEqual(check["status"], "fail")
+            self.assertTrue(any("降水" in item for item in check["errors"]))
+            self.assertTrue(any(item["key"] == "prec" and item["status"] == "fail" for item in check["variables"]))
+
     def test_out_of_window_forecast_files_warn_without_blocking_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

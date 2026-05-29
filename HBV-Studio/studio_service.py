@@ -2077,7 +2077,10 @@ def build_expected_observation_index(config: dict[str, Any], *, context: str = "
 
 
 def _directory_scan_signature(directory: Path) -> tuple[str, int, int]:
-    resolved = directory.resolve(strict=False)
+    try:
+        resolved = directory.resolve(strict=False)
+    except (OSError, ValueError):
+        return str(directory), 0, 0
     try:
         stat = resolved.stat()
     except (FileNotFoundError, PermissionError, OSError):
@@ -2094,7 +2097,17 @@ def scan_tif_time_series(directory: Path) -> dict[str, Any]:
         if cached and cached.get("signature") == signature:
             return copy.deepcopy(cached["data"])
 
-    tif_files = sorted(directory.glob("*.tif")) if directory.exists() else []
+    scan_error = ""
+    try:
+        exists = directory.exists()
+    except (OSError, ValueError) as exc:
+        exists = False
+        scan_error = str(exc)
+    try:
+        tif_files = sorted(directory.glob("*.tif")) if exists else []
+    except (OSError, ValueError) as exc:
+        tif_files = []
+        scan_error = str(exc)
     invalid_files: list[str] = []
     duplicate_timestamps: dict[pd.Timestamp, list[str]] = {}
     unique_timestamps: dict[pd.Timestamp, str] = {}
@@ -2113,7 +2126,7 @@ def scan_tif_time_series(directory: Path) -> dict[str, Any]:
 
     timestamps = sorted(unique_timestamps)
     result = {
-        "exists": directory.exists(),
+        "exists": exists,
         "path": str(directory),
         "total_files": len(tif_files),
         "parseable_files": parseable_files,
@@ -2121,6 +2134,7 @@ def scan_tif_time_series(directory: Path) -> dict[str, Any]:
         "invalid_files": invalid_files,
         "duplicate_timestamps": {ts: duplicate_timestamps[ts] for ts in sorted(duplicate_timestamps)},
         "timestamps": timestamps,
+        "scan_error": scan_error,
     }
     with TIF_SCAN_CACHE_LOCK:
         TIF_SCAN_CACHE[cache_key] = {"signature": signature, "data": copy.deepcopy(result)}
@@ -2227,7 +2241,9 @@ def validate_tif_time_series(
     errors: list[str] = []
     warnings: list[str] = []
 
-    if not result["exists"]:
+    if result.get("scan_error"):
+        errors.append(f"{label}目录无法读取：{directory}（{result['scan_error']}）")
+    elif not result["exists"]:
         errors.append(f"{label}目录不存在：{directory}")
     elif result["total_files"] == 0:
         errors.append(f"{label}目录中没有 .tif 文件：{directory}")
@@ -11451,7 +11467,25 @@ def _forecast_input_dir_summary(
             "missing_steps": 0,
             "out_of_window_steps": 0,
         }
-    directory = resolve_any_path(raw_text, must_exist=False)
+    try:
+        directory = resolve_any_path(raw_text, must_exist=False)
+    except (OSError, ValueError) as exc:
+        message = f"预报{label}目录路径无效：{exc}"
+        return {
+            "key": key,
+            "label": label,
+            "path": raw_text,
+            "status": "fail",
+            "summary": message,
+            "errors": [message],
+            "warnings": [],
+            "total_files": 0,
+            "valid_time_steps": 0,
+            "expected_steps": int(len(expected_index)) if expected_index is not None else 0,
+            "covered_steps": 0,
+            "missing_steps": int(len(expected_index)) if expected_index is not None else 0,
+            "out_of_window_steps": 0,
+        }
     check = validate_tif_time_series(label, directory, step_hours, expected_index, "预报窗口")
     expected_steps = int(len(expected_index)) if expected_index is not None else 0
     missing_count = int(len(check.get("missing_steps", []) or []))

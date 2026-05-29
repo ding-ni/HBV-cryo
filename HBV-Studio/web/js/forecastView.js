@@ -423,7 +423,10 @@
     };
     try { window.Plotly.purge(chart); } catch {}
     chart.innerHTML = "";
-    window.Plotly.newPlot(chart, traces, layout, { responsive: true });
+    try {
+      const plot = window.Plotly.newPlot(chart, traces, layout, { responsive: true });
+      if (plot && typeof plot.catch === "function") plot.catch(() => {});
+    } catch {}
   }
 
   function renderForecastResultDetail(data = {}, helpers = {}) {
