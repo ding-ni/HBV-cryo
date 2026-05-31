@@ -3916,13 +3916,12 @@ def _forecast_par_base(opt_params):
     TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, K_MUSK, X_MUSK = opt_params
     cfmax_low_step = scale_linear_to_step(CFMAX_low)
     cfmax_high_step = scale_linear_to_step(CFMAX_high)
-    cfr_step = scale_linear_to_step(CFR)
     k_step = scale_recession_to_step(K)
     k1_step = scale_recession_to_step(K1)
     k2_step = scale_recession_to_step(K2)
     perc_step = scale_linear_to_step(PERC)
     par_base = np.array([
-        TT, RFCF, SFCF, 0.0, CWH, cfr_step,
+        TT, RFCF, SFCF, 0.0, CWH, CFR,  # CFR 为无量纲倍率，步长缩放已由 cfmax 承担，不再独立缩放
         FC, BETA, FIXED["E_CORR"], LP, k_step, k1_step, k2_step, UZL, perc_step,
     ], dtype=np.float64)
     return par_base, ICE_FACTOR, K_MUSK, X_MUSK, cfmax_low_step, cfmax_high_step
@@ -4938,14 +4937,13 @@ def run_simulation(opt_params, mode="full"):
     TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, K_MUSK, X_MUSK = opt_params
     cfmax_low_step = scale_linear_to_step(CFMAX_low)
     cfmax_high_step = scale_linear_to_step(CFMAX_high)
-    cfr_step = scale_linear_to_step(CFR)
     k_step = scale_recession_to_step(K)
     k1_step = scale_recession_to_step(K1)
     k2_step = scale_recession_to_step(K2)
     perc_step = scale_linear_to_step(PERC)
 
     par_base = np.array([
-        TT, RFCF, SFCF, 0.0, CWH, cfr_step,
+        TT, RFCF, SFCF, 0.0, CWH, CFR,  # CFR 为无量纲倍率，步长缩放已由 cfmax 承担，不再独立缩放
         FC, BETA, FIXED["E_CORR"], LP, k_step, k1_step, k2_step, UZL, perc_step,
     ], dtype=np.float64)
 
@@ -5128,14 +5126,13 @@ def compute_state_snapshot(opt_params):
     TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, _, _ = opt_params
     cfmax_low_step = scale_linear_to_step(CFMAX_low)
     cfmax_high_step = scale_linear_to_step(CFMAX_high)
-    cfr_step = scale_linear_to_step(CFR)
     k_step = scale_recession_to_step(K)
     k1_step = scale_recession_to_step(K1)
     k2_step = scale_recession_to_step(K2)
     perc_step = scale_linear_to_step(PERC)
 
     par_base = np.array([
-        TT, RFCF, SFCF, 0.0, CWH, cfr_step,
+        TT, RFCF, SFCF, 0.0, CWH, CFR,  # CFR 为无量纲倍率，步长缩放已由 cfmax 承担，不再独立缩放
         FC, BETA, FIXED["E_CORR"], LP, k_step, k1_step, k2_step, UZL, perc_step,
     ], dtype=np.float64)
 
