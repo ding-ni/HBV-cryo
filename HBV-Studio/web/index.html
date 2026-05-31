@@ -219,12 +219,12 @@
                 <div class="field-group">
                   <label>洪水事件表</label>
                   <div class="path-input">
-                    <input id="wz-event-file" type="text" placeholder="CSV / JSON / Excel 事件表">
+                    <input id="wz-event-file" type="text" placeholder="事件表：编号、开始时间、结束时间">
                     <button class="browse-button" data-target="wz-event-file" data-browse-kind="file" data-extensions=".csv,.json,.xlsx,.xls">选择</button>
                   </div>
                 </div>
               </div>
-              <div class="hint-box" id="wz-event-mode-hint" style="margin-top:12px">连续时段要求完整覆盖预热、率定和验证期；洪水事件窗口只要求每场事件内部资料连续。</div>
+              <div class="hint-box" id="wz-event-mode-hint" style="margin-top:12px">连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。</div>
               <div id="wz-event-file-summary" style="margin-top:12px"></div>
               <div class="field-grid two" style="margin-top:12px">
                 <div class="field-group"><label>融雪度日因子分区阈值（米） <small style="color:var(--muted)">— 高/低海拔分别使用不同 CFMAX</small></label><input id="wz-cfmax" type="number" step="0.1" value="5000"></div>

@@ -1642,10 +1642,10 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
 }
 .event-coverage-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.3fr) minmax(180px, 1.7fr) minmax(76px, 0.7fr) minmax(72px, 0.7fr) minmax(120px, 1fr) minmax(92px, 0.8fr) minmax(64px, 0.6fr);
+  grid-template-columns: minmax(140px, 1.15fr) minmax(220px, 1.65fr) minmax(70px, 0.55fr);
   gap: 8px;
   align-items: center;
-  min-width: 860px;
+  min-width: 480px;
   padding: 8px 12px;
   border-top: 1px solid rgba(20,79,84,0.08);
   font-size: 12px;
@@ -1710,31 +1710,12 @@ input[readonly] { background: #f8f5ef; color: var(--muted); }
   overflow-wrap: anywhere;
 }
 
-.event-window-policy {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(20,79,84,0.08);
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.event-window-policy strong {
-  color: var(--text);
-}
-
-.event-window-policy .status-warn {
-  color: var(--warm);
-  font-weight: 600;
-}
-
 .event-window-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.2fr) minmax(56px, 0.55fr) minmax(190px, 1.5fr) minmax(190px, 1.5fr) minmax(88px, 0.7fr) minmax(66px, 0.55fr);
+  grid-template-columns: minmax(140px, 1.15fr) minmax(190px, 1.35fr) minmax(120px, 0.9fr);
   gap: 8px;
   align-items: center;
-  min-width: 820px;
+  min-width: 480px;
   padding: 8px 12px;
   border-top: 1px solid rgba(20,79,84,0.08);
   font-size: 12px;

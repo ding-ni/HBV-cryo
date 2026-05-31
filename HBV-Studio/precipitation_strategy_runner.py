@@ -229,8 +229,8 @@ def normalized_event_windows(config: dict[str, Any], *, step_hours: float) -> di
         event_id = str(event_field(raw_event, "event_id", "id", "编号") or f"event_{index}").strip()
         name = str(event_field(raw_event, "name", "名称", "事件名称") or event_id).strip()
         purpose = str(event_field(raw_event, "purpose", "用途", "类型") or "diagnostic").strip().lower()
-        score_start_raw = event_field(raw_event, "score_start", "评分开始", "事件开始", "start")
-        score_end_raw = event_field(raw_event, "score_end", "评分结束", "事件结束", "end")
+        score_start_raw = event_field(raw_event, "score_start", "评分开始", "事件开始", "洪水开始", "开始时间", "起始时间", "start")
+        score_end_raw = event_field(raw_event, "score_end", "评分结束", "事件结束", "洪水结束", "结束时间", "终止时间", "end")
         run_start_raw = event_field(raw_event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
         run_end_raw = event_field(raw_event, "run_end", "运行结束", "退水结束") or score_end_raw
         try:
@@ -301,17 +301,15 @@ def load_station_metadata(path: Path, raster_crs: Any) -> pd.DataFrame:
     id_col = detect_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
     lon_col = detect_column(columns, ["lon", "longitude", "x", "经度"])
     lat_col = detect_column(columns, ["lat", "latitude", "y", "纬度"])
-    weight_col = detect_column(columns, ["weight", "thiessen_weight", "area_weight", "权重"])
     if not id_col or not lon_col or not lat_col:
         raise ValueError("站点信息 csv 至少需要站号、经度、纬度字段。")
 
-    out = frame[[id_col, lon_col, lat_col] + ([weight_col] if weight_col else [])].copy()
-    out.columns = ["station_id", "x_raw", "y_raw"] + (["weight"] if weight_col else [])
+    out = frame[[id_col, lon_col, lat_col]].copy()
+    out.columns = ["station_id", "x_raw", "y_raw"]
     out["station_id"] = out["station_id"].astype(str).str.strip()
     out["x_raw"] = pd.to_numeric(out["x_raw"], errors="coerce")
     out["y_raw"] = pd.to_numeric(out["y_raw"], errors="coerce")
-    out["weight"] = pd.to_numeric(out["weight"], errors="coerce") if "weight" in out.columns else 1.0
-    out["weight"] = out["weight"].fillna(1.0).clip(lower=0.0)
+    out["weight"] = 1.0
     out = out.dropna(subset=["x_raw", "y_raw"])
     if out.empty:
         raise ValueError("站点信息 csv 中没有有效坐标。")

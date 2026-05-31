@@ -81,45 +81,41 @@
     const summary = check.event_coverage_summary || {};
     const okCount = Number(summary.ok_count ?? events.filter(item => item.status === "ok").length);
     const eventCount = Number(summary.event_count ?? events.length);
-    const rows = events.slice(0, 30).map(item => {
+    const problemEvents = events.filter(item => String(item.status || "warn") !== "ok");
+    const rows = problemEvents.slice(0, 8).map(item => {
       const status = String(item.status || "warn");
       const eventName = item.name || item.event_id || "未命名事件";
       const eventId = item.event_id && item.name ? `（${item.event_id}）` : "";
-      const windowText = item.run_start || item.run_end ? `${item.run_start || "—"} ~ ${item.run_end || "—"}` : "未记录";
-      const expected = Number(item.expected_steps || 0);
-      const covered = Number(item.covered_steps || 0);
       const zeroSteps = Number(item.zero_available_steps || 0);
       const maxZero = Number(item.max_consecutive_zero_steps || 0);
+      const coverage = coveragePercent(item.coverage_ratio, formatNumber);
+      const stationText = stationCountText(item, formatNumber);
+      const issueText = zeroSteps > 0 ? `${coverage}；${stationText}；无站点 ${zeroSteps} 步，最长连续 ${maxZero}` : `${coverage}；${stationText}`;
       return `
         <div class="event-coverage-row ${focusStatusClass(status)}">
           <span><strong>${escapeHtml(eventName)}</strong><small>${escapeHtml(eventId)}</small></span>
-          <span>${escapeHtml(windowText)}</span>
-          <span>${escapeHtml(expected ? `${covered}/${expected}` : String(covered || 0))}</span>
-          <span>${escapeHtml(coveragePercent(item.coverage_ratio, formatNumber))}</span>
-          <span>${escapeHtml(stationCountText(item, formatNumber))}</span>
-          <span>${escapeHtml(`${zeroSteps} / 连续 ${maxZero}`)}</span>
+          <span>${escapeHtml(issueText)}</span>
           <span class="${focusStatusClass(status)}">${escapeHtml(focusStatusLabel(status))}</span>
         </div>
       `;
     }).join("");
-    const more = events.length > 30
-      ? `<div class="event-coverage-more">还有 ${events.length - 30} 场事件未在此展开，可在站点覆盖明细中继续核对。</div>`
+    const more = problemEvents.length > 8
+      ? `<div class="event-coverage-more">还有 ${problemEvents.length - 8} 场需复核。</div>`
       : "";
     return `
       <div class="event-coverage-matrix">
         <div class="event-coverage-title">
-          <strong>洪水事件站点覆盖矩阵</strong>
-          <span>${escapeHtml(`${okCount}/${eventCount} 场事件运行窗口覆盖完整`)}</span>
+          <strong>洪水事件站点覆盖</strong>
+          <span>${escapeHtml(`${okCount}/${eventCount} 场可用`)}</span>
         </div>
-        <div class="event-coverage-row event-coverage-head">
-          <span>事件</span>
-          <span>运行窗口</span>
-          <span>覆盖步数</span>
-          <span>覆盖率</span>
-          <span>可用站点</span>
-          <span>无站点步</span>
-          <span>结论</span>
-        </div>
+        <div class="event-coverage-more">仅列出需复核的洪水事件；全部通过时不展开明细。</div>
+        ${rows ? `
+          <div class="event-coverage-row event-coverage-head">
+            <span>事件</span>
+            <span>站点资料</span>
+            <span>结论</span>
+          </div>
+        ` : ""}
         ${rows}
         ${more}
       </div>

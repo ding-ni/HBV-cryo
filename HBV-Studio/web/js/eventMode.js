@@ -70,11 +70,8 @@
 
   function eventChartCustomData(events, formatMetricValue = defaultFormatMetricValue) {
     return events.map(event => [
-      event?.used_in_objective ? "参与目标函数" : "诊断事件",
       formatMetricValue(event?.nse, 4),
       formatMetricValue(event?.kge, 4),
-      formatMetricValue(event?.high_flow_weighted_nse, 4),
-      formatMetricValue(event?.recession_slope_error_percent, 2, "%"),
     ]);
   }
 
@@ -112,7 +109,7 @@
 
     const names = events.map(event => event._chartName);
     const customdata = eventChartCustomData(events, formatMetricValue);
-    const hoverSuffix = "<br>类型 %{customdata[0]}<br>NSE %{customdata[1]}<br>KGE %{customdata[2]}<br>高流量NSE %{customdata[3]}<br>退水误差 %{customdata[4]}<extra></extra>";
+    const hoverSuffix = "<br>NSE %{customdata[0]}<br>KGE %{customdata[1]}<extra></extra>";
     const traces = [
       {
         x: names,
@@ -163,14 +160,6 @@
     } catch {}
   }
 
-  function purposeLabel(value) {
-    const key = String(value || "").trim().toLowerCase();
-    if (key === "calibration") return "率定";
-    if (key === "validation") return "验证";
-    if (key === "diagnostic") return "诊断";
-    return key || "未记录";
-  }
-
   function initialStatePolicyLabel(value) {
     const key = String(value || "").trim().toLowerCase();
     if (key === "event_warmup" || key === "warmup" || key === "event_preheat") return "事件预热";
@@ -186,7 +175,6 @@
     const shortPath = helpers.shortPath || defaultShortPath;
     if (!eventInfo || !Number(eventInfo.event_count || 0)) return "";
     const events = Array.isArray(eventInfo.events) ? eventInfo.events : [];
-    const counts = eventInfo.purpose_counts || {};
     const validCount = Number(eventInfo.valid_event_count || 0);
     const eventCount = Number(eventInfo.event_count || events.length);
     const hasErrors = Boolean((eventInfo.errors || []).length);
@@ -198,15 +186,11 @@
     ];
     const rows = events.slice(0, 30).map(event => {
       const rowStatus = event.valid ? "ok" : "fail";
-      const runWindow = `${event.run_start || "—"} ~ ${event.run_end || "—"}`;
-      const scoreWindow = `${event.score_start || "—"} ~ ${event.score_end || "—"}`;
+      const eventWindow = `${event.score_start || event.run_start || "—"} ~ ${event.score_end || event.run_end || "—"}`;
       return `
         <div class="event-window-row ${statusClass(rowStatus)}">
           <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
-          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
-          <span>${escapeHtml(runWindow)}</span>
-          <span>${escapeHtml(scoreWindow)}</span>
-          <span>${escapeHtml(`${event.time_steps_run || 0}/${event.time_steps_score || 0}`)}</span>
+          <span>${escapeHtml(eventWindow)}</span>
           <span class="${statusClass(rowStatus)}">${escapeHtml(event.valid ? "有效" : "需修正")}</span>
         </div>
       `;
@@ -217,31 +201,17 @@
     const issues = issueItems.length
       ? `<ul class="event-window-issues">${issueItems.slice(0, 8).map(({ item, cls }) => `<li class="${cls}">${escapeHtml(item)}</li>`).join("")}</ul>`
       : "";
-    const initialPolicy = eventInfo.initial_state_policy_label
-      || initialStatePolicyLabel(eventInfo.initial_state_policy);
-    const continuityText = eventInfo.state_continuity_between_events === true
-      ? "事件之间传递状态"
-      : "事件之间不传递状态";
-    const initialNote = eventInfo.initial_state_note || continuityText;
-    const initialWarning = eventInfo.initial_state_warning || "";
     return `
       <div class="event-window-summary">
         <div class="event-window-title">
-          <strong>洪水事件表解析结果</strong>
-          <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效；率定 ${counts.calibration || 0}、验证 ${counts.validation || 0}、诊断 ${counts.diagnostic || 0}`)}</span>
+          <strong>洪水事件表</strong>
+          <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效`)}</span>
         </div>
         ${eventInfo.source_file ? `<div class="event-window-source" title="${escapeHtml(eventInfo.source_file)}">事件表：${escapeHtml(shortPath(eventInfo.source_file) || "已读取")}</div>` : ""}
-        <div class="event-window-policy">
-          <strong>初始条件：${escapeHtml(initialPolicy)}</strong>
-          <span>${escapeHtml(initialNote)}</span>
-          ${initialWarning ? `<span class="status-warn">${escapeHtml(initialWarning)}</span>` : ""}
-        </div>
+        <div class="event-window-source">推荐表头：编号、开始时间、结束时间。事件之间允许资料间断。</div>
         <div class="event-window-row event-window-head">
           <span>事件</span>
-          <span>用途</span>
-          <span>运行窗口</span>
-          <span>评分窗口</span>
-          <span>运行/评分步数</span>
+          <span>洪水时段</span>
           <span>结论</span>
         </div>
         ${rows}
@@ -266,14 +236,12 @@
         const missing = Number(item.missing_steps || 0);
         return missing > 0 ? `${label} ${value}，缺 ${missing}` : `${label} ${value}`;
       }).join("；");
+      const conclusion = event.status === "ok" ? "完整" : `缺测：${variableText}`;
       return `
         <div class="event-window-row ${statusClass(event.status || "warn")}">
           <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
-          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
           <span>${escapeHtml(`${event.run_start || "—"} ~ ${event.run_end || "—"}`)}</span>
-          <span>${escapeHtml(String(event.expected_steps || 0))}</span>
-          <span>${escapeHtml(variableText)}</span>
-          <span class="${statusClass(event.status || "warn")}">${escapeHtml(event.status === "ok" ? "完整" : "缺测")}</span>
+          <span class="${statusClass(event.status || "warn")}">${escapeHtml(conclusion)}</span>
         </div>
       `;
     }).join("");
@@ -286,16 +254,13 @@
           <strong>事件内气象覆盖</strong>
           <span class="${statusClass(status)}">${escapeHtml(`${Number(coverage.complete_event_count || 0)}/${Number(coverage.event_count || 0)} 场完整`)}</span>
         </div>
-        <div class="event-window-source">按每场事件运行窗口分别核对降水、气温和潜在蒸散发；事件之间允许资料间断。</div>
+        <div class="event-window-source">只检查每场洪水内部气象资料；事件之间允许间断。</div>
         <div class="event-window-row event-window-head">
           <span>事件</span>
-          <span>用途</span>
-          <span>运行窗口</span>
-          <span>时间步</span>
-          <span>P/T/PET 覆盖</span>
+          <span>洪水时段</span>
           <span>结论</span>
         </div>
-        ${rows || '<div class="hint-box status-warn">尚未形成可检查的事件运行窗口。</div>'}
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的洪水事件。</div>'}
         ${more}
       </div>
     `;
@@ -315,14 +280,11 @@
       const preview = Array.isArray(event.missing_preview) && event.missing_preview.length
         ? `；缺测示例：${event.missing_preview.slice(0, 3).join("、")}`
         : "";
-      const conclusion = event.status === "ok" ? "完整" : event.status === "fail" ? "需补齐" : "需复核";
+      const conclusion = event.status === "ok" ? "完整" : `${event.status === "fail" ? "需补齐" : "需复核"}：覆盖率 ${ratio}${missing > 0 ? `，缺 ${missing}` : ""}${preview}`;
       return `
         <div class="event-window-row ${statusClass(event.status || "warn")}">
           <span><strong>${escapeHtml(event.name || event.event_id || "未命名事件")}</strong><small>${escapeHtml(event.event_id || "")}</small></span>
-          <span>${escapeHtml(purposeLabel(event.purpose))}</span>
           <span>${escapeHtml(`${event.score_start || "—"} ~ ${event.score_end || "—"}`)}</span>
-          <span>${escapeHtml(`${covered}/${expected}`)}</span>
-          <span>${escapeHtml(`覆盖率 ${ratio}${missing > 0 ? `，缺 ${missing}` : ""}${preview}`)}</span>
           <span class="${statusClass(event.status || "warn")}">${escapeHtml(conclusion)}</span>
         </div>
       `;
@@ -333,19 +295,16 @@
     return `
       <div class="event-window-summary">
         <div class="event-window-title">
-          <strong>事件评分窗口观测覆盖</strong>
+          <strong>事件流量覆盖</strong>
           <span class="${statusClass(status)}">${escapeHtml(`${Number(coverage.complete_event_count || 0)}/${Number(coverage.event_count || 0)} 场完整`)}</span>
         </div>
-        <div class="event-window-source">按每场事件评分窗口核对实测流量；事件之间允许资料间断，事件内部缺测会影响洪峰、洪量和退水评价。</div>
+        <div class="event-window-source">只检查每场洪水内部实测流量；事件之间允许间断。</div>
         <div class="event-window-row event-window-head">
           <span>事件</span>
-          <span>用途</span>
-          <span>评分窗口</span>
-          <span>观测步数</span>
-          <span>覆盖情况</span>
+          <span>洪水时段</span>
           <span>结论</span>
         </div>
-        ${rows || '<div class="hint-box status-warn">尚未形成可检查的事件评分窗口。</div>'}
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的洪水事件。</div>'}
         ${more}
       </div>
     `;

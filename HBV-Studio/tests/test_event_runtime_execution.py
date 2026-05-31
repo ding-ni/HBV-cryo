@@ -45,24 +45,14 @@ class EventRuntimeExecutionTests(unittest.TestCase):
 
             events = [
                 {
-                    "event_id": "E202007",
-                    "name": "event A",
-                    "purpose": "calibration",
-                    "run_start": "2020-07-01",
-                    "score_start": "2020-07-03",
-                    "score_end": "2020-07-05",
-                    "run_end": "2020-07-06",
-                    "weight": 1.0,
+                    "编号": "E202007",
+                    "开始时间": "2020-07-03",
+                    "结束时间": "2020-07-05",
                 },
                 {
-                    "event_id": "E202108",
-                    "name": "event B",
-                    "purpose": "validation",
-                    "run_start": "2021-08-01",
-                    "score_start": "2021-08-03",
-                    "score_end": "2021-08-05",
-                    "run_end": "2021-08-06",
-                    "weight": 0.7,
+                    "编号": "E202108",
+                    "开始时间": "2021-08-03",
+                    "结束时间": "2021-08-05",
                 },
             ]
             dates = pd.DatetimeIndex(
@@ -157,12 +147,12 @@ class EventRuntimeExecutionTests(unittest.TestCase):
             self.assertEqual(metadata["event_mode"]["runtime_mode"], "independent_event_windows")
             self.assertFalse(metadata["event_mode"]["state_continuity_between_events"])
             self.assertFalse(metadata["initial_state"]["state_snapshot_available"])
-            self.assertIn("事件窗口资料模式按场独立运行", metadata["flood_event_evaluation"]["notes"][0])
-            self.assertEqual(len(simulation), 12)
+            self.assertIn("每场洪水独立运行并评价", metadata["flood_event_evaluation"]["notes"][0])
+            self.assertEqual(len(simulation), 6)
             self.assertNotIn("2020-07-07", set(simulation["date"].astype(str)))
             self.assertEqual(set(event_metrics["event_id"]), {"E202007", "E202108"})
             self.assertEqual(set(["run_start", "score_start", "score_end", "run_end"]).issubset(event_metrics.columns), True)
-            self.assertIn("weight", event_metrics.columns)
+            self.assertNotIn("weight", event_metrics.columns)
 
 
 if __name__ == "__main__":

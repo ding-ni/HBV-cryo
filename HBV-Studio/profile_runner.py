@@ -274,8 +274,8 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
             continue
         event = dict(raw_event)
         token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        event_id = str(_event_field(event, "event_id", "id", "编号") or "").strip()
-        name = str(_event_field(event, "name", "名称", "事件名称") or "").strip()
+        event_id = str(_event_field(event, "event_id", "id", "编号", "洪水编号", "事件编号") or "").strip()
+        name = str(_event_field(event, "name", "名称", "事件名称", "洪水名称") or "").strip()
         if not event_id:
             event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
         if event_id in seen_ids:
@@ -288,8 +288,8 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
             warnings.append(f"事件 {event_id} 的用途 {purpose_raw} 未识别，按 diagnostic 处理。")
             purpose = "diagnostic"
 
-        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "start")
-        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "end")
+        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "洪水开始", "开始时间", "起始时间", "start")
+        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "洪水结束", "结束时间", "终止时间", "end")
         run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
         run_end_raw = _event_field(event, "run_end", "运行结束", "退水结束") or score_end_raw
         event_errors: list[str] = []
@@ -302,19 +302,9 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
             run_start = score_start = score_end = run_end = None
             event_errors.append(f"事件时间无法解析：{exc}")
         if None in (run_start, score_start, score_end, run_end):
-            event_errors.append("事件缺少运行窗口或评分窗口时间。")
+            event_errors.append("事件缺少开始时间或结束时间。")
         elif not (run_start <= score_start <= score_end <= run_end):
-            event_errors.append("事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
-
-        weight_raw = _event_field(event, "weight", "权重")
-        try:
-            weight = float(weight_raw) if weight_raw not in (None, "") else 1.0
-        except Exception:
-            weight = 1.0
-            warnings.append(f"事件 {event_id} 的权重无法解析，按 1 处理。")
-        if weight <= 0.0:
-            weight = 1.0
-            warnings.append(f"事件 {event_id} 的权重小于等于 0，按 1 处理。")
+            event_errors.append("事件时间顺序不正确：运行开始应不晚于开始时间，结束时间应不晚于运行结束。")
         if event_errors:
             errors.extend(f"{event_id}: {item}" for item in event_errors)
             continue
@@ -327,7 +317,6 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
                 "purpose": purpose,
                 "type": purpose,
                 "类型": purpose,
-                "weight": float(weight),
                 "run_start": _format_event_timestamp(run_start, step_hours),
                 "score_start": _format_event_timestamp(score_start, step_hours),
                 "score_end": _format_event_timestamp(score_end, step_hours),
@@ -344,7 +333,7 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
     events.sort(key=lambda item: (pd.Timestamp(item["run_start"]), str(item["event_id"])))
     for left, right in zip(events, events[1:]):
         if pd.Timestamp(left["run_end"]) >= pd.Timestamp(right["run_start"]):
-            warnings.append(f"事件运行窗口可能重叠：{left['event_id']} 与 {right['event_id']}。")
+            warnings.append(f"事件时段可能重叠：{left['event_id']} 与 {right['event_id']}。")
     return {
         "config": cfg,
         "events": events,

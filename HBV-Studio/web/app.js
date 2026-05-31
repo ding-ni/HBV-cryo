@@ -2055,10 +2055,10 @@ function stationPrecipModeLabel(mode) {
 
 function stationPrecipModeDescription(mode) {
   if (mode === "grid_plus_station_bias") {
-    return "按时段在站点位置抽取格点降水，采用比值订正与残差订正并进行空间插值，形成逐栅格订正降水。";
+    return "用站点实测降水修正格点降水，生成逐栅格降水。";
   }
   if (mode === "thiessen_station_only") {
-    return "直接以站点降水控制目标格网，按最近控制站形成面雨量场，适合作为站点资料主导的基线方案。";
+    return "用站点降水直接生成面降水，适合站点资料主导的任务。";
   }
   return "不启用站点订正或泰森分配，降水输入来自当前格点数据源。";
 }
@@ -2082,12 +2082,12 @@ function renderPrecipStrategyStatus() {
     <div class="workflow-signal-card ${needsStation ? (stationPrec ? "status-ok" : "status-warn") : ""}">
       <strong>站点降水表</strong>
       <span>${escapeHtml(needsStation ? (stationPrec ? shortPath(stationPrec) : "未选择") : "不需要")}</span>
-      <small>用于站点时间序列、站号匹配、缺测率和异常降水检查。</small>
+      <small>提供逐时或逐日站点降水。</small>
     </div>
     <div class="workflow-signal-card ${needsStation ? (stationMeta ? "status-ok" : "status-warn") : ""}">
       <strong>站点空间信息</strong>
       <span>${escapeHtml(needsStation ? (stationMeta ? shortPath(stationMeta) : "未选择") : "不需要")}</span>
-      <small>用于经纬度定位、格点抽样、空间权重和目标栅格分配。</small>
+      <small>提供站号、经度、纬度。</small>
     </div>
   `;
 }
@@ -2115,7 +2115,7 @@ function renderStationPrecipCheckOverview(validation = null) {
   const summary = !needsStation
     ? "当前为格点基线模式，输入检查不会执行站点降水订正专项分析。"
     : (stationPrec && stationMeta
-      ? "站点降水资料已登记，运行检查后会输出站号匹配、时间覆盖、缺测率和异常值。"
+      ? "站点降水资料已登记，输入检查会判断资料是否可用。"
       : "当前降水方案需要站点降水表和站点空间信息，资料未完整登记。");
   host.innerHTML = renderEngineeringFocusChecks([{
     title: "站点降水专项检查",
@@ -2219,7 +2219,7 @@ function updateObservationHint() {
     warnings.push(`当前项目为日尺度，系统会把小时观测按自然日聚合为日平均流量（至少 ${minHours} 小时/天）。`);
   }
   if (timeBasis === "event_windows") {
-    warnings.push("当前按洪水事件窗口检查资料；观测覆盖将在第 7 步按各事件评分窗口核验。");
+    warnings.push("当前按洪水事件检查资料；观测覆盖将在第 7 步按各场洪水时段核验。");
   }
   const periods = [
     { label: "率定期", start: getWizardTimeValue("#wz-calib-start"), end: getWizardTimeValue("#wz-calib-end") },
@@ -2268,11 +2268,11 @@ function updateEventModeHint() {
   if (basis === "event_windows") {
     host.className = `hint-box ${eventFile ? "status-ok" : "status-warn"}`;
     host.textContent = eventFile
-      ? "当前按洪水事件窗口组织资料。系统将按事件运行窗口检查气象强迫，按评分窗口检查观测流量；事件之间允许资料间断。"
-      : "已选择洪水事件窗口，请提供事件表。事件表应包含运行开始、评分开始、评分结束、运行结束和用途等字段。";
+      ? "当前按洪水事件组织资料。系统只检查每场洪水内部资料，事件之间允许间断。"
+      : "已选择洪水事件，请提供事件表。推荐表头为：编号、开始时间、结束时间。";
   } else {
     host.className = "hint-box";
-    host.textContent = "连续时段要求完整覆盖预热、率定和验证期；洪水事件窗口只要求每场事件内部资料连续。";
+    host.textContent = "连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。";
   }
 }
 
@@ -3100,13 +3100,12 @@ function floodEventRows(meta = {}) {
   const evaluation = floodEventEvaluation(meta);
   if (!evaluation?.enabled) return [];
   const rows = [
-    ["事件评价", floodEventStatusText(evaluation), `评价口径：${evaluation.evaluation_basis || "模拟流量"}`],
-    ["事件目标值", floodEventObjectiveText(evaluation), evaluation.objective_enabled ? "数值越小表示事件综合偏差越小" : "当前为诊断值，不参与本次优化"],
+    ["事件评价", floodEventStatusText(evaluation), ""],
+    ["事件目标值", floodEventObjectiveText(evaluation), "数值越小表示洪水过程偏差越小"],
   ];
   const eventMode = meta?.event_mode || meta?.time_config?.event_runtime || {};
   if (eventMode?.enabled) {
     const modeText = eventMode.runtime_mode === "independent_event_windows" ? "事件窗口独立运行" : "事件窗口资料";
-    const stateText = eventMode.state_continuity_between_events === false ? "事件之间不传递状态" : "按配置处理事件间状态";
     const initialPolicy = eventMode.initial_state_policy_label
       || window.HBVStudioEventMode?.initialStatePolicyLabel?.(eventMode.initial_state_policy)
       || eventMode.initial_state_policy
@@ -3114,7 +3113,7 @@ function floodEventRows(meta = {}) {
     rows.push([
       "事件资料模式",
       `${modeText}，${Number(eventMode.event_count || 0)} 场`,
-      `${stateText}；初始条件：${initialPolicy}`,
+      `初始条件：${initialPolicy}`,
     ]);
   }
   const events = Array.isArray(evaluation.events) ? evaluation.events : [];
@@ -3128,11 +3127,8 @@ function floodEventRows(meta = {}) {
     const detail = [
       `NSE ${formatMetricValue(event?.nse, 4)}`,
       `KGE ${formatMetricValue(event?.kge, 4)}`,
-      `高流量NSE ${formatMetricValue(event?.high_flow_weighted_nse, 4)}`,
-      `高流量KGE ${formatMetricValue(event?.high_flow_kge, 4)}`,
-      `退水 ${formatMetricValue(event?.recession_slope_error_percent, 2, "%")}`,
     ].join("，");
-    rows.push([String(name), value, `${event?.used_in_objective ? "参与目标函数" : "诊断事件"}；${detail}`]);
+    rows.push([String(name), value, detail]);
   });
   if (events.length > 12) {
     rows.push(["更多事件", `还有 ${events.length - 12} 场`, "完整事件表见结果目录 flood_events.csv"]);

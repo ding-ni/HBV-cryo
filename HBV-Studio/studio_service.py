@@ -151,7 +151,7 @@ EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
     "event_warmup": {
         "label": "事件预热",
         "state_continuity_between_events": False,
-        "note": "每场事件从运行开始独立预热至评分开始，事件之间不传递状态。",
+        "note": "每场洪水独立确定初始状态，事件之间不传递状态。",
         "warning": "",
     },
     "fixed_initial": {
@@ -163,7 +163,7 @@ EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
     "source_state": {
         "label": "来源状态",
         "state_continuity_between_events": False,
-        "note": "每场事件使用外部连续模拟状态作为初值，事件之间不直接传递状态。",
+        "note": "每场洪水使用外部连续模拟状态作为初值。",
         "warning": "",
     },
     "continuous_state": {
@@ -1913,9 +1913,9 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
             continue
         event = dict(raw_event)
         token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        event_id_raw = str(_event_field(event, "event_id", "id", "编号") or "").strip()
+        event_id_raw = str(_event_field(event, "event_id", "id", "编号", "洪水编号", "事件编号") or "").strip()
         event_id = event_id_raw
-        name = str(_event_field(event, "name", "名称", "事件名称") or "").strip()
+        name = str(_event_field(event, "name", "名称", "事件名称", "洪水名称") or "").strip()
         if not event_id:
             event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
             warnings.append(f"第 {index} 条事件未填写 event_id，已临时使用 {event_id}；正式工程建议填写唯一事件编号。")
@@ -1927,13 +1927,12 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
         if event_id in seen_ids:
             errors.append(f"洪水事件编号重复：{event_id}")
         seen_ids.add(event_id)
-        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "start")
-        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "end")
+        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "洪水开始", "开始时间", "起始时间", "start")
+        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "洪水结束", "结束时间", "终止时间", "end")
         run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
         run_end_value = _event_field(event, "run_end", "运行结束", "退水结束")
         if run_end_value in (None, ""):
             run_end_raw = score_end_raw
-            warnings.append(f"事件 {event_id} 未填写 run_end，已按评分结束作为运行结束；建议显式给出退水结束时间。")
         else:
             run_end_raw = run_end_value
         event_errors: list[str] = []
@@ -1948,25 +1947,16 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
             run_start = score_start = score_end = run_end = None
             event_errors.append(f"事件时间无法解析：{exc}")
         if run_start is None or score_start is None or score_end is None or run_end is None:
-            event_errors.append("事件缺少运行窗口或评分窗口时间。")
+            event_errors.append("事件缺少开始时间或结束时间。")
         elif not (run_start <= score_start <= score_end <= run_end):
-            event_errors.append("事件时间顺序必须满足 run_start <= score_start <= score_end <= run_end。")
+            event_errors.append("事件时间顺序不正确：运行开始应不晚于开始时间，结束时间应不晚于运行结束。")
         else:
             time_steps_run = int(len(_event_date_range(run_start, run_end, step)))
             time_steps_score = int(len(_event_date_range(score_start, score_end, step)))
             min_score_steps = 3 if step >= 24.0 else 6
             if time_steps_score < min_score_steps:
                 unit = "天" if step >= 24.0 else "小时"
-                event_errors.append(f"事件评分窗口过短：当前 {time_steps_score} 步，至少需要 {min_score_steps} 步（{unit}尺度）。")
-        weight = _event_field(event, "weight", "权重")
-        try:
-            weight_value = float(weight) if weight not in (None, "") else 1.0
-        except Exception:
-            weight_value = 1.0
-            warnings.append(f"事件 {event_id} 的权重无法解析，按 1 处理。")
-        if weight_value <= 0:
-            warnings.append(f"事件 {event_id} 的权重小于等于 0，按 1 处理。")
-            weight_value = 1.0
+                event_errors.append(f"事件时段过短：当前 {time_steps_score} 步，至少需要 {min_score_steps} 步（{unit}尺度）。")
         if event_errors:
             errors.extend(f"{event_id}: {item}" for item in event_errors)
         events.append(
@@ -1974,7 +1964,6 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
                 "event_id": event_id,
                 "name": name or event_id,
                 "purpose": purpose,
-                "weight": weight_value,
                 "run_start": run_start,
                 "score_start": score_start,
                 "score_end": score_end,
@@ -1992,7 +1981,7 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
     )
     for left, right in zip(valid_events, valid_events[1:]):
         if left["run_end"] >= right["run_start"]:
-            warnings.append(f"事件运行窗口可能重叠：{left['event_id']} 与 {right['event_id']}。")
+            warnings.append(f"事件时段可能重叠：{left['event_id']} 与 {right['event_id']}。")
     purpose_counts = {
         "calibration": sum(1 for event in valid_events if event.get("purpose") == "calibration"),
         "validation": sum(1 for event in valid_events if event.get("purpose") == "validation"),
@@ -2462,7 +2451,7 @@ def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tupl
         expected_steps = int(event.get("expected_steps", 0) or 0)
         preview = "、".join(str(item) for item in list(event.get("missing_preview", []) or [])[:3])
         suffix = f"；例如 {preview}" if preview else ""
-        message = f"事件 {name} 评分窗口观测径流缺测 {missing_steps}/{expected_steps} 步{suffix}。"
+        message = f"事件 {name} 观测径流缺测 {missing_steps}/{expected_steps} 步{suffix}。"
         if status == "fail":
             issues.append(message)
         else:
@@ -4848,15 +4837,11 @@ def event_windows_ui_summary(event_info: dict[str, Any] | None, step_hours: floa
         return {
             "event_id": event.get("event_id", ""),
             "name": event.get("name", "") or event.get("event_id", ""),
-            "purpose": event.get("purpose", ""),
-            "weight": event.get("weight"),
             "valid": bool(event.get("valid")),
-            "run_start": _format_time_for_check(event.get("run_start"), step_hours),
             "score_start": _format_time_for_check(event.get("score_start"), step_hours),
             "score_end": _format_time_for_check(event.get("score_end"), step_hours),
+            "run_start": _format_time_for_check(event.get("run_start"), step_hours),
             "run_end": _format_time_for_check(event.get("run_end"), step_hours),
-            "time_steps_run": int(event.get("time_steps_run", 0) or 0),
-            "time_steps_score": int(event.get("time_steps_score", 0) or 0),
         }
 
     return {
@@ -4900,35 +4885,31 @@ def input_time_basis_ui_summary(
         start, end, expected_steps = index_range(run_index)
         event_count = int(info.get("event_count", 0) or 0)
         valid_event_count = int(info.get("valid_event_count", 0) or 0)
-        counts = dict(info.get("purpose_counts", {}) or {})
         status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") or info.get("warnings") else "ok"
         initial_label = str(info.get("initial_state_policy_label", "事件预热") or "事件预热")
         initial_note = str(info.get("initial_state_note", "") or "")
         headline = (
-            f"当前按 {valid_event_count} 场洪水事件窗口检查，事件之间允许资料间断。"
+            f"当前按 {valid_event_count} 场洪水事件检查，事件之间允许资料间断。"
             if valid_event_count > 0
-            else "当前选择洪水事件窗口，但尚未识别到合法事件。"
+            else "当前选择洪水事件，但尚未识别到合法事件。"
         )
         return {
             "time_basis": time_basis,
             "time_basis_label": label,
             "headline": headline,
-            "detail": "气象强迫按运行窗口检查，观测径流按评分窗口检查；事件内部资料必须连续。"
+            "detail": "只检查每场洪水内部的气象与流量资料。"
             + (f" {initial_note}" if initial_note else ""),
             "start": start,
             "end": end,
             "expected_steps": expected_steps,
             "event_count": event_count,
             "valid_event_count": valid_event_count,
-            "purpose_counts": counts,
             "status": status,
             "items": [
                 {"label": "资料口径", "value": label},
                 {"label": "有效事件", "value": f"{valid_event_count}/{event_count} 场"},
-                {"label": "事件用途", "value": f"率定 {int(counts.get('calibration', 0) or 0)}、验证 {int(counts.get('validation', 0) or 0)}、诊断 {int(counts.get('diagnostic', 0) or 0)}"},
-                {"label": "运行窗口", "value": f"{start} 至 {end}" if start and end else "未形成有效运行窗口"},
+                {"label": "事件时段", "value": f"{start} 至 {end}" if start and end else "未形成有效时段"},
                 {"label": "初始条件", "value": initial_label},
-                {"label": "目标时间步", "value": str(expected_steps) if expected_steps else "未形成"},
             ],
             "initial_state_policy": str(info.get("initial_state_policy", "event_warmup") or "event_warmup"),
             "initial_state_policy_label": initial_label,
@@ -6336,7 +6317,7 @@ def validate_workspace_fields(
 
     time_cfg = config.get("时间", {})
     if time_basis == TIME_BASIS_EVENT_WINDOWS:
-        warnings.append("当前工作区采用洪水事件窗口资料口径，输入检查按事件运行窗口和评分窗口核验。")
+        warnings.append("当前工作区采用洪水事件资料口径，输入检查按每场洪水时段核验。")
     else:
         for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
             if not time_cfg.get(key):
