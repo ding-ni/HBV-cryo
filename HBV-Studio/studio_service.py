@@ -142,10 +142,12 @@ from services.system_status import (
 from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
+    ProcessMonitorContext,
     TaskQueryContext,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
     list_tasks as build_list_tasks,
+    monitor_process_task as build_monitor_process_task,
 )
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
@@ -6160,55 +6162,68 @@ def verify_data_prep_task_output(metadata: dict[str, Any]) -> tuple[bool, str]:
     return build_verify_data_prep_task_output(metadata, _data_prep_task_output_context())
 
 
+def _task_monitor_context(task_id: str) -> tuple[str, dict[str, Any]]:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+        return (
+            task.task_type if task is not None else "",
+            dict(task.metadata or {}) if task is not None else {},
+        )
+
+
+def _finalize_process_task(
+    task_id: str,
+    return_code: int,
+    detected_runs: list[str],
+    calibration_result: dict[str, Any] | None,
+) -> None:
+    with TASK_LOCK:
+        task = TASKS[task_id]
+        task.return_code = return_code
+        task.status = "completed" if return_code == 0 else "failed"
+        progress = dict(task.metadata.get("ui_progress") or {})
+        if progress:
+            progress["stage"] = "已完成" if return_code == 0 else "执行失败"
+            if return_code == 0 and progress.get("total") is not None:
+                progress["current"] = progress.get("total")
+            task.metadata["ui_progress"] = progress
+        task.updated_at = time.time()
+        task.detected_runs = detected_runs
+        if calibration_result is not None:
+            task.metadata["result"] = calibration_result
+            task.metadata["run_path"] = calibration_result["run_path"]
+
+
+def _mark_process_task_exception(task_id: str, exc: Exception) -> None:
+    with TASK_LOCK:
+        task = TASKS[task_id]
+        task.status = "failed"
+        task.return_code = -1
+        progress = dict(task.metadata.get("ui_progress") or {})
+        if progress:
+            progress["stage"] = "执行异常"
+            task.metadata["ui_progress"] = progress
+        task.updated_at = time.time()
+        task.append(f"[HBV-Studio] {exc}")
+
+
 def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: set[str]) -> None:
-    try:
-        if process.stdout is not None:
-            for raw_line in process.stdout:
-                add_task_output(task_id, _decode_subprocess_output_line(raw_line))
-        rc = process.wait()
-        task_type = ""
-        if rc == 0:
-            with TASK_LOCK:
-                task = TASKS.get(task_id)
-                task_type = task.task_type if task is not None else ""
-                task_metadata = dict(task.metadata or {}) if task is not None else {}
-            if task_type == "data_prep":
-                output_ok, output_message = verify_data_prep_task_output(task_metadata)
-                if not output_ok:
-                    add_task_output(task_id, f"[失败] 产物检查未通过：{output_message}")
-                    rc = 1
-        detected_runs = sorted(snapshot_run_paths() - previous_runs) if rc == 0 else []
-        calibration_result = None
-        latest_run_path = build_pick_latest_run_path(detected_runs)
-        if rc == 0:
-            if task_type == "calibration" and latest_run_path:
-                calibration_result = _build_calibration_task_result(latest_run_path)
-        with TASK_LOCK:
-            task = TASKS[task_id]
-            task.return_code = rc
-            task.status = "completed" if rc == 0 else "failed"
-            progress = dict(task.metadata.get("ui_progress") or {})
-            if progress:
-                progress["stage"] = "已完成" if rc == 0 else "执行失败"
-                if rc == 0 and progress.get("total") is not None:
-                    progress["current"] = progress.get("total")
-                task.metadata["ui_progress"] = progress
-            task.updated_at = time.time()
-            task.detected_runs = detected_runs
-            if calibration_result is not None:
-                task.metadata["result"] = calibration_result
-                task.metadata["run_path"] = calibration_result["run_path"]
-    except Exception as exc:
-        with TASK_LOCK:
-            task = TASKS[task_id]
-            task.status = "failed"
-            task.return_code = -1
-            progress = dict(task.metadata.get("ui_progress") or {})
-            if progress:
-                progress["stage"] = "执行异常"
-                task.metadata["ui_progress"] = progress
-            task.updated_at = time.time()
-            task.append(f"[HBV-Studio] {exc}")
+    build_monitor_process_task(
+        task_id,
+        process,
+        previous_runs,
+        ProcessMonitorContext(
+            decode_output_line=_decode_subprocess_output_line,
+            add_task_output=add_task_output,
+            get_task_context=_task_monitor_context,
+            verify_data_prep_task_output=verify_data_prep_task_output,
+            snapshot_run_paths=snapshot_run_paths,
+            pick_latest_run_path=build_pick_latest_run_path,
+            build_calibration_task_result=_build_calibration_task_result,
+            finalize_task=_finalize_process_task,
+            mark_task_exception=_mark_process_task_exception,
+        ),
+    )
 
 
 def _subprocess_env() -> dict[str, str]:
