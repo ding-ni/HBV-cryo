@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -9,10 +10,39 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.tasks import ProcessMonitorContext, monitor_process_task  # noqa: E402
+from services.tasks import (  # noqa: E402
+    ProcessMonitorContext,
+    TaskMutationContext,
+    append_task_exception_output,
+    append_task_output,
+    mark_task_finished,
+    monitor_process_task,
+    set_task_detected_runs,
+    update_task_metadata,
+)
+
+
+class FakeTask:
+    def __init__(self) -> None:
+        self.output: list[str] = []
+        self.metadata: dict[str, object] = {}
+        self.updated_at = 0.0
+        self.status = "running"
+        self.return_code: int | None = None
+        self.detected_runs: list[str] = []
+
+    def append(self, line: str) -> None:
+        self.output.append(line)
 
 
 class TaskServiceTests(unittest.TestCase):
+    def _mutation_context(self, tasks: dict[str, FakeTask], *, now: float = 123.0) -> TaskMutationContext:
+        return TaskMutationContext(
+            tasks=tasks,
+            task_lock=threading.Lock(),
+            now=lambda: now,
+        )
+
     def _context(
         self,
         *,
@@ -39,6 +69,45 @@ class TaskServiceTests(unittest.TestCase):
             ),
             mark_task_exception=lambda task_id, exc: events.append(("exception", task_id, str(exc))),
         )
+
+    def test_task_mutation_helpers_update_task_state(self) -> None:
+        task = FakeTask()
+        context = self._mutation_context({"task-1": task}, now=456.0)
+
+        append_task_output("task-1", "line", context)
+        update_task_metadata("task-1", context, ui_progress={"stage": "运行中"})
+        set_task_detected_runs("task-1", ["runs/a"], context)
+        mark_task_finished("task-1", context, ok=True, return_code=0, result={"run_path": "runs/a"})
+
+        self.assertEqual(task.output, ["line"])
+        self.assertEqual(task.metadata["ui_progress"], {"stage": "运行中"})
+        self.assertEqual(task.metadata["result"], {"run_path": "runs/a"})
+        self.assertEqual(task.detected_runs, ["runs/a"])
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.return_code, 0)
+        self.assertEqual(task.updated_at, 456.0)
+
+    def test_task_mutation_helpers_ignore_missing_task(self) -> None:
+        context = self._mutation_context({})
+
+        append_task_output("missing", "line", context)
+        update_task_metadata("missing", context, value=1)
+        set_task_detected_runs("missing", ["runs/a"], context)
+        mark_task_finished("missing", context, ok=False, return_code=-1)
+
+        self.assertEqual(context.tasks, {})
+
+    def test_append_task_exception_output_adds_prefix_and_diagnostics(self) -> None:
+        task = FakeTask()
+        context = self._mutation_context({"task-1": task})
+
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError as exc:
+            append_task_exception_output("task-1", exc, context, prefix="[错误]")
+
+        self.assertEqual(task.output[0], "[错误] boom")
+        self.assertTrue(any(line.startswith("[诊断]") and "RuntimeError: boom" in line for line in task.output))
 
     def test_monitor_process_task_records_calibration_result_for_new_run(self) -> None:
         events: list[tuple] = []

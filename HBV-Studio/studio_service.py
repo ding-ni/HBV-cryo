@@ -144,12 +144,18 @@ from services.system_status import (
 from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
+    TaskMutationContext,
     ProcessMonitorContext,
     TaskQueryContext,
+    append_task_exception_output as build_append_task_exception_output,
+    append_task_output as build_append_task_output,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
     list_tasks as build_list_tasks,
+    mark_task_finished as build_mark_task_finished,
     monitor_process_task as build_monitor_process_task,
+    set_task_detected_runs as build_set_task_detected_runs,
+    update_task_metadata as build_update_task_metadata,
 )
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
@@ -447,6 +453,14 @@ def _task_query_context() -> TaskQueryContext:
         task_lock=TASK_LOCK,
         snapshot_tasks=_snapshot_tasks,
         resolve_any_path=resolve_any_path,
+    )
+
+
+def _task_mutation_context() -> TaskMutationContext:
+    return TaskMutationContext(
+        tasks=TASKS,
+        task_lock=TASK_LOCK,
+        now=time.time,
     )
 
 
@@ -5745,26 +5759,15 @@ def task_step_map(profile: str, config: dict[str, Any] | None = None) -> dict[st
 
 
 def add_task_output(task_id: str, line: str) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is not None:
-            task.append(line)
+    build_append_task_output(task_id, line, _task_mutation_context())
 
 
 def add_task_exception_output(task_id: str, exc: BaseException, *, prefix: str = "[失败]") -> None:
-    add_task_output(task_id, f"{prefix} {exc}")
-    trace_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
-    for line in "".join(trace_lines).strip().splitlines()[-12:]:
-        add_task_output(task_id, f"[诊断] {line}")
+    build_append_task_exception_output(task_id, exc, _task_mutation_context(), prefix=prefix)
 
 
 def set_task_metadata(task_id: str, **items: Any) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is None:
-            return
-        task.metadata.update(items)
-        task.updated_at = time.time()
+    build_update_task_metadata(task_id, _task_mutation_context(), **items)
 
 
 def invalidate_deleted_run_refs(run_path: Path) -> None:
@@ -7243,15 +7246,7 @@ def _should_report_file_progress(index: int, total: int) -> bool:
 
 
 def _mark_task_finished(task_id: str, *, ok: bool, return_code: int, result: dict[str, Any] | None = None) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is None:
-            return
-        task.status = "completed" if ok else "failed"
-        task.return_code = return_code
-        if result is not None:
-            task.metadata["result"] = result
-        task.updated_at = time.time()
+    build_mark_task_finished(task_id, _task_mutation_context(), ok=ok, return_code=return_code, result=result)
 
 
 def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None) -> dict[str, Any]:
@@ -8530,11 +8525,8 @@ def _create_manual_start_result(
         }
 
 
-def _set_forward_simulation_detected_runs(task_id: str, detected_runs: list[str]) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is not None:
-            task.detected_runs = detected_runs
+def set_task_detected_runs(task_id: str, detected_runs: list[str]) -> None:
+    build_set_task_detected_runs(task_id, detected_runs, _task_mutation_context())
 
 
 def forward_sim_worker(task_id: str, payload: dict[str, Any]) -> None:
@@ -8547,16 +8539,9 @@ def forward_sim_worker(task_id: str, payload: dict[str, Any]) -> None:
             add_task_output=add_task_output,
             add_task_exception_output=add_task_exception_output,
             mark_task_finished=_mark_task_finished,
-            set_detected_runs=_set_forward_simulation_detected_runs,
+            set_detected_runs=set_task_detected_runs,
         ),
     )
-
-
-def _set_manual_start_detected_runs(task_id: str, detected_runs: list[str]) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is not None:
-            task.detected_runs = detected_runs
 
 
 def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
@@ -8569,7 +8554,7 @@ def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
             add_task_output=add_task_output,
             add_task_exception_output=add_task_exception_output,
             mark_task_finished=_mark_task_finished,
-            set_detected_runs=_set_manual_start_detected_runs,
+            set_detected_runs=set_task_detected_runs,
         ),
     )
 
@@ -8641,13 +8626,6 @@ def ensure_forecast_input_ready(payload: dict[str, Any]) -> dict[str, Any]:
     return build_ensure_forecast_input_ready(payload, _forecast_input_check_context())
 
 
-def _set_forecast_restart_detected_runs(task_id: str, detected_runs: list[str]) -> None:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        if task is not None:
-            task.detected_runs = detected_runs
-
-
 def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
     build_forecast_restart_worker_run(
         task_id,
@@ -8658,7 +8636,7 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
             add_task_output=add_task_output,
             add_task_exception_output=add_task_exception_output,
             mark_task_finished=_mark_task_finished,
-            set_detected_runs=_set_forecast_restart_detected_runs,
+            set_detected_runs=set_task_detected_runs,
         ),
     )
 

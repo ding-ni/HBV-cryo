@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -14,6 +15,13 @@ class TaskQueryContext:
     task_lock: threading.Lock
     snapshot_tasks: Callable[[], list[Any]]
     resolve_any_path: Callable[..., Path]
+
+
+@dataclass(frozen=True)
+class TaskMutationContext:
+    tasks: dict[str, Any]
+    task_lock: threading.Lock
+    now: Callable[[], float]
 
 
 @dataclass(frozen=True)
@@ -57,6 +65,61 @@ def find_running_task(task_type: str, config_path_raw: str, context: TaskQueryCo
             except Exception:
                 continue
     return None
+
+
+def append_task_output(task_id: str, line: str, context: TaskMutationContext) -> None:
+    with context.task_lock:
+        task = context.tasks.get(task_id)
+        if task is not None:
+            task.append(line)
+
+
+def append_task_exception_output(
+    task_id: str,
+    exc: BaseException,
+    context: TaskMutationContext,
+    *,
+    prefix: str = "[失败]",
+) -> None:
+    append_task_output(task_id, f"{prefix} {exc}", context)
+    trace_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    for line in "".join(trace_lines).strip().splitlines()[-12:]:
+        append_task_output(task_id, f"[诊断] {line}", context)
+
+
+def update_task_metadata(task_id: str, context: TaskMutationContext, **items: Any) -> None:
+    with context.task_lock:
+        task = context.tasks.get(task_id)
+        if task is None:
+            return
+        task.metadata.update(items)
+        task.updated_at = context.now()
+
+
+def mark_task_finished(
+    task_id: str,
+    context: TaskMutationContext,
+    *,
+    ok: bool,
+    return_code: int,
+    result: dict[str, Any] | None = None,
+) -> None:
+    with context.task_lock:
+        task = context.tasks.get(task_id)
+        if task is None:
+            return
+        task.status = "completed" if ok else "failed"
+        task.return_code = return_code
+        if result is not None:
+            task.metadata["result"] = result
+        task.updated_at = context.now()
+
+
+def set_task_detected_runs(task_id: str, detected_runs: list[str], context: TaskMutationContext) -> None:
+    with context.task_lock:
+        task = context.tasks.get(task_id)
+        if task is not None:
+            task.detected_runs = detected_runs
 
 
 def monitor_process_task(
