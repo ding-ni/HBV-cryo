@@ -27,6 +27,7 @@ from services.tasks import (  # noqa: E402
     build_python_script_command,
     call_with_output_capture,
     create_registered_task,
+    decode_subprocess_output_line,
     list_tasks,
     mark_task_finished,
     monitor_process_task,
@@ -323,6 +324,14 @@ class TaskServiceTests(unittest.TestCase):
         result = call_with_output_capture(None, lambda value: value + 1, 4)
 
         self.assertEqual(result, 5)
+
+    def test_decode_subprocess_output_line_handles_text_and_common_windows_encodings(self) -> None:
+        gb18030_text = "\u6267\u884c\u9636\u6bb5"
+
+        self.assertEqual(decode_subprocess_output_line(None), "")
+        self.assertEqual(decode_subprocess_output_line("line\r\n"), "line")
+        self.assertEqual(decode_subprocess_output_line(b"\xef\xbb\xbfhello\r\n"), "hello")
+        self.assertEqual(decode_subprocess_output_line(gb18030_text.encode("gb18030") + b"\r\n"), gb18030_text)
 
     def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
         command = build_python_script_command(

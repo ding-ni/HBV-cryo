@@ -8,7 +8,6 @@ import csv
 import hashlib
 import io
 import json
-import locale
 import math
 import mimetypes
 import os
@@ -155,6 +154,7 @@ from services.tasks import (
     build_python_script_command as build_task_python_script_command,
     call_with_output_capture,
     create_registered_task as build_create_registered_task,
+    decode_subprocess_output_line as build_decode_subprocess_output_line,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
     list_tasks as build_list_tasks,
@@ -5996,7 +5996,7 @@ def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: se
         process,
         previous_runs,
         ProcessMonitorContext(
-            decode_output_line=_decode_subprocess_output_line,
+            decode_output_line=build_decode_subprocess_output_line,
             add_task_output=add_task_output,
             get_task_context=_task_monitor_context,
             verify_data_prep_task_output=verify_data_prep_task_output,
@@ -6016,25 +6016,6 @@ def _subprocess_env() -> dict[str, str]:
     env["PYTHONUTF8"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     return env
-
-
-def _decode_subprocess_output_line(raw_line: Any) -> str:
-    if raw_line is None:
-        return ""
-    if isinstance(raw_line, str):
-        return raw_line.rstrip("\r\n")
-    data = bytes(raw_line)
-    encodings: list[str] = []
-    for encoding in ("utf-8-sig", "utf-8", locale.getpreferredencoding(False) or "", "gb18030", "cp936"):
-        normalized = str(encoding or "").strip().lower()
-        if normalized and normalized not in encodings:
-            encodings.append(normalized)
-    for encoding in encodings:
-        try:
-            return data.decode(encoding).rstrip("\r\n")
-        except (UnicodeDecodeError, LookupError):
-            continue
-    return data.decode("utf-8", errors="replace").rstrip("\r\n")
 
 
 def build_python_script_command(script: Path | str, *args: Any) -> list[str]:
@@ -6160,7 +6141,7 @@ def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payloa
             mark_task_finished=_mark_task_finished,
             popen=subprocess.Popen,
             subprocess_env=_subprocess_env,
-            decode_subprocess_output_line=_decode_subprocess_output_line,
+            decode_subprocess_output_line=build_decode_subprocess_output_line,
             project_root=PROJECT_ROOT,
             forcing_pipeline_step_ids=FORCING_PIPELINE_STEP_IDS,
         ),

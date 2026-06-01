@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import csv
+import locale
 import sys
 import threading
 import time
@@ -146,6 +147,25 @@ def call_with_output_capture(
     finally:
         stdout_relay.flush()
         stderr_relay.flush()
+
+
+def decode_subprocess_output_line(raw_line: Any) -> str:
+    if raw_line is None:
+        return ""
+    if isinstance(raw_line, str):
+        return raw_line.rstrip("\r\n")
+    data = bytes(raw_line)
+    encodings: list[str] = []
+    for encoding in ("utf-8-sig", "utf-8", locale.getpreferredencoding(False) or "", "gb18030", "cp936"):
+        normalized = str(encoding or "").strip().lower()
+        if normalized and normalized not in encodings:
+            encodings.append(normalized)
+    for encoding in encodings:
+        try:
+            return data.decode(encoding).rstrip("\r\n")
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("utf-8", errors="replace").rstrip("\r\n")
 
 
 @dataclass(frozen=True)
