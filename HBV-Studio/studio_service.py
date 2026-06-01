@@ -10125,6 +10125,37 @@ class StudioHandler(BaseHTTPRequestHandler):
         "/api/workspace/advice": "_api_get_workspace_advice",
         "/api/manual-presets": "_api_get_manual_presets",
     }
+    POST_ROUTE_HANDLERS = {
+        "/api/workspace/save": "_api_post_workspace_save",
+        "/api/config/save": "_api_post_workspace_save",
+        "/api/template/instantiate": "_api_post_template_instantiate",
+        "/api/import-workspace": "_api_post_import_workspace",
+        "/api/auto-config": "_api_post_import_workspace",
+        "/api/bootstrap/start": "_api_post_bootstrap_start",
+        "/api/data-prep/start": "_api_post_data_prep_start",
+        "/api/calibration/start": "_api_post_calibration_start",
+        "/api/self-check/start": "_api_post_self_check_start",
+        "/api/template/sync-tuotuohe": "_api_post_template_sync_tuotuohe",
+        "/api/wizard/save-step": "_api_post_wizard_save_step",
+        "/api/gis/import": "_api_post_gis_import",
+        "/api/meteo/import/start": "_api_post_meteo_import_start",
+        "/api/meteo/import": "_api_post_meteo_import",
+        "/api/simulate/forward/start": "_api_post_simulate_forward_start",
+        "/api/simulate/forward": "_api_post_simulate_forward",
+        "/api/forecast/restart/start": "_api_post_forecast_restart_start",
+        "/api/forecast/restart": "_api_post_forecast_restart",
+        "/api/forecast/input-check": "_api_post_forecast_input_check",
+        "/api/manual-start/start": "_api_post_manual_start_start",
+        "/api/manual-preset/save": "_api_post_manual_preset_save",
+        "/api/manual-preset/delete": "_api_post_manual_preset_delete",
+        "/api/run/export-excel": "_api_post_run_export_excel",
+        "/api/run/rename": "_api_post_run_rename",
+        "/api/run/delete": "_api_post_run_delete",
+        "/api/workspace/delete": "_api_post_workspace_delete",
+        "/api/fs/open-path": "_api_post_fs_open_path",
+        "/api/app/window-unload": "_api_post_app_window_unload",
+        "/api/app/quit": "_api_post_app_quit",
+    }
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return
@@ -10343,76 +10374,11 @@ class StudioHandler(BaseHTTPRequestHandler):
     def handle_api_post(self, parsed: Any) -> None:
         try:
             payload = self.read_json_body()
-            if parsed.path in {"/api/workspace/save", "/api/config/save"}:
-                raw_path = str(payload.get("path", "")).strip()
-                if not raw_path:
-                    raise ValueError("缺少工作区配置保存路径。")
-                path = resolve_any_path(raw_path, must_exist=False)
-                normalized = normalize_config_before_save(payload.get("data", {}), path)
-                write_json_file(path, normalized)
-                self.send_json({"ok": True, "path": str(path.resolve()), "display_path": to_display_path(path), "data": read_json_file(path)})
-            elif parsed.path == "/api/template/instantiate":
-                self.send_json({"ok": True, "data": instantiate_template(payload)}, status=201)
-            elif parsed.path in {"/api/import-workspace", "/api/auto-config"}:
-                self.send_json({"ok": True, "data": create_workspace_from_import(payload)}, status=201)
-            elif parsed.path == "/api/bootstrap/start":
-                self.send_json({"ok": True, "task": start_bootstrap(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/data-prep/start":
-                self.send_json({"ok": True, "task": start_data_prep(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/calibration/start":
-                self.send_json({"ok": True, "task": start_calibration(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/self-check/start":
-                self.send_json({"ok": True, "task": start_self_check().as_dict()}, status=201)
-            elif parsed.path == "/api/template/sync-tuotuohe":
-                self.send_json({"ok": True, "task": start_tuotuohe_sync(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/wizard/save-step":
-                self.send_json({"ok": True, "data": wizard_save_step(payload)})
-            elif parsed.path == "/api/gis/import":
-                self.send_json({"ok": True, "data": import_gis_files(payload)})
-            elif parsed.path == "/api/meteo/import/start":
-                self.send_json({"ok": True, "task": start_meteo_import(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/meteo/import":
-                self.send_json({"ok": True, "data": import_meteo_files(payload)})
-            elif parsed.path == "/api/simulate/forward/start":
-                self.send_json({"ok": True, "task": start_forward_simulation(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/simulate/forward":
-                self.send_json({"ok": True, "data": forward_simulate(payload)})
-            elif parsed.path == "/api/forecast/restart/start":
-                self.send_json({"ok": True, "task": start_forecast_restart(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/forecast/restart":
-                self.send_json({"ok": True, "data": forecast_restart(payload)})
-            elif parsed.path == "/api/forecast/input-check":
-                self.send_json({"ok": True, "data": forecast_input_check(payload)})
-            elif parsed.path == "/api/manual-start/start":
-                self.send_json({"ok": True, "task": start_manual_start(payload).as_dict()}, status=201)
-            elif parsed.path == "/api/manual-preset/save":
-                self.send_json({"ok": True, "data": save_manual_preset(payload)})
-            elif parsed.path == "/api/manual-preset/delete":
-                self.send_json({"ok": True, "data": delete_manual_preset(payload)})
-            elif parsed.path == "/api/run/export-excel":
-                self.send_json({"ok": True, "data": export_run_excel(payload)})
-            elif parsed.path == "/api/run/rename":
-                self.send_json({"ok": True, "data": rename_run(payload)})
-            elif parsed.path == "/api/run/delete":
-                self.send_json({"ok": True, "data": delete_run(str(payload.get("path", "")).strip())})
-            elif parsed.path == "/api/workspace/delete":
-                raw_path = str(payload.get("path", "")).strip()
-                if not raw_path:
-                    raise ValueError("缺少工作区路径。")
-                self.send_json({"ok": True, "data": delete_workspace(raw_path)})
-            elif parsed.path == "/api/fs/open-path":
-                self.send_json({"ok": True, "data": open_path_in_explorer(payload)})
-            elif parsed.path == "/api/app/window-unload":
-                mark_server_activity(unload=True)
-                self.send_json({"ok": True, "data": {"accepted": True}})
-            elif parsed.path == "/api/app/quit":
-                if has_running_tasks():
-                    self.send_error_json("当前仍有运行中的任务，请等待结束后再退出程序。", status=409)
-                    return
-                self.send_json({"ok": True, "data": {"accepted": True}})
-                request_server_shutdown(self.server, "[HBV-Studio] 收到退出请求，正在关闭本地服务。", delay_sec=0.2)
-            else:
+            handler_name = self.POST_ROUTE_HANDLERS.get(parsed.path)
+            if handler_name is None:
                 self.send_error_json("未知接口。", status=404)
+                return
+            getattr(self, handler_name)(payload)
         except FileNotFoundError as exc:
             self.send_error_json(str(exc), status=404)
         except ValueError as exc:
@@ -10422,6 +10388,101 @@ class StudioHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_error_json(str(exc), status=500)
             traceback.print_exc()
+
+    def _api_post_workspace_save(self, payload: dict[str, Any]) -> None:
+        raw_path = str(payload.get("path", "")).strip()
+        if not raw_path:
+            raise ValueError("缺少工作区配置保存路径。")
+        path = resolve_any_path(raw_path, must_exist=False)
+        normalized = normalize_config_before_save(payload.get("data", {}), path)
+        write_json_file(path, normalized)
+        self.send_json({"ok": True, "path": str(path.resolve()), "display_path": to_display_path(path), "data": read_json_file(path)})
+
+    def _api_post_template_instantiate(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": instantiate_template(payload)}, status=201)
+
+    def _api_post_import_workspace(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": create_workspace_from_import(payload)}, status=201)
+
+    def _api_post_bootstrap_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_bootstrap(payload).as_dict()}, status=201)
+
+    def _api_post_data_prep_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_data_prep(payload).as_dict()}, status=201)
+
+    def _api_post_calibration_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_calibration(payload).as_dict()}, status=201)
+
+    def _api_post_self_check_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_self_check().as_dict()}, status=201)
+
+    def _api_post_template_sync_tuotuohe(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_tuotuohe_sync(payload).as_dict()}, status=201)
+
+    def _api_post_wizard_save_step(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": wizard_save_step(payload)})
+
+    def _api_post_gis_import(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": import_gis_files(payload)})
+
+    def _api_post_meteo_import_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_meteo_import(payload).as_dict()}, status=201)
+
+    def _api_post_meteo_import(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": import_meteo_files(payload)})
+
+    def _api_post_simulate_forward_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_forward_simulation(payload).as_dict()}, status=201)
+
+    def _api_post_simulate_forward(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": forward_simulate(payload)})
+
+    def _api_post_forecast_restart_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_forecast_restart(payload).as_dict()}, status=201)
+
+    def _api_post_forecast_restart(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": forecast_restart(payload)})
+
+    def _api_post_forecast_input_check(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": forecast_input_check(payload)})
+
+    def _api_post_manual_start_start(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "task": start_manual_start(payload).as_dict()}, status=201)
+
+    def _api_post_manual_preset_save(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": save_manual_preset(payload)})
+
+    def _api_post_manual_preset_delete(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": delete_manual_preset(payload)})
+
+    def _api_post_run_export_excel(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": export_run_excel(payload)})
+
+    def _api_post_run_rename(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": rename_run(payload)})
+
+    def _api_post_run_delete(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": delete_run(str(payload.get("path", "")).strip())})
+
+    def _api_post_workspace_delete(self, payload: dict[str, Any]) -> None:
+        raw_path = str(payload.get("path", "")).strip()
+        if not raw_path:
+            raise ValueError("缺少工作区路径。")
+        self.send_json({"ok": True, "data": delete_workspace(raw_path)})
+
+    def _api_post_fs_open_path(self, payload: dict[str, Any]) -> None:
+        self.send_json({"ok": True, "data": open_path_in_explorer(payload)})
+
+    def _api_post_app_window_unload(self, payload: dict[str, Any]) -> None:
+        mark_server_activity(unload=True)
+        self.send_json({"ok": True, "data": {"accepted": True}})
+
+    def _api_post_app_quit(self, payload: dict[str, Any]) -> None:
+        if has_running_tasks():
+            self.send_error_json("当前仍有运行中的任务，请等待结束后再退出程序。", status=409)
+            return
+        self.send_json({"ok": True, "data": {"accepted": True}})
+        request_server_shutdown(self.server, "[HBV-Studio] 收到退出请求，正在关闭本地服务。", delay_sec=0.2)
 
     def serve_static(self, raw_path: str) -> None:
         request_path = raw_path or "/"
