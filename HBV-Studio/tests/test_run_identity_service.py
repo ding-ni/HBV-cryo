@@ -49,6 +49,7 @@ from services.runs import (  # noqa: E402
     optimization_stage_counter,
     infer_selected_result_stage,
     pick_latest_run_path,
+    prepare_run_metadata_sections,
     read_sampled_csv_rows,
     read_run_metrics_snapshot,
     recorded_objective_family,
@@ -497,6 +498,39 @@ class RunIdentityServiceTests(unittest.TestCase):
             ),
             profile_runner.OBJECTIVE_MODE_SINGLE,
         )
+
+    def test_prepare_run_metadata_sections_copies_sections_and_records_objective_family(self) -> None:
+        metadata = {
+            "data_sources": {"runtime_prec_source": "era5"},
+            "boundary_condition": {"enabled": True},
+            "optimization": {"effective_objective_mode": profile_runner.OBJECTIVE_MODE_MULTI},
+            "manual_result": {"source_run_name": "manual"},
+            "replay_context": {"source_run_path": "raw/path"},
+            "data_cache": {"paths": {"simulation_csv": "C:/run/sim.csv"}, "version": 1},
+        }
+
+        sections = prepare_run_metadata_sections(metadata)
+
+        self.assertEqual(metadata["recorded_objective_family"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(sections.effective_objective_mode, profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(sections.data_sources, {"runtime_prec_source": "era5"})
+        self.assertIsNot(sections.data_sources, metadata["data_sources"])
+        self.assertEqual(sections.boundary_condition, {"enabled": True})
+        self.assertEqual(sections.manual_result, {"source_run_name": "manual"})
+        self.assertEqual(sections.replay_context, {"source_run_path": "raw/path"})
+        self.assertEqual(sections.cache, {"paths": {"simulation_csv": "C:/run/sim.csv"}, "version": 1})
+        self.assertIsNot(sections.cache["paths"], metadata["data_cache"]["paths"])
+
+    def test_prepare_run_metadata_sections_prefers_metadata_effective_mode(self) -> None:
+        metadata = {
+            "effective_objective_mode": profile_runner.OBJECTIVE_MODE_SINGLE.upper(),
+            "optimization": {"effective_objective_mode": profile_runner.OBJECTIVE_MODE_MULTI},
+        }
+
+        sections = prepare_run_metadata_sections(metadata)
+
+        self.assertEqual(sections.effective_objective_mode, profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["recorded_objective_family"], profile_runner.OBJECTIVE_MODE_SINGLE)
 
     def test_sync_objective_profile_metadata_copies_contract_fields(self) -> None:
         metadata = {

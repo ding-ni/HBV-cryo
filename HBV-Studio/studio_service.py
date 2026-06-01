@@ -136,8 +136,8 @@ from services.runs import normalized_selected_result_label as build_normalized_s
 from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
 from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
+from services.runs import prepare_run_metadata_sections as build_prepare_run_metadata_sections
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
-from services.runs import recorded_objective_family as build_recorded_objective_family
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
@@ -2696,23 +2696,14 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         normalized["workspace_config"] = str(resolved_config)
     resolved_object_type = _resolve_metadata_object_type(normalized)
 
-    data_sources = dict(normalized.get("data_sources", {}) or {})
-    boundary_condition = dict(normalized.get("boundary_condition", {}) or {})
-    optimization = dict(normalized.get("optimization", {}) or {})
-    manual_result = dict(normalized.get("manual_result", {}) or {})
-    replay_context = dict(normalized.get("replay_context", {}) or {})
-    recorded_objective_family = build_recorded_objective_family(normalized, optimization)
-    if recorded_objective_family:
-        normalized["recorded_objective_family"] = recorded_objective_family
-    cache = {
-        key: (dict(value) if isinstance(value, dict) else value)
-        for key, value in dict(normalized.get("data_cache", {}) or {}).items()
-    }
-    effective_objective_mode = str(
-        normalized.get("effective_objective_mode")
-        or optimization.get("effective_objective_mode")
-        or ""
-    ).strip().lower()
+    sections = build_prepare_run_metadata_sections(normalized)
+    data_sources = sections.data_sources
+    boundary_condition = sections.boundary_condition
+    optimization = sections.optimization
+    manual_result = sections.manual_result
+    replay_context = sections.replay_context
+    cache = sections.cache
+    effective_objective_mode = sections.effective_objective_mode
 
     if resolved_config is not None:
         try:

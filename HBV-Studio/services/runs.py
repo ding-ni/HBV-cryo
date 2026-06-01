@@ -96,6 +96,17 @@ class RunMetadataObjectTypeContext:
 
 
 @dataclass(frozen=True)
+class RunMetadataSections:
+    data_sources: dict[str, Any]
+    boundary_condition: dict[str, Any]
+    optimization: dict[str, Any]
+    manual_result: dict[str, Any]
+    replay_context: dict[str, Any]
+    cache: dict[str, Any]
+    effective_objective_mode: str
+
+
+@dataclass(frozen=True)
 class RunDetailContext:
     resolve_path: Callable[..., Path]
     read_json_file: Callable[[Path], dict[str, Any]]
@@ -812,6 +823,35 @@ def recorded_objective_family(metadata: dict[str, Any], optimization: dict[str, 
         or objective_meta.get("type")
         or ""
     ).strip().lower()
+
+
+def prepare_run_metadata_sections(metadata: dict[str, Any]) -> RunMetadataSections:
+    data_sources = dict(metadata.get("data_sources", {}) or {})
+    boundary_condition = dict(metadata.get("boundary_condition", {}) or {})
+    optimization = dict(metadata.get("optimization", {}) or {})
+    manual_result = dict(metadata.get("manual_result", {}) or {})
+    replay_context = dict(metadata.get("replay_context", {}) or {})
+    family = recorded_objective_family(metadata, optimization)
+    if family:
+        metadata["recorded_objective_family"] = family
+    cache = {
+        key: (dict(value) if isinstance(value, dict) else value)
+        for key, value in dict(metadata.get("data_cache", {}) or {}).items()
+    }
+    effective_objective_mode = str(
+        metadata.get("effective_objective_mode")
+        or optimization.get("effective_objective_mode")
+        or ""
+    ).strip().lower()
+    return RunMetadataSections(
+        data_sources=data_sources,
+        boundary_condition=boundary_condition,
+        optimization=optimization,
+        manual_result=manual_result,
+        replay_context=replay_context,
+        cache=cache,
+        effective_objective_mode=effective_objective_mode,
+    )
 
 
 def sync_objective_profile_metadata(metadata: dict[str, Any]) -> None:
