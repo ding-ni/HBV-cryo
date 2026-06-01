@@ -16,7 +16,6 @@ import os
 import re
 import shutil
 import socket
-import string
 import subprocess
 import sys
 import threading
@@ -36,6 +35,13 @@ import pandas as pd
 
 import profile_runner
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
+from services.filesystem import (
+    FilesystemContext,
+    list_drives as build_list_drives,
+    list_filesystem as build_list_filesystem,
+    open_path_in_explorer as build_open_path_in_explorer,
+    safe_iterdir as build_safe_iterdir,
+)
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -8182,152 +8188,30 @@ def start_tuotuohe_sync(payload: dict[str, Any]) -> TaskRecord:
 
 
 def list_drives() -> list[str]:
-    if os.name != "nt":
-        return ["/"]
-    drives = []
-    for letter in string.ascii_uppercase:
-        drive = f"{letter}:\\"
-        if Path(drive).exists():
-            drives.append(drive)
-    return drives
-
-
-WINDOWS_HIDDEN_DIRS = frozenset({
-    "system volume information", "$recycle.bin", "$winrepackage",
-    "recovery", "config.msi", "msocache", "$sysreset",
-})
+    return build_list_drives()
 
 
 def _safe_iterdir(directory: Path) -> list[Path]:
-    """Iterate a directory, skipping entries that raise PermissionError individually."""
-    results: list[Path] = []
-    try:
-        scanner = os.scandir(str(directory))
-    except (PermissionError, OSError):
-        return results
-    try:
-        while True:
-            try:
-                entry = next(scanner)
-            except StopIteration:
-                break
-            except (PermissionError, OSError):
-                # Windows can raise per-entry errors (e.g. System Volume Information)
-                continue
-            results.append(Path(entry.path))
-    finally:
-        scanner.close()
-    return results
+    return build_safe_iterdir(directory)
+
+
+def _filesystem_context() -> FilesystemContext:
+    return FilesystemContext(
+        resolve_any_path=resolve_any_path,
+        workspace_dir=WORKSPACE_DIR,
+        project_runtime_dir=PROJECT_RUNTIME_DIR,
+        project_root=PROJECT_ROOT,
+        dir_browser_file_preview_items=DIR_BROWSER_FILE_PREVIEW_ITEMS,
+        max_browser_file_items=MAX_BROWSER_FILE_ITEMS,
+    )
 
 
 def list_filesystem(path_value, extensions=None, kind: str = "file"):
-    normalized_exts = {item.lower() for item in (extensions or []) if item}
-    browse_kind = str(kind or "file").strip().lower() or "file"
-    preview_only = browse_kind == "dir"
-    file_limit = DIR_BROWSER_FILE_PREVIEW_ITEMS if preview_only else MAX_BROWSER_FILE_ITEMS
-    if not path_value:
-        return {
-            "current_path": "",
-            "parent_path": None,
-            "roots": list_drives(),
-            "directories": [],
-            "files": [],
-            "kind": browse_kind,
-            "file_count": 0,
-            "shown_file_count": 0,
-            "files_truncated": False,
-        }
-    current = resolve_any_path(path_value, must_exist=False)
-    try:
-        if current.is_file():
-            current = current.parent
-    except (PermissionError, OSError):
-        current = current.parent
-    try:
-        exists = current.exists()
-    except (PermissionError, OSError):
-        exists = False
-    if not exists:
-        current = current.parent
-    try:
-        exists = current.exists()
-    except (PermissionError, OSError):
-        exists = False
-    if not exists:
-        raise FileNotFoundError(str(current))
-    directories = []
-    files = []
-    raw_children = _safe_iterdir(current)
-
-    # Filter out system/hidden dirs BEFORE sorting to avoid stat calls on them
-    def _is_system_entry(item: Path) -> bool:
-        try:
-            n = item.name.lower()
-            return n in WINDOWS_HIDDEN_DIRS or n.startswith("$") or n.startswith(".")
-        except Exception:
-            return True
-
-    raw_children = [child for child in raw_children if not _is_system_entry(child)]
-
-    def _sort_key(item: Path):
-        try:
-            return (not item.is_dir(), item.name.lower())
-        except (PermissionError, OSError):
-            return (True, item.name.lower())
-
-    file_count = 0
-    for child in sorted(raw_children, key=_sort_key):
-        try:
-            if child.is_dir():
-                directories.append({"name": child.name, "path": str(child)})
-            else:
-                if normalized_exts and child.suffix.lower() not in normalized_exts:
-                    continue
-                file_count += 1
-                if len(files) >= file_limit:
-                    continue
-                files.append({"name": child.name, "path": str(child), "suffix": child.suffix.lower()})
-        except (PermissionError, OSError):
-            continue
-    return {
-        "current_path": str(current),
-        "parent_path": str(current.parent) if current.parent != current else None,
-        "roots": list_drives(),
-        "directories": directories,
-        "files": files,
-        "kind": browse_kind,
-        "file_count": file_count,
-        "shown_file_count": len(files),
-        "files_truncated": file_count > len(files),
-    }
-
-
-def _is_within_root(candidate: Path, root: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
-        return True
-    except ValueError:
-        return False
+    return build_list_filesystem(path_value, _filesystem_context(), extensions=extensions, kind=kind)
 
 
 def open_path_in_explorer(payload: dict[str, Any]) -> dict[str, Any]:
-    raw_path = str(payload.get("path", "")).strip()
-    if not raw_path:
-        raise ValueError("缺少路径。")
-    target = resolve_any_path(raw_path, must_exist=True)
-    allowed_roots = [WORKSPACE_DIR, PROJECT_RUNTIME_DIR, PROJECT_ROOT, PROJECT_ROOT.parent]
-    if not any(_is_within_root(target, root) for root in allowed_roots):
-        raise ValueError(f"该路径不在允许打开的工程目录范围内：{target}")
-    if os.name == "nt":
-        if target.is_file():
-            subprocess.Popen(["explorer.exe", f"/select,{str(target)}"])
-        else:
-            subprocess.Popen(["explorer.exe", str(target)])
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(target)])
-    else:
-        subprocess.Popen(["xdg-open", str(target)])
-    return {"opened": True, "path": str(target.resolve(strict=False))}
+    return build_open_path_in_explorer(payload, _filesystem_context())
 
 
 def dashboard_payload() -> dict[str, Any]:
