@@ -33,6 +33,31 @@
     return `最少 ${minCount}，平均 ${formatNumber(meanCount, 1)}`;
   }
 
+  function stationPrecipModeLabel(mode) {
+    return ({
+      grid_only: "格点直接使用",
+      grid_plus_station_bias: "格点 + 站点偏差订正",
+      thiessen_station_only: "纯泰森多边形插值",
+    })[String(mode || "").toLowerCase()] || "格点直接使用";
+  }
+
+  function stationPrecipModeDescription(mode) {
+    if (mode === "grid_plus_station_bias") {
+      return "用站点实测降水修正格点降水，生成逐栅格降水。";
+    }
+    if (mode === "thiessen_station_only") {
+      return "用站点降水直接生成面降水，适合站点资料主导的任务。";
+    }
+    return "不启用站点订正或泰森分配，降水输入来自当前格点数据源。";
+  }
+
+  function stationPrecipCheckFromValidation(validation) {
+    const checks = validation?.focus_checks || [];
+    return checks.find(check => String(check?.id || "").toLowerCase() === "station_precip")
+      || checks.find(check => String(check?.title || "").includes("站点降水"))
+      || null;
+  }
+
   function renderTaskScopeSummary(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -123,6 +148,9 @@
   }
 
   window.HBVStudioStationPrecip = {
+    stationPrecipCheckFromValidation,
+    stationPrecipModeDescription,
+    stationPrecipModeLabel,
     renderTaskScopeSummary,
     renderEventCoverageMatrix,
   };
