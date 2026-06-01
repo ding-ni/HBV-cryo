@@ -6,13 +6,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import tempfile
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
-def request_json(url: str, timeout: float = 60.0) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+def request_json(url: str, timeout: float = 60.0, *, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8") if data is not None else None
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST" if data is not None else "GET",
+        headers={"Content-Type": "application/json"} if data is not None else {},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
@@ -99,6 +109,61 @@ def main() -> int:
             "studio_compatible": detail.get("studio_compatible"),
         }
 
+    temp_dir = Path(tempfile.mkdtemp(prefix="hbvstudio_run_export_"))
+    export_summary = None
+    try:
+        run_dir = temp_dir / "sample_run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "result_title": "Smoke Export Run",
+                    "time_config": {"time_step_hours": 24.0},
+                    "metrics": {"calibration": {"nse": 0.8}, "validation": {"nse": 0.7}},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "simulation.csv").write_text(
+            "\n".join(
+                [
+                    "date,q_sim,q_obs,q_rain,q_snow,q_ice",
+                    "2020-01-01,1.0,0.9,0.5,0.3,0.2",
+                    "2020-01-02,1.2,1.1,0.6,0.3,0.3",
+                    "2020-01-03,1.1,1.0,0.4,0.4,0.3",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        export_payload = {
+            "path": str(run_dir),
+            "fields": ["q_sim", "q_obs"],
+            "start_date": "2020-01-01",
+            "end_date": "2020-01-02",
+        }
+        export_response = request_json(f"{base_url}/api/run/export-excel", data=export_payload)
+        if not export_response.get("ok"):
+            raise RuntimeError(export_response.get("error") or "run export endpoint returned ok=false")
+        export_data = export_response.get("data") or {}
+        require_keys(export_data, {"path", "display_path", "row_count", "fields", "labels", "start", "end"}, "run export")
+        export_path = Path(str(export_data.get("path") or ""))
+        if not export_path.exists() or export_path.suffix.lower() != ".xlsx":
+            raise RuntimeError(f"run export should create an xlsx file: {export_data!r}")
+        if int(export_data.get("row_count") or 0) != 2:
+            raise RuntimeError(f"run export should include the requested date range rows: {export_data!r}")
+        if export_data.get("fields") != ["q_sim", "q_obs"]:
+            raise RuntimeError(f"run export should preserve requested fields: {export_data!r}")
+        export_summary = {
+            "row_count": export_data.get("row_count"),
+            "fields": export_data.get("fields"),
+            "file_size": export_path.stat().st_size,
+        }
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
     summary = {
         "run_count": len(runs),
         "first_run": {
@@ -111,6 +176,7 @@ def main() -> int:
         else None,
         "dashboard_count": dashboard_count,
         "run_detail": run_detail_summary,
+        "run_export": export_summary,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

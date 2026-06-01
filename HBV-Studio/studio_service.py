@@ -54,7 +54,8 @@ from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cf
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunDetailContext, RunListContext
+from services.runs import RunDetailContext, RunExportContext, RunListContext
+from services.runs import export_run_excel as build_export_run_excel
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.system_status import (
@@ -6936,94 +6937,22 @@ def read_sampled_csv_rows(path: Path, max_points: int = 900) -> tuple[list[dict[
     return sampled, total_rows
 
 
-def _run_export_time_label(timestamp: pd.Timestamp, step_hours: float) -> str:
-    return format_timestamp_for_display(timestamp, step_hours).replace(":", "-").replace(" ", "_")
-
-
 def export_run_excel(payload: dict[str, Any]) -> dict[str, Any]:
-    run_dir = resolve_any_path(str(payload.get("path", "")), must_exist=True)
-    simulation_path = run_dir / "simulation.csv"
-    metadata_path = run_dir / "metadata.json"
-    if not simulation_path.exists():
-        raise FileNotFoundError("结果目录缺少 simulation.csv。")
-    metadata = read_json_file(metadata_path) if metadata_path.exists() else {}
-    time_cfg = dict(metadata.get("time_config", {}) or {})
-    step_hours = normalize_time_step_hours(time_cfg.get("time_step_hours", 24.0))
+    return build_export_run_excel(payload, _run_export_context())
 
-    selected_fields = [
-        field
-        for field in [str(item).strip() for item in list(payload.get("fields", []) or [])]
-        if field
-    ] or default_run_export_fields(metadata)
-    invalid_fields = [field for field in selected_fields if field not in RUN_EXPORT_FIELD_LABELS]
-    if invalid_fields:
-        raise ValueError("存在不支持的导出字段：" + "、".join(invalid_fields[:6]))
 
-    frame = pd.read_csv(simulation_path)
-    if "date" not in frame.columns:
-        raise ValueError("simulation.csv 缺少 date 列。")
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-    frame = frame.dropna(subset=["date"]).copy()
-    if frame.empty:
-        raise ValueError("当前结果没有可导出的有效时间记录。")
-
-    start_raw = str(payload.get("start_date", "")).strip()
-    end_raw = str(payload.get("end_date", "")).strip()
-    start_ts = pd.to_datetime(start_raw) if start_raw else pd.Timestamp(frame["date"].min())
-    end_ts = pd.to_datetime(end_raw) if end_raw else pd.Timestamp(frame["date"].max())
-    if step_hours < 24.0 and is_date_only_string(end_raw):
-        end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(hours=step_hours)
-    if end_ts < start_ts:
-        raise ValueError("导出结束时间不能早于开始时间。")
-
-    actual_start = pd.Timestamp(frame["date"].min())
-    actual_end = pd.Timestamp(frame["date"].max())
-    warmup_start_raw = str(time_cfg.get("warmup_start", "") or "").strip()
-    warmup_start_ts = pd.to_datetime(warmup_start_raw) if warmup_start_raw else None
-    if warmup_start_ts is not None and actual_start > warmup_start_ts and start_ts < actual_start:
-        raise ValueError(
-            "当前结果文件只保存了率定后时段，未包含预热段。"
-            "请用新版程序重新生成结果后，再导出包含预热期的全时段数据。"
-        )
-
-    filtered = frame.loc[(frame["date"] >= start_ts) & (frame["date"] <= end_ts)].copy()
-    if filtered.empty:
-        raise ValueError("当前时间范围内没有可导出的结果记录。")
-
-    export_frame = pd.DataFrame()
-    export_frame["日期"] = filtered["date"].dt.strftime("%Y-%m-%d" if step_hours >= 24.0 else "%Y-%m-%d %H:%M")
-    for field in selected_fields:
-        export_frame[RUN_EXPORT_FIELD_LABELS[field]] = filtered[field] if field in filtered.columns else pd.NA
-
-    export_dir = run_dir / "导出"
-    export_dir.mkdir(parents=True, exist_ok=True)
-    run_title = str(metadata.get("result_title", "")).strip() or run_dir.name
-    file_name = (
-        f"{slugify_workspace_name(run_title)}"
-        f"_导出_{_run_export_time_label(start_ts, step_hours)}"
-        f"_{_run_export_time_label(end_ts, step_hours)}.xlsx"
+def _run_export_context() -> RunExportContext:
+    return RunExportContext(
+        resolve_path=resolve_any_path,
+        read_json_file=read_json_file,
+        normalize_time_step_hours=normalize_time_step_hours,
+        is_date_only_string=is_date_only_string,
+        format_timestamp_for_display=format_timestamp_for_display,
+        slugify_workspace_name=slugify_workspace_name,
+        to_display_path=to_display_path,
+        default_export_fields=default_run_export_fields,
+        export_field_labels=RUN_EXPORT_FIELD_LABELS,
     )
-    export_path = export_dir / file_name
-    try:
-        with pd.ExcelWriter(export_path, engine="xlsxwriter") as writer:
-            export_frame.to_excel(writer, sheet_name="结果数据", index=False)
-            worksheet = writer.sheets["结果数据"]
-            worksheet.freeze_panes(1, 1)
-            worksheet.set_column(0, 0, 18)
-            worksheet.set_column(1, len(export_frame.columns), 18)
-    except ImportError:
-        with pd.ExcelWriter(export_path, engine="openpyxl") as writer:
-            export_frame.to_excel(writer, sheet_name="结果数据", index=False)
-
-    return {
-        "path": str(export_path.resolve(strict=False)),
-        "display_path": to_display_path(export_path),
-        "row_count": int(len(export_frame)),
-        "fields": list(selected_fields),
-        "labels": [RUN_EXPORT_FIELD_LABELS[field] for field in selected_fields],
-        "start": export_frame.iloc[0, 0],
-        "end": export_frame.iloc[-1, 0],
-    }
 
 
 def load_run_detail(run_path: str) -> dict[str, Any]:
