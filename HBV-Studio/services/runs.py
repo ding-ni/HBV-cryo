@@ -763,6 +763,25 @@ def is_studio_editable_metadata(
     return bool(config_path and has_parameter_bounds(metadata))
 
 
+def resolve_run_workspace_config(
+    metadata: dict[str, Any],
+    *,
+    run_path: Path | None = None,
+    context: RunMetadataCompatibilityContext,
+) -> Path | None:
+    workspace_config = str(metadata.get("workspace_config", "") or "").strip()
+    hint_project_root, hint_gui_root = context.workspace_roots_hint_from_metadata(metadata)
+    resolved_config = context.resolve_workspace_config_reference(
+        workspace_config,
+        run_path=run_path,
+        project_root=hint_project_root,
+        gui_root=hint_gui_root,
+    )
+    if resolved_config is not None:
+        metadata["workspace_config"] = str(resolved_config)
+    return resolved_config
+
+
 def synthesized_parameter_profile(profile: str, objective_mode: str) -> dict[str, Any]:
     if profile == profile_runner.PROFILE_HOURLY:
         bounds = profile_runner.parameter_bounds_for_profile(profile_runner.PROFILE_HOURLY)

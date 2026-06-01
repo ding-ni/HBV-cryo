@@ -143,6 +143,7 @@ from services.runs import restore_forward_boundary_series as build_restore_forwa
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
 from services.runs import resolve_run_objective_metadata as build_resolve_run_objective_metadata
+from services.runs import resolve_run_workspace_config as build_resolve_run_workspace_config
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
@@ -2684,16 +2685,11 @@ def _normalized_method_label(optimization: dict[str, Any]) -> str:
 
 def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = None) -> tuple[dict[str, Any], Path | None]:
     normalized = copy.deepcopy(metadata or {})
-    workspace_config = str(normalized.get("workspace_config", "") or "").strip()
-    hint_project_root, hint_gui_root = _workspace_roots_hint_from_metadata(normalized)
-    resolved_config = resolve_workspace_config_reference(
-        workspace_config,
+    resolved_config = build_resolve_run_workspace_config(
+        normalized,
         run_path=run_path,
-        project_root=hint_project_root,
-        gui_root=hint_gui_root,
+        context=_run_metadata_compatibility_context(),
     )
-    if resolved_config is not None:
-        normalized["workspace_config"] = str(resolved_config)
     resolved_object_type = _resolve_metadata_object_type(normalized)
 
     sections = build_prepare_run_metadata_sections(normalized)

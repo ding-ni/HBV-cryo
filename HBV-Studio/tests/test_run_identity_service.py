@@ -58,6 +58,7 @@ from services.runs import (  # noqa: E402
     restore_forward_observed_series,
     resolve_metadata_object_type,
     resolve_run_objective_metadata,
+    resolve_run_workspace_config,
     resolve_source_run_reference,
     rebase_run_data_cache_paths,
     run_precip_dir_candidates,
@@ -877,6 +878,43 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(observed["raw"], "relative/config.json")
         self.assertEqual(observed["kwargs"]["project_root"], Path("C:/project"))
         self.assertEqual(observed["kwargs"]["gui_root"], Path("C:/gui"))
+
+    def test_resolve_run_workspace_config_updates_resolved_metadata_path(self) -> None:
+        observed = {}
+
+        def hints(metadata):
+            observed["metadata"] = metadata
+            return Path("C:/project"), Path("C:/gui")
+
+        def resolve(raw, **kwargs):
+            observed["raw"] = raw
+            observed["kwargs"] = kwargs
+            return Path("D:/resolved/config.json")
+
+        context = self._metadata_compatibility_context(hints=hints, resolve=resolve)
+        metadata = {"workspace_config": "relative/config.json"}
+
+        result = resolve_run_workspace_config(metadata, run_path=Path("C:/runs/run-001"), context=context)
+
+        self.assertEqual(result, Path("D:/resolved/config.json"))
+        self.assertEqual(metadata["workspace_config"], str(Path("D:/resolved/config.json")))
+        self.assertIs(observed["metadata"], metadata)
+        self.assertEqual(observed["raw"], "relative/config.json")
+        self.assertEqual(observed["kwargs"]["run_path"], Path("C:/runs/run-001"))
+        self.assertEqual(observed["kwargs"]["project_root"], Path("C:/project"))
+        self.assertEqual(observed["kwargs"]["gui_root"], Path("C:/gui"))
+
+    def test_resolve_run_workspace_config_keeps_raw_metadata_when_unresolved(self) -> None:
+        context = self._metadata_compatibility_context(
+            hints=lambda metadata: (None, None),
+            resolve=lambda raw, **kwargs: None,
+        )
+        metadata = {"workspace_config": "missing/config.json"}
+
+        result = resolve_run_workspace_config(metadata, context=context)
+
+        self.assertIsNone(result)
+        self.assertEqual(metadata["workspace_config"], "missing/config.json")
 
     def test_workspace_name_for_summary_prefers_workspace_label(self) -> None:
         def fail_resolve(*args, **kwargs):
