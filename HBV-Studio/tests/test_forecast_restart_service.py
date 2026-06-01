@@ -12,7 +12,14 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.forecast_restart import ForecastRestartStartContext, forecast_restart_args, forecast_restart_start_plan  # noqa: E402
+from services.forecast_restart import (  # noqa: E402
+    ForecastRestartRunContext,
+    ForecastRestartStartContext,
+    forecast_restart_args,
+    forecast_restart_run,
+    forecast_restart_run_with_progress,
+    forecast_restart_start_plan,
+)
 
 
 class ForecastRestartServiceTests(unittest.TestCase):
@@ -126,6 +133,68 @@ class ForecastRestartServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "连续状态预报输入检查未通过"):
             forecast_restart_start_plan({"config_path": "workspace.json"}, context)
+
+    def test_forecast_restart_run_checks_input_and_calls_runner(self) -> None:
+        args = SimpleNamespace(source_run="runs/source")
+        input_check = {"status": "ok"}
+        result = {"run_path": "runs/forecast"}
+        captured: dict[str, object] = {}
+
+        def build_args(payload):
+            captured["payload"] = payload
+            return args
+
+        def run_forecast(run_args, **kwargs):
+            captured["run_args"] = run_args
+            captured["kwargs"] = kwargs
+            return result
+
+        context = ForecastRestartRunContext(
+            build_args=build_args,
+            ensure_input_ready=lambda payload: input_check,
+            run_forecast=run_forecast,
+        )
+        payload = {"source_run": "runs/source"}
+
+        actual = forecast_restart_run(payload, context)
+
+        self.assertIs(actual, result)
+        self.assertIs(captured["run_args"], args)
+        self.assertEqual(captured["kwargs"], {})
+        self.assertEqual(captured["payload"], {"source_run": "runs/source", "_forecast_input_check": input_check})
+        self.assertEqual(payload, {"source_run": "runs/source"})
+
+    def test_forecast_restart_run_with_progress_reuses_checked_payload(self) -> None:
+        args = SimpleNamespace(source_run="runs/source")
+        input_check = {"status": "warn"}
+        result = {"run_path": "runs/forecast"}
+        captured: dict[str, object] = {}
+
+        def build_args(payload):
+            captured["payload"] = payload
+            return args
+
+        def run_forecast(run_args, **kwargs):
+            captured["run_args"] = run_args
+            captured["kwargs"] = kwargs
+            return result
+
+        def stage_callback(stage, message=None):
+            return None
+
+        context = ForecastRestartRunContext(
+            build_args=build_args,
+            ensure_input_ready=lambda payload: self.fail("input check should be reused"),
+            run_forecast=run_forecast,
+        )
+        payload = {"source_run": "runs/source", "_forecast_input_check": input_check}
+
+        actual = forecast_restart_run_with_progress(payload, context, stage_callback)
+
+        self.assertIs(actual, result)
+        self.assertIs(captured["run_args"], args)
+        self.assertEqual(captured["payload"], payload)
+        self.assertIs(captured["kwargs"]["stage_callback"], stage_callback)
 
 
 if __name__ == "__main__":

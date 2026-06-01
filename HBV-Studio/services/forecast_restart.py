@@ -16,6 +16,13 @@ class ForecastRestartStartContext:
 
 
 @dataclass(frozen=True)
+class ForecastRestartRunContext:
+    build_args: Callable[[dict[str, Any]], Any]
+    ensure_input_ready: Callable[[dict[str, Any]], dict[str, Any]]
+    run_forecast: Callable[..., dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class ForecastRestartStartPlan:
     label: str
     command: list[str]
@@ -83,3 +90,23 @@ def forecast_restart_start_plan(
         },
         checked_payload={**payload, "_forecast_input_check": input_check},
     )
+
+
+def forecast_restart_run(payload: dict[str, Any], context: ForecastRestartRunContext) -> dict[str, Any]:
+    input_check = context.ensure_input_ready(payload)
+    checked_payload = {**payload, "_forecast_input_check": input_check}
+    args = context.build_args(checked_payload)
+    return context.run_forecast(args)
+
+
+def forecast_restart_run_with_progress(
+    payload: dict[str, Any],
+    context: ForecastRestartRunContext,
+    stage_callback: Callable[[str, str | None], None],
+) -> dict[str, Any]:
+    input_check = dict(payload.get("_forecast_input_check") or {})
+    if not input_check:
+        input_check = context.ensure_input_ready(payload)
+    checked_payload = {**payload, "_forecast_input_check": input_check}
+    args = context.build_args(checked_payload)
+    return context.run_forecast(args, stage_callback=stage_callback)

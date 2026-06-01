@@ -68,7 +68,10 @@ from services.forecast_input import ForecastInputCheckContext
 from services.forecast_input import ensure_forecast_input_ready as build_ensure_forecast_input_ready
 from services.forecast_input import forecast_input_check as build_forecast_input_check
 from services.forecast_restart import ForecastRestartStartContext
+from services.forecast_restart import ForecastRestartRunContext
 from services.forecast_restart import forecast_restart_args as build_forecast_restart_args
+from services.forecast_restart import forecast_restart_run as build_forecast_restart_run
+from services.forecast_restart import forecast_restart_run_with_progress as build_forecast_restart_run_with_progress
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
@@ -8649,21 +8652,36 @@ def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
 def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
     import forecast_run
 
-    input_check = ensure_forecast_input_ready(payload)
-    checked_payload = {**payload, "_forecast_input_check": input_check}
-    args = build_forecast_restart_args(checked_payload, resolve_path=resolve_any_path, read_json_file=read_json_file)
-    return forecast_run.run_forecast(args)
+    return build_forecast_restart_run(
+        payload,
+        ForecastRestartRunContext(
+            build_args=lambda checked_payload: build_forecast_restart_args(
+                checked_payload,
+                resolve_path=resolve_any_path,
+                read_json_file=read_json_file,
+            ),
+            ensure_input_ready=ensure_forecast_input_ready,
+            run_forecast=forecast_run.run_forecast,
+        ),
+    )
 
 
 def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Callable[[str, str | None], None]) -> dict[str, Any]:
     import forecast_run
 
-    input_check = dict(payload.get("_forecast_input_check") or {})
-    if not input_check:
-        input_check = ensure_forecast_input_ready(payload)
-    checked_payload = {**payload, "_forecast_input_check": input_check}
-    args = build_forecast_restart_args(checked_payload, resolve_path=resolve_any_path, read_json_file=read_json_file)
-    return forecast_run.run_forecast(args, stage_callback=stage_callback)
+    return build_forecast_restart_run_with_progress(
+        payload,
+        ForecastRestartRunContext(
+            build_args=lambda checked_payload: build_forecast_restart_args(
+                checked_payload,
+                resolve_path=resolve_any_path,
+                read_json_file=read_json_file,
+            ),
+            ensure_input_ready=ensure_forecast_input_ready,
+            run_forecast=forecast_run.run_forecast,
+        ),
+        stage_callback,
+    )
 
 
 def _forecast_input_check_context() -> ForecastInputCheckContext:
