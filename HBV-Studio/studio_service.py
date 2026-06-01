@@ -107,7 +107,7 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunReplayConfigContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
@@ -118,6 +118,7 @@ from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import has_custom_result_title as build_has_custom_result_title
+from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
 from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
@@ -2611,29 +2612,15 @@ def _first_existing_path(candidates: list[Path]) -> Path | None:
     return fallback
 
 
-def _has_parameter_bounds(metadata: dict[str, Any]) -> bool:
-    profile = metadata.get("parameter_profile")
-    if not isinstance(profile, dict):
-        return False
-    bounds = profile.get("bounds")
-    if not isinstance(bounds, dict) or not bounds:
-        return False
-    for value in bounds.values():
-        if isinstance(value, (list, tuple)) and len(value) >= 2:
-            return True
-    return False
+def _run_metadata_compatibility_context() -> RunMetadataCompatibilityContext:
+    return RunMetadataCompatibilityContext(
+        workspace_roots_hint_from_metadata=_workspace_roots_hint_from_metadata,
+        resolve_workspace_config_reference=resolve_workspace_config_reference,
+    )
 
 
 def is_studio_editable_metadata(metadata: dict[str, Any], resolved_config: Path | None = None) -> bool:
-    config_path = resolved_config
-    if config_path is None:
-        hint_project_root, hint_gui_root = _workspace_roots_hint_from_metadata(metadata)
-        config_path = resolve_workspace_config_reference(
-            str(metadata.get("workspace_config", "") or ""),
-            project_root=hint_project_root,
-            gui_root=hint_gui_root,
-        )
-    return bool(config_path and _has_parameter_bounds(metadata))
+    return build_is_studio_editable_metadata(metadata, resolved_config, _run_metadata_compatibility_context())
 
 
 def _synthesized_parameter_profile(profile: str, objective_mode: str) -> dict[str, Any]:

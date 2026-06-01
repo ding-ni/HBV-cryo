@@ -16,6 +16,7 @@ if str(STUDIO_DIR) not in sys.path:
 from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
     RunDiscoveryContext,
+    RunMetadataCompatibilityContext,
     RunReplayConfigContext,
     RunSummaryContext,
     RunWorkspaceNameContext,
@@ -27,7 +28,9 @@ from services.runs import (  # noqa: E402
     discover_run_entries,
     discover_runtime_roots,
     display_run_title,
+    has_parameter_bounds,
     has_custom_result_title,
+    is_studio_editable_metadata,
     iter_run_parent_dirs,
     load_run_series_map,
     metadata_initial_state_override,
@@ -48,6 +51,12 @@ from services.runs import (  # noqa: E402
 
 
 class RunIdentityServiceTests(unittest.TestCase):
+    def _metadata_compatibility_context(self, *, hints=None, resolve=None) -> RunMetadataCompatibilityContext:
+        return RunMetadataCompatibilityContext(
+            workspace_roots_hint_from_metadata=hints or (lambda metadata: (None, None)),
+            resolve_workspace_config_reference=resolve or (lambda raw, **kwargs: None),
+        )
+
     def _workspace_name_context(self, *, hints=None, resolve=None, read_config=None) -> RunWorkspaceNameContext:
         return RunWorkspaceNameContext(
             workspace_roots_hint_from_metadata=hints or (lambda metadata: (None, None)),
@@ -225,6 +234,44 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(context["param_bounds_profile_label"], "小时尺度稳定范围")
         self.assertEqual(context["state_snapshot_time"], "2026-06-02 08:00:00")
         self.assertEqual(context["parameter_count"], 2)
+
+    def test_has_parameter_bounds_requires_two_value_bounds(self) -> None:
+        self.assertFalse(has_parameter_bounds({}))
+        self.assertFalse(has_parameter_bounds({"parameter_profile": {"bounds": {}}}))
+        self.assertFalse(has_parameter_bounds({"parameter_profile": {"bounds": {"TT": [0]}}}))
+        self.assertTrue(has_parameter_bounds({"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}))
+        self.assertTrue(has_parameter_bounds({"parameter_profile": {"bounds": {"FC": (100.0, 1000.0)}}}))
+
+    def test_is_studio_editable_metadata_requires_config_and_parameter_bounds(self) -> None:
+        metadata = {"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}
+
+        self.assertTrue(is_studio_editable_metadata(metadata, Path("C:/workspace/config.json")))
+        self.assertFalse(is_studio_editable_metadata({}, Path("C:/workspace/config.json")))
+        self.assertFalse(is_studio_editable_metadata(metadata, None, self._metadata_compatibility_context()))
+
+    def test_is_studio_editable_metadata_resolves_config_with_metadata_hints(self) -> None:
+        observed = {}
+
+        def hints(metadata):
+            observed["metadata"] = metadata
+            return Path("C:/project"), Path("C:/gui")
+
+        def resolve(raw, **kwargs):
+            observed["raw"] = raw
+            observed["kwargs"] = kwargs
+            return Path("D:/resolved/config.json")
+
+        context = self._metadata_compatibility_context(hints=hints, resolve=resolve)
+        metadata = {
+            "workspace_config": "relative/config.json",
+            "parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}},
+        }
+
+        self.assertTrue(is_studio_editable_metadata(metadata, context=context))
+        self.assertIs(observed["metadata"], metadata)
+        self.assertEqual(observed["raw"], "relative/config.json")
+        self.assertEqual(observed["kwargs"]["project_root"], Path("C:/project"))
+        self.assertEqual(observed["kwargs"]["gui_root"], Path("C:/gui"))
 
     def test_workspace_name_for_summary_prefers_workspace_label(self) -> None:
         def fail_resolve(*args, **kwargs):

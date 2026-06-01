@@ -72,6 +72,12 @@ class RunWorkspaceNameContext:
 
 
 @dataclass(frozen=True)
+class RunMetadataCompatibilityContext:
+    workspace_roots_hint_from_metadata: Callable[[dict[str, Any] | None], tuple[Path | None, Path | None]]
+    resolve_workspace_config_reference: Callable[..., Path | None]
+
+
+@dataclass(frozen=True)
 class RunDetailContext:
     resolve_path: Callable[..., Path]
     read_json_file: Callable[[Path], dict[str, Any]]
@@ -363,6 +369,35 @@ def source_run_meta(metadata: dict[str, Any], replace_placeholders: Callable[...
         except Exception:
             source_name = Path(source_path).name
     return source_path, source_name
+
+
+def has_parameter_bounds(metadata: dict[str, Any]) -> bool:
+    profile = metadata.get("parameter_profile")
+    if not isinstance(profile, dict):
+        return False
+    bounds = profile.get("bounds")
+    if not isinstance(bounds, dict) or not bounds:
+        return False
+    for value in bounds.values():
+        if isinstance(value, (list, tuple)) and len(value) >= 2:
+            return True
+    return False
+
+
+def is_studio_editable_metadata(
+    metadata: dict[str, Any],
+    resolved_config: Path | None = None,
+    context: RunMetadataCompatibilityContext | None = None,
+) -> bool:
+    config_path = resolved_config
+    if config_path is None and context is not None:
+        hint_project_root, hint_gui_root = context.workspace_roots_hint_from_metadata(metadata)
+        config_path = context.resolve_workspace_config_reference(
+            str(metadata.get("workspace_config", "") or ""),
+            project_root=hint_project_root,
+            gui_root=hint_gui_root,
+        )
+    return bool(config_path and has_parameter_bounds(metadata))
 
 
 def workspace_name_for_summary(
