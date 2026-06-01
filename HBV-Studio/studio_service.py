@@ -54,6 +54,8 @@ from services.data_prep import (
     verify_data_prep_task_output as build_verify_data_prep_task_output,
 )
 from services.boundary import BoundaryPreviewContext, boundary_preview as build_boundary_preview
+from services.calibration import CalibrationStartContext
+from services.calibration import calibration_start_plan as build_calibration_start_plan
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
 from services.filesystem import (
     FilesystemContext,
@@ -6425,152 +6427,42 @@ def start_bootstrap(payload: dict[str, Any]) -> TaskRecord:
     return record
 
 
+def _calibration_start_context() -> CalibrationStartContext:
+    return CalibrationStartContext(
+        resolve_path=resolve_any_path,
+        read_runtime_config=read_runtime_config,
+        current_profile=current_profile,
+        resolve_runtime_precip_source=profile_runner.resolve_runtime_precip_source,
+        validate_workspace_fields=validate_workspace_fields,
+        config_text_value=_config_text_value,
+        resolve_config_related_path=_resolve_config_related_path,
+        build_profile_paths=build_profile_paths,
+        resolve_legacy_precip_source=profile_runner.resolve_legacy_precip_source,
+        glacier_formal_requirements=glacier_formal_requirements,
+        resolve_objective_mode=profile_runner.resolve_objective_mode,
+        resolve_param_bounds_profile=profile_runner.resolve_param_bounds_profile,
+        resolve_calibration_workflow=profile_runner.resolve_calibration_workflow,
+        calibration_workflow_status=profile_runner.calibration_workflow_status,
+        find_manual_preset=find_manual_preset,
+        build_forward_runtime_cli_args=_build_forward_runtime_cli_args,
+        load_legacy_module=profile_runner.load_legacy_module,
+        old_script_path=profile_runner.old_script_path,
+        patch_runtime_environment=profile_runner.patch_runtime_environment,
+        patch_profile_behavior=profile_runner.patch_profile_behavior,
+        build_runtime_param_vector=build_runtime_param_vector,
+        build_python_script_command=build_python_script_command,
+        model_runner=MODEL_RUNNER,
+        observed_flow_key=OBSERVED_FLOW_KEY,
+        calibration_methods=CALIBRATION_METHODS,
+        profile_daily=PROFILE_DAILY,
+        profile_labels=PROFILE_LABELS,
+        param_bounds_profile_labels=profile_runner.PARAM_BOUNDS_PROFILE_LABELS,
+    )
+
+
 def start_calibration(payload: dict[str, Any]) -> TaskRecord:
-    config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
-    config = read_runtime_config(config_path)
-    profile = str(payload.get("calibration_mode", "")).strip().lower() or current_profile(config)
-    runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
-    quick_test = bool(payload.get("quick_test", False))
-    validation_stage = "quick_test" if quick_test else "calibration"
-    validation = validate_workspace_fields(str(config_path), stage=validation_stage, precip_source=runtime_prec_source)
-    if not validation["valid"]:
-        task_label = "输入预核算" if quick_test else "率定"
-        raise ValueError(f"输入检查未通过，无法启动{task_label}：\n- " + "\n- ".join(validation["missing"][:8]))
-    if not quick_test:
-        obs_path = _config_text_value(config, OBSERVED_FLOW_KEY)
-        if not obs_path:
-            raise ValueError(f"输入检查未通过，无法启动率定：\n- {OBSERVED_FLOW_KEY}")
-        obs_file = _resolve_config_related_path(config, obs_path)
-        if obs_file is None or not obs_file.exists():
-            raise ValueError(f"输入检查未通过，无法启动率定：\n- 观测径流文件不存在：{obs_path}")
-    paths = build_profile_paths(config, profile)
-    maxiter = int(payload.get("maxiter", 24))
-    workers = int(payload.get("workers", 4))
-    legacy_prec_source = profile_runner.resolve_legacy_precip_source(runtime_prec_source)
-    glacier_requirements = glacier_formal_requirements(config, profile)
-    objective_mode = profile_runner.resolve_objective_mode(config, payload.get("objective_mode", None), profile)
-    param_bounds_profile = profile_runner.resolve_param_bounds_profile(
-        config,
-        payload.get("param_bounds_profile", None),
-        profile,
-    )
-    calibration_workflow = profile_runner.resolve_calibration_workflow(
-        config,
-        payload.get("calibration_workflow", None),
-        profile,
-    )
-    calibration_workflow_status = profile_runner.calibration_workflow_status(calibration_workflow)
-    method = str(payload.get("method", "de")).strip().lower() or "de"
-    if method not in CALIBRATION_METHODS:
-        raise ValueError(f"未知率定方法：{method}")
-    mc_samples = int(payload.get("mc_samples", 300))
-    init_bound_shrink = max(0.0, float(payload.get("init_bound_shrink", 0.0) or 0.0))
-    debug_days = max(0, int(payload.get("debug_days", 0) or 0))
-    if quick_test:
-        debug_days = 0
-    refine_enabled_payload = bool(payload.get("refine_enabled", False))
-    refine_maxiter_payload = max(0, int(payload.get("refine_maxiter", 0) or 0))
-    if quick_test or method not in {"de", "mc_screen_de"}:
-        refine_cli_value = 0
-        refine_metadata_value = 0
-    elif refine_enabled_payload and refine_maxiter_payload > 0:
-        refine_cli_value = refine_maxiter_payload
-        refine_metadata_value = refine_maxiter_payload
-    elif refine_enabled_payload:
-        refine_cli_value = -1
-        refine_metadata_value = min(20, max(6, int(round(maxiter * 0.25))))
-    else:
-        refine_cli_value = 0
-        refine_metadata_value = 0
-    init_params_file = ""
-    preset_id = str(payload.get("init_preset_id", "")).strip()
-    if preset_id:
-        preset = find_manual_preset(str(config_path), preset_id)
-        preset_profile = str(preset.get("calibration_profile", "")).strip().lower()
-        if preset_profile and preset_profile != profile:
-            raise ValueError(
-                f"所选手调参数集属于 {PROFILE_LABELS.get(preset_profile, preset_profile)}，"
-                f"与当前率定模式 {PROFILE_LABELS.get(profile, profile)} 不一致。"
-            )
-        paths["cache_dir"].mkdir(parents=True, exist_ok=True)
-        init_file = Path(paths["cache_dir"]) / f"init_params_{preset_id}.json"
-        preset_params = dict(preset.get("params", {}))
-        cli_args = _build_forward_runtime_cli_args(
-            config_path,
-            profile,
-            prec_source=runtime_prec_source,
-            glacier_mode=str(payload.get("glacier_mode", "inline")).strip().lower() or "inline",
-            objective_mode=objective_mode,
-        )
-        module = profile_runner.load_legacy_module(profile_runner.old_script_path(config, "model", "calibrate_hbv_cryo.py"))
-        profile_runner.patch_runtime_environment(module, config, profile, cli_args)
-        profile_runner.patch_profile_behavior(module, config, profile, objective_mode, param_bounds_profile)
-        configure_time_step = getattr(module, "configure_time_step", None)
-        if callable(configure_time_step):
-            configure_time_step()
-        _, complete_params, _ = build_runtime_param_vector(module, preset_params)
-        init_file.write_text(json.dumps(complete_params, ensure_ascii=False, indent=2), encoding="utf-8")
-        init_params_file = str(init_file)
-    command = build_python_script_command(
-        MODEL_RUNNER,
-        "--配置", str(config_path),
-        "--率定模式", profile,
-        "--method", method,
-        "--workers", str(workers),
-        "--maxiter", str(maxiter),
-        "--popsize", str(int(payload.get("popsize", 6))),
-        "--seed", str(int(payload.get("seed", 42))),
-        "--mc-samples", str(mc_samples),
-        "--目标函数", objective_mode,
-        "--calibration-workflow", calibration_workflow,
-        "--冰川模式", str(payload.get("glacier_mode", "inline")),
-    )
-    if profile == PROFILE_DAILY:
-        command.extend(["--param-bounds-profile", param_bounds_profile])
-    if runtime_prec_source == "custom_tif":
-        command.extend(["--降水源", "custom_tif", "--prec-dir", str(paths["aligned_prec_custom_dir"])])
-    elif runtime_prec_source == "era5":
-        command.extend(["--降水源", "era5"])
-    else:
-        command.extend(["--降水源", legacy_prec_source])
-    if init_params_file:
-        command.extend(["--init-params-file", init_params_file, "--init-bound-shrink", str(init_bound_shrink)])
-    if debug_days > 0:
-        command.extend(["--debug-days", str(debug_days)])
-    if refine_cli_value != -1:
-        command.extend(["--refine-maxiter", str(refine_cli_value)])
-    if quick_test:
-        command.extend(["--quick-test", "--quick-days", str(int(payload.get("quick_days", 30)))])
-    task_name = "输入预核算" if quick_test else ("快速试算" if debug_days > 0 else "率定任务")
-    label = f"{task_name} | {config_path.stem} | {PROFILE_LABELS.get(profile, profile)}"
-    metadata = {
-        "config_path": str(config_path),
-        "logs_dir": str(paths["logs_dir"]),
-        "profile": profile,
-        "objective_mode": objective_mode,
-        "param_bounds_profile": param_bounds_profile,
-        "param_bounds_profile_label": profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(
-            param_bounds_profile,
-            param_bounds_profile,
-        ),
-        "calibration_workflow": calibration_workflow,
-        "calibration_workflow_status": calibration_workflow_status,
-        "method": method,
-        "maxiter": maxiter,
-        "mc_samples": mc_samples,
-        "debug_days": debug_days,
-        "init_preset_id": preset_id,
-        "init_bound_shrink": init_bound_shrink,
-        "runtime_prec_source": runtime_prec_source,
-        "refine_enabled": refine_enabled_payload and refine_metadata_value > 0,
-        "refine_maxiter": refine_metadata_value,
-        "quick_test": quick_test,
-        "ui_progress": {
-            "stage": "启动率定任务",
-            "label": "正在加载模型、驱动和目标函数",
-        },
-    }
-    return start_process("calibration", label, command, PROJECT_ROOT, metadata=metadata)
+    plan = build_calibration_start_plan(payload, _calibration_start_context())
+    return start_process("calibration", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
 
 
 def start_tuotuohe_sync(payload: dict[str, Any]) -> TaskRecord:
