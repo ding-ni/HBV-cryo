@@ -16,6 +16,13 @@ class MeteoImportStartContext:
 
 
 @dataclass(frozen=True)
+class MeteoImportWorkerContext:
+    perform_meteo_import: Callable[..., dict[str, Any]]
+    add_task_exception_output: Callable[[str, Exception], None]
+    mark_task_finished: Callable[..., None]
+
+
+@dataclass(frozen=True)
 class MeteoImportStartPlan:
     label: str
     command: list[str]
@@ -35,3 +42,16 @@ def meteo_import_start_plan(payload: dict[str, Any], context: MeteoImportStartCo
             "runtime_prec_source": runtime_prec_source,
         },
     )
+
+
+def meteo_import_worker_run(
+    task_id: str,
+    payload: dict[str, Any],
+    context: MeteoImportWorkerContext,
+) -> None:
+    try:
+        result = context.perform_meteo_import(payload, task_id=task_id)
+        context.mark_task_finished(task_id, ok=True, return_code=0, result=result)
+    except Exception as exc:
+        context.add_task_exception_output(task_id, exc)
+        context.mark_task_finished(task_id, ok=False, return_code=-1)

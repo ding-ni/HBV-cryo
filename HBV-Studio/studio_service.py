@@ -104,7 +104,9 @@ from services.manual_presets import manual_preset_store_path as build_manual_pre
 from services.manual_presets import save_manual_preset as build_save_manual_preset
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
 from services.meteo_import import MeteoImportStartContext
+from services.meteo_import import MeteoImportWorkerContext
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
+from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunDetailContext, RunExportContext, RunListContext, RunMutationContext
@@ -7519,12 +7521,15 @@ def import_meteo_files(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def meteo_import_worker(task_id: str, payload: dict[str, Any]) -> None:
-    try:
-        result = perform_meteo_import(payload, task_id=task_id)
-        _mark_task_finished(task_id, ok=True, return_code=0, result=result)
-    except Exception as exc:
-        add_task_exception_output(task_id, exc)
-        _mark_task_finished(task_id, ok=False, return_code=-1)
+    build_meteo_import_worker_run(
+        task_id,
+        payload,
+        MeteoImportWorkerContext(
+            perform_meteo_import=perform_meteo_import,
+            add_task_exception_output=add_task_exception_output,
+            mark_task_finished=_mark_task_finished,
+        ),
+    )
 
 
 def _meteo_import_start_context() -> MeteoImportStartContext:
