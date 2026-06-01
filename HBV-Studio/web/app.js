@@ -213,6 +213,7 @@ const CURRENT_OBJECTIVE_FAMILY = "daily_unified_professional_v1";
 const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
 const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted_multi_criteria"]);
 const runDetailRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const cdsApiStatusRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -269,7 +270,6 @@ const state = {
   prepStatus: {},
   cdsApiStatus: null,
   cdsApiNeedSignature: "",
-  activeCdsApiRequestId: 0,
   obsInfo: null,
   lastInputCheck: {
     configPath: "",
@@ -4795,16 +4795,16 @@ async function refreshEra5ApiStatus({ force = false } = {}) {
     renderEra5ApiPanel();
     return;
   }
-  const requestId = ++state.activeCdsApiRequestId;
+  const requestToken = cdsApiStatusRequestGuard.next();
   state.cdsApiNeedSignature = needSignature;
   state.cdsApiStatus = { loading: true };
   renderEra5ApiPanel();
   try {
     const payload = await apiGet("/api/cdsapi/status");
-    if (requestId !== state.activeCdsApiRequestId) return;
+    if (!cdsApiStatusRequestGuard.isActive(requestToken)) return;
     state.cdsApiStatus = payload.data || {};
   } catch (err) {
-    if (requestId !== state.activeCdsApiRequestId) return;
+    if (!cdsApiStatusRequestGuard.isActive(requestToken)) return;
     state.cdsApiStatus = { error: err.message };
   }
   renderEra5ApiPanel();

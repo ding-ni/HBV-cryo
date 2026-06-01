@@ -95,6 +95,15 @@ class FrontendStructureTests(unittest.TestCase):
         referenced = set(re.findall(r"window\.(HBVStudio[A-Za-z0-9_]+)", app_js))
         self.assertTrue(referenced <= registered, referenced - registered)
 
+    def test_migrated_request_guards_are_not_kept_in_state(self) -> None:
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+        state_keys = js_object_keys(app_js, "state")
+
+        self.assertNotIn("activeRunRequestId", state_keys)
+        self.assertNotIn("activeCdsApiRequestId", state_keys)
+        self.assertIn("runDetailRequestGuard", app_js)
+        self.assertIn("cdsApiStatusRequestGuard", app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
