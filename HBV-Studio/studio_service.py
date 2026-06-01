@@ -8695,124 +8695,6 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
-def _forecast_source_state_time(source_run: Path, metadata: dict[str, Any]) -> str:
-    initial_state = dict(metadata.get("initial_state", {}) or {})
-    time_config = dict(metadata.get("time_config", {}) or {})
-    state_time = str(
-        initial_state.get("state_snapshot_time")
-        or time_config.get("forecast_end")
-        or time_config.get("valid_end")
-        or time_config.get("calib_end")
-        or ""
-    ).strip()
-    if state_time:
-        return state_time
-    csv_path = source_run / "simulation.csv"
-    if csv_path.exists():
-        try:
-            frame = pd.read_csv(csv_path, usecols=["date"])
-            if not frame.empty:
-                return str(frame["date"].iloc[-1])
-        except Exception:
-            pass
-    return ""
-
-
-def _forecast_expected_index(start_raw: str, end_raw: str, step_hours: float) -> pd.DatetimeIndex:
-    step = normalize_time_step_hours(step_hours)
-    start_ts = pd.to_datetime(start_raw)
-    end_ts = pd.to_datetime(end_raw)
-    if step < 24.0 and is_date_only_string(end_raw):
-        end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(hours=step)
-    if end_ts < start_ts:
-        return pd.DatetimeIndex([])
-    return pd.date_range(start_ts, end_ts, freq=pd.Timedelta(hours=step))
-
-
-def _forecast_input_dir_summary(
-    *,
-    key: str,
-    label: str,
-    raw_path: str,
-    step_hours: float,
-    expected_index: pd.DatetimeIndex | None,
-) -> dict[str, Any]:
-    raw_text = str(raw_path or "").strip()
-    if not raw_text:
-        return {
-            "key": key,
-            "label": label,
-            "path": "",
-            "status": "fail",
-            "summary": f"请选择预报{label}栅格目录。",
-            "errors": [f"请选择预报{label}栅格目录。"],
-            "warnings": [],
-            "total_files": 0,
-            "valid_time_steps": 0,
-            "expected_steps": int(len(expected_index)) if expected_index is not None else 0,
-            "covered_steps": 0,
-            "missing_steps": 0,
-            "out_of_window_steps": 0,
-        }
-    try:
-        directory = resolve_any_path(raw_text, must_exist=False)
-    except (OSError, ValueError) as exc:
-        message = f"预报{label}目录路径无效：{exc}"
-        return {
-            "key": key,
-            "label": label,
-            "path": raw_text,
-            "status": "fail",
-            "summary": message,
-            "errors": [message],
-            "warnings": [],
-            "total_files": 0,
-            "valid_time_steps": 0,
-            "expected_steps": int(len(expected_index)) if expected_index is not None else 0,
-            "covered_steps": 0,
-            "missing_steps": int(len(expected_index)) if expected_index is not None else 0,
-            "out_of_window_steps": 0,
-        }
-    check = validate_tif_time_series(label, directory, step_hours, expected_index, "预报窗口")
-    expected_steps = int(len(expected_index)) if expected_index is not None else 0
-    missing_count = int(len(check.get("missing_steps", []) or []))
-    out_count = int(len(check.get("out_of_range_steps", []) or []))
-    valid_steps = int(check.get("valid_time_steps", 0) or 0)
-    covered_steps = max(0, expected_steps - missing_count) if expected_steps else valid_steps
-    errors = [str(item) for item in list(check.get("errors", []) or [])]
-    warnings = [str(item) for item in list(check.get("warnings", []) or [])]
-    if errors:
-        status = "fail"
-    elif warnings or expected_steps <= 0:
-        status = "warn"
-    else:
-        status = "ok"
-    if expected_steps > 0:
-        summary = f"{covered_steps}/{expected_steps} 个预报时步可用"
-        if out_count:
-            summary += f"，另有 {out_count} 个窗口外文件将不参与本次预报"
-    else:
-        summary = f"识别到 {valid_steps} 个有效时间步，填写预报时段后可核对覆盖"
-    timestamps = list(check.get("timestamps", []) or [])
-    return {
-        "key": key,
-        "label": label,
-        "path": str(directory.resolve(strict=False)),
-        "status": status,
-        "summary": summary,
-        "errors": errors,
-        "warnings": warnings,
-        "total_files": int(check.get("total_files", 0) or 0),
-        "valid_time_steps": valid_steps,
-        "expected_steps": expected_steps,
-        "covered_steps": covered_steps,
-        "missing_steps": missing_count,
-        "out_of_window_steps": out_count,
-        "first_time": _format_time_for_check(timestamps[0], step_hours) if timestamps else "",
-        "last_time": _format_time_for_check(timestamps[-1], step_hours) if timestamps else "",
-    }
-
-
 def _forecast_output_preview(
     payload: dict[str, Any],
     source_run: Path,
@@ -8977,10 +8859,9 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         read_json_file=read_json_file,
         parameter_check_context=_forecast_parameter_check_context,
         normalize_time_step_hours=normalize_time_step_hours,
-        forecast_source_state_time=_forecast_source_state_time,
+        is_date_only_string=is_date_only_string,
+        validate_tif_time_series=validate_tif_time_series,
         format_time_for_check=_format_time_for_check,
-        forecast_expected_index=_forecast_expected_index,
-        forecast_input_dir_summary=_forecast_input_dir_summary,
         forecast_output_preview=_forecast_output_preview,
         forecast_parameter_detail_text=_forecast_parameter_detail_text,
         forecast_station_precip_check=_forecast_station_precip_check,
