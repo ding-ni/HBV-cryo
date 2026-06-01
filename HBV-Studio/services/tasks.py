@@ -18,6 +18,14 @@ class TaskQueryContext:
 
 
 @dataclass(frozen=True)
+class TaskCreateContext:
+    tasks: dict[str, Any]
+    task_lock: threading.Lock
+    generate_task_id: Callable[[], str]
+    create_task_record: Callable[..., Any]
+
+
+@dataclass(frozen=True)
 class TaskMutationContext:
     tasks: dict[str, Any]
     task_lock: threading.Lock
@@ -65,6 +73,29 @@ def find_running_task(task_type: str, config_path_raw: str, context: TaskQueryCo
             except Exception:
                 continue
     return None
+
+
+def create_registered_task(
+    task_type: str,
+    label: str,
+    command: list[str],
+    cwd: Path,
+    context: TaskCreateContext,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    task_id = context.generate_task_id()
+    record = context.create_task_record(
+        id=task_id,
+        task_type=task_type,
+        label=label,
+        command=command,
+        cwd=str(cwd),
+        metadata=metadata or {},
+    )
+    with context.task_lock:
+        context.tasks[task_id] = record
+    return record
 
 
 def append_task_output(task_id: str, line: str, context: TaskMutationContext) -> None:

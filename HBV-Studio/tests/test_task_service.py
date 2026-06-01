@@ -12,9 +12,11 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.tasks import (  # noqa: E402
     ProcessMonitorContext,
+    TaskCreateContext,
     TaskMutationContext,
     append_task_exception_output,
     append_task_output,
+    create_registered_task,
     mark_task_finished,
     monitor_process_task,
     set_task_detected_runs,
@@ -35,7 +37,20 @@ class FakeTask:
         self.output.append(line)
 
 
+class FakeRecord:
+    def __init__(self, **kwargs) -> None:
+        self.__dict__.update(kwargs)
+
+
 class TaskServiceTests(unittest.TestCase):
+    def _create_context(self, tasks: dict[str, FakeRecord]) -> TaskCreateContext:
+        return TaskCreateContext(
+            tasks=tasks,
+            task_lock=threading.Lock(),
+            generate_task_id=lambda: "task-1",
+            create_task_record=lambda **kwargs: FakeRecord(**kwargs),
+        )
+
     def _mutation_context(self, tasks: dict[str, FakeTask], *, now: float = 123.0) -> TaskMutationContext:
         return TaskMutationContext(
             tasks=tasks,
@@ -69,6 +84,35 @@ class TaskServiceTests(unittest.TestCase):
             ),
             mark_task_exception=lambda task_id, exc: events.append(("exception", task_id, str(exc))),
         )
+
+    def test_create_registered_task_builds_and_stores_record(self) -> None:
+        tasks: dict[str, FakeRecord] = {}
+        metadata = {"ui_progress": {"stage": "准备"}}
+
+        record = create_registered_task(
+            "forward_sim",
+            "保存并重算",
+            ["forward_sim"],
+            Path("project-root"),
+            self._create_context(tasks),
+            metadata=metadata,
+        )
+
+        self.assertIs(tasks["task-1"], record)
+        self.assertEqual(record.id, "task-1")
+        self.assertEqual(record.task_type, "forward_sim")
+        self.assertEqual(record.label, "保存并重算")
+        self.assertEqual(record.command, ["forward_sim"])
+        self.assertEqual(record.cwd, "project-root")
+        self.assertIs(record.metadata, metadata)
+
+    def test_create_registered_task_defaults_metadata(self) -> None:
+        tasks: dict[str, FakeRecord] = {}
+
+        record = create_registered_task("sync", "同步", ["sync"], Path("project-root"), self._create_context(tasks))
+
+        self.assertEqual(record.metadata, {})
+        self.assertIs(tasks["task-1"], record)
 
     def test_task_mutation_helpers_update_task_state(self) -> None:
         task = FakeTask()

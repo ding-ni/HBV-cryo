@@ -144,11 +144,13 @@ from services.system_status import (
 from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
+    TaskCreateContext,
     TaskMutationContext,
     ProcessMonitorContext,
     TaskQueryContext,
     append_task_exception_output as build_append_task_exception_output,
     append_task_output as build_append_task_output,
+    create_registered_task as build_create_registered_task,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
     list_tasks as build_list_tasks,
@@ -453,6 +455,15 @@ def _task_query_context() -> TaskQueryContext:
         task_lock=TASK_LOCK,
         snapshot_tasks=_snapshot_tasks,
         resolve_any_path=resolve_any_path,
+    )
+
+
+def _task_create_context() -> TaskCreateContext:
+    return TaskCreateContext(
+        tasks=TASKS,
+        task_lock=TASK_LOCK,
+        generate_task_id=lambda: uuid.uuid4().hex[:10],
+        create_task_record=TaskRecord,
     )
 
 
@@ -6267,8 +6278,25 @@ def build_python_script_command(script: Path | str, *args: Any) -> list[str]:
     return [PYTHON_EXE, script_path, *tail]
 
 
+def create_registered_task(
+    task_type: str,
+    label: str,
+    command: list[str],
+    cwd: Path,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> TaskRecord:
+    return build_create_registered_task(
+        task_type,
+        label,
+        command,
+        cwd,
+        _task_create_context(),
+        metadata=metadata,
+    )
+
+
 def start_process(task_type: str, label: str, command: list[str], cwd: Path, metadata: dict[str, Any] | None = None) -> TaskRecord:
-    task_id = uuid.uuid4().hex[:10]
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -6277,10 +6305,8 @@ def start_process(task_type: str, label: str, command: list[str], cwd: Path, met
         bufsize=0,
         env=_subprocess_env(),
     )
-    record = TaskRecord(id=task_id, task_type=task_type, label=label, command=command, cwd=str(cwd), metadata=metadata or {})
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=monitor_task, args=(task_id, process, snapshot_run_paths()), daemon=True).start()
+    record = create_registered_task(task_type, label, command, cwd, metadata=metadata)
+    threading.Thread(target=monitor_task, args=(record.id, process, snapshot_run_paths()), daemon=True).start()
     return record
 
 
@@ -6363,18 +6389,8 @@ def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payloa
 
 def start_bootstrap(payload: dict[str, Any]) -> TaskRecord:
     plan = build_data_prep_bootstrap_plan(payload, _data_prep_bootstrap_context())
-    task_id = uuid.uuid4().hex[:10]
-    record = TaskRecord(
-        id=task_id,
-        task_type="bootstrap",
-        label=plan.label,
-        command=plan.command,
-        cwd=str(PROJECT_ROOT),
-        metadata=plan.metadata,
-    )
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=workflow_worker, args=(task_id, plan.config_path, plan.step_ids, payload), daemon=True).start()
+    record = create_registered_task("bootstrap", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
+    threading.Thread(target=workflow_worker, args=(record.id, plan.config_path, plan.step_ids, payload), daemon=True).start()
     return record
 
 
@@ -7538,18 +7554,8 @@ def _meteo_import_start_context() -> MeteoImportStartContext:
 
 def start_meteo_import(payload: dict[str, Any]) -> TaskRecord:
     plan = build_meteo_import_start_plan(payload, _meteo_import_start_context())
-    task_id = uuid.uuid4().hex[:10]
-    record = TaskRecord(
-        id=task_id,
-        task_type="meteo_import",
-        label=plan.label,
-        command=plan.command,
-        cwd=str(PROJECT_ROOT),
-        metadata=plan.metadata,
-    )
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=meteo_import_worker, args=(task_id, dict(payload)), daemon=True).start()
+    record = create_registered_task("meteo_import", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
+    threading.Thread(target=meteo_import_worker, args=(record.id, dict(payload)), daemon=True).start()
     return record
 
 
@@ -8649,18 +8655,8 @@ def _forward_simulation_start_context() -> ForwardSimulationStartContext:
 
 def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
     plan = build_forward_simulation_start_plan(payload, _forward_simulation_start_context())
-    task_id = uuid.uuid4().hex[:10]
-    record = TaskRecord(
-        id=task_id,
-        task_type="forward_sim",
-        label=plan.label,
-        command=plan.command,
-        cwd=str(PROJECT_ROOT),
-        metadata=plan.metadata,
-    )
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=forward_sim_worker, args=(task_id, dict(payload)), daemon=True).start()
+    record = create_registered_task("forward_sim", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
+    threading.Thread(target=forward_sim_worker, args=(record.id, dict(payload)), daemon=True).start()
     return record
 
 
@@ -8678,18 +8674,8 @@ def _forecast_restart_start_context() -> ForecastRestartStartContext:
 
 def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     plan = build_forecast_restart_start_plan(payload, _forecast_restart_start_context())
-    task_id = uuid.uuid4().hex[:10]
-    record = TaskRecord(
-        id=task_id,
-        task_type="forecast_restart",
-        label=plan.label,
-        command=plan.command,
-        cwd=str(PROJECT_ROOT),
-        metadata=plan.metadata,
-    )
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=forecast_restart_worker, args=(task_id, plan.checked_payload), daemon=True).start()
+    record = create_registered_task("forecast_restart", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
+    threading.Thread(target=forecast_restart_worker, args=(record.id, plan.checked_payload), daemon=True).start()
     return record
 
 
@@ -8705,18 +8691,8 @@ def start_manual_start(payload: dict[str, Any]) -> TaskRecord:
     if current is not None:
         return current
     plan = build_manual_start_start_plan(payload, config_path, _manual_start_start_context())
-    task_id = uuid.uuid4().hex[:10]
-    record = TaskRecord(
-        id=task_id,
-        task_type="manual_start",
-        label=plan.label,
-        command=plan.command,
-        cwd=str(PROJECT_ROOT),
-        metadata=plan.metadata,
-    )
-    with TASK_LOCK:
-        TASKS[task_id] = record
-    threading.Thread(target=manual_start_worker, args=(task_id, dict(payload)), daemon=True).start()
+    record = create_registered_task("manual_start", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
+    threading.Thread(target=manual_start_worker, args=(record.id, dict(payload)), daemon=True).start()
     return record
 
 
