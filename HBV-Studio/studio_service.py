@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 import profile_runner
+from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -8330,32 +8331,20 @@ def open_path_in_explorer(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def dashboard_payload() -> dict[str, Any]:
-    templates = list_templates()
-    workspaces = list_workspaces()
-    runs = list_runs()
-    tasks = list_tasks()
-    return {
-        "project": {
-            "project_root": str(PROJECT_ROOT),
-            "gui_root": str(GUI_ROOT),
-            "builtin_dem": str(BUILTIN_DEM.resolve()),
-            "builtin_dems": {
-                "1km": str(BUILTIN_DEM_1KM.resolve()),
-                "0p1deg": str(BUILTIN_DEM_0P1.resolve()),
-            },
-            "runtime_root": str(PROJECT_RUNTIME_DIR.resolve()),
-        },
-        "counts": {
-            "templates": len(templates),
-            "workspaces": len(workspaces),
-            "runs": len(runs),
-            "tasks": len(tasks),
-        },
-        "templates": templates,
-        "workspaces": workspaces,
-        "runs": runs,
-        "tasks": tasks,
-    }
+    return build_dashboard_payload(
+        DashboardContext(
+            list_templates=list_templates,
+            list_workspaces=list_workspaces,
+            list_runs=list_runs,
+            list_tasks=list_tasks,
+            project_root=PROJECT_ROOT,
+            gui_root=GUI_ROOT,
+            builtin_dem=BUILTIN_DEM,
+            builtin_dem_1km=BUILTIN_DEM_1KM,
+            builtin_dem_0p1=BUILTIN_DEM_0P1,
+            project_runtime_dir=PROJECT_RUNTIME_DIR,
+        )
+    )
 
 
 def cdsapi_status() -> dict[str, Any]:
