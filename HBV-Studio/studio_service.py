@@ -90,7 +90,9 @@ from services.geo_overview import workspace_glacier_geojson as build_workspace_g
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
 from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
 from services.manual_start import ManualStartStartContext
+from services.manual_start import ManualStartWorkerContext
 from services.manual_start import manual_start_start_plan as build_manual_start_start_plan
+from services.manual_start import manual_start_worker_run as build_manual_start_worker_run
 from services.manual_presets import ManualPresetContext
 from services.manual_presets import _source_run_metadata_for_preset as build_source_run_metadata_for_preset
 from services.manual_presets import delete_manual_preset as build_delete_manual_preset
@@ -8614,34 +8616,26 @@ def forward_sim_worker(task_id: str, payload: dict[str, Any]) -> None:
     )
 
 
+def _set_manual_start_detected_runs(task_id: str, detected_runs: list[str]) -> None:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+        if task is not None:
+            task.detected_runs = detected_runs
+
+
 def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
-    last_stage = ""
-
-    def report(stage: str, message: str | None = None) -> None:
-        nonlocal last_stage
-        last_stage = stage
-        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "手调起点"})
-        if message:
-            add_task_output(task_id, message)
-
-    try:
-        report("准备启动", "[阶段] 准备生成手调起点")
-        result = _create_manual_start_result(
-            payload,
-            stage_callback=report,
-            output_callback=lambda line: add_task_output(task_id, line),
-        )
-        set_task_metadata(task_id, run_path=result["run_path"])
-        with TASK_LOCK:
-            task = TASKS.get(task_id)
-            if task is not None:
-                task.detected_runs = [result["run_path"]]
-        _mark_task_finished(task_id, ok=True, return_code=0, result=result)
-    except Exception as exc:
-        if last_stage:
-            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "手调起点"})
-        add_task_exception_output(task_id, exc)
-        _mark_task_finished(task_id, ok=False, return_code=-1)
+    build_manual_start_worker_run(
+        task_id,
+        payload,
+        ManualStartWorkerContext(
+            create_manual_start_result=_create_manual_start_result,
+            set_task_metadata=set_task_metadata,
+            add_task_output=add_task_output,
+            add_task_exception_output=add_task_exception_output,
+            mark_task_finished=_mark_task_finished,
+            set_detected_runs=_set_manual_start_detected_runs,
+        ),
+    )
 
 
 def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
