@@ -39,6 +39,7 @@ from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
+from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_layout import WorkspaceLayoutContext, workspace_layout_summary as build_workspace_layout_summary
 from profile_runner import (
     PROFILE_DAILY,
@@ -9494,132 +9495,27 @@ def workspace_detailed_check(config_path_raw: str, precip_source: Any = None) ->
 
 
 def workspace_advice(config_path_raw: str, precip_source: Any = None) -> dict[str, Any]:
-    cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-    config = read_runtime_config(cfg_path)
-    profile = current_profile(config)
-    runtime_prec_source = resolve_precip_source(config, precip_source)
-    comp = workspace_completeness(str(cfg_path), precip_source=runtime_prec_source)
-    validation = validate_workspace_fields(str(cfg_path), stage="calibration", precip_source=runtime_prec_source)
-    forcing = validate_forcing_bundle(config, profile, precip_source=runtime_prec_source)
-    presets = list_manual_presets(str(cfg_path)).get("presets", [])
-    cpu_total = max(1, int(os.cpu_count() or 4))
-    expected_steps = int(forcing.get("expected_steps") or 0)
-    object_type = detect_object_type(config)
-
-    advice_items: list[dict[str, Any]] = []
-    missing_text = "；".join(validation.get("missing", [])[:2]) if validation.get("missing") else ""
-    if comp.get("ready_for_calibration"):
-        headline = "输入已基本就绪，可以进入率定。"
-    else:
-        headline = f"当前还不能率定，优先补齐：{missing_text or '向导中的缺项'}"
-
-    for message in validation.get("missing", []):
-        target_step = 7
-        if any(token in message for token in ("流域边界", "观测径流", "时间.", "时间顺序")):
-            target_step = 2
-        elif "上游边界入流" in message:
-            target_step = 3
-        elif any(token in message for token in ("站点", "自带降水", "自带温度", "自带蒸散发", "本地降水栅格", "本地气温栅格", "本地蒸散发栅格")):
-            target_step = 4
-        elif any(token in message for token in ("dem_1km", "dem_0p1deg", "flow_accumulation_masked", "DEM", "流量累积", "流域掩膜", "高程分区")):
-            target_step = 5
-        elif any(token in message for token in ("降水目录", "气温目录", "蒸散发目录", "时间覆盖", "时间戳", "气象驱动", "forcing", ".tif")):
-            target_step = 6
-        advice_items.append(
-            {
-                "kind": "fix",
-                "title": f"先完成第 {target_step} 步",
-                "detail": message,
-                "target_step": target_step,
-            }
-        )
-
-    for message in validation.get("warnings", [])[:4]:
-        advice_items.append(
-            {
-                "kind": "warn",
-                "title": "需要注意",
-                "detail": message,
-                "target_step": None,
-            }
-        )
-
-    heavy_profile = profile == PROFILE_HOURLY or expected_steps >= 4000
-    recommended_method = "mc_screen_de"
-    recommended_workers = min(cpu_total, 4 if heavy_profile else 6)
-    recommended_maxiter = 18 if heavy_profile else 24
-    recommended_popsize = 6 if heavy_profile else 8
-    recommended_mc_samples = 240 if heavy_profile else 300
-    recommended_bound_shrink = 0.25 if presets else 0.0
-    calibration_reasons: list[str] = []
-
-    if presets:
-        calibration_reasons.append("已存在手调参数集，可以在较小范围内继续精细搜索或局部精修。")
-    else:
-        calibration_reasons.append("尚无手调参数集，建议先在结果页按雪过程、土壤过程、产汇流顺序手调一轮。")
-    if heavy_profile:
-        calibration_reasons.append("当前时段较长或为小时尺度，自动率定负载会明显变大，建议先完成输入完整性检查并控制搜索规模。")
-        recommended_method = "mc_screen_de"
-    else:
-        calibration_reasons.append("当前负载处于可控范围，适合先筛选再精修。")
-    if object_type == OBJECT_INTERBASIN:
-        calibration_reasons.append("区间流域对边界入流更敏感，建议先核对边界入流过程是否合理。")
-    if forcing.get("warnings"):
-        calibration_reasons.append("虽然当前可率定，但气象驱动仍有警告，建议先在第 7 步确认时间覆盖。")
-
-    advice_items.append(
-        {
-            "kind": "plan",
-            "title": "推荐率定策略",
-            "detail": "先完成输入完整性检查，再手动调参，最后自动率定。",
-            "target_step": None,
-        }
+    return build_workspace_advice(
+        config_path_raw,
+        WorkspaceAdviceContext(
+            resolve_any_path=resolve_any_path,
+            read_runtime_config=read_runtime_config,
+            current_profile=current_profile,
+            resolve_precip_source=resolve_precip_source,
+            workspace_completeness=workspace_completeness,
+            validate_workspace_fields=validate_workspace_fields,
+            validate_forcing_bundle=validate_forcing_bundle,
+            list_manual_presets=list_manual_presets,
+            detect_object_type=detect_object_type,
+            profile_daily=PROFILE_DAILY,
+            profile_hourly=PROFILE_HOURLY,
+            object_interbasin=OBJECT_INTERBASIN,
+            daily_param_bounds_profile=profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE,
+            hourly_param_bounds_profile=profile_runner.PARAM_BOUNDS_PROFILE_HOURLY,
+            param_bounds_profile_labels=profile_runner.PARAM_BOUNDS_PROFILE_LABELS,
+        ),
+        precip_source=precip_source,
     )
-    if not presets:
-        advice_items.append(
-            {
-                "kind": "plan",
-                "title": "推荐手调顺序",
-                "detail": "先调雪过程，再调土壤过程，最后调产汇流。每次只改少量参数并重算观察变化。",
-                "target_step": None,
-            }
-        )
-
-    return {
-        "headline": headline,
-        "ready_for_calibration": bool(comp.get("ready_for_calibration", False)),
-        "profile": profile,
-        "object_type": object_type,
-        "recommended_step": comp.get("next_step"),
-        "recommendations": advice_items[:8],
-        "calibration": {
-            "method": recommended_method,
-            "method_label": {
-                "mc_screen_de": "快速筛选 + 精细搜索",
-                "de": "精细搜索（差分进化）",
-                "mc_only": "仅快速筛选",
-            }[recommended_method],
-            "workers": recommended_workers,
-            "maxiter": recommended_maxiter,
-            "popsize": recommended_popsize,
-            "mc_samples": recommended_mc_samples,
-            "init_bound_shrink": recommended_bound_shrink,
-            "param_bounds_profile": profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE
-            if profile == PROFILE_DAILY
-            else profile_runner.PARAM_BOUNDS_PROFILE_HOURLY,
-            "param_bounds_profile_label": profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(
-                profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE
-                if profile == PROFILE_DAILY
-                else profile_runner.PARAM_BOUNDS_PROFILE_HOURLY,
-                "",
-            ),
-            "reasons": calibration_reasons,
-            "expected_steps": expected_steps,
-            "has_manual_presets": bool(presets),
-            "manual_preset_count": len(presets),
-            "quick_test_first": False,
-        },
-    }
 
 
 # ---------------------------------------------------------------------------
