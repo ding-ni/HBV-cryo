@@ -62,6 +62,8 @@ from services.filesystem import (
     open_path_in_explorer as build_open_path_in_explorer,
     safe_iterdir as build_safe_iterdir,
 )
+from services.forecast_restart import ForecastRestartStartContext
+from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -9250,32 +9252,28 @@ def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
     return record
 
 
+def _forecast_restart_start_context() -> ForecastRestartStartContext:
+    return ForecastRestartStartContext(
+        build_args=_forecast_restart_args,
+        resolve_path=resolve_any_path,
+        ensure_input_ready=ensure_forecast_input_ready,
+    )
+
+
 def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
-    args = _forecast_restart_args(payload)
-    source_run = resolve_any_path(args.source_run, must_exist=True)
-    input_check = ensure_forecast_input_ready(payload)
+    plan = build_forecast_restart_start_plan(payload, _forecast_restart_start_context())
     task_id = uuid.uuid4().hex[:10]
     record = TaskRecord(
         id=task_id,
         task_type="forecast_restart",
-        label=f"连续状态预报 | {source_run.name}",
-        command=["forecast_restart"],
+        label=plan.label,
+        command=plan.command,
         cwd=str(PROJECT_ROOT),
-        metadata={
-            "config_path": str(resolve_any_path(args.config, must_exist=True).resolve(strict=False)),
-            "run_path": str(source_run.resolve(strict=False)),
-            "forecast_start": args.forecast_start,
-            "forecast_end": args.forecast_end,
-            "runtime_prec_source": args.prec_source,
-            "glacier_mode": args.glacier_mode,
-            "forecast_input_check": input_check,
-            "ui_progress": {"stage": "准备启动", "label": "连续状态预报"},
-        },
+        metadata=plan.metadata,
     )
     with TASK_LOCK:
         TASKS[task_id] = record
-    checked_payload = {**payload, "_forecast_input_check": input_check}
-    threading.Thread(target=forecast_restart_worker, args=(task_id, checked_payload), daemon=True).start()
+    threading.Thread(target=forecast_restart_worker, args=(task_id, plan.checked_payload), daemon=True).start()
     return record
 
 
