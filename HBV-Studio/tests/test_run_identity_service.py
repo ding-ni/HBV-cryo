@@ -32,6 +32,7 @@ from services.runs import (  # noqa: E402
     discover_run_entries,
     discover_runtime_roots,
     display_run_title,
+    finalize_run_metadata_sections,
     first_existing_path,
     has_parameter_bounds,
     has_custom_result_title,
@@ -647,6 +648,62 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(replay_context["source_run_path"], "C:/resolved/manual-run")
         self.assertEqual(manual_result["source_run_path"], "C:/resolved/manual-run")
         self.assertEqual(optimization["source_run_path"], "C:/resolved/manual-run")
+
+    def test_finalize_run_metadata_sections_writes_run_sections_and_normalizes_optimization(self) -> None:
+        metadata = {"evaluations": 3, "objective_profile": {}, "objective": {}}
+        data_sources = {"runtime_prec_source": "era5", "prec_dir": "C:/prec"}
+        boundary_condition = {"enabled": True, "path": "C:/boundary.csv"}
+        replay_context = {}
+        manual_result = {"source_run_path": "manual/raw", "source_run_name": "manual-run"}
+        optimization = {
+            "method": "mc_only",
+            "selected_result_stage": "mc",
+            "source_run_name": "opt-run",
+            "stage_stats": {"mc": {"nfev": 5, "nit": 2}},
+        }
+        cache = {"simulation": {"csv": "C:/run/simulation.csv"}}
+
+        finalize_run_metadata_sections(
+            metadata,
+            data_sources=data_sources,
+            boundary_condition=boundary_condition,
+            replay_context=replay_context,
+            manual_result=manual_result,
+            optimization=optimization,
+            cache=cache,
+            effective_objective_mode=profile_runner.OBJECTIVE_MODE_SINGLE,
+            resolve_source_run_reference=lambda raw, name: f"C:/resolved/{name or Path(str(raw)).name}",
+        )
+
+        self.assertIs(metadata["data_sources"], data_sources)
+        self.assertIs(metadata["boundary_condition"], boundary_condition)
+        self.assertEqual(metadata["replay_context"]["source_run_path"], "C:/resolved/manual-run")
+        self.assertEqual(metadata["manual_result"]["source_run_path"], "C:/resolved/manual-run")
+        self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["optimization"]["source_run_path"], "C:/resolved/manual-run")
+        self.assertEqual(metadata["optimization"]["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["optimization"]["total_evaluations"], 5)
+        self.assertEqual(metadata["evaluations"], 5)
+        self.assertIs(metadata["data_cache"], cache)
+
+    def test_finalize_run_metadata_sections_skips_empty_optional_sections(self) -> None:
+        metadata = {}
+
+        finalize_run_metadata_sections(
+            metadata,
+            data_sources={},
+            boundary_condition={},
+            replay_context={},
+            manual_result={},
+            optimization={},
+            cache={},
+            effective_objective_mode="",
+            resolve_source_run_reference=lambda raw, name: "",
+        )
+
+        self.assertEqual(metadata, {})
 
     def test_run_precip_dir_candidates_follow_source_specific_order(self) -> None:
         paths = {

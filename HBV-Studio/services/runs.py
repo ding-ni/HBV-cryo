@@ -913,6 +913,42 @@ def sync_source_run_reference(
     return source_run_path
 
 
+def finalize_run_metadata_sections(
+    metadata: dict[str, Any],
+    *,
+    data_sources: dict[str, Any],
+    boundary_condition: dict[str, Any],
+    replay_context: dict[str, Any],
+    manual_result: dict[str, Any],
+    optimization: dict[str, Any],
+    cache: dict[str, Any],
+    effective_objective_mode: str,
+    resolve_source_run_reference: Callable[[Any, Any], str],
+) -> None:
+    if data_sources:
+        metadata["data_sources"] = data_sources
+    if boundary_condition:
+        metadata["boundary_condition"] = boundary_condition
+    sync_source_run_reference(replay_context, manual_result, optimization, resolve_source_run_reference)
+    if replay_context:
+        metadata["replay_context"] = replay_context
+    if manual_result:
+        metadata["manual_result"] = manual_result
+    apply_effective_objective_mode(metadata, optimization, effective_objective_mode)
+    if optimization:
+        normalized_optimization = normalize_optimization_metadata(
+            optimization,
+            effective_objective_mode=effective_objective_mode,
+            fallback_total_evaluations=metadata.get("evaluations"),
+        )
+        metadata["optimization"] = normalized_optimization
+        total_evaluations = optimization_stage_counter(normalized_optimization.get("total_evaluations"))
+        if total_evaluations > 0:
+            metadata["evaluations"] = total_evaluations
+    if cache:
+        metadata["data_cache"] = cache
+
+
 def run_precip_dir_candidates(
     paths: dict[str, Any],
     source_key: str,

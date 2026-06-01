@@ -111,13 +111,13 @@ from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscov
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
-from services.runs import apply_effective_objective_mode as build_apply_effective_objective_mode
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
 from services.runs import delete_run as build_delete_run
 from services.runs import discover_run_entries as build_discover_run_entries
 from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
+from services.runs import finalize_run_metadata_sections as build_finalize_run_metadata_sections
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
@@ -129,12 +129,10 @@ from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import metadata_boundary_enabled as build_metadata_boundary_enabled
-from services.runs import normalize_optimization_metadata as build_normalize_optimization_metadata
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import normalize_metadata_object_type as build_normalize_metadata_object_type
 from services.runs import normalized_method_label as build_normalized_method_label
 from services.runs import normalized_selected_result_label as build_normalized_selected_result_label
-from services.runs import optimization_stage_counter as build_optimization_stage_counter
 from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
 from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
@@ -158,7 +156,6 @@ from services.runs import run_kind_label as build_run_kind_label
 from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
 from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
 from services.runs import sync_run_data_source_paths as build_sync_run_data_source_paths
-from services.runs import sync_source_run_reference as build_sync_source_run_reference
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2669,10 +2666,6 @@ def _optimization_stage_payload(value: Any) -> dict[str, Any]:
     return build_optimization_stage_payload(value)
 
 
-def _optimization_stage_counter(value: Any) -> int:
-    return build_optimization_stage_counter(value)
-
-
 def _optimization_stage_has_execution(stage: dict[str, Any]) -> bool:
     return build_optimization_stage_has_execution(stage)
 
@@ -2687,19 +2680,6 @@ def _normalized_selected_result_label(optimization: dict[str, Any]) -> str:
 
 def _normalized_method_label(optimization: dict[str, Any]) -> str:
     return build_normalized_method_label(optimization)
-
-
-def _normalize_optimization_metadata(
-    optimization: dict[str, Any],
-    *,
-    effective_objective_mode: str = "",
-    fallback_total_evaluations: Any = None,
-) -> dict[str, Any]:
-    return build_normalize_optimization_metadata(
-        optimization,
-        effective_objective_mode=effective_objective_mode,
-        fallback_total_evaluations=fallback_total_evaluations,
-    )
 
 
 def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = None) -> tuple[dict[str, Any], Path | None]:
@@ -2811,32 +2791,17 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         resolved_object_type=resolved_object_type,
     )
 
-    if data_sources:
-        normalized["data_sources"] = data_sources
-    if boundary_condition:
-        normalized["boundary_condition"] = boundary_condition
-    source_run_path = build_sync_source_run_reference(
-        replay_context,
-        manual_result,
-        optimization,
-        _resolve_source_run_reference,
+    build_finalize_run_metadata_sections(
+        normalized,
+        data_sources=data_sources,
+        boundary_condition=boundary_condition,
+        replay_context=replay_context,
+        manual_result=manual_result,
+        optimization=optimization,
+        cache=cache,
+        effective_objective_mode=effective_objective_mode,
+        resolve_source_run_reference=_resolve_source_run_reference,
     )
-    if replay_context:
-        normalized["replay_context"] = replay_context
-    if manual_result:
-        normalized["manual_result"] = manual_result
-    build_apply_effective_objective_mode(normalized, optimization, effective_objective_mode)
-    if optimization:
-        optimization = _normalize_optimization_metadata(
-            optimization,
-            effective_objective_mode=effective_objective_mode,
-            fallback_total_evaluations=normalized.get("evaluations"),
-        )
-        normalized["optimization"] = optimization
-        if _optimization_stage_counter(optimization.get("total_evaluations")) > 0:
-            normalized["evaluations"] = _optimization_stage_counter(optimization.get("total_evaluations"))
-    if cache:
-        normalized["data_cache"] = cache
     return normalized, resolved_config
 
 
