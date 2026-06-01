@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -25,7 +26,11 @@ class ForecastInputCheckContext:
     is_date_only_string: Callable[[str], bool]
     validate_tif_time_series: Callable[..., dict[str, Any]]
     format_time_for_check: Callable[[Any, float], str]
-    forecast_station_precip_check: Callable[[dict[str, Any], dict[str, Any], str, str, float], dict[str, Any] | None]
+    analyze_station_precip_inputs: Callable[..., dict[str, Any]]
+    meteo_key: str
+    meteo_precip_mode_key: str
+    time_basis_forecast_window: str
+    time_basis_labels: dict[str, str]
 
 
 def forecast_source_state_time(source_run: Path, metadata: dict[str, Any]) -> str:
@@ -267,6 +272,75 @@ def forecast_parameter_detail_text(
     return "；".join(parts)
 
 
+def forecast_station_precip_check(
+    payload: dict[str, Any],
+    metadata: dict[str, Any],
+    forecast_start: str,
+    forecast_end: str,
+    step_hours: float,
+    *,
+    resolve_path: Callable[..., Path],
+    read_runtime_config: Callable[[Path], dict[str, Any]],
+    analyze_station_precip_inputs: Callable[..., dict[str, Any]],
+    meteo_key: str,
+    meteo_precip_mode_key: str,
+    time_basis_forecast_window: str,
+    time_basis_labels: dict[str, str],
+) -> dict[str, Any] | None:
+    if not forecast_start or not forecast_end:
+        return None
+    config_path_raw = str(
+        payload.get("config_path")
+        or payload.get("config")
+        or metadata.get("workspace_config")
+        or ""
+    ).strip()
+    if not config_path_raw:
+        return None
+    try:
+        cfg_path = resolve_path(config_path_raw, must_exist=True)
+        config = read_runtime_config(cfg_path)
+    except Exception:
+        return None
+    meteo = dict(config.get(meteo_key, {}) or {})
+    precip_mode = str(meteo.get(meteo_precip_mode_key, "grid_only") or "grid_only").strip()
+    if precip_mode not in {"grid_plus_station_bias", "thiessen_station_only"}:
+        return None
+    forecast_config = copy.deepcopy(config)
+    forecast_config["任务时段模式"] = time_basis_forecast_window
+    forecast_config["时间步长_小时"] = step_hours
+    time_cfg = dict(forecast_config.get("时间", {}) or {})
+    time_cfg.update(
+        {
+            "预热开始": forecast_start,
+            "率定开始": forecast_start,
+            "率定结束": forecast_end,
+            "验证开始": forecast_start,
+            "验证结束": forecast_end,
+        }
+    )
+    forecast_config["时间"] = time_cfg
+    try:
+        return analyze_station_precip_inputs(
+            forecast_config,
+            step_hours=step_hours,
+            context="forecast",
+        )
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "mode": precip_mode,
+            "status": "warn",
+            "summary": f"预报窗口站点降水资料检查失败：{exc}",
+            "items": [{"label": "检查状态", "value": str(exc), "status": "warn"}],
+            "warnings": [f"预报窗口站点降水资料检查失败：{exc}"],
+            "missing": [],
+            "matched_station_count": 0,
+            "time_basis": time_basis_forecast_window,
+            "time_basis_label": time_basis_labels[time_basis_forecast_window],
+        }
+
+
 def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckContext) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -387,12 +461,19 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
         precip_source_label=context.precip_source_label,
         station_precip_mode_label=context.station_precip_mode_label,
     )
-    station_precip_check = context.forecast_station_precip_check(
+    station_precip_check = forecast_station_precip_check(
         payload,
         metadata,
         forecast_start,
         forecast_end,
         step_hours,
+        resolve_path=context.resolve_path,
+        read_runtime_config=context.read_runtime_config,
+        analyze_station_precip_inputs=context.analyze_station_precip_inputs,
+        meteo_key=context.meteo_key,
+        meteo_precip_mode_key=context.meteo_precip_mode_key,
+        time_basis_forecast_window=context.time_basis_forecast_window,
+        time_basis_labels=context.time_basis_labels,
     )
     return {
         "status": status,

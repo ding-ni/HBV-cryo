@@ -8695,67 +8695,6 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
-def _forecast_station_precip_check(
-    payload: dict[str, Any],
-    metadata: dict[str, Any],
-    forecast_start: str,
-    forecast_end: str,
-    step_hours: float,
-) -> dict[str, Any] | None:
-    if not forecast_start or not forecast_end:
-        return None
-    config_path_raw = str(
-        payload.get("config_path")
-        or payload.get("config")
-        or metadata.get("workspace_config")
-        or ""
-    ).strip()
-    if not config_path_raw:
-        return None
-    try:
-        cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-        config = read_runtime_config(cfg_path)
-    except Exception:
-        return None
-    meteo = dict(config.get(METEO_KEY, {}) or {})
-    precip_mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only") or "grid_only").strip()
-    if precip_mode not in {"grid_plus_station_bias", "thiessen_station_only"}:
-        return None
-    forecast_config = copy.deepcopy(config)
-    forecast_config["任务时段模式"] = TIME_BASIS_FORECAST_WINDOW
-    forecast_config["时间步长_小时"] = step_hours
-    time_cfg = dict(forecast_config.get("时间", {}) or {})
-    time_cfg.update(
-        {
-            "预热开始": forecast_start,
-            "率定开始": forecast_start,
-            "率定结束": forecast_end,
-            "验证开始": forecast_start,
-            "验证结束": forecast_end,
-        }
-    )
-    forecast_config["时间"] = time_cfg
-    try:
-        return analyze_station_precip_inputs(
-            forecast_config,
-            step_hours=step_hours,
-            context="forecast",
-        )
-    except Exception as exc:
-        return {
-            "enabled": True,
-            "mode": precip_mode,
-            "status": "warn",
-            "summary": f"预报窗口站点降水资料检查失败：{exc}",
-            "items": [{"label": "检查状态", "value": str(exc), "status": "warn"}],
-            "warnings": [f"预报窗口站点降水资料检查失败：{exc}"],
-            "missing": [],
-            "matched_station_count": 0,
-            "time_basis": TIME_BASIS_FORECAST_WINDOW,
-            "time_basis_label": TIME_BASIS_LABELS[TIME_BASIS_FORECAST_WINDOW],
-        }
-
-
 def _forecast_input_check_context() -> ForecastInputCheckContext:
     return ForecastInputCheckContext(
         resolve_path=resolve_any_path,
@@ -8772,7 +8711,11 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,
         format_time_for_check=_format_time_for_check,
-        forecast_station_precip_check=_forecast_station_precip_check,
+        analyze_station_precip_inputs=analyze_station_precip_inputs,
+        meteo_key=METEO_KEY,
+        meteo_precip_mode_key=METEO_PRECIP_MODE_KEY,
+        time_basis_forecast_window=TIME_BASIS_FORECAST_WINDOW,
+        time_basis_labels=TIME_BASIS_LABELS,
     )
 
 

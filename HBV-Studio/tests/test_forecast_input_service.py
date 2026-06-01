@@ -21,6 +21,7 @@ from services.forecast_input import (  # noqa: E402
     forecast_output_preview,
     forecast_parameter_check_context,
     forecast_parameter_detail_text,
+    forecast_station_precip_check,
     forecast_source_state_time,
 )
 
@@ -45,7 +46,11 @@ class ForecastInputServiceTests(unittest.TestCase):
             is_date_only_string=fail,
             validate_tif_time_series=fail,
             format_time_for_check=fail,
-            forecast_station_precip_check=fail,
+            analyze_station_precip_inputs=fail,
+            meteo_key="meteo",
+            meteo_precip_mode_key="precip_mode",
+            time_basis_forecast_window="forecast_window",
+            time_basis_labels={"forecast_window": "预报窗口"},
         )
 
     def test_forecast_input_check_rejects_missing_source_without_context_io(self) -> None:
@@ -271,6 +276,99 @@ class ForecastInputServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(detail, "计算尺度：event；降水方案：泰森站点降水")
+
+    def test_forecast_station_precip_check_skips_grid_only_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "workspace.json"
+            config_path.write_text("{}", encoding="utf-8")
+
+            result = forecast_station_precip_check(
+                {"config_path": str(config_path)},
+                {},
+                "2026-01-01",
+                "2026-01-03",
+                24,
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                read_runtime_config=lambda path: {"meteo": {"precip_mode": "grid_only"}},
+                analyze_station_precip_inputs=lambda *args, **kwargs: self.fail("analysis should be skipped"),
+                meteo_key="meteo",
+                meteo_precip_mode_key="precip_mode",
+                time_basis_forecast_window="forecast_window",
+                time_basis_labels={"forecast_window": "预报窗口"},
+            )
+
+            self.assertIsNone(result)
+
+    def test_forecast_station_precip_check_builds_forecast_window_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "workspace.json"
+            config_path.write_text("{}", encoding="utf-8")
+            config = {
+                "meteo": {"precip_mode": "grid_plus_station_bias"},
+                "时间": {"预热开始": "old", "率定结束": "old"},
+            }
+            captured: dict[str, object] = {}
+
+            def analyze(forecast_config, **kwargs):
+                captured["config"] = forecast_config
+                captured["kwargs"] = kwargs
+                return {"status": "ok", "items": []}
+
+            result = forecast_station_precip_check(
+                {"config_path": str(config_path)},
+                {},
+                "2026-01-01",
+                "2026-01-03",
+                6,
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                read_runtime_config=lambda path: config,
+                analyze_station_precip_inputs=analyze,
+                meteo_key="meteo",
+                meteo_precip_mode_key="precip_mode",
+                time_basis_forecast_window="forecast_window",
+                time_basis_labels={"forecast_window": "预报窗口"},
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(config["时间"]["预热开始"], "old")
+            forecast_config = captured["config"]
+            self.assertEqual(forecast_config["任务时段模式"], "forecast_window")
+            self.assertEqual(forecast_config["时间步长_小时"], 6)
+            self.assertEqual(forecast_config["时间"]["预热开始"], "2026-01-01")
+            self.assertEqual(forecast_config["时间"]["率定开始"], "2026-01-01")
+            self.assertEqual(forecast_config["时间"]["率定结束"], "2026-01-03")
+            self.assertEqual(forecast_config["时间"]["验证开始"], "2026-01-01")
+            self.assertEqual(forecast_config["时间"]["验证结束"], "2026-01-03")
+            self.assertEqual(captured["kwargs"], {"step_hours": 6, "context": "forecast"})
+
+    def test_forecast_station_precip_check_warns_when_analysis_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "workspace.json"
+            config_path.write_text("{}", encoding="utf-8")
+
+            def analyze(*args, **kwargs):
+                raise RuntimeError("station data unavailable")
+
+            result = forecast_station_precip_check(
+                {"config_path": str(config_path)},
+                {},
+                "2026-01-01",
+                "2026-01-03",
+                24,
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                read_runtime_config=lambda path: {"meteo": {"precip_mode": "thiessen_station_only"}},
+                analyze_station_precip_inputs=analyze,
+                meteo_key="meteo",
+                meteo_precip_mode_key="precip_mode",
+                time_basis_forecast_window="forecast_window",
+                time_basis_labels={"forecast_window": "预报窗口"},
+            )
+
+            self.assertEqual(result["status"], "warn")
+            self.assertEqual(result["mode"], "thiessen_station_only")
+            self.assertEqual(result["time_basis"], "forecast_window")
+            self.assertEqual(result["time_basis_label"], "预报窗口")
+            self.assertTrue(any("station data unavailable" in item for item in result["warnings"]))
 
 
 if __name__ == "__main__":
