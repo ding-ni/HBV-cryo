@@ -213,6 +213,48 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_preset_list_path_and_stale_compare_guard(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console, encodeURIComponent };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
+            if (path !== "/api/manual-presets?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2Fworkspace.json&calibration_profile=daily%20mode&scope=all") {
+              throw new Error(`unexpected list path: ${path}`);
+            }
+            if (library.shouldClearManualPresetComparison({ id: "same" }, "same")) {
+              throw new Error("same id should keep comparison");
+            }
+            if (library.shouldClearManualPresetComparison({ parameter_set_id: "same-global" }, "same-global")) {
+              throw new Error("same parameter_set_id should keep comparison");
+            }
+            if (!library.shouldClearManualPresetComparison({ id: "current" }, "old")) {
+              throw new Error("different id should clear comparison");
+            }
+            if (!library.shouldClearManualPresetComparison(null, "old")) {
+              throw new Error("missing current preset should clear stale comparison");
+            }
+            if (library.shouldClearManualPresetComparison({ id: "current" }, "")) {
+              throw new Error("empty compare id should not clear");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

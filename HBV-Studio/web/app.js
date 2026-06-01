@@ -60,6 +60,8 @@ const frontendModuleContracts = [
       "manualPresetDiffSummary",
       "manualPresetCompareSummary",
       "findPresetById",
+      "manualPresetListPath",
+      "shouldClearManualPresetComparison",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
@@ -1484,7 +1486,7 @@ function timeBasisLabel(value) {
 
 function selectedTaskManualPreset() {
   const presetId = $("#task-init-preset")?.value || "";
-  return state.taskManualPresets.find(p => String(p.id || "") === String(presetId)) || null;
+  return window.HBVStudioParameterLibrary.findPresetById(state.taskManualPresets, presetId);
 }
 
 function currentTaskPresetContext() {
@@ -1596,11 +1598,7 @@ function updateCompareSummary() {
 }
 
 function clearStaleManualPresetComparison({ silent = true } = {}) {
-  if (!state.comparePresetId) return;
-  const currentPresetId = String(selectedManualPreset()?.id || "").trim();
-  const comparePresetId = String(state.comparePresetId || "").trim();
-  if (!comparePresetId) return;
-  if (currentPresetId === comparePresetId) return;
+  if (!window.HBVStudioParameterLibrary.shouldClearManualPresetComparison(selectedManualPreset(), state.comparePresetId)) return;
   clearManualPresetComparison({ silent });
 }
 
@@ -3190,7 +3188,7 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
     renderManualPresetDiff();
   }
   try {
-    const p = await apiGet(`/api/manual-presets?config_path=${encodeURIComponent(path)}&calibration_profile=${encodeURIComponent(resolvedProfile)}&scope=all`);
+    const p = await apiGet(window.HBVStudioParameterLibrary.manualPresetListPath(path, resolvedProfile, "all"));
     if (!runManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.runManualPresetConfigPath)) {
       return p.data?.presets || [];
     }
@@ -3232,7 +3230,7 @@ async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(
     refreshCalibrationControls();
   }
   try {
-    const p = await apiGet(`/api/manual-presets?config_path=${encodeURIComponent(path)}&calibration_profile=${encodeURIComponent(resolvedProfile)}&scope=all`);
+    const p = await apiGet(window.HBVStudioParameterLibrary.manualPresetListPath(path, resolvedProfile, "all"));
     if (!taskManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.taskManualPresetConfigPath)) {
       return p.data?.presets || [];
     }

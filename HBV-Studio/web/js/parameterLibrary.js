@@ -100,6 +100,17 @@
     ) || null;
   }
 
+  function manualPresetListPath(configPath = "", calibrationProfile = "", scope = "all") {
+    return `/api/manual-presets?config_path=${encodeURIComponent(String(configPath || "").trim())}&calibration_profile=${encodeURIComponent(String(calibrationProfile || "").trim())}&scope=${encodeURIComponent(String(scope || "all").trim())}`;
+  }
+
+  function shouldClearManualPresetComparison(currentPreset = null, comparePresetId = "") {
+    const compareId = String(comparePresetId || "").trim();
+    if (!compareId) return false;
+    const currentId = String(currentPreset?.id || currentPreset?.parameter_set_id || "").trim();
+    return currentId !== compareId;
+  }
+
   function manualPresetSavePayload(options = {}) {
     const runData = options.runData || {};
     const metadata = runData.metadata || {};
@@ -318,6 +329,8 @@
     manualPresetDiffSummary,
     manualPresetCompareSummary,
     findPresetById,
+    manualPresetListPath,
+    shouldClearManualPresetComparison,
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,
