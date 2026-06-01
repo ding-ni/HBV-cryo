@@ -37,6 +37,26 @@ HBV-Cryo 是面向寒区流域的分布式 HBV 水文模拟与率定系统。工
    python HBV-Cryo/01_训练率定.py
    ```
 
+## 开发检查门禁
+
+前后端重构、界面专业化和打包相关修改，在提交前至少运行：
+
+```powershell
+python dev_tools/studio_baseline_check.py
+```
+
+该检查会覆盖 Python 语法、前端 JavaScript 语法、`studio_service.py` API 路由快照、源码 / Demo / 安装包关键路径，以及源码启动链 `/api/health`。如果有意新增、删除或改名 API 路由，先人工确认兼容性，再更新快照：
+
+```powershell
+python dev_tools/studio_baseline_check.py --update-api-snapshot
+```
+
+`pytest` 可用时，再补充运行：
+
+```powershell
+python -m pytest HBV-Studio/tests
+```
+
 ## 数据输入说明
 
 - 流域边界通常使用矢量数据，DEM 使用栅格数据；冰川边界为可选输入。
