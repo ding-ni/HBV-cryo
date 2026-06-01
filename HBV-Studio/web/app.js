@@ -38,6 +38,29 @@ const frontendModuleContracts = [
     exports: ["chartColors"],
   },
   {
+    script: "./js/runView.js",
+    global: "HBVStudioRunView",
+    exports: [
+      "compactTimeText",
+      "forecastFriendlyRunName",
+      "isGeneratedRunName",
+      "objectiveFamilyKey",
+      "objectiveVersionBadge",
+      "objectiveVersionStatus",
+      "readableRunReferenceName",
+      "runDisplayName",
+      "runDisplaySubtitle",
+      "runEditabilityLabel",
+      "runMetricsText",
+      "runTimeText",
+      "runTypeBadge",
+      "runTypeLabel",
+      "runTypeValue",
+      "runWorkspaceName",
+      "timeRangeText",
+    ],
+  },
+  {
     script: "./js/stationPrecip.js",
     global: "HBVStudioStationPrecip",
     exports: ["renderTaskScopeSummary", "renderEventCoverageMatrix"],
@@ -197,14 +220,6 @@ const MANUAL_GROUP_META = {
     title: "冰川过程",
     guide: "第三阶段才释放 ICE_FACTOR 和冰川温度修正相关项，只允许其解释晚融季、暖季、雪耗尽后的额外径流。",
   },
-};
-
-const RUN_TYPE_LABELS = {
-  manual_starter: "手调起点",
-  manual_result: "手调结果",
-  forecast_restart: "连续状态预报",
-  calibration: "正式率定",
-  legacy: "历史结果",
 };
 
 const RUN_EXPORT_FIELDS = [
@@ -408,162 +423,80 @@ function workspaceLabelByPath(path) {
 }
 
 function runTypeValue(run) {
-  const direct = String(run?.run_type || "").trim().toLowerCase();
-  if (direct) return direct;
-  return run?.studio_compatible ? "calibration" : "legacy";
+  return window.HBVStudioRunView.runTypeValue(run);
 }
 
 function runTypeLabel(value, fallback = "") {
-  const key = String(value || "").trim().toLowerCase();
-  return RUN_TYPE_LABELS[key] || fallback || "结果";
+  return window.HBVStudioRunView.runTypeLabel(value, fallback);
 }
 
 function runDisplayName(run) {
-  const explicit = String(run?.result_title || run?.display_name || "").trim();
-  if (explicit && !isGeneratedRunName(explicit)) {
-    return explicit.replace(/状态接续预报/g, "连续状态预报").trim();
-  }
-  const rawName = String(run?.name || "").trim();
-  if (rawName && !isGeneratedRunName(rawName)) {
-    return rawName.replace(/状态接续预报/g, "连续状态预报").trim();
-  }
-  const workspace = runWorkspaceName(run);
-  const type = runTypeLabel(runTypeValue(run), "结果");
-  const time = runTimeText(run);
-  return [workspace && workspace !== "未命名工作区" ? workspace : "", type, time]
-    .filter(Boolean)
-    .join(" · ") || "未命名结果";
+  return window.HBVStudioRunView.runDisplayName(run, { workspaceLabelByPath, formatDateTime });
 }
 
 function isGeneratedRunName(value) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  return /^hbv_(cryo|forecast|manual|calib|run)(_|$)/i.test(text)
-    || /_\d{8}_\d{6}(_|$)/.test(text);
+  return window.HBVStudioRunView.isGeneratedRunName(value);
 }
 
 function forecastFriendlyRunName(run) {
-  const raw = runDisplayName(run);
-  if (raw && !isGeneratedRunName(raw)) return raw;
-  const type = runTypeLabel(runTypeValue(run));
-  const stepHours = Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
-  const forecastRange = timeRangeText(run?.time_config?.forecast_start, run?.time_config?.forecast_end, stepHours);
-  if (runTypeValue(run) === "forecast_restart" && forecastRange !== "—") {
-    return `${type} · ${forecastRange}`;
-  }
-  const workspace = runWorkspaceName(run);
-  if (workspace && workspace !== "未命名工作区") return `${workspace} · ${type}`;
-  const stateTime = run?.state_snapshot_time || run?.time_config?.valid_end || run?.time_config?.calib_end || "";
-  return stateTime ? `${type} · 状态 ${compactTimeText(stateTime, stepHours)}` : type;
+  return window.HBVStudioRunView.forecastFriendlyRunName(run, { workspaceLabelByPath, formatDateTime });
 }
 
 function readableRunReferenceName(value, fallback = "") {
-  const raw = String(value || "").trim();
-  if (!raw) return String(fallback || "").trim();
-  return isGeneratedRunName(raw) ? String(fallback || "").trim() : raw;
+  return window.HBVStudioRunView.readableRunReferenceName(value, fallback);
 }
 
 function runDisplaySubtitle(run) {
-  const text = String(run?.display_subtitle || "").trim();
-  if (!text) return "";
-  const directoryName = text.replace(/^目录名[:：]\s*/i, "").trim();
-  if (isGeneratedRunName(directoryName)) return "";
-  return text;
+  return window.HBVStudioRunView.runDisplaySubtitle(run);
 }
 
 function runWorkspaceName(run) {
-  return String(run?.workspace_name || "").trim() || workspaceLabelByPath(run?.workspace_config);
+  return window.HBVStudioRunView.runWorkspaceName(run, { workspaceLabelByPath });
 }
 
 function runTimeText(run) {
-  return String(run?.run_time_label || run?.run_time || "").trim() || formatDateTime(run?.updated_at);
+  return window.HBVStudioRunView.runTimeText(run, { formatDateTime });
 }
 
 function compactTimeText(value, stepHours = 24) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (stepHours <= 1.5) return text.replace("T", " ");
-  return text.slice(0, 10);
+  return window.HBVStudioRunView.compactTimeText(value, stepHours);
 }
 
 function timeRangeText(start, end, stepHours = 24) {
-  const left = compactTimeText(start, stepHours);
-  const right = compactTimeText(end, stepHours);
-  if (left && right) return `${left} ~ ${right}`;
-  return left || right || "\u2014";
+  return window.HBVStudioRunView.timeRangeText(start, end, stepHours);
 }
 
 function runEditabilityLabel(run) {
-  return run?.studio_compatible ? "可继续手调" : "仅查看";
+  return window.HBVStudioRunView.runEditabilityLabel(run);
 }
 
 function runMetricsText(run) {
-  const cfg = run?.time_config || {};
-  const stepHours = Number(cfg.time_step_hours || run?.time_step_hours || 24);
-  const start = String(cfg.warmup_start || cfg.calib_start || "").trim();
-  const end = String(cfg.valid_end || cfg.calib_end || "").trim();
-  if (!start && !end) return "";
-  return `全时段${cfg.warmup_start ? "（含预热）" : ""}：${timeRangeText(start, end, stepHours)}`;
+  return window.HBVStudioRunView.runMetricsText(run);
 }
 
 function runTypeBadge(run) {
-  const label = runTypeLabel(runTypeValue(run), String(run?.run_type_label || "").trim());
-  return `<span class="status-badge status-type">${escapeHtml(label)}</span>`;
+  return window.HBVStudioRunView.runTypeBadge(run, { escapeHtml });
 }
 
 function objectiveFamilyKey(metaOrRun = {}) {
-  return String(
-    metaOrRun?.recorded_objective_family
-    || metaOrRun?.objective_family
-    || metaOrRun?.effective_objective_mode
-    || metaOrRun?.optimization?.effective_objective_mode
-    || metaOrRun?.objective_profile?.type
-    || metaOrRun?.objective?.type
-    || ""
-  ).trim().toLowerCase();
+  return window.HBVStudioRunView.objectiveFamilyKey(metaOrRun);
 }
 
 function objectiveVersionStatus(metaOrRun = {}) {
-  const family = objectiveFamilyKey(metaOrRun);
-  if (family === CURRENT_OBJECTIVE_FAMILY) {
-    return {
-      state: "current",
-      label: "当前口径",
-      value: "当前综合评价口径",
-      detail: "该结果使用当前统一日尺度水文评价口径，可用于径流拟合与冰雪融水过程复核。",
-      badgeClass: "status-ok",
-    };
-  }
-  if (family === FLOOD_EVENT_OBJECTIVE_FAMILY) {
-    return {
-      state: "current",
-      label: "事件口径",
-      value: "事件洪水率定结果",
-      detail: "该结果按洪水事件窗口评价；事件资料模式下每场事件独立预热。",
-      badgeClass: "status-ok",
-    };
-  }
-  if (LEGACY_OBJECTIVE_FAMILIES.has(family)) {
-    return {
-      state: "legacy",
-      label: "历史口径",
-      value: "历史计算结果",
-      detail: "该结果来自旧版计算口径，适合兼容查看；冰雪融水解释应以当前口径重新计算结果为准。",
-      badgeClass: "status-warn",
-    };
-  }
-  return {
-    state: "unknown",
-    label: "口径未明",
-    value: "评价口径未记录",
-    detail: "结果未记录评价口径，冰雪融水解释仅作兼容查看。",
-    badgeClass: "status-warn",
-  };
+  return window.HBVStudioRunView.objectiveVersionStatus(metaOrRun, {
+    currentObjectiveFamily: CURRENT_OBJECTIVE_FAMILY,
+    floodEventObjectiveFamily: FLOOD_EVENT_OBJECTIVE_FAMILY,
+    legacyObjectiveFamilies: LEGACY_OBJECTIVE_FAMILIES,
+  });
 }
 
 function objectiveVersionBadge(run) {
-  const status = objectiveVersionStatus(run);
-  return `<span class="status-badge ${status.badgeClass}">${escapeHtml(status.label)}</span>`;
+  return window.HBVStudioRunView.objectiveVersionBadge(run, {
+    escapeHtml,
+    currentObjectiveFamily: CURRENT_OBJECTIVE_FAMILY,
+    floodEventObjectiveFamily: FLOOD_EVENT_OBJECTIVE_FAMILY,
+    legacyObjectiveFamilies: LEGACY_OBJECTIVE_FAMILIES,
+  });
 }
 
 function visibleRuns() {
@@ -5605,7 +5538,7 @@ function renderRunDetail(data) {
       ["结果说明", hydrologySummaryValue(summary, "diagnostics_detail_note", "水文模拟结果说明已保存至本地结果目录。")],
       ["说明文件", reportDisplayPath ? shortPath(reportDisplayPath) : "结果目录内生成"],
       ["运行时间", meta.run_time],
-      ["结果类型", data.run?.run_type_label || RUN_TYPE_LABELS[data.run?.run_type] || (manual ? "手调结果" : starter ? "手调起点" : data.run?.run_origin === "studio" ? "可调结果" : "查看结果")],
+      ["结果类型", data.run?.run_type_label || runTypeLabel(data.run?.run_type, manual ? "手调结果" : starter ? "手调起点" : data.run?.run_origin === "studio" ? "可调结果" : "查看结果")],
       ["所属工作区", workspaceLabelByPath(meta.workspace_config || data.run?.workspace_config)],
       ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
       ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
