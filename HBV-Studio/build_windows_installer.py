@@ -236,6 +236,9 @@ def copy_installer_files(bundle_dir: Path) -> None:
     for name in portable.STUDIO_FILES:
         shutil.copy2(GUI_ROOT / name, bundle_gui_root / name)
 
+    for name in portable.STUDIO_DIRS:
+        copy_tree(GUI_ROOT / name, bundle_gui_root / name)
+
     copy_tree(GUI_ROOT / "web", bundle_gui_root / "web")
     copy_installer_templates(GUI_ROOT / "templates", bundle_gui_root / "templates")
     copy_tree(GUI_ROOT / "installer_assets", bundle_gui_root / "installer_assets")

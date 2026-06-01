@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import os
 import socket
@@ -30,6 +31,7 @@ SNAPSHOT_PATH = Path(__file__).resolve().parent / "baseline" / "studio_api_route
 
 PYTHON_GLOBS = (
     "HBV-Studio/*.py",
+    "HBV-Studio/services/*.py",
     "HBV-Cryo/*.py",
     "dev_tools/*.py",
     "HBV-Studio/tests/*.py",
@@ -249,10 +251,21 @@ def check_packaging_surfaces() -> dict[str, Any]:
         GUI_ROOT / "web" / "index.html",
         GUI_ROOT / "web" / "app.js",
         GUI_ROOT / "web" / "styles.css",
+        GUI_ROOT / "services" / "geo_overview.py",
     ]
     for path in required:
         if not path.exists():
             raise CheckError(f"Required packaging/source surface missing: {rel(path)}")
+    spec = importlib.util.spec_from_file_location("hbvstudio_portable_build_check", GUI_ROOT / "build_portable_bundle.py")
+    if spec is None or spec.loader is None:
+        raise CheckError("Unable to inspect build_portable_bundle.py")
+    portable = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(portable)
+    if "services" not in getattr(portable, "STUDIO_DIRS", []):
+        raise CheckError("Portable build script does not include HBV-Studio/services")
+    installer_text = (GUI_ROOT / "build_windows_installer.py").read_text(encoding="utf-8-sig")
+    if "portable.STUDIO_DIRS" not in installer_text:
+        raise CheckError("Installer build script does not include portable.STUDIO_DIRS")
     project_parent = REPO_ROOT.parent
     demo_exe = project_parent / "HBVStudio_Demo" / "HBVStudio_Demo.exe"
     installer_output = project_parent / "hbvstudio_packaging" / "output"

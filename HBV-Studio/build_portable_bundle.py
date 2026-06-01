@@ -91,6 +91,10 @@ STUDIO_FILES = [
     "sync_tuotuohe_data.py",
 ]
 
+STUDIO_DIRS = [
+    "services",
+]
+
 PUBLIC_DOC_FILES = [
     "HBV-Studio_正式用户说明.md",
     "data_request_checklist.md",
@@ -464,6 +468,9 @@ def copy_project_files(bundle_root: Path) -> None:
 
     for name in STUDIO_FILES:
         shutil.copy2(GUI_ROOT / name, bundle_gui_root / name)
+
+    for name in STUDIO_DIRS:
+        copy_tree(GUI_ROOT / name, bundle_gui_root / name)
 
     copy_tree(GUI_ROOT / "web", bundle_gui_root / "web")
     copy_tree(GUI_ROOT / "templates", bundle_gui_root / "templates")
