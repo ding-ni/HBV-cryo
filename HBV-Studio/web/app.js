@@ -26,6 +26,81 @@ const viewRenderers = {
   results: renderResultsView,
 };
 
+const frontendModuleContracts = [
+  {
+    script: "./js/stationPrecip.js",
+    global: "HBVStudioStationPrecip",
+    exports: ["renderTaskScopeSummary", "renderEventCoverageMatrix"],
+  },
+  {
+    script: "./js/eventMode.js",
+    global: "HBVStudioEventMode",
+    exports: [
+      "floodEventEvaluation",
+      "eventChartEvents",
+      "initialStatePolicyLabel",
+      "renderFloodEventChart",
+      "renderEventWindowSummary",
+      "renderEventForcingCoverage",
+      "renderEventObservationCoverage",
+    ],
+  },
+  {
+    script: "./js/parameterLibrary.js",
+    global: "HBVStudioParameterLibrary",
+    exports: [
+      "normalizeKey",
+      "scopeLabel",
+      "renderPresetOptions",
+      "manualContextWarning",
+      "taskContextWarnings",
+      "renderTaskContextHint",
+      "forecastParameterContext",
+    ],
+  },
+  {
+    script: "./js/forecastView.js",
+    global: "HBVStudioForecastView",
+    exports: [
+      "renderForecastResultEmpty",
+      "renderForecastResultLoading",
+      "renderForecastInputSummary",
+      "renderForecastTaskInputCheckSummary",
+      "renderForecastResultDetail",
+    ],
+  },
+  {
+    script: "./js/geoPreview.js",
+    global: "HBVStudioGeoPreview",
+    exports: ["renderOverview"],
+  },
+  {
+    script: "./js/workspaceLayout.js",
+    global: "HBVStudioWorkspaceLayout",
+    exports: ["aliasForPath", "render"],
+  },
+  {
+    script: "./js/taskView.js",
+    global: "HBVStudioTaskView",
+    exports: [
+      "cleanTaskLogMessage",
+      "methodLabel",
+      "optimizationMethodLabel",
+      "renderTaskActions",
+      "renderTaskMilestones",
+      "taskContextSummary",
+      "taskDebugDetails",
+      "taskLastMeaningfulLog",
+      "taskPrimaryTitle",
+      "taskStageLabel",
+      "taskStatusClass",
+      "taskStatusLabel",
+      "taskSummaryLine",
+      "taskTypeLabel",
+    ],
+  },
+];
+
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
 const CHECK_STEP_IDS = new Set(["check_inputs"]);
 
@@ -244,6 +319,24 @@ function showToast(message, isError = false) {
   t.classList.add("visible");
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => t.classList.remove("visible"), 2800);
+}
+
+function validateFrontendModules() {
+  const missing = [];
+  frontendModuleContracts.forEach(contract => {
+    const module = window[contract.global];
+    if (!module) {
+      missing.push(contract.global);
+      return;
+    }
+    contract.exports.forEach(name => {
+      if (typeof module[name] !== "function") missing.push(`${contract.global}.${name}`);
+    });
+  });
+  if (missing.length) {
+    showToast(`前端模块未完整加载：${missing.slice(0, 4).join("、")}${missing.length > 4 ? "…" : ""}`, true);
+  }
+  return missing;
 }
 
 function formatNumber(v, digits = 3) {
@@ -7794,6 +7887,7 @@ function startPolling() {
 async function init() {
   bindEvents();
   window.addEventListener("pagehide", notifyWindowUnload);
+  validateFrontendModules();
   renderRunExportFields();
   updateConditionalFields();
   updateGisMode();

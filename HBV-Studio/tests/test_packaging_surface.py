@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+import re
 from pathlib import Path
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
@@ -27,6 +28,22 @@ class PackagingSurfaceTests(unittest.TestCase):
 
         self.assertIn("api_routes.py", copied_modules)
         self.assertEqual(copied_modules, expected_modules)
+
+    def test_frontend_js_modules_survive_packaging_copy_filter(self) -> None:
+        web_src = STUDIO_DIR / "web"
+        index_html = (web_src / "index.html").read_text(encoding="utf-8")
+        js_scripts = [
+            item.removeprefix("./")
+            for item in re.findall(r'<script\s+src="([^"]+)"', index_html)
+            if item.startswith("./js/")
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            web_dst = Path(tmp) / "web"
+            portable.copy_tree(web_src, web_dst)
+
+            for script in js_scripts:
+                self.assertTrue((web_dst / script).is_file(), script)
 
 
 if __name__ == "__main__":
