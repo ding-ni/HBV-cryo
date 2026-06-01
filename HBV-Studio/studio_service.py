@@ -142,6 +142,7 @@ from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
+from services.runs import resolve_run_config_objective_mode as build_resolve_run_config_objective_mode
 from services.runs import resolve_run_objective_metadata as build_resolve_run_objective_metadata
 from services.runs import resolve_run_workspace_config as build_resolve_run_workspace_config
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
@@ -2708,14 +2709,7 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
                 config,
                 str(normalized.get("calibration_profile", normalized.get("rate_mode", ""))).strip().lower() or None,
             )
-            objective_mode = profile_runner.resolve_objective_mode(
-                config,
-                normalized.get("optimization", {}).get("objective_mode")
-                or normalized.get("objective_profile", {}).get("type")
-                or normalized.get("objective", {}).get("type")
-                or normalized.get("目标函数模式"),
-                profile,
-            )
+            objective_mode = build_resolve_run_config_objective_mode(normalized, optimization, config, profile)
             paths = build_profile_paths(config, profile)
             configured_source = configured_precip_source(config)
             raw_source_key = str(

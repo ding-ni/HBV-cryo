@@ -57,6 +57,7 @@ from services.runs import (  # noqa: E402
     restore_forward_observation_state,
     restore_forward_observed_series,
     resolve_metadata_object_type,
+    resolve_run_config_objective_mode,
     resolve_run_objective_metadata,
     resolve_run_workspace_config,
     resolve_source_run_reference,
@@ -532,6 +533,35 @@ class RunIdentityServiceTests(unittest.TestCase):
 
         self.assertEqual(sections.effective_objective_mode, profile_runner.OBJECTIVE_MODE_SINGLE)
         self.assertEqual(metadata["recorded_objective_family"], profile_runner.OBJECTIVE_MODE_SINGLE)
+
+    def test_resolve_run_config_objective_mode_prefers_optimization_record(self) -> None:
+        metadata = {
+            "objective_profile": {"type": profile_runner.OBJECTIVE_MODE_MULTI},
+            "objective": {"type": profile_runner.OBJECTIVE_MODE_MULTI},
+            "\u76ee\u6807\u51fd\u6570\u6a21\u5f0f": profile_runner.OBJECTIVE_MODE_MULTI,
+        }
+        optimization = {"objective_mode": profile_runner.OBJECTIVE_MODE_SINGLE}
+
+        mode = resolve_run_config_objective_mode(
+            metadata,
+            optimization,
+            {},
+            profile_runner.PROFILE_HOURLY,
+        )
+
+        self.assertEqual(mode, profile_runner.OBJECTIVE_MODE_SINGLE)
+
+    def test_resolve_run_config_objective_mode_falls_back_to_metadata_config_mode(self) -> None:
+        metadata = {"\u76ee\u6807\u51fd\u6570\u6a21\u5f0f": profile_runner.OBJECTIVE_MODE_MULTI}
+
+        mode = resolve_run_config_objective_mode(
+            metadata,
+            {},
+            {},
+            profile_runner.PROFILE_DAILY,
+        )
+
+        self.assertEqual(mode, profile_runner.OBJECTIVE_MODE_MULTI)
 
     def test_sync_objective_profile_metadata_copies_contract_fields(self) -> None:
         metadata = {

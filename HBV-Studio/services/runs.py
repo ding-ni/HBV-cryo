@@ -885,6 +885,24 @@ def sync_objective_profile_metadata(metadata: dict[str, Any]) -> None:
         metadata["objective"] = objective_meta
 
 
+def resolve_run_config_objective_mode(
+    metadata: dict[str, Any],
+    optimization: dict[str, Any],
+    config: dict[str, Any],
+    profile: str,
+) -> str:
+    objective_profile = metadata.get("objective_profile") if isinstance(metadata.get("objective_profile"), dict) else {}
+    objective_meta = metadata.get("objective") if isinstance(metadata.get("objective"), dict) else {}
+    return profile_runner.resolve_objective_mode(
+        config,
+        optimization.get("objective_mode")
+        or objective_profile.get("type")
+        or objective_meta.get("type")
+        or metadata.get("\u76ee\u6807\u51fd\u6570\u6a21\u5f0f"),
+        profile,
+    )
+
+
 def sync_run_config_profile_metadata(
     metadata: dict[str, Any],
     optimization: dict[str, Any],
