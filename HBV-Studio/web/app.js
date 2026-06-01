@@ -218,6 +218,7 @@ const forecastInputCheckRequestGuard = window.HBVStudioApiClient.createLatestReq
 const forecastResultRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const runManualPresetRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const taskManualPresetRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const compareRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -265,7 +266,6 @@ const state = {
   forecastResultLoadingPath: "",
   forecastInputCheckTimer: null,
   lastForecastExportPath: "",
-  activeCompareRequestId: 0,
   prepSteps: [],
   prepStatus: {},
   cdsApiStatus: null,
@@ -589,11 +589,6 @@ function currentSelectedRunPath() {
   return String(state.selectedRunPath || state.currentRun?.run?.path || state.currentRun?.path || "").trim();
 }
 
-function nextCompareRequestId() {
-  state.activeCompareRequestId = Number(state.activeCompareRequestId || 0) + 1;
-  return state.activeCompareRequestId;
-}
-
 function normalizeCalibrationProfile(value, fallback = "") {
   const profile = String(value || "").trim().toLowerCase();
   return profile || fallback;
@@ -807,7 +802,7 @@ function renderResultsFilterToolbar() {
 function clearRunDetail(message = "请先从左侧选择一个结果。") {
   runDetailRequestGuard.cancel();
   runManualPresetRequestGuard.cancel();
-  nextCompareRequestId();
+  compareRequestGuard.cancel();
   state.currentRun = null;
   state.selectedRunPath = "";
   state._runData = null;
@@ -1545,7 +1540,7 @@ function renderTaskPresetContextHint() {
 }
 
 function clearManualPresetComparison({ silent = false } = {}) {
-  nextCompareRequestId();
+  compareRequestGuard.cancel();
   state.compareSeries = null;
   state.compareMetrics = null;
   state.compareLabel = "";
@@ -5565,7 +5560,7 @@ function renderRunDetail(data) {
   state._runData = data;
   state._runParams = editable ? { ...(meta.optimized_params || {}) } : null;
   state._runOrigParams = editable ? { ...(meta.optimized_params || {}) } : null;
-  nextCompareRequestId();
+  compareRequestGuard.cancel();
   state.compareSeries = null;
   state.compareMetrics = null;
   state.compareLabel = "";
@@ -5969,7 +5964,7 @@ async function compareSelectedManualPresetSimulation() {
     host.className = "hint-box";
     host.textContent = `正在计算参数集“${preset.name}”的对比结果...`;
   }
-  const requestId = nextCompareRequestId();
+  const requestToken = compareRequestGuard.next();
   const runPath = String(state._runData?.run?.path || "").trim();
   const presetId = String(preset.id || "").trim();
   try {
@@ -5977,7 +5972,7 @@ async function compareSelectedManualPresetSimulation() {
       run_path: state._runData.run?.path,
       params: preset.params || {},
     });
-    if (requestId !== state.activeCompareRequestId) return;
+    if (!compareRequestGuard.isActive(requestToken)) return;
     if (!samePath(runPath, state._runData?.run?.path || "")) return;
     const currentPresetId = String(selectedManualPreset()?.id || "").trim();
     if (presetId && currentPresetId && presetId !== currentPresetId) return;
@@ -5996,7 +5991,7 @@ async function compareSelectedManualPresetSimulation() {
     updateManualPresetControls();
     showToast(`已生成参数集“${preset.name}”的对比曲线。`);
   } catch (err) {
-    if (requestId !== state.activeCompareRequestId) return;
+    if (!compareRequestGuard.isActive(requestToken)) return;
     state.compareSeries = null;
     state.compareMetrics = null;
     state.compareLabel = "";
