@@ -74,7 +74,9 @@ from services.manual_presets import save_manual_preset as build_save_manual_pres
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext, RunSummaryContext
+from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import RunReplayConfigContext, RunSummaryContext
+from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import delete_run as build_delete_run
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
@@ -6064,99 +6066,16 @@ def _run_detail_context() -> RunDetailContext:
     )
 
 
-def _metadata_initial_state_override(metadata: dict[str, Any]) -> dict[str, float] | None:
-    initial_state = dict(metadata.get("initial_state", {}) or {})
-    raw_vector = initial_state.get("vector", None)
-    if not isinstance(raw_vector, dict):
-        return None
-
-    override: dict[str, float] = {}
-    for key in profile_runner.DEFAULT_INIT_STATE.keys():
-        if key not in raw_vector:
-            continue
-        raw_value = raw_vector.get(key)
-        try:
-            value = float(raw_value)
-        except Exception as exc:
-            raise ValueError(f"结果 metadata 中的 initial_state.{key} 不是有效数字：{raw_value}") from exc
-        if value < 0:
-            raise ValueError(f"结果 metadata 中的 initial_state.{key} 不能为负值：{raw_value}")
-        override[key] = value
-    return override or None
+def _run_replay_config_context() -> RunReplayConfigContext:
+    return RunReplayConfigContext(
+        default_initial_state=dict(profile_runner.DEFAULT_INIT_STATE),
+        resolve_metadata_object_type=_resolve_metadata_object_type,
+        metadata_boundary_enabled=_metadata_boundary_enabled,
+    )
 
 
 def _apply_run_replay_config_overrides(config: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
-    patched = copy.deepcopy(config)
-    time_meta = dict(metadata.get("time_config", {}) or {})
-    if time_meta:
-        time_cfg = dict(patched.get("时间", {}) or {})
-        key_map = {
-            "warmup_start": "预热开始",
-            "warmup_end": "预热结束",
-            "calib_start": "率定开始",
-            "calib_end": "率定结束",
-            "valid_start": "验证开始",
-            "valid_end": "验证结束",
-        }
-        for src_key, dst_key in key_map.items():
-            value = time_meta.get(src_key, None)
-            if value:
-                time_cfg[dst_key] = str(value)
-        starts = [pd.to_datetime(value) for value in [time_cfg.get("预热开始"), time_cfg.get("率定开始")] if value]
-        ends = [pd.to_datetime(value) for value in [time_cfg.get("验证结束"), time_cfg.get("率定结束")] if value]
-        if starts:
-            time_cfg["开始年份"] = int(min(starts).year)
-        if ends:
-            time_cfg["结束年份"] = int(max(ends).year)
-        patched["时间"] = time_cfg
-        if time_meta.get("time_step_hours", None) is not None:
-            patched["时间步长_小时"] = float(time_meta["time_step_hours"])
-
-    resolved_object_type = _resolve_metadata_object_type(metadata)
-    if resolved_object_type:
-        patched["项目对象"] = resolved_object_type
-
-    objective_meta = dict(metadata.get("objective", {}) or {})
-    obs_mode = str(objective_meta.get("obs_mode", "") or "").strip()
-    if obs_mode:
-        patched["观测口径模式"] = obs_mode
-    cfmax_threshold = objective_meta.get("cfmax_zone_threshold_m", None)
-    if cfmax_threshold not in (None, ""):
-        try:
-            patched["CFMAX分区阈值_m"] = float(cfmax_threshold)
-        except Exception as exc:
-            raise ValueError(f"结果 metadata 中的 cfmax_zone_threshold_m 不是有效数字：{cfmax_threshold}") from exc
-
-    initial_state_override = _metadata_initial_state_override(metadata)
-    if initial_state_override is not None:
-        init_state = dict(patched.get("初始状态", {}) or {})
-        for key, default_value in profile_runner.DEFAULT_INIT_STATE.items():
-            init_state.setdefault(key, default_value)
-        init_state.update(initial_state_override)
-        patched["初始状态"] = init_state
-
-    boundary_meta = dict(metadata.get("boundary_condition", {}) or {})
-    optional_modules = dict(metadata.get("optional_modules", {}) or {})
-    boundary_module = dict(optional_modules.get("boundary_inflow", {}) or {})
-    boundary_file = str(
-        boundary_meta.get("boundary_inflow_file")
-        or boundary_module.get("file")
-        or ""
-    ).strip()
-    boundary_enabled = _metadata_boundary_enabled(metadata)
-    boundary_cfg = dict(patched.get("边界条件", {}) or {})
-    boundary_cfg["时间字段"] = str(boundary_meta.get("date_field", boundary_cfg.get("时间字段", "date")) or "date")
-    boundary_cfg["流量字段"] = str(boundary_meta.get("flow_field", boundary_cfg.get("流量字段", "inflow_m3s")) or "inflow_m3s")
-    gap_fill = boundary_meta.get("gap_fill", boundary_cfg.get("缺失填补", "zero"))
-    boundary_cfg["缺失填补"] = str(gap_fill or "zero")
-    if boundary_enabled is False:
-        boundary_cfg["上游边界入流_csv"] = ""
-    elif boundary_file:
-        boundary_cfg["上游边界入流_csv"] = boundary_file
-    if boundary_cfg:
-        patched["边界条件"] = boundary_cfg
-
-    return patched
+    return build_apply_run_replay_config_overrides(config, metadata, _run_replay_config_context())
 
 
 def _restore_forward_observed_series(module: Any, source_obs_series: dict[str, float | None]) -> bool:

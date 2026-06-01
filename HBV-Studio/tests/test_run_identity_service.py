@@ -9,12 +9,15 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.runs import (  # noqa: E402
+    RunReplayConfigContext,
     RunSummaryContext,
+    apply_run_replay_config_overrides,
     build_run_summary,
     default_run_export_fields,
     display_run_title,
     has_custom_result_title,
     load_run_series_map,
+    metadata_initial_state_override,
     normalize_result_title,
     read_sampled_csv_rows,
     run_parameter_context,
@@ -253,6 +256,86 @@ class RunIdentityServiceTests(unittest.TestCase):
 
         self.assertEqual(observed, {"2026-06-01": 12.5, "2026-06-02": None})
         self.assertEqual(missing, {})
+
+    def test_apply_run_replay_config_overrides_replays_metadata_contracts(self) -> None:
+        config = {
+            "时间": {"预热开始": "2020-01-01", "率定开始": "2020-02-01"},
+            "初始状态": {"UZ": 1.0},
+            "边界条件": {"上游边界入流_csv": "old.csv"},
+        }
+        metadata = {
+            "time_config": {
+                "warmup_start": "2026-01-01",
+                "calib_start": "2026-02-01",
+                "valid_end": "2026-12-31",
+                "time_step_hours": 6,
+            },
+            "objective": {"obs_mode": "daily_mean", "cfmax_zone_threshold_m": "4800"},
+            "initial_state": {"vector": {"SM": "2.5"}},
+            "boundary_condition": {
+                "date_field": "time",
+                "flow_field": "inflow",
+                "gap_fill": "nearest",
+                "boundary_inflow_file": "boundary.csv",
+            },
+        }
+        context = RunReplayConfigContext(
+            default_initial_state={"SM": 0.0, "UZ": 0.0},
+            resolve_metadata_object_type=lambda meta: "interbasin_with_boundary",
+            metadata_boundary_enabled=lambda meta: True,
+        )
+
+        patched = apply_run_replay_config_overrides(config, metadata, context)
+
+        self.assertEqual(config["时间"]["预热开始"], "2020-01-01")
+        self.assertEqual(patched["时间"]["预热开始"], "2026-01-01")
+        self.assertEqual(patched["时间"]["率定开始"], "2026-02-01")
+        self.assertEqual(patched["时间"]["验证结束"], "2026-12-31")
+        self.assertEqual(patched["时间"]["开始年份"], 2026)
+        self.assertEqual(patched["时间"]["结束年份"], 2026)
+        self.assertEqual(patched["时间步长_小时"], 6.0)
+        self.assertEqual(patched["项目对象"], "interbasin_with_boundary")
+        self.assertEqual(patched["观测口径模式"], "daily_mean")
+        self.assertEqual(patched["CFMAX分区阈值_m"], 4800.0)
+        self.assertEqual(patched["初始状态"], {"UZ": 1.0, "SM": 2.5})
+        self.assertEqual(
+            patched["边界条件"],
+            {
+                "上游边界入流_csv": "boundary.csv",
+                "时间字段": "time",
+                "流量字段": "inflow",
+                "缺失填补": "nearest",
+            },
+        )
+
+    def test_apply_run_replay_config_overrides_clears_disabled_boundary(self) -> None:
+        context = RunReplayConfigContext(
+            default_initial_state={},
+            resolve_metadata_object_type=lambda meta: "full_upstream_basin",
+            metadata_boundary_enabled=lambda meta: False,
+        )
+
+        patched = apply_run_replay_config_overrides(
+            {"边界条件": {"上游边界入流_csv": "old.csv"}},
+            {"boundary_condition": {"date_field": "date"}},
+            context,
+        )
+
+        self.assertEqual(patched["项目对象"], "full_upstream_basin")
+        self.assertEqual(patched["边界条件"]["上游边界入流_csv"], "")
+        self.assertEqual(patched["边界条件"]["时间字段"], "date")
+        self.assertEqual(patched["边界条件"]["流量字段"], "inflow_m3s")
+        self.assertEqual(patched["边界条件"]["缺失填补"], "zero")
+
+    def test_metadata_initial_state_override_rejects_invalid_values(self) -> None:
+        self.assertEqual(
+            metadata_initial_state_override({"initial_state": {"vector": {"SM": "1.25"}}}, {"SM": 0.0}),
+            {"SM": 1.25},
+        )
+        with self.assertRaisesRegex(ValueError, "不是有效数字"):
+            metadata_initial_state_override({"initial_state": {"vector": {"SM": "bad"}}}, {"SM": 0.0})
+        with self.assertRaisesRegex(ValueError, "不能为负值"):
+            metadata_initial_state_override({"initial_state": {"vector": {"SM": "-1"}}}, {"SM": 0.0})
 
 
 if __name__ == "__main__":
