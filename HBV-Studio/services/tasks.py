@@ -56,6 +56,25 @@ class ProcessTaskStartContext:
     stderr_stdout: Any
 
 
+@dataclass(frozen=True)
+class PythonScriptCommandContext:
+    python_exe: str
+    run_py_file_role: str
+    frozen: bool
+
+
+def build_python_script_command(
+    script: Path | str,
+    *args: Any,
+    context: PythonScriptCommandContext,
+) -> list[str]:
+    script_path = str(script)
+    tail = [str(arg) for arg in args]
+    if context.frozen:
+        return [context.python_exe, context.run_py_file_role, script_path, *tail]
+    return [context.python_exe, script_path, *tail]
+
+
 def has_running_tasks(context: TaskQueryContext) -> bool:
     with context.task_lock:
         return any(task.status == "running" for task in context.tasks.values())

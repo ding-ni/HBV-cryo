@@ -145,12 +145,14 @@ from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
     ProcessTaskStartContext,
+    PythonScriptCommandContext,
     TaskCreateContext,
     TaskMutationContext,
     ProcessMonitorContext,
     TaskQueryContext,
     append_task_exception_output as build_append_task_exception_output,
     append_task_output as build_append_task_output,
+    build_python_script_command as build_task_python_script_command,
     create_registered_task as build_create_registered_task,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
@@ -6273,11 +6275,15 @@ def _decode_subprocess_output_line(raw_line: Any) -> str:
 
 
 def build_python_script_command(script: Path | str, *args: Any) -> list[str]:
-    script_path = str(script)
-    tail = [str(arg) for arg in args]
-    if getattr(sys, "frozen", False):
-        return [PYTHON_EXE, RUN_PY_FILE_ROLE, script_path, *tail]
-    return [PYTHON_EXE, script_path, *tail]
+    return build_task_python_script_command(
+        script,
+        *args,
+        context=PythonScriptCommandContext(
+            python_exe=PYTHON_EXE,
+            run_py_file_role=RUN_PY_FILE_ROLE,
+            frozen=bool(getattr(sys, "frozen", False)),
+        ),
+    )
 
 
 def create_registered_task(

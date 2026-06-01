@@ -13,10 +13,12 @@ if str(STUDIO_DIR) not in sys.path:
 from services.tasks import (  # noqa: E402
     ProcessMonitorContext,
     ProcessTaskStartContext,
+    PythonScriptCommandContext,
     TaskCreateContext,
     TaskMutationContext,
     append_task_exception_output,
     append_task_output,
+    build_python_script_command,
     create_registered_task,
     mark_task_finished,
     monitor_process_task,
@@ -115,6 +117,33 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertEqual(record.metadata, {})
         self.assertIs(tasks["task-1"], record)
+
+    def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
+        command = build_python_script_command(
+            Path("scripts") / "run.py",
+            "--count",
+            3,
+            context=PythonScriptCommandContext(
+                python_exe="python.exe",
+                run_py_file_role="__run_py_file__",
+                frozen=False,
+            ),
+        )
+
+        self.assertEqual(command, ["python.exe", str(Path("scripts") / "run.py"), "--count", "3"])
+
+    def test_build_python_script_command_uses_bootstrap_role_when_frozen(self) -> None:
+        command = build_python_script_command(
+            "scripts/run.py",
+            "--flag",
+            context=PythonScriptCommandContext(
+                python_exe="HBVStudio.exe",
+                run_py_file_role="__run_py_file__",
+                frozen=True,
+            ),
+        )
+
+        self.assertEqual(command, ["HBVStudio.exe", "__run_py_file__", "scripts/run.py", "--flag"])
 
     def test_start_process_task_launches_registers_and_starts_monitor(self) -> None:
         events: list[tuple] = []
