@@ -2,13 +2,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.geo_overview import GeoOverviewContext, workspace_geo_overview, workspace_station_geojson  # noqa: E402
+from services import geo_overview as geo_service  # noqa: E402
+from services.geo_overview import GeoOverviewContext, workspace_basin_geojson, workspace_geo_overview, workspace_station_geojson  # noqa: E402
 
 
 class GeoOverviewStationLayerTests(unittest.TestCase):
@@ -65,6 +67,31 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
             self.assertEqual(len(geojson["features"]), 2)
             self.assertEqual(geojson["features"][0]["geometry"], {"type": "Point", "coordinates": [100.0, 31.0]})
             self.assertEqual(geojson["features"][0]["properties"]["label"], "S1")
+
+    def test_basin_layer_rings_become_geojson_polygon(self) -> None:
+        context = mock.Mock()
+        basin_layer = {
+            "id": "basin",
+            "label": "流域边界",
+            "status": "ok",
+            "message": "1 个要素",
+            "bounds": {"west": 100.0, "south": 31.0, "east": 100.2, "north": 31.2},
+            "metrics": {"feature_count": 1},
+            "rings": [
+                {"points": [[100.0, 31.0], [100.2, 31.0], [100.2, 31.2], [100.0, 31.2]]},
+            ],
+        }
+        with mock.patch.object(geo_service, "workspace_geo_overview", return_value={"layers": [basin_layer]}):
+            geojson = workspace_basin_geojson("workspace.json", context)
+
+        self.assertEqual(geojson["type"], "FeatureCollection")
+        self.assertEqual(geojson["properties"]["id"], "basin")
+        self.assertEqual(geojson["properties"]["metrics"]["feature_count"], 1)
+        self.assertEqual(len(geojson["features"]), 1)
+        geometry = geojson["features"][0]["geometry"]
+        self.assertEqual(geometry["type"], "Polygon")
+        self.assertEqual(geometry["coordinates"][0][0], [100.0, 31.0])
+        self.assertEqual(geometry["coordinates"][0][-1], [100.0, 31.0])
 
 
 if __name__ == "__main__":

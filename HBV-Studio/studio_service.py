@@ -57,6 +57,7 @@ from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext
+from services.geo_overview import workspace_basin_geojson as build_workspace_basin_geojson
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
 from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
 from services.manual_presets import ManualPresetContext
@@ -2553,6 +2554,10 @@ def _geo_overview_context() -> GeoOverviewContext:
 
 def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
     return build_workspace_geo_overview(config_path_raw, _geo_overview_context())
+
+
+def workspace_basin_geojson(config_path_raw: str) -> dict[str, Any]:
+    return build_workspace_basin_geojson(config_path_raw, _geo_overview_context())
 
 
 def workspace_station_geojson(config_path_raw: str) -> dict[str, Any]:
@@ -10229,6 +10234,10 @@ class StudioHandler(BaseHTTPRequestHandler):
     def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
+
+    def _api_get_geo_basin(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self.send_json({"ok": True, "data": workspace_basin_geojson(raw_path)})
 
     def _api_get_geo_stations(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])

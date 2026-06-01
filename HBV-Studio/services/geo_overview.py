@@ -351,6 +351,63 @@ def _point_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _polygon_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
+    features = []
+    for idx, ring in enumerate(layer.get("rings", []) or []):
+        points = ring.get("points") if isinstance(ring, dict) else None
+        if not isinstance(points, list) or len(points) < 3:
+            continue
+        coords: list[list[float]] = []
+        for point in points:
+            if not isinstance(point, list) or len(point) < 2:
+                continue
+            lon = float(point[0])
+            lat = float(point[1])
+            if math.isfinite(lon) and math.isfinite(lat):
+                coords.append([lon, lat])
+        if len(coords) < 3:
+            continue
+        if coords[0] != coords[-1]:
+            coords.append(coords[0])
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [coords]},
+            "properties": {
+                "id": str(layer.get("id", "") or ""),
+                "label": str(layer.get("label", "") or ""),
+                "layer": str(layer.get("id", "") or ""),
+                "feature_index": idx,
+            },
+        })
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {
+            "id": str(layer.get("id", "") or ""),
+            "label": str(layer.get("label", "") or ""),
+            "status": str(layer.get("status", "") or ""),
+            "message": str(layer.get("message", "") or ""),
+            "bounds": layer.get("bounds"),
+            "metrics": layer.get("metrics", {}),
+        },
+    }
+
+
+def _empty_geojson_layer(layer_id: str, label: str, status: str = "missing", message: str = "未配置") -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "features": [],
+        "properties": {
+            "id": layer_id,
+            "label": label,
+            "status": status,
+            "message": message,
+            "bounds": None,
+            "metrics": {},
+        },
+    }
+
+
 def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
     cfg_path, config = context.load_workspace_config(config_path_raw)
     try:
@@ -426,5 +483,13 @@ def workspace_station_geojson(config_path_raw: str, context: GeoOverviewContext)
     overview = workspace_geo_overview(config_path_raw, context)
     station_layer = next((layer for layer in overview.get("layers", []) if layer.get("id") == "stations"), None)
     if not station_layer:
-        station_layer = _geo_empty_layer("stations", "站点", "point", None, "missing", "未配置", context)
+        return _empty_geojson_layer("stations", "站点")
     return _point_layer_geojson(station_layer)
+
+
+def workspace_basin_geojson(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    overview = workspace_geo_overview(config_path_raw, context)
+    basin_layer = next((layer for layer in overview.get("layers", []) if layer.get("id") == "basin"), None)
+    if not basin_layer:
+        return _empty_geojson_layer("basin", "流域边界")
+    return _polygon_layer_geojson(basin_layer)
