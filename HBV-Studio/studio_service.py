@@ -84,6 +84,7 @@ from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import rename_run as build_rename_run
+from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import run_time_label as build_run_time_label
@@ -6017,53 +6018,13 @@ def _run_parameter_context(
     metadata: dict[str, Any],
     resolved_config: Path | None,
 ) -> dict[str, Any]:
-    data_sources = dict(metadata.get("data_sources", {}) or {})
-    time_config = dict(metadata.get("time_config", {}) or {})
-    initial_state = dict(metadata.get("initial_state", {}) or {})
-    parameter_profile = dict(metadata.get("parameter_profile", {}) or {})
-    optimized_params = metadata.get("optimized_params", {})
-    bounds_profile = str(
-        metadata.get("param_bounds_profile")
-        or parameter_profile.get("bounds_profile")
-        or ""
-    ).strip()
-    bounds_label = str(
-        metadata.get("param_bounds_profile_label")
-        or parameter_profile.get("bounds_profile_label")
-        or getattr(profile_runner, "PARAM_BOUNDS_PROFILE_LABELS", {}).get(bounds_profile, "")
-        or ""
-    ).strip()
-    workspace_config = str(metadata.get("workspace_config", "") or (resolved_config or "")).strip()
-    return {
-        "schema": "run_parameter_context_v1",
-        "parameter_source": "source_result",
-        "parameter_source_label": "源结果参数",
-        "source_run_path": str(run_dir.resolve(strict=False)),
-        "source_run_name": run_dir.name,
-        "source_workspace": _workspace_name_for_summary(metadata, resolved_config),
-        "source_workspace_config": workspace_config,
-        "calibration_profile": str(metadata.get("calibration_profile") or "").strip(),
-        "time_step_hours": time_config.get("time_step_hours"),
-        "objective_mode": _metadata_objective_family(metadata),
-        "prec_source": str(
-            data_sources.get("runtime_prec_source")
-            or data_sources.get("prec_source")
-            or data_sources.get("configured_precip_source")
-            or ""
-        ).strip(),
-        "precipitation_strategy": str(
-            data_sources.get("precipitation_strategy")
-            or data_sources.get("precipitation_mode")
-            or data_sources.get("station_precip_mode")
-            or ""
-        ).strip(),
-        "glacier_mode": str(data_sources.get("glacier_mode", "") or "").strip(),
-        "glacier_enabled": bool(metadata.get("optional_modules", {}).get("glacier", {}).get("enabled")),
-        "param_bounds_profile": bounds_profile,
-        "param_bounds_profile_label": bounds_label,
-        "state_snapshot_time": str(initial_state.get("state_snapshot_time", "") or "").strip(),
-        "parameter_count": int(len(optimized_params)) if isinstance(optimized_params, dict) else 0,
-    }
+    return build_run_parameter_context(
+        run_dir,
+        metadata,
+        resolved_config,
+        _workspace_name_for_summary(metadata, resolved_config),
+        getattr(profile_runner, "PARAM_BOUNDS_PROFILE_LABELS", {}),
+    )
 
 
 def _build_run_summary(

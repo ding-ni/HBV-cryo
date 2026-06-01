@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.run_hydrology import metadata_objective_family
+
 
 RUN_KIND_LABELS = {
     "manual_starter": "手调起点",
@@ -177,6 +179,63 @@ def display_run_title(
         "run_type_label": kind_label,
         "workspace_name": workspace_name,
         "run_time_label": time_text,
+    }
+
+
+def run_parameter_context(
+    run_dir: Path,
+    metadata: dict[str, Any],
+    resolved_config: Path | None,
+    workspace_name: str = "",
+    param_bounds_profile_labels: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    data_sources = dict(metadata.get("data_sources", {}) or {})
+    time_config = dict(metadata.get("time_config", {}) or {})
+    initial_state = dict(metadata.get("initial_state", {}) or {})
+    parameter_profile = dict(metadata.get("parameter_profile", {}) or {})
+    optimized_params = metadata.get("optimized_params", {})
+    bounds_profile = str(
+        metadata.get("param_bounds_profile")
+        or parameter_profile.get("bounds_profile")
+        or ""
+    ).strip()
+    bounds_labels = dict(param_bounds_profile_labels or {})
+    bounds_label = str(
+        metadata.get("param_bounds_profile_label")
+        or parameter_profile.get("bounds_profile_label")
+        or bounds_labels.get(bounds_profile, "")
+        or ""
+    ).strip()
+    workspace_config = str(metadata.get("workspace_config", "") or (resolved_config or "")).strip()
+    return {
+        "schema": "run_parameter_context_v1",
+        "parameter_source": "source_result",
+        "parameter_source_label": "源结果参数",
+        "source_run_path": str(run_dir.resolve(strict=False)),
+        "source_run_name": run_dir.name,
+        "source_workspace": str(workspace_name or "").strip(),
+        "source_workspace_config": workspace_config,
+        "calibration_profile": str(metadata.get("calibration_profile") or "").strip(),
+        "time_step_hours": time_config.get("time_step_hours"),
+        "objective_mode": metadata_objective_family(metadata),
+        "prec_source": str(
+            data_sources.get("runtime_prec_source")
+            or data_sources.get("prec_source")
+            or data_sources.get("configured_precip_source")
+            or ""
+        ).strip(),
+        "precipitation_strategy": str(
+            data_sources.get("precipitation_strategy")
+            or data_sources.get("precipitation_mode")
+            or data_sources.get("station_precip_mode")
+            or ""
+        ).strip(),
+        "glacier_mode": str(data_sources.get("glacier_mode", "") or "").strip(),
+        "glacier_enabled": bool(metadata.get("optional_modules", {}).get("glacier", {}).get("enabled")),
+        "param_bounds_profile": bounds_profile,
+        "param_bounds_profile_label": bounds_label,
+        "state_snapshot_time": str(initial_state.get("state_snapshot_time", "") or "").strip(),
+        "parameter_count": int(len(optimized_params)) if isinstance(optimized_params, dict) else 0,
     }
 
 

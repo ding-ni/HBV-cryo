@@ -11,6 +11,7 @@ from services.runs import (  # noqa: E402
     display_run_title,
     has_custom_result_title,
     normalize_result_title,
+    run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
     source_run_meta,
@@ -73,6 +74,52 @@ class RunIdentityServiceTests(unittest.TestCase):
         })
         self.assertEqual(explicit_path, "C:/runs/manual_source")
         self.assertEqual(explicit_name, "人工命名源结果")
+
+    def test_run_parameter_context_summarizes_source_result_for_forecast(self) -> None:
+        run_dir = Path("C:/runs/source_run")
+        metadata = {
+            "workspace_config": "",
+            "calibration_profile": "hourly",
+            "effective_objective_mode": "daily_unified_professional_v1",
+            "time_config": {"time_step_hours": 1},
+            "initial_state": {"state_snapshot_time": "2026-06-02 08:00:00"},
+            "data_sources": {
+                "configured_precip_source": "era5",
+                "prec_source": "cmfd",
+                "runtime_prec_source": "custom_tif",
+                "station_precip_mode": "station_only",
+                "precipitation_mode": "basin_grid",
+                "precipitation_strategy": "station_corrected",
+                "glacier_mode": "binary_legacy",
+            },
+            "optional_modules": {"glacier": {"enabled": True}},
+            "parameter_profile": {"bounds_profile": "hourly_step"},
+            "optimized_params": {"TT": -1.0, "FC": 850.0},
+        }
+
+        context = run_parameter_context(
+            run_dir,
+            metadata,
+            Path("C:/workspace/config.json"),
+            "沱沱河",
+            {"hourly_step": "小时尺度稳定范围"},
+        )
+
+        self.assertEqual(context["schema"], "run_parameter_context_v1")
+        self.assertEqual(context["source_run_name"], "source_run")
+        self.assertEqual(context["source_workspace"], "沱沱河")
+        self.assertEqual(context["source_workspace_config"], "C:\\workspace\\config.json")
+        self.assertEqual(context["calibration_profile"], "hourly")
+        self.assertEqual(context["time_step_hours"], 1)
+        self.assertEqual(context["objective_mode"], "daily_unified_professional_v1")
+        self.assertEqual(context["prec_source"], "custom_tif")
+        self.assertEqual(context["precipitation_strategy"], "station_corrected")
+        self.assertEqual(context["glacier_mode"], "binary_legacy")
+        self.assertTrue(context["glacier_enabled"])
+        self.assertEqual(context["param_bounds_profile"], "hourly_step")
+        self.assertEqual(context["param_bounds_profile_label"], "小时尺度稳定范围")
+        self.assertEqual(context["state_snapshot_time"], "2026-06-02 08:00:00")
+        self.assertEqual(context["parameter_count"], 2)
 
 
 if __name__ == "__main__":
