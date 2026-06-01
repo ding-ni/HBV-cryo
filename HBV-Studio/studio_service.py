@@ -158,6 +158,7 @@ from services.tasks import (
     find_running_task as build_find_running_task,
     finalize_process_task as build_finalize_process_task,
     has_running_tasks as build_has_running_tasks,
+    invalidate_deleted_run_refs as build_invalidate_deleted_run_refs,
     list_tasks as build_list_tasks,
     mark_process_task_exception as build_mark_process_task_exception,
     mark_task_finished as build_mark_task_finished,
@@ -5553,36 +5554,7 @@ def set_task_metadata(task_id: str, **items: Any) -> None:
 
 
 def invalidate_deleted_run_refs(run_path: Path) -> None:
-    deleted_run = run_path.resolve(strict=False)
-    with TASK_LOCK:
-        for task in TASKS.values():
-            changed = False
-            filtered_runs = [
-                item for item in task.detected_runs
-                if not same_path(Path(str(item)), deleted_run)
-            ]
-            if len(filtered_runs) != len(task.detected_runs):
-                task.detected_runs = filtered_runs
-                changed = True
-
-            task_run_path = str(task.metadata.get("run_path", "") or "").strip()
-            if task_run_path and same_path(Path(task_run_path), deleted_run):
-                task.metadata["run_path"] = ""
-                task.metadata["deleted_run_path"] = str(deleted_run)
-                changed = True
-
-            result = task.metadata.get("result")
-            if isinstance(result, dict):
-                result_run_path = str(result.get("run_path", "") or "").strip()
-                if result_run_path and same_path(Path(result_run_path), deleted_run):
-                    updated_result = dict(result)
-                    updated_result["deleted_run_path"] = result_run_path
-                    updated_result["run_path"] = ""
-                    task.metadata["result"] = updated_result
-                    changed = True
-
-            if changed:
-                task.updated_at = time.time()
+    build_invalidate_deleted_run_refs(run_path, _task_mutation_context(), same_path)
 
 
 def list_tasks() -> list[dict[str, Any]]:

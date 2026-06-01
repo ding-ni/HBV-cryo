@@ -29,6 +29,7 @@ from services.tasks import (  # noqa: E402
     create_registered_task,
     decode_subprocess_output_line,
     finalize_process_task,
+    invalidate_deleted_run_refs,
     list_tasks,
     mark_process_task_exception,
     mark_task_finished,
@@ -550,6 +551,34 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(task.updated_at, 791.0)
         self.assertEqual(task.metadata["ui_progress"], {"stage": "\u6267\u884c\u5f02\u5e38"})
         self.assertEqual(task.output, ["[HBV-Studio] boom"])
+
+    def test_invalidate_deleted_run_refs_clears_task_run_references(self) -> None:
+        task = FakeTask()
+        task.detected_runs = ["runs/old", "runs/keep"]
+        task.metadata.update(
+            {
+                "run_path": "runs/old",
+                "result": {"run_path": "runs/old", "nse": 0.8},
+            }
+        )
+        untouched = FakeTask()
+        untouched.detected_runs = ["runs/keep"]
+        untouched.metadata["run_path"] = "runs/keep"
+        context = self._mutation_context({"task-1": task, "task-2": untouched}, now=792.0)
+
+        def same_path(left: Path, right: Path) -> bool:
+            return left.resolve(strict=False) == right.resolve(strict=False)
+
+        invalidate_deleted_run_refs(Path("runs/old"), context, same_path)
+
+        self.assertEqual(task.detected_runs, ["runs/keep"])
+        self.assertEqual(task.metadata["run_path"], "")
+        self.assertEqual(task.metadata["deleted_run_path"], str(Path("runs/old").resolve(strict=False)))
+        self.assertEqual(task.metadata["result"], {"run_path": "", "deleted_run_path": "runs/old", "nse": 0.8})
+        self.assertEqual(task.updated_at, 792.0)
+        self.assertEqual(untouched.detected_runs, ["runs/keep"])
+        self.assertEqual(untouched.metadata["run_path"], "runs/keep")
+        self.assertEqual(untouched.updated_at, 0.0)
 
     def test_append_task_exception_output_adds_prefix_and_diagnostics(self) -> None:
         task = FakeTask()
