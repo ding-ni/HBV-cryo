@@ -81,6 +81,8 @@ from services.manual_presets import load_manual_preset_store as build_load_manua
 from services.manual_presets import manual_preset_store_path as build_manual_preset_store_path
 from services.manual_presets import save_manual_preset as build_save_manual_preset
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
+from services.meteo_import import MeteoImportStartContext
+from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunDetailContext, RunExportContext, RunListContext, RunMutationContext
@@ -7686,22 +7688,25 @@ def meteo_import_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
+def _meteo_import_start_context() -> MeteoImportStartContext:
+    return MeteoImportStartContext(
+        resolve_path=resolve_any_path,
+        read_runtime_config=read_runtime_config,
+        current_profile=current_profile,
+        resolve_runtime_precip_source=profile_runner.resolve_runtime_precip_source,
+    )
+
+
 def start_meteo_import(payload: dict[str, Any]) -> TaskRecord:
-    config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
-    config = read_runtime_config(config_path)
-    runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
+    plan = build_meteo_import_start_plan(payload, _meteo_import_start_context())
     task_id = uuid.uuid4().hex[:10]
     record = TaskRecord(
         id=task_id,
         task_type="meteo_import",
-        label=f"气象栅格导入 | {config_path.stem}",
-        command=["meteo_import"],
+        label=plan.label,
+        command=plan.command,
         cwd=str(PROJECT_ROOT),
-        metadata={
-            "config_path": str(config_path.resolve()),
-            "profile": current_profile(config),
-            "runtime_prec_source": runtime_prec_source,
-        },
+        metadata=plan.metadata,
     )
     with TASK_LOCK:
         TASKS[task_id] = record
