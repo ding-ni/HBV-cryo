@@ -57,6 +57,12 @@ python dev_tools/studio_baseline_check.py --update-api-snapshot
 python -m pytest HBV-Studio/tests
 ```
 
+涉及界面视觉、布局或前端交互的修改，还应启动本地服务后运行 Playwright 视觉烟测：
+
+```powershell
+python dev_tools/studio_visual_smoke.py --url http://127.0.0.1:8765/
+```
+
 ## 数据输入说明
 
 - 流域边界通常使用矢量数据，DEM 使用栅格数据；冰川边界为可选输入。
