@@ -45,6 +45,17 @@ class ProcessMonitorContext:
     mark_task_exception: Callable[[str, Exception], None]
 
 
+@dataclass(frozen=True)
+class ProcessTaskStartContext:
+    popen: Callable[..., Any]
+    subprocess_env: Callable[[], dict[str, str]]
+    create_registered_task: Callable[..., Any]
+    snapshot_run_paths: Callable[[], set[str]]
+    start_monitor_thread: Callable[[str, Any, set[str]], None]
+    stdout_pipe: Any
+    stderr_stdout: Any
+
+
 def has_running_tasks(context: TaskQueryContext) -> bool:
     with context.task_lock:
         return any(task.status == "running" for task in context.tasks.values())
@@ -95,6 +106,28 @@ def create_registered_task(
     )
     with context.task_lock:
         context.tasks[task_id] = record
+    return record
+
+
+def start_process_task(
+    task_type: str,
+    label: str,
+    command: list[str],
+    cwd: Path,
+    context: ProcessTaskStartContext,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    process = context.popen(
+        command,
+        cwd=str(cwd),
+        stdout=context.stdout_pipe,
+        stderr=context.stderr_stdout,
+        bufsize=0,
+        env=context.subprocess_env(),
+    )
+    record = context.create_registered_task(task_type, label, command, cwd, metadata=metadata)
+    context.start_monitor_thread(record.id, process, context.snapshot_run_paths())
     return record
 
 

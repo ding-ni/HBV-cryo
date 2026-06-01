@@ -144,6 +144,7 @@ from services.system_status import (
 from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
+    ProcessTaskStartContext,
     TaskCreateContext,
     TaskMutationContext,
     ProcessMonitorContext,
@@ -157,6 +158,7 @@ from services.tasks import (
     mark_task_finished as build_mark_task_finished,
     monitor_process_task as build_monitor_process_task,
     set_task_detected_runs as build_set_task_detected_runs,
+    start_process_task as build_start_process_task,
     update_task_metadata as build_update_task_metadata,
 )
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
@@ -6297,17 +6299,26 @@ def create_registered_task(
 
 
 def start_process(task_type: str, label: str, command: list[str], cwd: Path, metadata: dict[str, Any] | None = None) -> TaskRecord:
-    process = subprocess.Popen(
+    return build_start_process_task(
+        task_type,
+        label,
         command,
-        cwd=str(cwd),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=0,
-        env=_subprocess_env(),
+        cwd,
+        ProcessTaskStartContext(
+            popen=subprocess.Popen,
+            subprocess_env=_subprocess_env,
+            create_registered_task=create_registered_task,
+            snapshot_run_paths=snapshot_run_paths,
+            start_monitor_thread=lambda task_id, process, previous_runs: threading.Thread(
+                target=monitor_task,
+                args=(task_id, process, previous_runs),
+                daemon=True,
+            ).start(),
+            stdout_pipe=subprocess.PIPE,
+            stderr_stdout=subprocess.STDOUT,
+        ),
+        metadata=metadata,
     )
-    record = create_registered_task(task_type, label, command, cwd, metadata=metadata)
-    threading.Thread(target=monitor_task, args=(record.id, process, snapshot_run_paths()), daemon=True).start()
-    return record
 
 
 def start_self_check() -> TaskRecord:

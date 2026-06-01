@@ -12,6 +12,7 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.tasks import (  # noqa: E402
     ProcessMonitorContext,
+    ProcessTaskStartContext,
     TaskCreateContext,
     TaskMutationContext,
     append_task_exception_output,
@@ -20,6 +21,7 @@ from services.tasks import (  # noqa: E402
     mark_task_finished,
     monitor_process_task,
     set_task_detected_runs,
+    start_process_task,
     update_task_metadata,
 )
 
@@ -113,6 +115,91 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertEqual(record.metadata, {})
         self.assertIs(tasks["task-1"], record)
+
+    def test_start_process_task_launches_registers_and_starts_monitor(self) -> None:
+        events: list[tuple] = []
+        process = object()
+        metadata = {"step_id": "calibration"}
+
+        def subprocess_env() -> dict[str, str]:
+            events.append(("env",))
+            return {"PYTHONUNBUFFERED": "1"}
+
+        def popen(command, **kwargs):
+            events.append(("popen", command, kwargs))
+            return process
+
+        def create_task(task_type, label, command, cwd, *, metadata=None):
+            events.append(("register", task_type, label, command, cwd, metadata))
+            return FakeRecord(id="task-42")
+
+        context = ProcessTaskStartContext(
+            popen=popen,
+            subprocess_env=subprocess_env,
+            create_registered_task=create_task,
+            snapshot_run_paths=lambda: events.append(("snapshot",)) or {"runs/old"},
+            start_monitor_thread=lambda task_id, process_arg, previous_runs: events.append(
+                ("monitor", task_id, process_arg, previous_runs)
+            ),
+            stdout_pipe="PIPE",
+            stderr_stdout="STDOUT",
+        )
+
+        record = start_process_task(
+            "calibration",
+            "Calibration",
+            ["python", "runner.py"],
+            Path("project-root"),
+            context,
+            metadata=metadata,
+        )
+
+        self.assertEqual(record.id, "task-42")
+        self.assertEqual(events[0], ("env",))
+        self.assertEqual(events[1][0], "popen")
+        self.assertEqual(events[1][1], ["python", "runner.py"])
+        self.assertEqual(
+            events[1][2],
+            {
+                "cwd": "project-root",
+                "stdout": "PIPE",
+                "stderr": "STDOUT",
+                "bufsize": 0,
+                "env": {"PYTHONUNBUFFERED": "1"},
+            },
+        )
+        self.assertEqual(
+            events[2],
+            ("register", "calibration", "Calibration", ["python", "runner.py"], Path("project-root"), metadata),
+        )
+        self.assertEqual(events[3], ("snapshot",))
+        self.assertEqual(events[4], ("monitor", "task-42", process, {"runs/old"}))
+
+    def test_start_process_task_propagates_popen_failure_without_registration(self) -> None:
+        events: list[tuple] = []
+
+        def subprocess_env() -> dict[str, str]:
+            events.append(("env",))
+            return {}
+
+        def popen(command, **kwargs):
+            events.append(("popen", command, kwargs))
+            raise RuntimeError("launch failed")
+
+        context = ProcessTaskStartContext(
+            popen=popen,
+            subprocess_env=subprocess_env,
+            create_registered_task=lambda *args, **kwargs: events.append(("register", args, kwargs)),
+            snapshot_run_paths=lambda: events.append(("snapshot",)) or set(),
+            start_monitor_thread=lambda *args: events.append(("monitor", args)),
+            stdout_pipe="PIPE",
+            stderr_stdout="STDOUT",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "launch failed"):
+            start_process_task("sync", "Sync", ["sync"], Path("project-root"), context)
+
+        self.assertEqual([event[0] for event in events], ["env", "popen"])
 
     def test_task_mutation_helpers_update_task_state(self) -> None:
         task = FakeTask()
