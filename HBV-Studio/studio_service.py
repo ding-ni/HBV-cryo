@@ -64,6 +64,9 @@ from services.filesystem import (
     open_path_in_explorer as build_open_path_in_explorer,
     safe_iterdir as build_safe_iterdir,
 )
+from services.forecast_input import ForecastInputCheckContext
+from services.forecast_input import ensure_forecast_input_ready as build_ensure_forecast_input_ready
+from services.forecast_input import forecast_input_check as build_forecast_input_check
 from services.forecast_restart import ForecastRestartStartContext
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forward_simulation import ForwardSimulationStartContext
@@ -8968,129 +8971,28 @@ def _forecast_station_precip_check(
         }
 
 
+def _forecast_input_check_context() -> ForecastInputCheckContext:
+    return ForecastInputCheckContext(
+        resolve_path=resolve_any_path,
+        read_json_file=read_json_file,
+        parameter_check_context=_forecast_parameter_check_context,
+        normalize_time_step_hours=normalize_time_step_hours,
+        forecast_source_state_time=_forecast_source_state_time,
+        format_time_for_check=_format_time_for_check,
+        forecast_expected_index=_forecast_expected_index,
+        forecast_input_dir_summary=_forecast_input_dir_summary,
+        forecast_output_preview=_forecast_output_preview,
+        forecast_parameter_detail_text=_forecast_parameter_detail_text,
+        forecast_station_precip_check=_forecast_station_precip_check,
+    )
+
+
 def forecast_input_check(payload: dict[str, Any]) -> dict[str, Any]:
-    source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
-    if not source_run_raw:
-        return {
-            "status": "fail",
-            "headline": "请先选择预报源结果。",
-            "errors": ["请先选择预报源结果。"],
-            "warnings": [],
-            "items": [],
-            "variables": [],
-        }
-    source_run = resolve_any_path(source_run_raw, must_exist=True)
-    metadata = read_json_file(source_run / "metadata.json")
-    initial_state = dict(metadata.get("initial_state", {}) or {})
-    time_config = dict(metadata.get("time_config", {}) or {})
-    params = dict(metadata.get("optimized_params", {}) or {})
-    parameter_context = _forecast_parameter_check_context(payload, source_run, metadata)
-    step_hours = normalize_time_step_hours(time_config.get("time_step_hours", payload.get("time_step_hours", 24.0)))
-    source_state_time = _forecast_source_state_time(source_run, metadata)
-    errors: list[str] = []
-    warnings: list[str] = []
-    if not params:
-        errors.append("源结果缺少率定参数，不能作为连续状态预报起点。")
-    snapshot_file = str(initial_state.get("state_snapshot_file", "") or "").strip() or "state_snapshot.npz"
-    snapshot_path = source_run / snapshot_file
-    state_available = bool(snapshot_path.exists() or initial_state.get("state_snapshot_available"))
-    if not state_available:
-        errors.append("源结果缺少可用于起报的保存状态。")
-    expected_start = ""
-    if source_state_time:
-        expected_start = _format_time_for_check(pd.to_datetime(source_state_time) + pd.Timedelta(hours=step_hours), step_hours)
-    else:
-        errors.append("源结果未记录状态时刻，不能推断预报起报时间。")
-    requested_start_raw = str(payload.get("forecast_start", "") or "").strip()
-    forecast_start = requested_start_raw or expected_start
-    forecast_end = str(payload.get("forecast_end", "") or "").strip()
-    expected_index: pd.DatetimeIndex | None = None
-    if not forecast_end:
-        warnings.append("尚未填写预报结束时间。")
-    if forecast_start and forecast_end:
-        try:
-            expected_index = _forecast_expected_index(forecast_start, forecast_end, step_hours)
-            if expected_index.empty:
-                errors.append("预报结束时间不能早于起报时间。")
-            elif requested_start_raw and expected_start and pd.Timestamp(pd.to_datetime(forecast_start)) != pd.Timestamp(pd.to_datetime(expected_start)):
-                errors.append(f"起报时间必须紧接源结果保存状态，当前应从 {expected_start} 起报。")
-        except Exception as exc:
-            errors.append(f"预报时段无法解析：{exc}")
-    variables = [
-        _forecast_input_dir_summary(key="prec", label="降水", raw_path=str(payload.get("forecast_prec_dir", payload.get("prec_dir", "")) or ""), step_hours=step_hours, expected_index=expected_index),
-        _forecast_input_dir_summary(key="temp", label="气温", raw_path=str(payload.get("forecast_temp_dir", payload.get("temp_dir", "")) or ""), step_hours=step_hours, expected_index=expected_index),
-        _forecast_input_dir_summary(key="evap", label="潜在蒸散发", raw_path=str(payload.get("forecast_evap_dir", payload.get("evap_dir", "")) or ""), step_hours=step_hours, expected_index=expected_index),
-    ]
-    for item in variables:
-        errors.extend(str(msg) for msg in list(item.get("errors", []) or []))
-        warnings.extend(str(msg) for msg in list(item.get("warnings", []) or []))
-    expected_steps = int(len(expected_index)) if expected_index is not None else 0
-    status = "fail" if errors else "warn" if warnings or expected_steps <= 0 else "ok"
-    coverage_complete = not errors and expected_steps > 0
-    headline = (
-        f"预报气象覆盖完整：{forecast_start} 至 {forecast_end}，共 {expected_steps} 个时间步。"
-        if coverage_complete
-        else "预报气象输入仍需核对。"
-    )
-    output_preview = _forecast_output_preview(
-        payload,
-        source_run,
-        profile_hint=str(metadata.get("calibration_profile", "") or ""),
-    )
-    output_status = "ok" if expected_steps > 0 else "warn"
-    parameter_detail = _forecast_parameter_detail_text(parameter_context)
-    station_precip_check = _forecast_station_precip_check(
-        payload,
-        metadata,
-        forecast_start,
-        forecast_end,
-        step_hours,
-    )
-    return {
-        "status": status,
-        "headline": headline,
-        "errors": sorted(set(errors)),
-        "warnings": sorted(set(warnings)),
-        "source": {
-            "source_run": str(source_run.resolve(strict=False)),
-            "source_run_name": source_run.name,
-            "parameter_count": int(len(params)),
-            "state_available": state_available,
-            "source_state_time": _format_time_for_check(source_state_time, step_hours),
-            "expected_forecast_start": expected_start,
-            "parameter_context": parameter_context,
-            "source_parameter_summary": dict(metadata.get("source_parameter_summary") or {}),
-        },
-        "parameter_context": parameter_context,
-        "window": {
-            "forecast_start": forecast_start,
-            "forecast_end": forecast_end,
-            "time_step_hours": float(step_hours),
-            "expected_steps": expected_steps,
-        },
-        "output": output_preview,
-        "variables": variables,
-        "station_precip": station_precip_check,
-        "items": [
-            {"label": "源结果", "value": source_run.name, "status": "ok"},
-            {"label": "起报状态", "value": _format_time_for_check(source_state_time, step_hours) or "未记录", "status": "ok" if source_state_time and state_available else "fail"},
-            {"label": "建议起报", "value": expected_start or "未形成", "status": "ok" if expected_start else "fail"},
-            {"label": "预报时段", "value": f"{forecast_start} 至 {forecast_end}" if forecast_start and forecast_end else "未完整填写", "status": "ok" if expected_steps > 0 else "warn"},
-            {"label": "参数来源", "value": f"源结果参数（{len(params)} 项）" if params else "缺少参数", "detail": parameter_detail, "status": "ok" if params else "fail"},
-            {"label": "归档方式", "value": "运行时仅归档预报窗口内 P/T/PET 栅格", "status": "ok" if expected_steps > 0 else "warn"},
-            {"label": "结果输出", "value": output_preview["result_label"], "detail": output_preview["result_detail"], "status": output_status},
-            {"label": "输入清单", "value": output_preview["archive_label"], "detail": output_preview["archive_detail"], "status": output_status},
-        ],
-    }
+    return build_forecast_input_check(payload, _forecast_input_check_context())
 
 
 def ensure_forecast_input_ready(payload: dict[str, Any]) -> dict[str, Any]:
-    check = forecast_input_check(payload)
-    if str(check.get("status", "")).lower() == "fail":
-        issues = [str(item) for item in list(check.get("errors", []) or []) if str(item).strip()]
-        message = "；".join(issues[:3]) if issues else "预报气象输入检查未通过。"
-        raise ValueError(f"连续状态预报输入检查未通过：{message}")
-    return check
+    return build_ensure_forecast_input_ready(payload, _forecast_input_check_context())
 
 
 def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
