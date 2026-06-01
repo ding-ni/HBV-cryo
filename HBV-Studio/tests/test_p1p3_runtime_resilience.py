@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import threading
@@ -77,6 +78,7 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             "/api/obs-info",
             "/api/suggest/bbox",
             "/api/suggest/cfmax-threshold",
+            "/api/geo/dem",
             "/api/geo/overview",
             "/api/geo/basin",
             "/api/geo/elevation-zones",
@@ -204,6 +206,28 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(calls[0], ("probe", {"a": ["1"]}, None))
         self.assertEqual(calls[1], ("error", "未知接口。", 404))
         self.assertEqual(calls[2], ("error", "bad input", 400))
+
+    def test_geo_dem_handler_sends_png_with_geo_headers(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+        calls: list[tuple[bytes, str, dict[str, str]]] = []
+        handler.send_bytes = lambda body, content_type, status=200, headers=None: calls.append((body, content_type, headers or {})) or True
+        with mock.patch.object(
+            svc,
+            "workspace_dem_png",
+            return_value={
+                "body": b"\x89PNG\r\n\x1a\n",
+                "content_type": "image/png",
+                "bounds": {"west": 100.0, "south": 31.0, "east": 101.0, "north": 32.0},
+                "metrics": {"style": "gray", "preview_width": 10, "preview_height": 8},
+            },
+        ) as build_dem:
+            handler._api_get_geo_dem({"ws": ["workspace.json"], "style": ["gray"]})
+
+        build_dem.assert_called_once_with("workspace.json", style="gray")
+        self.assertEqual(calls[0][0], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(calls[0][1], "image/png")
+        self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Bounds"])["east"], 101.0)
+        self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Metrics"])["style"], "gray")
 
     def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

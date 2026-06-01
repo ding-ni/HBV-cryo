@@ -58,6 +58,7 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext
 from services.geo_overview import workspace_basin_geojson as build_workspace_basin_geojson
+from services.geo_overview import workspace_dem_png as build_workspace_dem_png
 from services.geo_overview import workspace_elevation_zones_geojson as build_workspace_elevation_zones_geojson
 from services.geo_overview import workspace_glacier_geojson as build_workspace_glacier_geojson
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
@@ -2560,6 +2561,10 @@ def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
 
 def workspace_basin_geojson(config_path_raw: str) -> dict[str, Any]:
     return build_workspace_basin_geojson(config_path_raw, _geo_overview_context())
+
+
+def workspace_dem_png(config_path_raw: str, style: str = "hillshade") -> dict[str, Any]:
+    return build_workspace_dem_png(config_path_raw, _geo_overview_context(), style=style)
 
 
 def workspace_glacier_geojson(config_path_raw: str) -> dict[str, Any]:
@@ -10150,6 +10155,26 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             return False
 
+    def send_bytes(
+        self,
+        body: bytes,
+        content_type: str,
+        status: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> bool:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except self.CONNECTION_GONE_ERRORS:
+            self.close_connection = True
+            return False
+
     def send_error_json(self, message: str, status: int = 400) -> bool:
         return self.send_json({"ok": False, "error": message}, status=status)
 
@@ -10240,6 +10265,19 @@ class StudioHandler(BaseHTTPRequestHandler):
         shp = unquote(query.get("shp_path", [""])[0])
         dem = unquote(query.get("dem_path", [""])[0]) or str(BUILTIN_DEM.resolve())
         self.send_json({"ok": True, "data": suggest_cfmax_threshold(shp, dem)})
+
+    def _api_get_geo_dem(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        style = unquote(query.get("style", ["hillshade"])[0] or "hillshade")
+        image = workspace_dem_png(raw_path, style=style)
+        self.send_bytes(
+            image["body"],
+            str(image.get("content_type") or "image/png"),
+            headers={
+                "X-HBV-Geo-Bounds": json_dumps_safe(image.get("bounds") or {}),
+                "X-HBV-Geo-Metrics": json_dumps_safe(image.get("metrics") or {}),
+            },
+        )
 
     def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])

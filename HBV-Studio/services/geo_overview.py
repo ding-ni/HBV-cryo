@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import math
+import struct
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -107,6 +109,78 @@ def _geo_rect_ring(bounds: dict[str, float] | None) -> list[dict[str, Any]]:
             ]
         }
     ]
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def _encode_rgba_png(image: Any) -> bytes:
+    height, width, channels = image.shape
+    if channels != 4:
+        raise ValueError("PNG image must be RGBA")
+    rows = b"".join(b"\x00" + image[row].tobytes() for row in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(rows, level=6))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _normalise_unit(values: Any, valid: Any) -> Any:
+    import numpy as np
+
+    if not np.any(valid):
+        return np.zeros_like(values, dtype="float64")
+    finite = values[valid]
+    lo = float(np.nanpercentile(finite, 2))
+    hi = float(np.nanpercentile(finite, 98))
+    if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
+        lo = float(np.nanmin(finite))
+        hi = float(np.nanmax(finite))
+    if not math.isfinite(lo) or not math.isfinite(hi) or hi <= lo:
+        return np.zeros_like(values, dtype="float64")
+    return np.clip((values - lo) / (hi - lo), 0.0, 1.0)
+
+
+def _dem_array_to_png(values: Any, style: str = "hillshade") -> bytes:
+    import numpy as np
+
+    arr = np.asarray(values, dtype="float64")
+    valid = np.isfinite(arr)
+    if not np.any(valid):
+        rgba = np.zeros((max(1, arr.shape[0]), max(1, arr.shape[1]), 4), dtype=np.uint8)
+        return _encode_rgba_png(rgba)
+
+    fill_value = float(np.nanmedian(arr[valid]))
+    filled = np.where(valid, arr, fill_value)
+    elevation = _normalise_unit(filled, valid)
+
+    if style == "gray":
+        tone = elevation
+    elif style == "hillshade":
+        grad_y, grad_x = np.gradient(filled)
+        slope = np.pi / 2.0 - np.arctan(np.hypot(grad_x, grad_y))
+        aspect = np.arctan2(-grad_x, grad_y)
+        azimuth = np.deg2rad(315.0)
+        altitude = np.deg2rad(45.0)
+        shade = (
+            np.sin(altitude) * np.sin(slope)
+            + np.cos(altitude) * np.cos(slope) * np.cos(azimuth - aspect)
+        )
+        shade = np.clip((shade + 1.0) / 2.0, 0.0, 1.0)
+        tone = np.clip(0.68 * shade + 0.32 * elevation, 0.0, 1.0)
+    else:
+        raise ValueError("不支持的 DEM 样式。")
+
+    rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+    rgba[..., 0] = np.clip(54 + tone * 142, 0, 255).astype(np.uint8)
+    rgba[..., 1] = np.clip(73 + tone * 145, 0, 255).astype(np.uint8)
+    rgba[..., 2] = np.clip(90 + tone * 150, 0, 255).astype(np.uint8)
+    rgba[..., 3] = np.where(valid, 255, 0).astype(np.uint8)
+    return _encode_rgba_png(rgba)
 
 
 def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -288,6 +362,12 @@ def _raster_geo_layer(layer_id: str, label: str, path: Path | None, context: Geo
             }
     except Exception as exc:
         return _geo_empty_layer(layer_id, label, "raster", path, "error", f"读取失败：{exc}", context)
+
+
+def _workspace_dem_file(config: dict[str, Any], gis_dir: Path, context: GeoOverviewContext) -> Path | None:
+    configured_dem_path = context.resolve_config_related_path(config, config.get("DEM_tif"))
+    workspace_dem = context.workspace_dem_path(gis_dir, context.configured_dem_kind(config))
+    return workspace_dem if workspace_dem.exists() else configured_dem_path
 
 
 def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[str, Any]:
@@ -485,9 +565,7 @@ def _empty_geojson_layer(layer_id: str, label: str, status: str = "missing", mes
 def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
     cfg_path, config, raw_config, profile, paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
     basin_path = context.resolve_config_related_path(config, config.get("流域边界_shp"))
-    configured_dem_path = context.resolve_config_related_path(config, config.get("DEM_tif"))
-    workspace_dem = context.workspace_dem_path(gis_dir, context.configured_dem_kind(config))
-    dem_path = workspace_dem if workspace_dem.exists() else configured_dem_path
+    dem_path = _workspace_dem_file(config, gis_dir, context)
 
     zone_candidates = [
         gis_dir / "elevation_zone_low.tif",
@@ -586,3 +664,59 @@ def workspace_elevation_zones_geojson(config_path_raw: str, context: GeoOverview
     if not layers:
         return _empty_geojson_layer("elevation_zones", "高程分区", message="未生成高程分区")
     return _polygon_layers_geojson("elevation_zones", "高程分区", layers)
+
+
+def workspace_dem_png(config_path_raw: str, context: GeoOverviewContext, style: str = "hillshade") -> dict[str, Any]:
+    import numpy as np
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    _cfg_path, config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    dem_path = _workspace_dem_file(config, gis_dir, context)
+    if dem_path is None:
+        raise FileNotFoundError("DEM 未配置。")
+    if not dem_path.exists():
+        raise FileNotFoundError(f"DEM 文件不存在：{dem_path}")
+    clean_style = str(style or "hillshade").strip().lower()
+    if clean_style not in {"hillshade", "gray"}:
+        raise ValueError("不支持的 DEM 样式。")
+
+    try:
+        with rasterio.open(dem_path) as src:
+            if src.crs:
+                bounds_values = transform_bounds(src.crs, "EPSG:4326", *src.bounds, densify_pts=21)
+                crs_text = str(src.crs)
+            else:
+                bounds_values = src.bounds
+                crs_text = ""
+            bounds = _geo_bounds_dict(bounds_values)
+            if not bounds:
+                raise ValueError("DEM 范围无效。")
+            max_dim = 768
+            scale = min(1.0, max_dim / max(1, src.width), max_dim / max(1, src.height))
+            out_width = max(2, int(round(src.width * scale)))
+            out_height = max(2, int(round(src.height * scale)))
+            arr = src.read(1, out_shape=(out_height, out_width), masked=True)
+            values = np.asarray(arr.filled(np.nan) if hasattr(arr, "filled") else arr, dtype="float64")
+            body = _dem_array_to_png(values, style=clean_style)
+            return {
+                "content_type": "image/png",
+                "body": body,
+                "bounds": bounds,
+                "path": str(dem_path.resolve(strict=False)),
+                "display_path": context.to_display_path(dem_path.resolve(strict=False)),
+                "metrics": {
+                    "width": int(src.width),
+                    "height": int(src.height),
+                    "preview_width": int(out_width),
+                    "preview_height": int(out_height),
+                    "crs": crs_text,
+                    "style": clean_style,
+                },
+            }
+    except FileNotFoundError:
+        raise
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"DEM 晕渲失败：{exc}") from exc
