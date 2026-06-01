@@ -35,6 +35,8 @@ from services.runs import (  # noqa: E402
     first_existing_path,
     has_parameter_bounds,
     has_custom_result_title,
+    apply_effective_objective_mode,
+    infer_effective_objective_mode,
     is_studio_editable_metadata,
     iter_run_parent_dirs,
     load_run_series_map,
@@ -48,6 +50,7 @@ from services.runs import (  # noqa: E402
     pick_latest_run_path,
     read_sampled_csv_rows,
     read_run_metrics_snapshot,
+    recorded_objective_family,
     restore_forward_boundary_series,
     restore_forward_observation_state,
     restore_forward_observed_series,
@@ -63,6 +66,8 @@ from services.runs import (  # noqa: E402
     source_run_meta,
     synthesized_objective_profile,
     synthesized_parameter_profile,
+    sync_objective_profile_metadata,
+    sync_source_run_reference,
     workspace_name_for_summary,
 )
 
@@ -465,6 +470,81 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(profile["summary"], "\u5386\u53f2\u8bf4\u660e")
         self.assertEqual(profile["weights"], {"nse": 0.7, "pbias": 0.3})
         self.assertEqual(profile["notes"], ["\u5df2\u8bb0\u5f55\u5907\u6ce8"])
+
+    def test_recorded_objective_family_uses_existing_metadata_priority(self) -> None:
+        self.assertEqual(
+            recorded_objective_family(
+                {
+                    "objective_family": "flood_event_calibration_v1",
+                    "effective_objective_mode": profile_runner.OBJECTIVE_MODE_MULTI,
+                    "objective_profile": {"type": profile_runner.OBJECTIVE_MODE_SINGLE},
+                },
+                {"objective_mode": "ignored"},
+            ),
+            "flood_event_calibration_v1",
+        )
+        self.assertEqual(
+            recorded_objective_family(
+                {"objective_profile": {"type": profile_runner.OBJECTIVE_MODE_SINGLE}},
+                {},
+            ),
+            profile_runner.OBJECTIVE_MODE_SINGLE,
+        )
+
+    def test_sync_objective_profile_metadata_copies_contract_fields(self) -> None:
+        metadata = {
+            "objective": {"label": "\u539f\u6807\u7b7e"},
+            "objective_profile": {
+                "type": profile_runner.OBJECTIVE_MODE_MULTI,
+                "summary": "\u7efc\u5408\u8bf4\u660e",
+                "formula": "NSE + PBIAS",
+                "weights": {"nse": 0.8},
+                "diagnostic_only_constraints": ["winter_ice"],
+            },
+        }
+
+        sync_objective_profile_metadata(metadata)
+
+        self.assertEqual(metadata["objective"]["label"], "\u539f\u6807\u7b7e")
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["objective"]["summary"], "\u7efc\u5408\u8bf4\u660e")
+        self.assertEqual(metadata["objective"]["formula"], "NSE + PBIAS")
+        self.assertEqual(metadata["objective"]["weights"], {"nse": 0.8})
+        self.assertEqual(metadata["objective"]["diagnostic_only_constraints"], ["winter_ice"])
+
+    def test_effective_objective_mode_helpers_normalize_and_apply_to_metadata(self) -> None:
+        metadata = {
+            "\u76ee\u6807\u51fd\u6570\u6a21\u5f0f": "nse",
+            "objective_profile": {"type": ""},
+            "objective": {},
+        }
+        optimization = {}
+
+        mode = infer_effective_objective_mode(metadata, optimization)
+        apply_effective_objective_mode(metadata, optimization, mode)
+
+        self.assertEqual(mode, profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(optimization["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+
+    def test_sync_source_run_reference_updates_all_present_metadata_sections(self) -> None:
+        replay_context = {}
+        manual_result = {"source_run_path": "manual/raw", "source_run_name": "manual-run"}
+        optimization = {"source_run_name": "opt-run"}
+
+        source_run_path = sync_source_run_reference(
+            replay_context,
+            manual_result,
+            optimization,
+            lambda raw, name: f"C:/resolved/{name or Path(str(raw)).name}",
+        )
+
+        self.assertEqual(source_run_path, "C:/resolved/manual-run")
+        self.assertEqual(replay_context["source_run_path"], "C:/resolved/manual-run")
+        self.assertEqual(manual_result["source_run_path"], "C:/resolved/manual-run")
+        self.assertEqual(optimization["source_run_path"], "C:/resolved/manual-run")
 
     def test_is_studio_editable_metadata_requires_config_and_parameter_bounds(self) -> None:
         metadata = {"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}

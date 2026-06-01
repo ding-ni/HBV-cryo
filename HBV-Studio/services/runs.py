@@ -42,6 +42,7 @@ DEFAULT_RUN_EXPORT_FIELDS = ("q_sim", "q_obs", "q_rain", "q_snow", "q_ice")
 OBJECT_REGRESSION = "regression_validation"
 OBJECT_INTERBASIN = "interbasin_with_boundary"
 OBJECT_FULL_UPSTREAM = "full_upstream_basin"
+OBJECTIVE_META_FIELDS = ("type", "summary", "formula", "weights", "diagnostic_only_constraints")
 
 
 @dataclass(frozen=True)
@@ -796,6 +797,78 @@ def synthesized_objective_profile(profile: str, objective_mode: str, current: di
             base[key] = value
     base["type"] = objective_mode
     return base
+
+
+def recorded_objective_family(metadata: dict[str, Any], optimization: dict[str, Any] | None = None) -> str:
+    optimization_payload = dict(optimization if optimization is not None else metadata.get("optimization", {}) or {})
+    objective_profile = metadata.get("objective_profile") if isinstance(metadata.get("objective_profile"), dict) else {}
+    objective_meta = metadata.get("objective") if isinstance(metadata.get("objective"), dict) else {}
+    return str(
+        metadata.get("objective_family")
+        or metadata.get("effective_objective_mode")
+        or optimization_payload.get("effective_objective_mode")
+        or optimization_payload.get("objective_mode")
+        or objective_profile.get("type")
+        or objective_meta.get("type")
+        or ""
+    ).strip().lower()
+
+
+def sync_objective_profile_metadata(metadata: dict[str, Any]) -> None:
+    if not isinstance(metadata.get("objective_profile"), dict):
+        return
+    objective_profile = metadata["objective_profile"]
+    objective_meta = dict(metadata.get("objective", {}) or {})
+    for key in OBJECTIVE_META_FIELDS:
+        if key in objective_profile:
+            objective_meta[key] = objective_profile[key]
+    if objective_meta:
+        metadata["objective"] = objective_meta
+
+
+def infer_effective_objective_mode(metadata: dict[str, Any], optimization: dict[str, Any]) -> str:
+    objective_profile = metadata.get("objective_profile") if isinstance(metadata.get("objective_profile"), dict) else {}
+    objective_meta = metadata.get("objective") if isinstance(metadata.get("objective"), dict) else {}
+    return profile_runner.normalize_objective_mode(
+        optimization.get("effective_objective_mode")
+        or objective_profile.get("type")
+        or objective_meta.get("type")
+        or optimization.get("objective_mode")
+        or metadata.get("\u76ee\u6807\u51fd\u6570\u6a21\u5f0f")
+        or ""
+    )
+
+
+def apply_effective_objective_mode(metadata: dict[str, Any], optimization: dict[str, Any], effective_objective_mode: str) -> None:
+    if not effective_objective_mode:
+        return
+    if isinstance(metadata.get("objective_profile"), dict):
+        metadata["objective_profile"]["type"] = effective_objective_mode
+    if isinstance(metadata.get("objective"), dict):
+        metadata["objective"]["type"] = effective_objective_mode
+    metadata["effective_objective_mode"] = effective_objective_mode
+    optimization["effective_objective_mode"] = effective_objective_mode
+
+
+def sync_source_run_reference(
+    replay_context: dict[str, Any],
+    manual_result: dict[str, Any],
+    optimization: dict[str, Any],
+    resolve_source_run_reference: Callable[[Any, Any], str],
+) -> str:
+    source_run_path = resolve_source_run_reference(
+        replay_context.get("source_run_path")
+        or manual_result.get("source_run_path")
+        or optimization.get("source_run_path"),
+        manual_result.get("source_run_name") or optimization.get("source_run_name"),
+    ).strip()
+    if source_run_path:
+        replay_context["source_run_path"] = source_run_path
+        if manual_result:
+            manual_result["source_run_path"] = source_run_path
+        if optimization:
+            optimization["source_run_path"] = source_run_path
+    return source_run_path
 
 
 def workspace_name_for_summary(

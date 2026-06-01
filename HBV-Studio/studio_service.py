@@ -111,6 +111,7 @@ from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscov
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
+from services.runs import apply_effective_objective_mode as build_apply_effective_objective_mode
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
 from services.runs import delete_run as build_delete_run
@@ -122,6 +123,7 @@ from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import infer_selected_result_stage as build_infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
+from services.runs import infer_effective_objective_mode as build_infer_effective_objective_mode
 from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
@@ -138,6 +140,7 @@ from services.runs import optimization_stage_has_execution as build_optimization
 from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
+from services.runs import recorded_objective_family as build_recorded_objective_family
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
@@ -152,6 +155,8 @@ from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import synthesized_objective_profile as build_synthesized_objective_profile
 from services.runs import synthesized_parameter_profile as build_synthesized_parameter_profile
+from services.runs import sync_objective_profile_metadata as build_sync_objective_profile_metadata
+from services.runs import sync_source_run_reference as build_sync_source_run_reference
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2722,15 +2727,7 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
     optimization = dict(normalized.get("optimization", {}) or {})
     manual_result = dict(normalized.get("manual_result", {}) or {})
     replay_context = dict(normalized.get("replay_context", {}) or {})
-    recorded_objective_family = str(
-        normalized.get("objective_family")
-        or normalized.get("effective_objective_mode")
-        or optimization.get("effective_objective_mode")
-        or optimization.get("objective_mode")
-        or (normalized.get("objective_profile", {}) if isinstance(normalized.get("objective_profile"), dict) else {}).get("type")
-        or (normalized.get("objective", {}) if isinstance(normalized.get("objective"), dict) else {}).get("type")
-        or ""
-    ).strip().lower()
+    recorded_objective_family = build_recorded_objective_family(normalized, optimization)
     if recorded_objective_family:
         normalized["recorded_objective_family"] = recorded_objective_family
     cache = {
@@ -2841,12 +2838,7 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
                 normalized["parameter_profile"] = _synthesized_parameter_profile(profile, objective_mode)
             if not isinstance(normalized.get("objective_profile"), dict):
                 normalized["objective_profile"] = _synthesized_objective_profile(profile, objective_mode, normalized.get("objective"))
-            objective_meta = dict(normalized.get("objective", {}) or {})
-            for key in ("type", "summary", "formula", "weights", "diagnostic_only_constraints"):
-                if key in normalized["objective_profile"]:
-                    objective_meta[key] = normalized["objective_profile"][key]
-            if objective_meta:
-                normalized["objective"] = objective_meta
+            build_sync_objective_profile_metadata(normalized)
 
             boundary_cfg = dict(config.get("边界条件", {}) or {})
             boundary_path = _resolve_config_related_path(config, boundary_cfg.get("上游边界入流_csv"))
@@ -2889,25 +2881,10 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         except Exception:
             pass
 
-    if isinstance(normalized.get("objective_profile"), dict):
-        objective_meta = dict(normalized.get("objective", {}) or {})
-        for key in ("type", "summary", "formula", "weights", "diagnostic_only_constraints"):
-            if key in normalized["objective_profile"]:
-                objective_meta[key] = normalized["objective_profile"][key]
-        if objective_meta:
-            normalized["objective"] = objective_meta
+    build_sync_objective_profile_metadata(normalized)
 
     if not effective_objective_mode:
-        objective_profile = normalized.get("objective_profile") if isinstance(normalized.get("objective_profile"), dict) else {}
-        objective_meta = normalized.get("objective") if isinstance(normalized.get("objective"), dict) else {}
-        effective_objective_mode = profile_runner.normalize_objective_mode(
-            optimization.get("effective_objective_mode")
-            or objective_profile.get("type")
-            or objective_meta.get("type")
-            or optimization.get("objective_mode")
-            or normalized.get("目标函数模式")
-            or ""
-        )
+        effective_objective_mode = build_infer_effective_objective_mode(normalized, optimization)
     if resolved_object_type:
         normalized["project_object_type"] = resolved_object_type
 
@@ -2915,29 +2892,17 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         normalized["data_sources"] = data_sources
     if boundary_condition:
         normalized["boundary_condition"] = boundary_condition
-    source_run_path = _resolve_source_run_reference(
-        replay_context.get("source_run_path")
-        or manual_result.get("source_run_path")
-        or optimization.get("source_run_path"),
-        manual_result.get("source_run_name") or optimization.get("source_run_name"),
-    ).strip()
-    if source_run_path:
-        replay_context["source_run_path"] = source_run_path
-        if manual_result:
-            manual_result["source_run_path"] = source_run_path
-        if optimization:
-            optimization["source_run_path"] = source_run_path
+    source_run_path = build_sync_source_run_reference(
+        replay_context,
+        manual_result,
+        optimization,
+        _resolve_source_run_reference,
+    )
     if replay_context:
         normalized["replay_context"] = replay_context
     if manual_result:
         normalized["manual_result"] = manual_result
-    if effective_objective_mode:
-        if isinstance(normalized.get("objective_profile"), dict):
-            normalized["objective_profile"]["type"] = effective_objective_mode
-        if isinstance(normalized.get("objective"), dict):
-            normalized["objective"]["type"] = effective_objective_mode
-        normalized["effective_objective_mode"] = effective_objective_mode
-        optimization["effective_objective_mode"] = effective_objective_mode
+    build_apply_effective_objective_mode(normalized, optimization, effective_objective_mode)
     if optimization:
         optimization = _normalize_optimization_metadata(
             optimization,
