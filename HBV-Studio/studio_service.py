@@ -125,6 +125,8 @@ from services.system_status import (
     health_payload as build_health_payload,
     source_files_latest_mtime as build_source_files_latest_mtime,
 )
+from services.template_sync import TuotuoheSyncStartContext
+from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
     TaskQueryContext,
     find_running_task as build_find_running_task,
@@ -6465,25 +6467,20 @@ def start_calibration(payload: dict[str, Any]) -> TaskRecord:
     return start_process("calibration", plan.label, plan.command, PROJECT_ROOT, metadata=plan.metadata)
 
 
+def _tuotuohe_sync_start_context() -> TuotuoheSyncStartContext:
+    return TuotuoheSyncStartContext(
+        list_drives=list_drives,
+        env_get=lambda key, default="": str(os.environ.get(key, default)),
+        build_python_script_command=build_python_script_command,
+        tuotuohe_sync_script=TUOTUOHE_SYNC_SCRIPT,
+        project_runtime_dir=PROJECT_RUNTIME_DIR,
+        gui_root=GUI_ROOT,
+    )
+
+
 def start_tuotuohe_sync(payload: dict[str, Any]) -> TaskRecord:
-    source_root = str(payload.get("source_root", "")).strip()
-    if not source_root:
-        env_source = str(os.environ.get("HBV_TUOTUOHE_SOURCE_ROOT", "")).strip()
-        if env_source and Path(env_source).exists():
-            source_root = env_source
-        else:
-            for drive in list_drives():
-                candidate = Path(drive) / "Hapi" / "data"
-                if candidate.exists():
-                    source_root = str(candidate.resolve(strict=False))
-                    break
-    if not source_root:
-        raise ValueError("未找到历史数据源目录。请将旧目录放在任一盘符的 Hapi\\data 下，或显式传入 source_root。")
-    target_root = str(payload.get("target_root", PROJECT_RUNTIME_DIR / "沱沱河" / "数据"))
-    command = build_python_script_command(TUOTUOHE_SYNC_SCRIPT, "--source", source_root, "--target", target_root)
-    if bool(payload.get("include_raw", False)):
-        command.append("--include-raw")
-    return start_process("sync", "同步沱沱河模板数据", command, GUI_ROOT)
+    plan = build_tuotuohe_sync_start_plan(payload, _tuotuohe_sync_start_context())
+    return start_process("sync", plan.label, plan.command, plan.cwd)
 
 
 def list_drives() -> list[str]:
