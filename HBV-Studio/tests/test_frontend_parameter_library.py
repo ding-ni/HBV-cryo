@@ -174,6 +174,45 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_preset_applied_params_merges_and_marks_changes(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            if (typeof library.manualPresetAppliedParams !== "function") {
+              throw new Error("manualPresetAppliedParams was not exported");
+            }
+            const result = library.manualPresetAppliedParams(
+              { TT: 0.1, FC: 110, K0: 0.3 },
+              { TT: 0.1, FC: 120, K0: 0.3 },
+              { params: { TT: 0.1, FC: 130 } },
+            );
+
+            if (result.params.TT !== 0.1 || result.params.FC !== 130 || result.params.K0 !== 0.3) {
+              throw new Error("merged params are wrong");
+            }
+            const byName = Object.fromEntries(result.applied.map(item => [item.name, item]));
+            if (byName.TT.changed) throw new Error("unchanged parameter should not be marked changed");
+            if (!byName.FC.changed) throw new Error("changed parameter should be marked changed");
+            if ("K0" in byName) throw new Error("unapplied existing params should not be listed as applied");
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -135,6 +135,21 @@
     };
   }
 
+  function manualPresetAppliedParams(currentParams = {}, originalParams = {}, preset = {}) {
+    const params = preset && typeof preset.params === "object" ? preset.params : {};
+    const baseParams = currentParams && typeof currentParams === "object" ? currentParams : {};
+    const originals = originalParams && typeof originalParams === "object" ? originalParams : {};
+    const applied = Object.entries(params).map(([name, value]) => ({
+      name,
+      value,
+      changed: Math.abs(Number(value) - Number(originals[name])) > 1e-8,
+    }));
+    return {
+      params: { ...baseParams, ...params },
+      applied,
+    };
+  }
+
   function manualContextWarning(preset, current = {}, helpers = {}) {
     if (!preset) return "";
     const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
@@ -305,6 +320,7 @@
     findPresetById,
     manualPresetSavePayload,
     manualPresetDeletePayload,
+    manualPresetAppliedParams,
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,

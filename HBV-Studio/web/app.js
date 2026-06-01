@@ -62,6 +62,7 @@ const frontendModuleContracts = [
       "findPresetById",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
+      "manualPresetAppliedParams",
       "manualContextWarning",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -5352,15 +5353,15 @@ function selectedManualPreset() {
 
 function applyManualPresetToCurrentRun(preset) {
   if (!preset || !state._runParams || !state._runOrigParams) return;
-  const params = preset.params || {};
-  state._runParams = { ...state._runParams, ...params };
-  Object.entries(params).forEach(([name, value]) => {
+  const applied = window.HBVStudioParameterLibrary.manualPresetAppliedParams(state._runParams, state._runOrigParams, preset);
+  state._runParams = applied.params;
+  applied.applied.forEach(({ name, value, changed }) => {
     const slider = $(`[data-param-slider="${name}"]`);
     const input = $(`[data-param-input="${name}"]`);
     if (slider) slider.value = value;
     if (input) input.value = value;
     const item = slider?.closest(".param-slider-item");
-    if (item) item.classList.toggle("changed", Math.abs(Number(value) - Number(state._runOrigParams[name])) > 1e-8);
+    if (item) item.classList.toggle("changed", changed);
   });
   const hint = $("#resim-hint");
   hint.style.display = "";
