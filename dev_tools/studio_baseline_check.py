@@ -43,6 +43,7 @@ JAVASCRIPT_FILES = (
     GUI_ROOT / "web" / "js" / "geoPreview.js",
     GUI_ROOT / "web" / "js" / "parameterLibrary.js",
     GUI_ROOT / "web" / "js" / "stationPrecip.js",
+    GUI_ROOT / "web" / "js" / "workspaceLayout.js",
 )
 
 
