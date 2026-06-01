@@ -14,6 +14,7 @@ from services.runs import (  # noqa: E402
     default_run_export_fields,
     display_run_title,
     has_custom_result_title,
+    load_run_series_map,
     normalize_result_title,
     read_sampled_csv_rows,
     run_parameter_context,
@@ -230,6 +231,28 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(sampled[0]["date"], "2026-06-01")
         self.assertEqual(sampled[-1]["date"], "2026-06-11")
         self.assertLess(len(sampled), total_rows)
+
+    def test_load_run_series_map_reads_requested_field_by_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_path = Path(temp_dir)
+            csv_path = run_path / "simulation.csv"
+            csv_path.write_text(
+                "\n".join(
+                    [
+                        "date,q_obs,q_boundary_inflow",
+                        "2026-06-01,12.5,3.1",
+                        ",99,8",
+                        "2026-06-02,bad,4.2",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            observed = load_run_series_map(run_path, "q_obs")
+            missing = load_run_series_map(run_path / "missing", "q_obs")
+
+        self.assertEqual(observed, {"2026-06-01": 12.5, "2026-06-02": None})
+        self.assertEqual(missing, {})
 
 
 if __name__ == "__main__":

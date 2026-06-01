@@ -81,6 +81,7 @@ from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
+from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import rename_run as build_rename_run
 from services.runs import run_parameter_context as build_run_parameter_context
@@ -6063,21 +6064,6 @@ def _run_detail_context() -> RunDetailContext:
     )
 
 
-def _load_run_series_map(run_path: Path, field: str) -> dict[str, float | None]:
-    simulation_path = run_path / "simulation.csv"
-    if not simulation_path.exists():
-        return {}
-    values: dict[str, float | None] = {}
-    with simulation_path.open("r", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            date_text = str(row.get("date", "")).strip()
-            if not date_text:
-                continue
-            values[date_text] = safe_float(row.get(field))
-    return values
-
-
 def _metadata_initial_state_override(metadata: dict[str, Any]) -> dict[str, float] | None:
     initial_state = dict(metadata.get("initial_state", {}) or {})
     raw_vector = initial_state.get("vector", None)
@@ -8242,8 +8228,8 @@ def _build_forward_payload_context(payload: dict[str, Any]) -> dict[str, Any]:
     if not metadata_path.exists():
         raise FileNotFoundError("结果目录缺少 metadata.json。")
     metadata, resolved_config = normalize_run_metadata(read_json_file(metadata_path), run_path=run_path)
-    source_obs_series = _load_run_series_map(run_path, "q_obs")
-    source_boundary_series = _load_run_series_map(run_path, "q_boundary_inflow")
+    source_obs_series = build_load_run_series_map(run_path, "q_obs")
+    source_boundary_series = build_load_run_series_map(run_path, "q_boundary_inflow")
     source_boundary_enabled = bool(
         metadata.get("optional_modules", {}).get("boundary_inflow", {}).get("enabled")
         or metadata.get("boundary_condition", {}).get("enabled")

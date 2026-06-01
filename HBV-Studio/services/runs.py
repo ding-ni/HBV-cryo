@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from services.run_hydrology import metadata_objective_family
+from services.run_hydrology import metadata_objective_family, safe_float
 
 
 RUN_KIND_LABELS = {
@@ -439,6 +439,21 @@ def read_sampled_csv_rows(path: Path, max_points: int = 900) -> tuple[list[dict[
     if last_row is not None and (not sampled or sampled[-1] != last_row):
         sampled.append(last_row)
     return sampled, total_rows
+
+
+def load_run_series_map(run_path: Path, field: str) -> dict[str, float | None]:
+    simulation_path = run_path / "simulation.csv"
+    if not simulation_path.exists():
+        return {}
+    values: dict[str, float | None] = {}
+    with simulation_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            date_text = str(row.get("date", "")).strip()
+            if not date_text:
+                continue
+            values[date_text] = safe_float(row.get(field))
+    return values
 
 
 def list_runs(context: RunListContext) -> list[dict[str, Any]]:
