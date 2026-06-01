@@ -120,6 +120,7 @@ from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
+from services.runs import infer_selected_result_stage as build_infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
 from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
@@ -127,8 +128,14 @@ from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import metadata_boundary_enabled as build_metadata_boundary_enabled
+from services.runs import normalize_optimization_metadata as build_normalize_optimization_metadata
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import normalize_metadata_object_type as build_normalize_metadata_object_type
+from services.runs import normalized_method_label as build_normalized_method_label
+from services.runs import normalized_selected_result_label as build_normalized_selected_result_label
+from services.runs import optimization_stage_counter as build_optimization_stage_counter
+from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
+from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
 from services.runs import rename_run as build_rename_run
@@ -2697,91 +2704,27 @@ def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, An
 
 
 def _optimization_stage_payload(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
+    return build_optimization_stage_payload(value)
 
 
 def _optimization_stage_counter(value: Any) -> int:
-    try:
-        return max(0, int(value or 0))
-    except Exception:
-        return 0
+    return build_optimization_stage_counter(value)
 
 
 def _optimization_stage_has_execution(stage: dict[str, Any]) -> bool:
-    if not stage:
-        return False
-    if bool(stage.get("executed")):
-        return True
-    for key in ("nfev", "nit", "progress_points", "valid_samples", "processed_samples"):
-        if _optimization_stage_counter(stage.get(key)) > 0:
-            return True
-    if any(key in stage for key in ("success", "valid", "message")):
-        return True
-    return stage.get("objective_value") is not None
+    return build_optimization_stage_has_execution(stage)
 
 
 def _infer_selected_result_stage(optimization: dict[str, Any], stage_stats: dict[str, dict[str, Any]]) -> str:
-    selected_stage = str(optimization.get("selected_result_stage", "") or "").strip().lower()
-    if selected_stage in {"mc", "global", "refine"}:
-        return selected_stage
-    for stage_name in ("refine", "global", "mc"):
-        if bool(stage_stats.get(stage_name, {}).get("selected")):
-            return stage_name
-    label = str(optimization.get("selected_result_label", "") or "").strip()
-    if "局部精修" in label:
-        return "refine"
-    if ("快速筛选" in label) or ("随机筛选" in label) or ("蒙特卡洛" in label):
-        return "mc"
-    if ("精细搜索" in label) or ("全局搜索" in label) or ("差分进化" in label):
-        return "global"
-    return ""
+    return build_infer_selected_result_stage(optimization, stage_stats)
 
 
 def _normalized_selected_result_label(optimization: dict[str, Any]) -> str:
-    selected_stage = str(optimization.get("selected_result_stage", "") or "").strip().lower()
-    if selected_stage == "global":
-        return "精细搜索结果（含末端精修）" if bool(optimization.get("polish")) else "精细搜索结果"
-    if selected_stage == "refine":
-        return "局部精修结果"
-    if selected_stage == "mc":
-        return "快速筛选结果"
-    return str(optimization.get("selected_result_label", "") or "").strip()
+    return build_normalized_selected_result_label(optimization)
 
 
 def _normalized_method_label(optimization: dict[str, Any]) -> str:
-    method_key = str(optimization.get("method", "") or "").strip().lower()
-    refine = _optimization_stage_payload(dict(optimization.get("stage_stats", {}) or {}).get("refine"))
-    refine_requested = bool(optimization.get("refine_requested") or optimization.get("refine_enabled") or refine.get("requested"))
-    refine_executed = bool(optimization.get("refine_executed") or refine.get("executed"))
-    refine_skipped = bool(str(refine.get("skipped_reason", "") or "").strip())
-    polish_enabled = bool(optimization.get("polish"))
-    if method_key == "manual_adjustment":
-        return "手调后重算"
-    if method_key == "manual_start":
-        return "手调起点"
-    if method_key == "de":
-        if refine_executed:
-            return "精细搜索 + 局部精修"
-        if refine_requested and refine_skipped:
-            return "精细搜索（局部精修已跳过）"
-        if refine_requested:
-            return "精细搜索（局部精修未产出有效结果）"
-        if polish_enabled:
-            return "精细搜索（含末端精修）"
-        return "精细搜索（差分进化）"
-    if method_key == "mc_screen_de":
-        if refine_executed:
-            return "快速筛选 + 精细搜索 + 局部精修"
-        if refine_requested and refine_skipped:
-            return "快速筛选 + 精细搜索（局部精修已跳过）"
-        if refine_requested:
-            return "快速筛选 + 精细搜索（局部精修未产出有效结果）"
-        if polish_enabled:
-            return "快速筛选 + 精细搜索（含末端精修）"
-        return "快速筛选 + 精细搜索"
-    if method_key == "mc_only":
-        return "仅快速筛选"
-    return str(optimization.get("method_label", "") or "").strip() or str(optimization.get("method", "") or "").strip()
+    return build_normalized_method_label(optimization)
 
 
 def _normalize_optimization_metadata(
@@ -2790,117 +2733,11 @@ def _normalize_optimization_metadata(
     effective_objective_mode: str = "",
     fallback_total_evaluations: Any = None,
 ) -> dict[str, Any]:
-    normalized = dict(optimization or {})
-    method_key = str(normalized.get("method", "") or "").strip().lower()
-    stage_stats_raw = dict(normalized.get("stage_stats", {}) or {})
-    stage_stats: dict[str, dict[str, Any]] = {}
-    for stage_name in ("mc", "global", "refine"):
-        stage = _optimization_stage_payload(stage_stats_raw.get(stage_name))
-        if not stage:
-            continue
-        if stage_name == "mc" and _optimization_stage_counter(stage.get("progress_points")) <= 0 and _optimization_stage_counter(stage.get("nit")) > 0:
-            stage["progress_points"] = _optimization_stage_counter(stage.get("nit"))
-        stage_stats[stage_name] = stage
-
-    selected_stage = _infer_selected_result_stage(normalized, stage_stats)
-    polish_enabled = bool(normalized.get("polish") or stage_stats.get("global", {}).get("polish"))
-    normalized["polish"] = polish_enabled
-
-    refine_stage = dict(stage_stats.get("refine", {}))
-    if refine_stage and (not bool(refine_stage.get("requested"))) and str(refine_stage.get("skipped_reason", "") or "").strip():
-        refine_stage["requested"] = True
-        stage_stats["refine"] = refine_stage
-    refine_requested = bool(normalized.get("refine_requested") or normalized.get("refine_enabled") or refine_stage.get("requested"))
-    refine_executed = bool(normalized.get("refine_executed") or refine_stage.get("executed") or selected_stage == "refine" or _optimization_stage_has_execution(refine_stage))
-    normalized["refine_requested"] = refine_requested
-    normalized["refine_enabled"] = refine_requested
-    normalized["refine_executed"] = refine_executed
-
-    requested_by_method = {
-        "mc": method_key in {"mc_only", "mc_screen_de"},
-        "global": method_key in {"de", "mc_screen_de"},
-        "refine": refine_requested,
-    }
-    global_execution_hint = bool(selected_stage in {"global", "refine"} or _optimization_stage_has_execution(stage_stats.get("global", {})))
-    for stage_name in ("mc", "global", "refine"):
-        stage = dict(stage_stats.get(stage_name, {}))
-        requested = bool(stage.get("requested")) or requested_by_method[stage_name]
-        executed = bool(stage.get("executed")) or (selected_stage == stage_name) or _optimization_stage_has_execution(stage)
-        if stage_name == "global" and selected_stage == "refine":
-            executed = True
-        if stage_name == "mc" and method_key == "mc_screen_de" and global_execution_hint:
-            executed = True
-        if stage_name == "refine" and str(stage.get("skipped_reason", "") or "").strip():
-            requested = True
-        if stage_name == "global" and (polish_enabled or ("polish" in stage)):
-            stage["polish"] = polish_enabled
-        if not (stage or requested or executed or selected_stage == stage_name):
-            continue
-        stage["requested"] = requested
-        stage["executed"] = executed
-        if selected_stage == stage_name:
-            stage["selected"] = True
-        stage_stats[stage_name] = stage
-
-    selected_stage_stats = dict(stage_stats.get(selected_stage, {}))
-    global_stage = dict(stage_stats.get("global", {}))
-    refine_stage = dict(stage_stats.get("refine", {}))
-    mc_stage = dict(stage_stats.get("mc", {}))
-
-    selected_stage_evaluations = _optimization_stage_counter(selected_stage_stats.get("nfev"))
-    if selected_stage_evaluations <= 0:
-        selected_stage_evaluations = _optimization_stage_counter(normalized.get("selected_stage_evaluations"))
-
-    selected_stage_generations = _optimization_stage_counter(selected_stage_stats.get("nit")) if selected_stage in {"global", "refine"} else 0
-    if selected_stage_generations <= 0 and selected_stage in {"global", "refine"}:
-        selected_stage_generations = _optimization_stage_counter(normalized.get("selected_stage_generations"))
-
-    selected_stage_progress_points = _optimization_stage_counter(selected_stage_stats.get("progress_points"))
-    if selected_stage_progress_points <= 0:
-        selected_stage_progress_points = _optimization_stage_counter(normalized.get("selected_stage_progress_points"))
-    if selected_stage == "mc" and selected_stage_progress_points <= 0:
-        selected_stage_progress_points = _optimization_stage_counter(normalized.get("selected_stage_generations"))
-
-    total_generations = (
-        _optimization_stage_counter(global_stage.get("nit"))
-        + _optimization_stage_counter(refine_stage.get("nit"))
+    return build_normalize_optimization_metadata(
+        optimization,
+        effective_objective_mode=effective_objective_mode,
+        fallback_total_evaluations=fallback_total_evaluations,
     )
-    if total_generations <= 0 and method_key != "mc_only" and (
-        _optimization_stage_counter(global_stage.get("nit")) <= 0
-        and _optimization_stage_counter(refine_stage.get("nit")) <= 0
-    ):
-        total_generations = _optimization_stage_counter(normalized.get("total_generations"))
-
-    total_progress_points = sum(
-        _optimization_stage_counter(stage.get("progress_points"))
-        for stage in (mc_stage, global_stage, refine_stage)
-    )
-    if total_progress_points <= 0:
-        total_progress_points = _optimization_stage_counter(normalized.get("total_progress_points"))
-    if total_progress_points <= 0 and _optimization_stage_counter(mc_stage.get("nit")) > 0:
-        total_progress_points = _optimization_stage_counter(mc_stage.get("nit")) + _optimization_stage_counter(global_stage.get("progress_points")) + _optimization_stage_counter(refine_stage.get("progress_points"))
-
-    total_evaluations = max(
-        _optimization_stage_counter(fallback_total_evaluations),
-        _optimization_stage_counter(normalized.get("total_evaluations")),
-        selected_stage_evaluations,
-        sum(_optimization_stage_counter(stage.get("nfev")) for stage in (mc_stage, global_stage, refine_stage)),
-    )
-
-    normalized["selected_result_stage"] = selected_stage
-    normalized["selected_result_label"] = _normalized_selected_result_label({**normalized, "selected_result_stage": selected_stage, "polish": polish_enabled})
-    normalized["method_label"] = _normalized_method_label({**normalized, "stage_stats": stage_stats, "selected_result_stage": selected_stage, "polish": polish_enabled})
-    normalized["selected_stage_evaluations"] = selected_stage_evaluations
-    normalized["selected_stage_generations"] = selected_stage_generations
-    normalized["selected_stage_progress_points"] = selected_stage_progress_points
-    normalized["total_evaluations"] = total_evaluations
-    normalized["total_generations"] = total_generations
-    normalized["total_progress_points"] = total_progress_points
-    if effective_objective_mode:
-        normalized["objective_mode"] = effective_objective_mode
-        normalized["effective_objective_mode"] = effective_objective_mode
-    normalized["stage_stats"] = stage_stats or None
-    return normalized
 
 
 def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = None) -> tuple[dict[str, Any], Path | None]:

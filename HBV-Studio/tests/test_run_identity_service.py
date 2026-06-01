@@ -39,7 +39,10 @@ from services.runs import (  # noqa: E402
     metadata_boundary_enabled,
     metadata_initial_state_override,
     normalize_metadata_object_type,
+    normalize_optimization_metadata,
     normalize_result_title,
+    optimization_stage_counter,
+    infer_selected_result_stage,
     pick_latest_run_path,
     read_sampled_csv_rows,
     read_run_metrics_snapshot,
@@ -324,6 +327,47 @@ class RunIdentityServiceTests(unittest.TestCase):
             ),
             "full_upstream_basin",
         )
+
+    def test_optimization_stage_counter_clamps_invalid_values(self) -> None:
+        self.assertEqual(optimization_stage_counter("5"), 5)
+        self.assertEqual(optimization_stage_counter("-2"), 0)
+        self.assertEqual(optimization_stage_counter("bad"), 0)
+        self.assertEqual(optimization_stage_counter(None), 0)
+
+    def test_infer_selected_result_stage_uses_explicit_stage_stats_and_labels(self) -> None:
+        self.assertEqual(infer_selected_result_stage({"selected_result_stage": "global"}, {}), "global")
+        self.assertEqual(infer_selected_result_stage({}, {"refine": {"selected": True}}), "refine")
+        self.assertEqual(infer_selected_result_stage({"selected_result_label": "\u5feb\u901f\u7b5b\u9009\u7ed3\u679c"}, {}), "mc")
+        self.assertEqual(infer_selected_result_stage({"selected_result_label": "\u5dee\u5206\u8fdb\u5316\u7ed3\u679c"}, {}), "global")
+
+    def test_normalize_optimization_metadata_marks_skipped_refine_and_totals(self) -> None:
+        normalized = normalize_optimization_metadata(
+            {
+                "method": "mc_screen_de",
+                "stage_stats": {
+                    "mc": {"nit": 12},
+                    "global": {"nfev": 30, "nit": 5, "selected": True},
+                    "refine": {"skipped_reason": "flat objective"},
+                },
+            },
+            effective_objective_mode="daily_unified_professional_v1",
+            fallback_total_evaluations=18,
+        )
+
+        self.assertEqual(normalized["selected_result_stage"], "global")
+        self.assertEqual(normalized["selected_result_label"], "\u7cbe\u7ec6\u641c\u7d22\u7ed3\u679c")
+        self.assertEqual(normalized["method_label"], "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22\uff08\u5c40\u90e8\u7cbe\u4fee\u5df2\u8df3\u8fc7\uff09")
+        self.assertEqual(normalized["selected_stage_evaluations"], 30)
+        self.assertEqual(normalized["selected_stage_generations"], 5)
+        self.assertEqual(normalized["total_evaluations"], 30)
+        self.assertEqual(normalized["total_generations"], 5)
+        self.assertEqual(normalized["total_progress_points"], 12)
+        self.assertEqual(normalized["effective_objective_mode"], "daily_unified_professional_v1")
+        self.assertTrue(normalized["stage_stats"]["mc"]["requested"])
+        self.assertTrue(normalized["stage_stats"]["mc"]["executed"])
+        self.assertTrue(normalized["stage_stats"]["global"]["selected"])
+        self.assertTrue(normalized["stage_stats"]["refine"]["requested"])
+        self.assertFalse(normalized["stage_stats"]["refine"]["executed"])
 
     def test_run_parameter_context_summarizes_source_result_for_forecast(self) -> None:
         run_dir = Path("C:/runs/source_run")

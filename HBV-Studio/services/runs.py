@@ -514,6 +514,213 @@ def resolve_metadata_object_type(
     return ""
 
 
+def optimization_stage_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def optimization_stage_counter(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except Exception:
+        return 0
+
+
+def optimization_stage_has_execution(stage: dict[str, Any]) -> bool:
+    if not stage:
+        return False
+    if bool(stage.get("executed")):
+        return True
+    for key in ("nfev", "nit", "progress_points", "valid_samples", "processed_samples"):
+        if optimization_stage_counter(stage.get(key)) > 0:
+            return True
+    if any(key in stage for key in ("success", "valid", "message")):
+        return True
+    return stage.get("objective_value") is not None
+
+
+def infer_selected_result_stage(optimization: dict[str, Any], stage_stats: dict[str, dict[str, Any]]) -> str:
+    selected_stage = str(optimization.get("selected_result_stage", "") or "").strip().lower()
+    if selected_stage in {"mc", "global", "refine"}:
+        return selected_stage
+    for stage_name in ("refine", "global", "mc"):
+        if bool(stage_stats.get(stage_name, {}).get("selected")):
+            return stage_name
+    label = str(optimization.get("selected_result_label", "") or "").strip()
+    if "\u5c40\u90e8\u7cbe\u4fee" in label:
+        return "refine"
+    if ("\u5feb\u901f\u7b5b\u9009" in label) or ("\u968f\u673a\u7b5b\u9009" in label) or ("\u8499\u7279\u5361\u6d1b" in label):
+        return "mc"
+    if ("\u7cbe\u7ec6\u641c\u7d22" in label) or ("\u5168\u5c40\u641c\u7d22" in label) or ("\u5dee\u5206\u8fdb\u5316" in label):
+        return "global"
+    return ""
+
+
+def normalized_selected_result_label(optimization: dict[str, Any]) -> str:
+    selected_stage = str(optimization.get("selected_result_stage", "") or "").strip().lower()
+    if selected_stage == "global":
+        return "\u7cbe\u7ec6\u641c\u7d22\u7ed3\u679c\uff08\u542b\u672b\u7aef\u7cbe\u4fee\uff09" if bool(optimization.get("polish")) else "\u7cbe\u7ec6\u641c\u7d22\u7ed3\u679c"
+    if selected_stage == "refine":
+        return "\u5c40\u90e8\u7cbe\u4fee\u7ed3\u679c"
+    if selected_stage == "mc":
+        return "\u5feb\u901f\u7b5b\u9009\u7ed3\u679c"
+    return str(optimization.get("selected_result_label", "") or "").strip()
+
+
+def normalized_method_label(optimization: dict[str, Any]) -> str:
+    method_key = str(optimization.get("method", "") or "").strip().lower()
+    refine = optimization_stage_payload(dict(optimization.get("stage_stats", {}) or {}).get("refine"))
+    refine_requested = bool(optimization.get("refine_requested") or optimization.get("refine_enabled") or refine.get("requested"))
+    refine_executed = bool(optimization.get("refine_executed") or refine.get("executed"))
+    refine_skipped = bool(str(refine.get("skipped_reason", "") or "").strip())
+    polish_enabled = bool(optimization.get("polish"))
+    if method_key == "manual_adjustment":
+        return "\u624b\u8c03\u540e\u91cd\u7b97"
+    if method_key == "manual_start":
+        return "\u624b\u8c03\u8d77\u70b9"
+    if method_key == "de":
+        if refine_executed:
+            return "\u7cbe\u7ec6\u641c\u7d22 + \u5c40\u90e8\u7cbe\u4fee"
+        if refine_requested and refine_skipped:
+            return "\u7cbe\u7ec6\u641c\u7d22\uff08\u5c40\u90e8\u7cbe\u4fee\u5df2\u8df3\u8fc7\uff09"
+        if refine_requested:
+            return "\u7cbe\u7ec6\u641c\u7d22\uff08\u5c40\u90e8\u7cbe\u4fee\u672a\u4ea7\u51fa\u6709\u6548\u7ed3\u679c\uff09"
+        if polish_enabled:
+            return "\u7cbe\u7ec6\u641c\u7d22\uff08\u542b\u672b\u7aef\u7cbe\u4fee\uff09"
+        return "\u7cbe\u7ec6\u641c\u7d22\uff08\u5dee\u5206\u8fdb\u5316\uff09"
+    if method_key == "mc_screen_de":
+        if refine_executed:
+            return "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22 + \u5c40\u90e8\u7cbe\u4fee"
+        if refine_requested and refine_skipped:
+            return "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22\uff08\u5c40\u90e8\u7cbe\u4fee\u5df2\u8df3\u8fc7\uff09"
+        if refine_requested:
+            return "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22\uff08\u5c40\u90e8\u7cbe\u4fee\u672a\u4ea7\u51fa\u6709\u6548\u7ed3\u679c\uff09"
+        if polish_enabled:
+            return "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22\uff08\u542b\u672b\u7aef\u7cbe\u4fee\uff09"
+        return "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22"
+    if method_key == "mc_only":
+        return "\u4ec5\u5feb\u901f\u7b5b\u9009"
+    return str(optimization.get("method_label", "") or "").strip() or str(optimization.get("method", "") or "").strip()
+
+
+def normalize_optimization_metadata(
+    optimization: dict[str, Any],
+    *,
+    effective_objective_mode: str = "",
+    fallback_total_evaluations: Any = None,
+) -> dict[str, Any]:
+    normalized = dict(optimization or {})
+    method_key = str(normalized.get("method", "") or "").strip().lower()
+    stage_stats_raw = dict(normalized.get("stage_stats", {}) or {})
+    stage_stats: dict[str, dict[str, Any]] = {}
+    for stage_name in ("mc", "global", "refine"):
+        stage = optimization_stage_payload(stage_stats_raw.get(stage_name))
+        if not stage:
+            continue
+        if stage_name == "mc" and optimization_stage_counter(stage.get("progress_points")) <= 0 and optimization_stage_counter(stage.get("nit")) > 0:
+            stage["progress_points"] = optimization_stage_counter(stage.get("nit"))
+        stage_stats[stage_name] = stage
+
+    selected_stage = infer_selected_result_stage(normalized, stage_stats)
+    polish_enabled = bool(normalized.get("polish") or stage_stats.get("global", {}).get("polish"))
+    normalized["polish"] = polish_enabled
+
+    refine_stage = dict(stage_stats.get("refine", {}))
+    if refine_stage and (not bool(refine_stage.get("requested"))) and str(refine_stage.get("skipped_reason", "") or "").strip():
+        refine_stage["requested"] = True
+        stage_stats["refine"] = refine_stage
+    refine_requested = bool(normalized.get("refine_requested") or normalized.get("refine_enabled") or refine_stage.get("requested"))
+    refine_executed = bool(normalized.get("refine_executed") or refine_stage.get("executed") or selected_stage == "refine" or optimization_stage_has_execution(refine_stage))
+    normalized["refine_requested"] = refine_requested
+    normalized["refine_enabled"] = refine_requested
+    normalized["refine_executed"] = refine_executed
+
+    requested_by_method = {
+        "mc": method_key in {"mc_only", "mc_screen_de"},
+        "global": method_key in {"de", "mc_screen_de"},
+        "refine": refine_requested,
+    }
+    global_execution_hint = bool(selected_stage in {"global", "refine"} or optimization_stage_has_execution(stage_stats.get("global", {})))
+    for stage_name in ("mc", "global", "refine"):
+        stage = dict(stage_stats.get(stage_name, {}))
+        requested = bool(stage.get("requested")) or requested_by_method[stage_name]
+        executed = bool(stage.get("executed")) or (selected_stage == stage_name) or optimization_stage_has_execution(stage)
+        if stage_name == "global" and selected_stage == "refine":
+            executed = True
+        if stage_name == "mc" and method_key == "mc_screen_de" and global_execution_hint:
+            executed = True
+        if stage_name == "refine" and str(stage.get("skipped_reason", "") or "").strip():
+            requested = True
+        if stage_name == "global" and (polish_enabled or ("polish" in stage)):
+            stage["polish"] = polish_enabled
+        if not (stage or requested or executed or selected_stage == stage_name):
+            continue
+        stage["requested"] = requested
+        stage["executed"] = executed
+        if selected_stage == stage_name:
+            stage["selected"] = True
+        stage_stats[stage_name] = stage
+
+    selected_stage_stats = dict(stage_stats.get(selected_stage, {}))
+    global_stage = dict(stage_stats.get("global", {}))
+    refine_stage = dict(stage_stats.get("refine", {}))
+    mc_stage = dict(stage_stats.get("mc", {}))
+
+    selected_stage_evaluations = optimization_stage_counter(selected_stage_stats.get("nfev"))
+    if selected_stage_evaluations <= 0:
+        selected_stage_evaluations = optimization_stage_counter(normalized.get("selected_stage_evaluations"))
+
+    selected_stage_generations = optimization_stage_counter(selected_stage_stats.get("nit")) if selected_stage in {"global", "refine"} else 0
+    if selected_stage_generations <= 0 and selected_stage in {"global", "refine"}:
+        selected_stage_generations = optimization_stage_counter(normalized.get("selected_stage_generations"))
+
+    selected_stage_progress_points = optimization_stage_counter(selected_stage_stats.get("progress_points"))
+    if selected_stage_progress_points <= 0:
+        selected_stage_progress_points = optimization_stage_counter(normalized.get("selected_stage_progress_points"))
+    if selected_stage == "mc" and selected_stage_progress_points <= 0:
+        selected_stage_progress_points = optimization_stage_counter(normalized.get("selected_stage_generations"))
+
+    total_generations = (
+        optimization_stage_counter(global_stage.get("nit"))
+        + optimization_stage_counter(refine_stage.get("nit"))
+    )
+    if total_generations <= 0 and method_key != "mc_only" and (
+        optimization_stage_counter(global_stage.get("nit")) <= 0
+        and optimization_stage_counter(refine_stage.get("nit")) <= 0
+    ):
+        total_generations = optimization_stage_counter(normalized.get("total_generations"))
+
+    total_progress_points = sum(
+        optimization_stage_counter(stage.get("progress_points"))
+        for stage in (mc_stage, global_stage, refine_stage)
+    )
+    if total_progress_points <= 0:
+        total_progress_points = optimization_stage_counter(normalized.get("total_progress_points"))
+    if total_progress_points <= 0 and optimization_stage_counter(mc_stage.get("nit")) > 0:
+        total_progress_points = optimization_stage_counter(mc_stage.get("nit")) + optimization_stage_counter(global_stage.get("progress_points")) + optimization_stage_counter(refine_stage.get("progress_points"))
+
+    total_evaluations = max(
+        optimization_stage_counter(fallback_total_evaluations),
+        optimization_stage_counter(normalized.get("total_evaluations")),
+        selected_stage_evaluations,
+        sum(optimization_stage_counter(stage.get("nfev")) for stage in (mc_stage, global_stage, refine_stage)),
+    )
+
+    normalized["selected_result_stage"] = selected_stage
+    normalized["selected_result_label"] = normalized_selected_result_label({**normalized, "selected_result_stage": selected_stage, "polish": polish_enabled})
+    normalized["method_label"] = normalized_method_label({**normalized, "stage_stats": stage_stats, "selected_result_stage": selected_stage, "polish": polish_enabled})
+    normalized["selected_stage_evaluations"] = selected_stage_evaluations
+    normalized["selected_stage_generations"] = selected_stage_generations
+    normalized["selected_stage_progress_points"] = selected_stage_progress_points
+    normalized["total_evaluations"] = total_evaluations
+    normalized["total_generations"] = total_generations
+    normalized["total_progress_points"] = total_progress_points
+    if effective_objective_mode:
+        normalized["objective_mode"] = effective_objective_mode
+        normalized["effective_objective_mode"] = effective_objective_mode
+    normalized["stage_stats"] = stage_stats or None
+    return normalized
+
+
 def has_parameter_bounds(metadata: dict[str, Any]) -> bool:
     profile = metadata.get("parameter_profile")
     if not isinstance(profile, dict):
