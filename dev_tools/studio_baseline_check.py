@@ -262,6 +262,7 @@ def check_packaging_surfaces() -> dict[str, Any]:
         GUI_ROOT / "services" / "geo_suggestions.py",
         GUI_ROOT / "services" / "meteo_status.py",
         GUI_ROOT / "services" / "observed.py",
+        GUI_ROOT / "services" / "runs.py",
         GUI_ROOT / "services" / "system_status.py",
         GUI_ROOT / "services" / "tasks.py",
         GUI_ROOT / "services" / "workspace_advice.py",

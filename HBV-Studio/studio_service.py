@@ -54,6 +54,7 @@ from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cf
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
+from services.runs import RunListContext, list_runs as build_list_runs
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -541,9 +542,6 @@ def call_with_output_capture(callback: Callable[[str], None] | None, fn: Callabl
 
 TASKS: dict[str, TaskRecord] = {}
 TASK_LOCK = threading.Lock()
-RUN_LIST_CACHE_LOCK = threading.Lock()
-RUN_LIST_CACHE_SIGNATURE: tuple[tuple[Any, ...], ...] | None = None
-RUN_LIST_CACHE_ITEMS: list[dict[str, Any]] = []
 TIF_SCAN_CACHE_LOCK = threading.Lock()
 TIF_SCAN_CACHE: dict[str, dict[str, Any]] = {}
 GRID_ALIGNMENT_CACHE_LOCK = threading.Lock()
@@ -6913,18 +6911,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
 
 
 def list_runs() -> list[dict[str, Any]]:
-    global RUN_LIST_CACHE_SIGNATURE, RUN_LIST_CACHE_ITEMS
-    entries = _discover_run_entries()
-    signature = tuple(item[0] for item in entries)
-    with RUN_LIST_CACHE_LOCK:
-        if signature == RUN_LIST_CACHE_SIGNATURE:
-            return [dict(item) for item in RUN_LIST_CACHE_ITEMS]
-
-    items = sorted([summarize_run(path) for _, path in entries], key=lambda item: item["updated_at"], reverse=True)
-    with RUN_LIST_CACHE_LOCK:
-        RUN_LIST_CACHE_SIGNATURE = signature
-        RUN_LIST_CACHE_ITEMS = [dict(item) for item in items]
-    return items
+    return build_list_runs(RunListContext(discover_run_entries=_discover_run_entries, summarize_run=summarize_run))
 
 
 def read_sampled_csv_rows(path: Path, max_points: int = 900) -> tuple[list[dict[str, str]], int]:
