@@ -8695,63 +8695,6 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
-def _forecast_output_preview(
-    payload: dict[str, Any],
-    source_run: Path,
-    *,
-    profile_hint: str = "",
-) -> dict[str, Any]:
-    source_name = source_run.name or "source_result"
-    name_pattern = f"hbv_forecast_{source_name}_运行时间_编号"
-    output_dir_raw = str(payload.get("output_dir", "") or "").strip()
-    if output_dir_raw:
-        output_dir = resolve_any_path(output_dir_raw, must_exist=False)
-        archive_root = output_dir / "forecast_inputs"
-        manifest_path = archive_root / "input_manifest.json"
-        return {
-            "explicit": True,
-            "result_parent": str(output_dir.parent.resolve(strict=False)),
-            "result_dir": str(output_dir.resolve(strict=False)),
-            "result_name_pattern": output_dir.name,
-            "result_label": "指定结果目录",
-            "result_detail": str(output_dir.resolve(strict=False)),
-            "archive_label": "指定目录下的 forecast_inputs",
-            "archive_root": str(archive_root.resolve(strict=False)),
-            "manifest_path": str(manifest_path.resolve(strict=False)),
-            "archive_detail": str(manifest_path.resolve(strict=False)),
-        }
-
-    result_parent = source_run.parent
-    config_path_raw = str(payload.get("config_path", "") or "").strip()
-    if config_path_raw:
-        try:
-            cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-            config = read_runtime_config(cfg_path)
-            requested_profile = str(
-                payload.get("profile")
-                or payload.get("calibration_mode")
-                or profile_hint
-                or ""
-            ).strip() or None
-            active_profile = resolve_profile(config, requested_profile)
-            result_parent = Path(build_profile_paths(config, active_profile)["runs_dir"]).resolve(strict=False)
-        except Exception:
-            result_parent = source_run.parent
-    result_detail = str((result_parent / name_pattern).resolve(strict=False))
-    return {
-        "explicit": False,
-        "result_parent": str(result_parent.resolve(strict=False)),
-        "result_dir": "",
-        "result_name_pattern": name_pattern,
-        "result_label": "运行时新建预报结果目录",
-        "result_detail": result_detail,
-        "archive_label": "结果目录下的 forecast_inputs",
-        "archive_root": "",
-        "manifest_path": "结果目录/forecast_inputs/input_manifest.json",
-        "archive_detail": f"{result_detail}\\forecast_inputs\\input_manifest.json",
-    }
-
-
 def _forecast_parameter_check_context(
     payload: dict[str, Any],
     source_run: Path,
@@ -8857,12 +8800,14 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
     return ForecastInputCheckContext(
         resolve_path=resolve_any_path,
         read_json_file=read_json_file,
+        read_runtime_config=read_runtime_config,
+        build_profile_paths=build_profile_paths,
+        resolve_profile=resolve_profile,
         parameter_check_context=_forecast_parameter_check_context,
         normalize_time_step_hours=normalize_time_step_hours,
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,
         format_time_for_check=_format_time_for_check,
-        forecast_output_preview=_forecast_output_preview,
         forecast_parameter_detail_text=_forecast_parameter_detail_text,
         forecast_station_precip_check=_forecast_station_precip_check,
     )

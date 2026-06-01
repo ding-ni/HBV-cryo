@@ -13,12 +13,14 @@ import pandas as pd
 class ForecastInputCheckContext:
     resolve_path: Callable[..., Path]
     read_json_file: Callable[[Path], dict[str, Any]]
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
+    resolve_profile: Callable[[dict[str, Any], str | None], str]
     parameter_check_context: Callable[[dict[str, Any], Path, dict[str, Any]], dict[str, Any]]
     normalize_time_step_hours: Callable[[Any], float]
     is_date_only_string: Callable[[str], bool]
     validate_tif_time_series: Callable[..., dict[str, Any]]
     format_time_for_check: Callable[[Any, float], str]
-    forecast_output_preview: Callable[..., dict[str, Any]]
     forecast_parameter_detail_text: Callable[[dict[str, Any]], str]
     forecast_station_precip_check: Callable[[dict[str, Any], dict[str, Any], str, str, float], dict[str, Any] | None]
 
@@ -151,6 +153,67 @@ def forecast_input_dir_summary(
     }
 
 
+def forecast_output_preview(
+    payload: dict[str, Any],
+    source_run: Path,
+    *,
+    profile_hint: str = "",
+    resolve_path: Callable[..., Path],
+    read_runtime_config: Callable[[Path], dict[str, Any]],
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]],
+    resolve_profile: Callable[[dict[str, Any], str | None], str],
+) -> dict[str, Any]:
+    source_name = source_run.name or "source_result"
+    name_pattern = f"hbv_forecast_{source_name}_运行时间_编号"
+    output_dir_raw = str(payload.get("output_dir", "") or "").strip()
+    if output_dir_raw:
+        output_dir = resolve_path(output_dir_raw, must_exist=False)
+        archive_root = output_dir / "forecast_inputs"
+        manifest_path = archive_root / "input_manifest.json"
+        return {
+            "explicit": True,
+            "result_parent": str(output_dir.parent.resolve(strict=False)),
+            "result_dir": str(output_dir.resolve(strict=False)),
+            "result_name_pattern": output_dir.name,
+            "result_label": "指定结果目录",
+            "result_detail": str(output_dir.resolve(strict=False)),
+            "archive_label": "指定目录下的 forecast_inputs",
+            "archive_root": str(archive_root.resolve(strict=False)),
+            "manifest_path": str(manifest_path.resolve(strict=False)),
+            "archive_detail": str(manifest_path.resolve(strict=False)),
+        }
+
+    result_parent = source_run.parent
+    config_path_raw = str(payload.get("config_path", "") or "").strip()
+    if config_path_raw:
+        try:
+            cfg_path = resolve_path(config_path_raw, must_exist=True)
+            config = read_runtime_config(cfg_path)
+            requested_profile = str(
+                payload.get("profile")
+                or payload.get("calibration_mode")
+                or profile_hint
+                or ""
+            ).strip() or None
+            active_profile = resolve_profile(config, requested_profile)
+            result_parent = Path(build_profile_paths(config, active_profile)["runs_dir"]).resolve(strict=False)
+        except Exception:
+            result_parent = source_run.parent
+    result_detail = str((result_parent / name_pattern).resolve(strict=False))
+    return {
+        "explicit": False,
+        "result_parent": str(result_parent.resolve(strict=False)),
+        "result_dir": "",
+        "result_name_pattern": name_pattern,
+        "result_label": "运行时新建预报结果目录",
+        "result_detail": result_detail,
+        "archive_label": "结果目录下的 forecast_inputs",
+        "archive_root": "",
+        "manifest_path": "结果目录/forecast_inputs/input_manifest.json",
+        "archive_detail": f"{result_detail}\\forecast_inputs\\input_manifest.json",
+    }
+
+
 def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckContext) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -248,10 +311,14 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
         if coverage_complete
         else "预报气象输入仍需核对。"
     )
-    output_preview = context.forecast_output_preview(
+    output_preview = forecast_output_preview(
         payload,
         source_run,
         profile_hint=str(metadata.get("calibration_profile", "") or ""),
+        resolve_path=context.resolve_path,
+        read_runtime_config=context.read_runtime_config,
+        build_profile_paths=context.build_profile_paths,
+        resolve_profile=context.resolve_profile,
     )
     output_status = "ok" if expected_steps > 0 else "warn"
     parameter_detail = context.forecast_parameter_detail_text(parameter_context)

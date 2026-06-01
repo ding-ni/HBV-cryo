@@ -18,6 +18,7 @@ from services.forecast_input import (  # noqa: E402
     forecast_expected_index,
     forecast_input_check,
     forecast_input_dir_summary,
+    forecast_output_preview,
     forecast_source_state_time,
 )
 
@@ -30,12 +31,14 @@ class ForecastInputServiceTests(unittest.TestCase):
         return ForecastInputCheckContext(
             resolve_path=fail,
             read_json_file=fail,
+            read_runtime_config=fail,
+            build_profile_paths=fail,
+            resolve_profile=fail,
             parameter_check_context=fail,
             normalize_time_step_hours=fail,
             is_date_only_string=fail,
             validate_tif_time_series=fail,
             format_time_for_check=fail,
-            forecast_output_preview=fail,
             forecast_parameter_detail_text=fail,
             forecast_station_precip_check=fail,
         )
@@ -104,6 +107,77 @@ class ForecastInputServiceTests(unittest.TestCase):
         self.assertEqual(summary["missing_steps"], 1)
         self.assertEqual(summary["out_of_window_steps"], 1)
         self.assertIn("2/3", summary["summary"])
+
+    def test_forecast_output_preview_uses_explicit_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_run = root / "source_run"
+            output_dir = root / "manual_forecast"
+            source_run.mkdir()
+
+            preview = forecast_output_preview(
+                {"output_dir": str(output_dir)},
+                source_run,
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                read_runtime_config=lambda *args, **kwargs: self.fail("config should not be read"),
+                build_profile_paths=lambda *args, **kwargs: self.fail("profile paths should not be built"),
+                resolve_profile=lambda *args, **kwargs: self.fail("profile should not be resolved"),
+            )
+
+            self.assertTrue(preview["explicit"])
+            self.assertEqual(preview["result_dir"], str(output_dir.resolve(strict=False)))
+            self.assertEqual(preview["result_parent"], str(root.resolve(strict=False)))
+            self.assertEqual(preview["archive_root"], str((output_dir / "forecast_inputs").resolve(strict=False)))
+            self.assertEqual(
+                preview["manifest_path"],
+                str((output_dir / "forecast_inputs" / "input_manifest.json").resolve(strict=False)),
+            )
+
+    def test_forecast_output_preview_uses_config_runs_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_run = root / "source_run"
+            config_path = root / "workspace.json"
+            runs_dir = root / "runs"
+            source_run.mkdir()
+            config_path.write_text("{}", encoding="utf-8")
+
+            preview = forecast_output_preview(
+                {"config_path": str(config_path), "profile": "daily"},
+                source_run,
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                read_runtime_config=lambda path: {"config_path": str(path)},
+                build_profile_paths=lambda config, profile: {"runs_dir": str(runs_dir)},
+                resolve_profile=lambda config, requested: requested or "daily",
+            )
+
+            self.assertFalse(preview["explicit"])
+            self.assertEqual(preview["result_parent"], str(runs_dir.resolve(strict=False)))
+            self.assertIn("hbv_forecast_source_run", preview["result_detail"])
+            self.assertTrue(preview["archive_detail"].endswith("\\forecast_inputs\\input_manifest.json"))
+
+    def test_forecast_output_preview_falls_back_when_config_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_run = root / "source_run"
+            source_run.mkdir()
+
+            def resolve_path(raw, **kwargs):
+                if kwargs.get("must_exist"):
+                    raise FileNotFoundError(str(raw))
+                return Path(str(raw))
+
+            preview = forecast_output_preview(
+                {"config_path": str(root / "missing_workspace.json")},
+                source_run,
+                resolve_path=resolve_path,
+                read_runtime_config=lambda *args, **kwargs: self.fail("config should not be read"),
+                build_profile_paths=lambda *args, **kwargs: self.fail("profile paths should not be built"),
+                resolve_profile=lambda *args, **kwargs: self.fail("profile should not be resolved"),
+            )
+
+            self.assertFalse(preview["explicit"])
+            self.assertEqual(preview["result_parent"], str(root.resolve(strict=False)))
 
 
 if __name__ == "__main__":
