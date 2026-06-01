@@ -18,6 +18,7 @@ from services.runs import (  # noqa: E402
     RunDiscoveryContext,
     RunReplayConfigContext,
     RunSummaryContext,
+    RunWorkspaceNameContext,
     apply_run_replay_config_overrides,
     build_run_summary,
     build_calibration_task_result,
@@ -42,10 +43,18 @@ from services.runs import (  # noqa: E402
     run_update_timestamps,
     snapshot_run_paths,
     source_run_meta,
+    workspace_name_for_summary,
 )
 
 
 class RunIdentityServiceTests(unittest.TestCase):
+    def _workspace_name_context(self, *, hints=None, resolve=None, read_config=None) -> RunWorkspaceNameContext:
+        return RunWorkspaceNameContext(
+            workspace_roots_hint_from_metadata=hints or (lambda metadata: (None, None)),
+            resolve_workspace_config_reference=resolve or (lambda raw, **kwargs: None),
+            read_runtime_config=read_config or (lambda path: {}),
+        )
+
     def test_run_kind_and_labels_follow_result_metadata(self) -> None:
         self.assertEqual(run_kind_from_metadata({"forecast_result": {"enabled": True}}), "forecast_restart")
         self.assertEqual(run_kind_from_metadata({"manual_result": {"enabled": True}}), "manual_result")
@@ -216,6 +225,78 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(context["param_bounds_profile_label"], "小时尺度稳定范围")
         self.assertEqual(context["state_snapshot_time"], "2026-06-02 08:00:00")
         self.assertEqual(context["parameter_count"], 2)
+
+    def test_workspace_name_for_summary_prefers_workspace_label(self) -> None:
+        def fail_resolve(*args, **kwargs):
+            self.fail("workspace_config should not be resolved when label is present")
+
+        def fail_read(path):
+            self.fail("config should not be read when label is present")
+
+        context = self._workspace_name_context(resolve=fail_resolve, read_config=fail_read)
+
+        name = workspace_name_for_summary(
+            {"workspace_label": "  Basin Label  ", "workspace_config": "C:/workspace/config.json"},
+            context=context,
+        )
+
+        self.assertEqual(name, "Basin Label")
+
+    def test_workspace_name_for_summary_reads_resolved_config_name(self) -> None:
+        config_path = Path("C:/workspace/config_alpha.json")
+        read_paths = []
+        context = self._workspace_name_context(
+            read_config=lambda path: read_paths.append(path) or {"\u6d41\u57df\u540d\u79f0": "Config Basin"},
+        )
+
+        name = workspace_name_for_summary({"workspace_config": "ignored"}, config_path, context)
+
+        self.assertEqual(name, "Config Basin")
+        self.assertEqual(read_paths, [config_path])
+
+    def test_workspace_name_for_summary_falls_back_to_config_stem_when_read_fails(self) -> None:
+        def fail_read(path):
+            raise RuntimeError("cannot read config")
+
+        context = self._workspace_name_context(read_config=fail_read)
+
+        name = workspace_name_for_summary(
+            {"workspace_config": "ignored"},
+            Path("C:/workspace/config_beta.json"),
+            context,
+        )
+
+        self.assertEqual(name, "config_beta")
+
+    def test_workspace_name_for_summary_resolves_metadata_config_with_hints(self) -> None:
+        observed = {}
+
+        def hints(metadata):
+            observed["metadata"] = metadata
+            return Path("C:/project"), Path("C:/gui")
+
+        def resolve(raw, **kwargs):
+            observed["raw"] = raw
+            observed["kwargs"] = kwargs
+            return Path("D:/resolved/config_gamma.json")
+
+        context = self._workspace_name_context(hints=hints, resolve=resolve)
+        metadata = {"workspace_config": "relative/config_gamma.json"}
+
+        name = workspace_name_for_summary(metadata, context=context)
+
+        self.assertEqual(name, "config_gamma")
+        self.assertIs(observed["metadata"], metadata)
+        self.assertEqual(observed["raw"], "relative/config_gamma.json")
+        self.assertEqual(observed["kwargs"]["project_root"], Path("C:/project"))
+        self.assertEqual(observed["kwargs"]["gui_root"], Path("C:/gui"))
+
+    def test_workspace_name_for_summary_falls_back_to_raw_config_stem(self) -> None:
+        context = self._workspace_name_context()
+
+        name = workspace_name_for_summary({"workspace_config": "C:/workspace/raw_delta.json"}, context=context)
+
+        self.assertEqual(name, "raw_delta")
 
     def test_build_run_summary_keeps_result_api_fields(self) -> None:
         run_dir = Path("C:/runs/source_run")

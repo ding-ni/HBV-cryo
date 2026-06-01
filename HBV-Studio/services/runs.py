@@ -65,6 +65,13 @@ class RunSummaryContext:
 
 
 @dataclass(frozen=True)
+class RunWorkspaceNameContext:
+    workspace_roots_hint_from_metadata: Callable[[dict[str, Any] | None], tuple[Path | None, Path | None]]
+    resolve_workspace_config_reference: Callable[..., Path | None]
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class RunDetailContext:
     resolve_path: Callable[..., Path]
     read_json_file: Callable[[Path], dict[str, Any]]
@@ -356,6 +363,41 @@ def source_run_meta(metadata: dict[str, Any], replace_placeholders: Callable[...
         except Exception:
             source_name = Path(source_path).name
     return source_path, source_name
+
+
+def workspace_name_for_summary(
+    metadata: dict[str, Any],
+    resolved_config: Path | None = None,
+    context: RunWorkspaceNameContext | None = None,
+) -> str:
+    value = str(metadata.get("workspace_label", "") or "").strip()
+    if value:
+        return value
+    config_path = resolved_config
+    if config_path is None and context is not None:
+        hint_project_root, hint_gui_root = context.workspace_roots_hint_from_metadata(metadata)
+        config_path = context.resolve_workspace_config_reference(
+            str(metadata.get("workspace_config", "") or ""),
+            project_root=hint_project_root,
+            gui_root=hint_gui_root,
+        )
+    if config_path is not None:
+        if context is None:
+            return config_path.stem
+        try:
+            config = context.read_runtime_config(config_path)
+            value = str(config.get("\u6d41\u57df\u540d\u79f0", config_path.stem)).strip()
+            if value:
+                return value
+        except Exception:
+            return config_path.stem
+    raw = str(metadata.get("workspace_config", "") or "").strip()
+    if raw:
+        try:
+            return Path(raw).stem
+        except Exception:
+            return raw
+    return ""
 
 
 def display_run_title(

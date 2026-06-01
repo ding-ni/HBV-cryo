@@ -108,7 +108,7 @@ from services.meteo_import import meteo_import_worker_run as build_meteo_import_
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMutationContext
-from services.runs import RunReplayConfigContext, RunSummaryContext
+from services.runs import RunReplayConfigContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
@@ -133,6 +133,7 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
+from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
 from services.runs import snapshot_run_paths as build_snapshot_run_paths
@@ -5600,33 +5601,16 @@ def _run_update_timestamps(run_dir: Path) -> tuple[float, int]:
     return build_run_update_timestamps(run_dir)
 
 
+def _run_workspace_name_context() -> RunWorkspaceNameContext:
+    return RunWorkspaceNameContext(
+        workspace_roots_hint_from_metadata=_workspace_roots_hint_from_metadata,
+        resolve_workspace_config_reference=resolve_workspace_config_reference,
+        read_runtime_config=read_runtime_config,
+    )
+
+
 def _workspace_name_for_summary(metadata: dict[str, Any], resolved_config: Path | None = None) -> str:
-    value = str(metadata.get("workspace_label", "") or "").strip()
-    if value:
-        return value
-    config_path = resolved_config
-    if config_path is None:
-        hint_project_root, hint_gui_root = _workspace_roots_hint_from_metadata(metadata)
-        config_path = resolve_workspace_config_reference(
-            str(metadata.get("workspace_config", "") or ""),
-            project_root=hint_project_root,
-            gui_root=hint_gui_root,
-        )
-    if config_path is not None:
-        try:
-            config = read_runtime_config(config_path)
-            value = str(config.get("流域名称", config_path.stem)).strip()
-            if value:
-                return value
-        except Exception:
-            return config_path.stem
-    raw = str(metadata.get("workspace_config", "") or "").strip()
-    if raw:
-        try:
-            return Path(raw).stem
-        except Exception:
-            return raw
-    return ""
+    return build_workspace_name_for_summary(metadata, resolved_config, _run_workspace_name_context())
 
 
 def _run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
