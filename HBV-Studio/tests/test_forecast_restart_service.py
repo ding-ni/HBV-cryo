@@ -15,10 +15,12 @@ if str(STUDIO_DIR) not in sys.path:
 from services.forecast_restart import (  # noqa: E402
     ForecastRestartRunContext,
     ForecastRestartStartContext,
+    ForecastRestartWorkerContext,
     forecast_restart_args,
     forecast_restart_run,
     forecast_restart_run_with_progress,
     forecast_restart_start_plan,
+    forecast_restart_worker_run,
 )
 
 
@@ -195,6 +197,54 @@ class ForecastRestartServiceTests(unittest.TestCase):
         self.assertIs(captured["run_args"], args)
         self.assertEqual(captured["payload"], payload)
         self.assertIs(captured["kwargs"]["stage_callback"], stage_callback)
+
+    def test_forecast_restart_worker_run_records_success_outputs_and_detected_run(self) -> None:
+        events: list[tuple] = []
+
+        def run_with_progress(payload, report):
+            events.append(("payload", payload))
+            report("运行中", "正在预报")
+            return {"run_path": "runs/forecast"}
+
+        context = ForecastRestartWorkerContext(
+            run_with_progress=run_with_progress,
+            set_task_metadata=lambda task_id, **kwargs: events.append(("metadata", task_id, kwargs)),
+            add_task_output=lambda task_id, message: events.append(("output", task_id, message)),
+            add_task_exception_output=lambda task_id, exc: events.append(("exception", task_id, str(exc))),
+            mark_task_finished=lambda task_id, **kwargs: events.append(("finished", task_id, kwargs)),
+            set_detected_runs=lambda task_id, runs: events.append(("detected", task_id, runs)),
+        )
+
+        forecast_restart_worker_run("task-1", {"source_run": "runs/source"}, context)
+
+        self.assertIn(("output", "task-1", "[阶段] 准备连续状态预报"), events)
+        self.assertIn(("output", "task-1", "正在预报"), events)
+        self.assertIn(("metadata", "task-1", {"run_path": "runs/forecast"}), events)
+        self.assertIn(("detected", "task-1", ["runs/forecast"]), events)
+        self.assertIn(("finished", "task-1", {"ok": True, "return_code": 0, "result": {"run_path": "runs/forecast"}}), events)
+
+    def test_forecast_restart_worker_run_records_failure_after_last_stage(self) -> None:
+        events: list[tuple] = []
+
+        def run_with_progress(payload, report):
+            report("运行中", "正在预报")
+            raise RuntimeError("forecast failed")
+
+        context = ForecastRestartWorkerContext(
+            run_with_progress=run_with_progress,
+            set_task_metadata=lambda task_id, **kwargs: events.append(("metadata", task_id, kwargs)),
+            add_task_output=lambda task_id, message: events.append(("output", task_id, message)),
+            add_task_exception_output=lambda task_id, exc: events.append(("exception", task_id, str(exc))),
+            mark_task_finished=lambda task_id, **kwargs: events.append(("finished", task_id, kwargs)),
+            set_detected_runs=lambda task_id, runs: events.append(("detected", task_id, runs)),
+        )
+
+        forecast_restart_worker_run("task-1", {"source_run": "runs/source"}, context)
+
+        self.assertIn(("metadata", "task-1", {"ui_progress": {"stage": "运行中", "label": "连续状态预报"}}), events)
+        self.assertIn(("exception", "task-1", "forecast failed"), events)
+        self.assertIn(("finished", "task-1", {"ok": False, "return_code": -1}), events)
+        self.assertFalse(any(event[0] == "detected" for event in events))
 
 
 if __name__ == "__main__":

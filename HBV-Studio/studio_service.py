@@ -72,6 +72,8 @@ from services.forecast_restart import ForecastRestartRunContext
 from services.forecast_restart import forecast_restart_args as build_forecast_restart_args
 from services.forecast_restart import forecast_restart_run as build_forecast_restart_run
 from services.forecast_restart import forecast_restart_run_with_progress as build_forecast_restart_run_with_progress
+from services.forecast_restart import ForecastRestartWorkerContext
+from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
@@ -8716,31 +8718,26 @@ def ensure_forecast_input_ready(payload: dict[str, Any]) -> dict[str, Any]:
     return build_ensure_forecast_input_ready(payload, _forecast_input_check_context())
 
 
+def _set_forecast_restart_detected_runs(task_id: str, detected_runs: list[str]) -> None:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+        if task is not None:
+            task.detected_runs = detected_runs
+
+
 def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
-    last_stage = ""
-
-    def report(stage: str, message: str | None = None) -> None:
-        nonlocal last_stage
-        last_stage = stage
-        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "连续状态预报"})
-        if message:
-            add_task_output(task_id, message)
-
-    try:
-        report("准备启动", "[阶段] 准备连续状态预报")
-        result = forecast_restart_with_progress(payload, report)
-        if result.get("run_path"):
-            set_task_metadata(task_id, run_path=result["run_path"])
-            with TASK_LOCK:
-                task = TASKS.get(task_id)
-                if task is not None:
-                    task.detected_runs = [str(result["run_path"])]
-        _mark_task_finished(task_id, ok=True, return_code=0, result=result)
-    except Exception as exc:
-        if last_stage:
-            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
-        add_task_exception_output(task_id, exc)
-        _mark_task_finished(task_id, ok=False, return_code=-1)
+    build_forecast_restart_worker_run(
+        task_id,
+        payload,
+        ForecastRestartWorkerContext(
+            run_with_progress=forecast_restart_with_progress,
+            set_task_metadata=set_task_metadata,
+            add_task_output=add_task_output,
+            add_task_exception_output=add_task_exception_output,
+            mark_task_finished=_mark_task_finished,
+            set_detected_runs=_set_forecast_restart_detected_runs,
+        ),
+    )
 
 
 def _forward_simulation_start_context() -> ForwardSimulationStartContext:

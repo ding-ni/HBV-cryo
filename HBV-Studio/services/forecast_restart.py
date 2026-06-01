@@ -23,6 +23,16 @@ class ForecastRestartRunContext:
 
 
 @dataclass(frozen=True)
+class ForecastRestartWorkerContext:
+    run_with_progress: Callable[[dict[str, Any], Callable[[str, str | None], None]], dict[str, Any]]
+    set_task_metadata: Callable[..., None]
+    add_task_output: Callable[[str, str], None]
+    add_task_exception_output: Callable[[str, Exception], None]
+    mark_task_finished: Callable[..., None]
+    set_detected_runs: Callable[[str, list[str]], None]
+
+
+@dataclass(frozen=True)
 class ForecastRestartStartPlan:
     label: str
     command: list[str]
@@ -110,3 +120,32 @@ def forecast_restart_run_with_progress(
     checked_payload = {**payload, "_forecast_input_check": input_check}
     args = context.build_args(checked_payload)
     return context.run_forecast(args, stage_callback=stage_callback)
+
+
+def forecast_restart_worker_run(
+    task_id: str,
+    payload: dict[str, Any],
+    context: ForecastRestartWorkerContext,
+) -> None:
+    last_stage = ""
+
+    def report(stage: str, message: str | None = None) -> None:
+        nonlocal last_stage
+        last_stage = stage
+        context.set_task_metadata(task_id, ui_progress={"stage": stage, "label": "连续状态预报"})
+        if message:
+            context.add_task_output(task_id, message)
+
+    try:
+        report("准备启动", "[阶段] 准备连续状态预报")
+        result = context.run_with_progress(payload, report)
+        if result.get("run_path"):
+            run_path = str(result["run_path"])
+            context.set_task_metadata(task_id, run_path=run_path)
+            context.set_detected_runs(task_id, [run_path])
+        context.mark_task_finished(task_id, ok=True, return_code=0, result=result)
+    except Exception as exc:
+        if last_stage:
+            context.set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "连续状态预报"})
+        context.add_task_exception_output(task_id, exc)
+        context.mark_task_finished(task_id, ok=False, return_code=-1)
