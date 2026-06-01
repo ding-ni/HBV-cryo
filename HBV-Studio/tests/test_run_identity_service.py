@@ -17,6 +17,7 @@ import profile_runner  # noqa: E402
 
 from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
+    RunConfigDataSourceContext,
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
     RunMetadataObjectTypeContext,
@@ -62,6 +63,7 @@ from services.runs import (  # noqa: E402
     resolve_run_workspace_config,
     resolve_source_run_reference,
     rebase_run_data_cache_paths,
+    run_precip_source_key,
     run_precip_dir_candidates,
     run_csv_date_bounds,
     run_csv_preview,
@@ -75,6 +77,7 @@ from services.runs import (  # noqa: E402
     synthesized_parameter_profile,
     sync_objective_profile_metadata,
     sync_run_boundary_condition_path,
+    sync_run_config_data_sources,
     sync_run_config_profile_metadata,
     sync_run_data_source_paths,
     sync_source_run_reference,
@@ -796,6 +799,74 @@ class RunIdentityServiceTests(unittest.TestCase):
             "D:/resolved/relative/prec",
             "C:/effective/prec",
         ])
+
+    def test_run_precip_source_key_prefers_runtime_metadata_before_configured_source(self) -> None:
+        self.assertEqual(
+            run_precip_source_key(
+                {"runtime_prec_source": " CMFD ", "prec_source": "era5", "configured_precip_source": "custom_tif"},
+                "era5",
+            ),
+            "cmfd",
+        )
+        self.assertEqual(run_precip_source_key({"prec_source": "custom_tif"}, "era5"), "custom_tif")
+        self.assertEqual(run_precip_source_key({"configured_precip_source": "cmfd"}, "era5"), "cmfd")
+        self.assertEqual(run_precip_source_key({}, "custom_tif"), "custom_tif")
+        self.assertEqual(run_precip_source_key({}, ""), "era5")
+
+    def test_sync_run_config_data_sources_resolves_source_dirs_and_observed_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cmfd_prec_dir = root / "cmfd_prec"
+            temp_dir = root / "temp"
+            evap_dir = root / "evap"
+            glacier_melt_dir = root / "glacier_melt"
+            gis_dir = root / "gis"
+            for path in (cmfd_prec_dir, temp_dir, evap_dir, glacier_melt_dir, gis_dir):
+                path.mkdir()
+            (gis_dir / "glacier_mask.tif").write_text("mask", encoding="utf-8")
+            obs_path = root / "obs.csv"
+            obs_path.write_text("date,q\n2026-06-01,1\n", encoding="utf-8")
+            data_sources = {"runtime_prec_source": "cmfd", "prec_dir": "legacy/prec"}
+            paths = {
+                "aligned_prec_cmfd_dir": cmfd_prec_dir,
+                "aligned_prec_cmfd_base_dir": root / "cmfd_base",
+                "aligned_temp_dir": temp_dir,
+                "aligned_evap_dir": evap_dir,
+                "glacier_melt_dir": glacier_melt_dir,
+                "gis_dir": gis_dir,
+            }
+            context = RunConfigDataSourceContext(
+                configured_precip_source=lambda config: "era5",
+                resolve_precip_source=lambda config, source: str(source),
+                effective_precip_paths=lambda config, profile, **kwargs: (
+                    None,
+                    root / "effective_prec",
+                    None,
+                ),
+                resolve_any_path=lambda raw, **kwargs: root / str(raw),
+                first_existing_path=first_existing_path,
+                resolve_config_related_path=lambda config, raw: Path(raw) if raw else None,
+                observed_flow_key="observed",
+            )
+
+            source_key = sync_run_config_data_sources(
+                data_sources,
+                {"observed": str(obs_path)},
+                profile_runner.PROFILE_DAILY,
+                paths,
+                context,
+            )
+
+            self.assertEqual(source_key, "cmfd")
+            self.assertEqual(data_sources["prec_dir"], str(cmfd_prec_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["temp_dir"], str(temp_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["evap_dir"], str(evap_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["glacier_melt_dir"], str(glacier_melt_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["glacier_mask"], str((gis_dir / "glacier_mask.tif").resolve(strict=False)))
+            self.assertEqual(data_sources["obs_file"], str(obs_path.resolve(strict=False)))
+            self.assertEqual(data_sources["prec_source"], "cmfd")
+            self.assertEqual(data_sources["configured_precip_source"], "era5")
+            self.assertEqual(data_sources["runtime_prec_source"], "cmfd")
 
     def test_sync_run_data_source_paths_sets_configured_paths_and_optional_glacier_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -107,7 +107,7 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunConfigDataSourceContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
@@ -150,14 +150,13 @@ from services.runs import resolve_metadata_object_type as build_resolve_metadata
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import rebase_run_data_cache_paths as build_rebase_run_data_cache_paths
-from services.runs import run_precip_dir_candidates as build_run_precip_dir_candidates
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
+from services.runs import sync_run_config_data_sources as build_sync_run_config_data_sources
 from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
-from services.runs import sync_run_data_source_paths as build_sync_run_data_source_paths
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2660,6 +2659,18 @@ def _run_metadata_object_type_context() -> RunMetadataObjectTypeContext:
     return RunMetadataObjectTypeContext(detect_object_type=detect_object_type)
 
 
+def _run_config_data_source_context() -> RunConfigDataSourceContext:
+    return RunConfigDataSourceContext(
+        configured_precip_source=configured_precip_source,
+        resolve_precip_source=resolve_precip_source,
+        effective_precip_paths=effective_precip_paths,
+        resolve_any_path=resolve_any_path,
+        first_existing_path=_first_existing_path,
+        resolve_config_related_path=_resolve_config_related_path,
+        observed_flow_key=OBSERVED_FLOW_KEY,
+    )
+
+
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
@@ -2711,32 +2722,12 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
             )
             objective_mode = build_resolve_run_config_objective_mode(normalized, optimization, config, profile)
             paths = build_profile_paths(config, profile)
-            configured_source = configured_precip_source(config)
-            raw_source_key = str(
-                data_sources.get("runtime_prec_source")
-                or data_sources.get("prec_source")
-                or data_sources.get("configured_precip_source")
-                or configured_source
-                or "era5"
-            ).strip().lower()
-            source_key = resolve_precip_source(config, raw_source_key)
-            _, effective_prec_dir, _ = effective_precip_paths(config, profile, precip_source=source_key)
-            prec_candidates = build_run_precip_dir_candidates(
-                paths,
-                source_key,
-                data_sources.get("prec_dir", ""),
-                effective_prec_dir,
-                resolve_any_path,
-            )
-            resolved_prec_dir = _first_existing_path(prec_candidates)
-            obs_path = _resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))
-            build_sync_run_data_source_paths(
+            build_sync_run_config_data_sources(
                 data_sources,
+                config,
+                profile,
                 paths,
-                source_key,
-                configured_source,
-                resolved_prec_dir,
-                obs_path,
+                _run_config_data_source_context(),
             )
             if not resolved_object_type:
                 resolved_object_type = _resolve_metadata_object_type(normalized, config)

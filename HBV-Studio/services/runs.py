@@ -96,6 +96,17 @@ class RunMetadataObjectTypeContext:
 
 
 @dataclass(frozen=True)
+class RunConfigDataSourceContext:
+    configured_precip_source: Callable[[dict[str, Any]], str]
+    resolve_precip_source: Callable[[dict[str, Any], Any], str]
+    effective_precip_paths: Callable[..., tuple[Any, Any, Any]]
+    resolve_any_path: Callable[..., Path]
+    first_existing_path: Callable[[list[Path]], Path | None]
+    resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
+    observed_flow_key: str
+
+
+@dataclass(frozen=True)
 class RunMetadataSections:
     data_sources: dict[str, Any]
     boundary_condition: dict[str, Any]
@@ -1053,6 +1064,47 @@ def run_precip_dir_candidates(
     if effective_prec_dir:
         candidates.append(Path(effective_prec_dir))
     return candidates
+
+
+def run_precip_source_key(data_sources: dict[str, Any], configured_source: str) -> str:
+    return str(
+        data_sources.get("runtime_prec_source")
+        or data_sources.get("prec_source")
+        or data_sources.get("configured_precip_source")
+        or configured_source
+        or "era5"
+    ).strip().lower()
+
+
+def sync_run_config_data_sources(
+    data_sources: dict[str, Any],
+    config: dict[str, Any],
+    profile: str,
+    paths: dict[str, Any],
+    context: RunConfigDataSourceContext,
+) -> str:
+    configured_source = context.configured_precip_source(config)
+    raw_source_key = run_precip_source_key(data_sources, configured_source)
+    source_key = context.resolve_precip_source(config, raw_source_key)
+    _, effective_prec_dir, _ = context.effective_precip_paths(config, profile, precip_source=source_key)
+    prec_candidates = run_precip_dir_candidates(
+        paths,
+        source_key,
+        data_sources.get("prec_dir", ""),
+        effective_prec_dir,
+        context.resolve_any_path,
+    )
+    resolved_prec_dir = context.first_existing_path(prec_candidates)
+    obs_path = context.resolve_config_related_path(config, config.get(context.observed_flow_key))
+    sync_run_data_source_paths(
+        data_sources,
+        paths,
+        source_key,
+        configured_source,
+        resolved_prec_dir,
+        obs_path,
+    )
+    return source_key
 
 
 def sync_run_data_source_paths(
