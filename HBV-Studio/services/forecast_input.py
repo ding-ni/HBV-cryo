@@ -17,11 +17,14 @@ class ForecastInputCheckContext:
     build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
     resolve_profile: Callable[[dict[str, Any], str | None], str]
     run_parameter_context: Callable[[Path, dict[str, Any], Path | None], dict[str, Any]]
+    profile_labels: dict[str, str]
+    objective_label: Callable[[dict[str, Any]], str]
+    precip_source_label: Callable[[str], str]
+    station_precip_mode_label: Callable[[str], str]
     normalize_time_step_hours: Callable[[Any], float]
     is_date_only_string: Callable[[str], bool]
     validate_tif_time_series: Callable[..., dict[str, Any]]
     format_time_for_check: Callable[[Any, float], str]
-    forecast_parameter_detail_text: Callable[[dict[str, Any]], str]
     forecast_station_precip_check: Callable[[dict[str, Any], dict[str, Any], str, str, float], dict[str, Any] | None]
 
 
@@ -237,6 +240,33 @@ def forecast_parameter_check_context(
     return run_parameter_context(source_run, metadata, resolved_config)
 
 
+def forecast_parameter_detail_text(
+    context: dict[str, Any],
+    *,
+    profile_labels: dict[str, str],
+    objective_label: Callable[[dict[str, Any]], str],
+    precip_source_label: Callable[[str], str],
+    station_precip_mode_label: Callable[[str], str],
+) -> str:
+    parts: list[str] = []
+    workspace = str(context.get("source_workspace", "") or "").strip()
+    profile = str(context.get("calibration_profile", "") or "").strip()
+    objective = str(context.get("objective_mode", "") or "").strip()
+    prec_source = str(context.get("prec_source", "") or "").strip()
+    precipitation = str(context.get("precipitation_strategy", "") or context.get("precipitation_mode", "") or "").strip()
+    if workspace:
+        parts.append(f"来源工作区：{workspace}")
+    if profile:
+        parts.append(f"计算尺度：{profile_labels.get(profile, profile)}")
+    if objective:
+        parts.append(f"率定目标：{objective_label({'effective_objective_mode': objective})}")
+    if prec_source:
+        parts.append(f"降水驱动：{precip_source_label(prec_source)}")
+    if precipitation:
+        parts.append(f"降水方案：{station_precip_mode_label(precipitation)}")
+    return "；".join(parts)
+
+
 def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckContext) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -350,7 +380,13 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
         resolve_profile=context.resolve_profile,
     )
     output_status = "ok" if expected_steps > 0 else "warn"
-    parameter_detail = context.forecast_parameter_detail_text(parameter_context)
+    parameter_detail = forecast_parameter_detail_text(
+        parameter_context,
+        profile_labels=context.profile_labels,
+        objective_label=context.objective_label,
+        precip_source_label=context.precip_source_label,
+        station_precip_mode_label=context.station_precip_mode_label,
+    )
     station_precip_check = context.forecast_station_precip_check(
         payload,
         metadata,

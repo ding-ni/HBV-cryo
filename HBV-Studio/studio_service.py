@@ -8695,26 +8695,6 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
-def _forecast_parameter_detail_text(context: dict[str, Any]) -> str:
-    parts: list[str] = []
-    workspace = str(context.get("source_workspace", "") or "").strip()
-    profile = str(context.get("calibration_profile", "") or "").strip()
-    objective = str(context.get("objective_mode", "") or "").strip()
-    prec_source = str(context.get("prec_source", "") or "").strip()
-    precipitation = str(context.get("precipitation_strategy", "") or context.get("precipitation_mode", "") or "").strip()
-    if workspace:
-        parts.append(f"来源工作区：{workspace}")
-    if profile:
-        parts.append(f"计算尺度：{PROFILE_LABELS.get(profile, profile)}")
-    if objective:
-        parts.append(f"率定目标：{_objective_label_zh({'effective_objective_mode': objective})}")
-    if prec_source:
-        parts.append(f"降水驱动：{display_precip_source_label(prec_source)}")
-    if precipitation:
-        parts.append(f"降水方案：{_station_precip_mode_label(precipitation)}")
-    return "；".join(parts)
-
-
 def _forecast_station_precip_check(
     payload: dict[str, Any],
     metadata: dict[str, Any],
@@ -8784,11 +8764,14 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         build_profile_paths=build_profile_paths,
         resolve_profile=resolve_profile,
         run_parameter_context=_run_parameter_context,
+        profile_labels=PROFILE_LABELS,
+        objective_label=_objective_label_zh,
+        precip_source_label=display_precip_source_label,
+        station_precip_mode_label=_station_precip_mode_label,
         normalize_time_step_hours=normalize_time_step_hours,
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,
         format_time_for_check=_format_time_for_check,
-        forecast_parameter_detail_text=_forecast_parameter_detail_text,
         forecast_station_precip_check=_forecast_station_precip_check,
     )
 

@@ -20,6 +20,7 @@ from services.forecast_input import (  # noqa: E402
     forecast_input_dir_summary,
     forecast_output_preview,
     forecast_parameter_check_context,
+    forecast_parameter_detail_text,
     forecast_source_state_time,
 )
 
@@ -36,11 +37,14 @@ class ForecastInputServiceTests(unittest.TestCase):
             build_profile_paths=fail,
             resolve_profile=fail,
             run_parameter_context=fail,
+            profile_labels={},
+            objective_label=fail,
+            precip_source_label=fail,
+            station_precip_mode_label=fail,
             normalize_time_step_hours=fail,
             is_date_only_string=fail,
             validate_tif_time_series=fail,
             format_time_for_check=fail,
-            forecast_parameter_detail_text=fail,
             forecast_station_precip_check=fail,
         )
 
@@ -230,6 +234,43 @@ class ForecastInputServiceTests(unittest.TestCase):
             )
 
             self.assertIsNone(result["config"])
+
+    def test_forecast_parameter_detail_text_formats_available_context(self) -> None:
+        detail = forecast_parameter_detail_text(
+            {
+                "source_workspace": "Basin_A",
+                "calibration_profile": "daily",
+                "objective_mode": "daily_unified_professional_v1",
+                "prec_source": "custom_tif",
+                "precipitation_strategy": "grid_plus_station_bias",
+            },
+            profile_labels={"daily": "日尺度"},
+            objective_label=lambda metadata: "统一专业目标",
+            precip_source_label=lambda source: "本地栅格",
+            station_precip_mode_label=lambda mode: "站点订正",
+        )
+
+        self.assertEqual(
+            detail,
+            "来源工作区：Basin_A；计算尺度：日尺度；率定目标：统一专业目标；降水驱动：本地栅格；降水方案：站点订正",
+        )
+
+    def test_forecast_parameter_detail_text_skips_blank_fields_and_keeps_unknown_profile(self) -> None:
+        detail = forecast_parameter_detail_text(
+            {
+                "source_workspace": "",
+                "calibration_profile": "event",
+                "objective_mode": "",
+                "prec_source": "",
+                "precipitation_mode": "thiessen_station_only",
+            },
+            profile_labels={},
+            objective_label=lambda metadata: self.fail("objective label should not be used"),
+            precip_source_label=lambda source: self.fail("precip source label should not be used"),
+            station_precip_mode_label=lambda mode: "泰森站点降水",
+        )
+
+        self.assertEqual(detail, "计算尺度：event；降水方案：泰森站点降水")
 
 
 if __name__ == "__main__":
