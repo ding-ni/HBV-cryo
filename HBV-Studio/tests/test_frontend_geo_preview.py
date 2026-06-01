@@ -59,6 +59,68 @@ class FrontendGeoPreviewTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_maplibre_layer_plan_uses_offline_geo_endpoints(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console, URLSearchParams };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/geoPreview.js", "utf8"), context);
+
+            const geo = context.window.HBVStudioGeoPreview;
+            if (!geo?.buildMapLibreLayerPlan || !geo?.buildMapLibreStyle) {
+              throw new Error("geo map planning exports are missing");
+            }
+            const overview = {
+              config_path: "F:/测试 工作区/workspace.json",
+              focus_bounds: { west: 99.8, south: 30.8, east: 100.5, north: 31.4 },
+              layers: [
+                { id: "dem", kind: "raster", status: "ok", bounds: { west: 99.8, south: 30.8, east: 100.5, north: 31.4 } },
+                { id: "basin", kind: "vector", status: "ok" },
+                { id: "elevation_zone", kind: "raster", status: "ok" },
+                { id: "glacier", kind: "raster", status: "ok" },
+                { id: "stations", kind: "point", status: "ok" },
+              ],
+            };
+            const plan = geo.buildMapLibreLayerPlan(overview, overview.config_path, { demStyle: "gray" });
+            const style = geo.buildMapLibreStyle(overview, overview.config_path, { demStyle: "gray" });
+
+            if (plan.version !== 8 || plan.offline !== true) throw new Error("plan metadata mismatch");
+            if (plan.sources.dem.type !== "image") throw new Error("DEM should use image source");
+            if (!plan.sources.dem.url.startsWith("/api/geo/dem?")) throw new Error(plan.sources.dem.url);
+            if (!plan.sources.dem.url.includes("style=gray")) throw new Error(plan.sources.dem.url);
+            if (!plan.sources.dem.url.includes("ws=F%3A%2F%E6%B5%8B%E8%AF%95+%E5%B7%A5%E4%BD%9C%E5%8C%BA%2Fworkspace.json")) {
+              throw new Error(`workspace path was not encoded: ${plan.sources.dem.url}`);
+            }
+            if (JSON.stringify(plan.sources.dem.coordinates[0]) !== JSON.stringify([99.8, 31.4])) {
+              throw new Error("DEM image coordinates must start at top-left");
+            }
+            for (const key of ["basin", "elevation_zones", "glacier", "stations"]) {
+              const serialized = JSON.stringify(plan.sources[key]);
+              if (!serialized.includes("/api/geo/")) throw new Error(`${key} source missing geo endpoint`);
+              if (/https?:\/\//i.test(serialized)) throw new Error(`${key} source must stay offline`);
+            }
+            const ids = plan.layers.map(layer => layer.id);
+            for (const id of ["dem", "elevation-zones-fill", "glacier-fill", "basin-line", "stations"]) {
+              if (!ids.includes(id)) throw new Error(`missing layer ${id}: ${ids.join(",")}`);
+            }
+            if (JSON.stringify(style.sources) !== JSON.stringify(plan.sources)) {
+              throw new Error("style sources should reuse the layer plan");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

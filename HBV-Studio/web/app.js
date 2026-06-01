@@ -153,7 +153,7 @@ const frontendModuleContracts = [
   {
     script: "./js/geoPreview.js",
     global: "HBVStudioGeoPreview",
-    exports: ["renderOverview"],
+    exports: ["buildMapLibreLayerPlan", "buildMapLibreStyle", "renderOverview"],
   },
   {
     script: "./js/workspaceLayout.js",
