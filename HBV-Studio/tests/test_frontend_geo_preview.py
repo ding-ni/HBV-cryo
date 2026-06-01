@@ -22,6 +22,7 @@ class FrontendGeoPreviewTests(unittest.TestCase):
 
             const geo = context.window.HBVStudioGeoPreview;
             if (!geo) throw new Error("geo preview module was not exported");
+            const css = fs.readFileSync("web/styles.css", "utf8");
             const html = geo.renderOverview({
               flow_name: "测试流域",
               available_layer_count: 1,
@@ -47,6 +48,8 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!html.includes("<path")) throw new Error(`typed station symbols were not rendered: ${html}`);
             if (!html.includes("<circle")) throw new Error(`station circles were not rendered: ${html}`);
             if (!html.includes("geo-layer-stations")) throw new Error("station CSS class missing");
+            if (!html.includes("geo-layer-control geo-layer-stations")) throw new Error("station layer toggle missing");
+            if (!html.includes('data-geo-layer-toggle="stations"')) throw new Error("station layer toggle key missing");
             for (const cls of ["geo-station-type-rain", "geo-station-type-hydrology", "geo-station-type-outlet", "geo-station-type-station"]) {
               if (!html.includes(cls)) throw new Error(`station type class missing: ${cls}`);
             }
@@ -55,6 +58,10 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!html.includes("4 个")) throw new Error("station count metric missing");
             for (const item of ["雨量站 1", "水文站 1", "出口站 1", "站点 1"]) {
               if (!html.includes(item)) throw new Error(`station type legend missing: ${item}`);
+            }
+            for (const key of ["dem", "basin", "elevation_zone", "glacier", "stations"]) {
+              const selector = `.geo-preview-map:has(.geo-layer-toggle-${key}:not(:checked))`;
+              if (!css.includes(selector)) throw new Error(`layer visibility selector missing: ${selector}`);
             }
             if (!html.includes('data-geo-layer-count="1"')) throw new Error("layer count attribute mismatch");
             """

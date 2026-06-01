@@ -15,9 +15,18 @@
     return "status-fail";
   }
 
-  function layerCssClass(layer) {
+  function layerKey(layer) {
     const id = String(layer?.id || "").replace(/[^a-z0-9_-]/gi, "");
+    return id || "generic";
+  }
+
+  function layerCssClass(layer) {
+    const id = layerKey(layer);
     return id ? `geo-layer-${id}` : "geo-layer-generic";
+  }
+
+  function layerToggleClass(layer) {
+    return `geo-layer-toggle-${layerKey(layer)}`;
   }
 
   function stationTypeMeta(type) {
@@ -132,6 +141,27 @@
       .join("");
   }
 
+  function renderLayerToggles(overview, escapeHtml) {
+    const layers = Array.isArray(overview?.layers) ? overview.layers : [];
+    const drawableLayers = layers.filter(layer => {
+      if (layer?.status !== "ok") return false;
+      if (layer.id === "dem") return true;
+      if (layer.kind === "point") return Array.isArray(layer.points) && layer.points.length > 0;
+      return Array.isArray(layer.rings) && layer.rings.length > 0;
+    });
+    if (!drawableLayers.length) return "";
+    return `
+      <div class="geo-layer-control-bar" role="group" aria-label="图层">
+        ${drawableLayers.map(layer => `
+          <label class="geo-layer-control ${layerCssClass(layer)}">
+            <input class="geo-layer-toggle ${layerToggleClass(layer)}" type="checkbox" checked data-geo-layer-toggle="${escapeHtml(layerKey(layer))}">
+            <span>${escapeHtml(layer.label || layer.id || "图层")}</span>
+          </label>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function renderStationTypeLegend(layer, escapeHtml) {
     const counts = layer?.metrics?.station_type_counts || {};
     const items = ["rain", "hydrology", "outlet", "station"]
@@ -213,6 +243,7 @@
         </div>
         <div class="geo-preview-body">
           <div class="geo-preview-map">
+            ${renderLayerToggles(overview, escapeHtml)}
             <svg class="geo-preview-svg" viewBox="0 0 640 300" role="img" aria-label="工作区空间预览">
               <rect class="geo-preview-frame" x="1" y="1" width="638" height="298" rx="4"></rect>
               ${hasDem ? '<rect class="geo-layer geo-layer-dem" x="26" y="26" width="588" height="248" rx="3"></rect>' : ""}
