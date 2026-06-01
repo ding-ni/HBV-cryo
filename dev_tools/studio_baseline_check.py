@@ -255,6 +255,7 @@ def check_packaging_surfaces() -> dict[str, Any]:
         GUI_ROOT / "web" / "app.js",
         GUI_ROOT / "web" / "styles.css",
         GUI_ROOT / "services" / "dashboard.py",
+        GUI_ROOT / "services" / "data_prep.py",
         GUI_ROOT / "services" / "filesystem.py",
         GUI_ROOT / "services" / "geo_overview.py",
         GUI_ROOT / "services" / "geo_suggestions.py",
