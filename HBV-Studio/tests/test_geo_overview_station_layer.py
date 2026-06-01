@@ -36,7 +36,13 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
             gis_dir.mkdir()
             station_csv = root / "stations.csv"
             station_csv.write_text(
-                "station_id,lon,lat\nS1,100.0,31.0\nS2,100.3,31.2\nBAD,,31.5\n",
+                (
+                    "station_id,lon,lat,类型\n"
+                    "S1,100.0,31.0,雨量站\n"
+                    "S2,100.3,31.2,hydrology\n"
+                    "OUT,100.5,31.3,出口\n"
+                    "BAD,,31.5,雨量站\n"
+                ),
                 encoding="utf-8",
             )
             config = {
@@ -65,10 +71,18 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
 
             self.assertEqual(station_layer["status"], "ok")
             self.assertEqual(station_layer["kind"], "point")
-            self.assertEqual(station_layer["message"], "2 个站点")
-            self.assertEqual(station_layer["metrics"]["station_count"], 2)
-            self.assertEqual([item["id"] for item in station_layer["points"]], ["S1", "S2"])
+            self.assertEqual(station_layer["message"], "3 个站点")
+            self.assertEqual(station_layer["metrics"]["station_count"], 3)
+            self.assertEqual(
+                station_layer["metrics"]["station_type_counts"],
+                {"rain": 1, "hydrology": 1, "outlet": 1},
+            )
+            self.assertEqual([item["id"] for item in station_layer["points"]], ["S1", "S2", "OUT"])
             self.assertEqual(station_layer["points"][0]["coord"], [100.0, 31.0])
+            self.assertEqual(station_layer["points"][0]["station_type"], "rain")
+            self.assertEqual(station_layer["points"][0]["station_type_label"], "雨量站")
+            self.assertEqual(station_layer["points"][1]["station_type"], "hydrology")
+            self.assertEqual(station_layer["points"][2]["station_type"], "outlet")
             self.assertEqual(overview["available_layer_count"], 1)
             self.assertEqual(overview["bounds"], station_layer["bounds"])
             self.assertEqual(overview["focus_bounds"], station_layer["bounds"])
@@ -77,10 +91,12 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
             self.assertEqual(geojson["type"], "FeatureCollection")
             self.assertEqual(geojson["properties"]["id"], "stations")
             self.assertEqual(geojson["properties"]["status"], "ok")
-            self.assertEqual(geojson["properties"]["metrics"]["station_count"], 2)
-            self.assertEqual(len(geojson["features"]), 2)
+            self.assertEqual(geojson["properties"]["metrics"]["station_count"], 3)
+            self.assertEqual(len(geojson["features"]), 3)
         self.assertEqual(geojson["features"][0]["geometry"], {"type": "Point", "coordinates": [100.0, 31.0]})
         self.assertEqual(geojson["features"][0]["properties"]["label"], "S1")
+        self.assertEqual(geojson["features"][0]["properties"]["station_type"], "rain")
+        self.assertEqual(geojson["features"][0]["properties"]["station_type_label"], "雨量站")
 
     def test_dem_raster_can_be_rendered_as_offline_png(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -111,6 +111,18 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!Array.isArray(zonesPaint) || zonesPaint[0] !== "match" || !zonesPaint.includes("low") || !zonesPaint.includes("high")) {
               throw new Error(`elevation zones should use banded fill colors: ${JSON.stringify(zonesPaint)}`);
             }
+            const stationPaint = plan.layers.find(layer => layer.id === "stations").paint;
+            const stationColor = stationPaint["circle-color"];
+            const stationRadius = stationPaint["circle-radius"];
+            if (!Array.isArray(stationColor) || stationColor[0] !== "match" || JSON.stringify(stationColor[1]) !== JSON.stringify(["get", "station_type"])) {
+              throw new Error(`station colors should be keyed by station_type: ${JSON.stringify(stationColor)}`);
+            }
+            if (!stationColor.includes("rain") || !stationColor.includes("hydrology") || !stationColor.includes("outlet")) {
+              throw new Error(`station color palette missing station types: ${JSON.stringify(stationColor)}`);
+            }
+            if (!Array.isArray(stationRadius) || !stationRadius.includes("outlet") || !stationRadius.includes(6.2)) {
+              throw new Error(`station radius should highlight outlet stations: ${JSON.stringify(stationRadius)}`);
+            }
             if (JSON.stringify(style.sources) !== JSON.stringify(plan.sources)) {
               throw new Error("style sources should reuse the layer plan");
             }

@@ -27,6 +27,13 @@ _ELEVATION_ZONE_PROPERTY_KEYS = (
     "class_order",
 )
 
+_STATION_TYPE_LABELS = {
+    "rain": "雨量站",
+    "hydrology": "水文站",
+    "outlet": "出口站",
+    "station": "站点",
+}
+
 
 @dataclass(frozen=True)
 class GeoOverviewContext:
@@ -232,6 +239,46 @@ def _detect_table_column(columns: list[str], candidates: list[str]) -> str | Non
     return None
 
 
+def _station_type_metadata(raw_value: Any) -> tuple[str, str]:
+    text = str(raw_value or "").strip().lower()
+    compact = text.replace(" ", "").replace("_", "").replace("-", "")
+    if not compact:
+        station_type = "station"
+    elif (
+        compact in {"outlet", "control", "controlsection", "exit", "basinoutlet"}
+        or "出口" in compact
+        or "控制断面" in compact
+        or "流域出口" in compact
+        or "出水口" in compact
+    ):
+        station_type = "outlet"
+    elif (
+        compact in {"rain", "rainfall", "precip", "precipitation", "meteo", "meteorological", "weather"}
+        or "雨量" in compact
+        or "降水" in compact
+        or "气象" in compact
+    ):
+        station_type = "rain"
+    elif (
+        compact in {"hydro", "hydrology", "hydrological", "discharge", "flow", "streamflow", "runoff", "river"}
+        or "水文" in compact
+        or "径流" in compact
+        or "流量" in compact
+    ):
+        station_type = "hydrology"
+    else:
+        station_type = "station"
+    return station_type, _STATION_TYPE_LABELS[station_type]
+
+
+def _station_type_counts(points: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for point in points:
+        station_type = str(point.get("station_type", "") or "station")
+        counts[station_type] = counts.get(station_type, 0) + 1
+    return counts
+
+
 def _points_bounds(points: list[dict[str, Any]]) -> dict[str, float] | None:
     valid: list[tuple[float, float]] = []
     for item in points:
@@ -422,6 +469,10 @@ def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[s
             id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
             lon_col = _detect_table_column(columns, ["lon", "longitude", "x", "经度"])
             lat_col = _detect_table_column(columns, ["lat", "latitude", "y", "纬度"])
+            type_col = _detect_table_column(
+                columns,
+                ["station_type", "type", "role", "kind", "class", "类别", "类型", "站点类型", "站类", "站别"],
+            )
             if not id_col or not lon_col or not lat_col:
                 return _geo_empty_layer("stations", "站点", "point", path, "error", "未识别到站号或经纬度字段", context)
             points: list[dict[str, Any]] = []
@@ -434,10 +485,13 @@ def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[s
                 if not (math.isfinite(lon) and math.isfinite(lat)):
                     continue
                 station_id = str(row.get(id_col, "") or "").strip() or f"station_{idx + 1}"
+                station_type, station_type_label = _station_type_metadata(row.get(type_col, "") if type_col else "")
                 points.append({
                     "id": station_id,
                     "label": station_id,
                     "coord": [round(lon, 6), round(lat, 6)],
+                    "station_type": station_type,
+                    "station_type_label": station_type_label,
                 })
         if not points:
             return _geo_empty_layer("stations", "站点", "point", path, "missing", "无有效经纬度", context)
@@ -453,7 +507,7 @@ def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[s
             "bounds": _points_bounds(points),
             "rings": [],
             "points": points[:500],
-            "metrics": {"station_count": len(points)},
+            "metrics": {"station_count": len(points), "station_type_counts": _station_type_counts(points)},
         }
     except Exception as exc:
         return _geo_empty_layer("stations", "站点", "point", path, "error", f"读取失败：{exc}", context)
@@ -469,15 +523,20 @@ def _point_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
         lat = float(coord[1])
         if not (math.isfinite(lon) and math.isfinite(lat)):
             continue
+        properties = {
+            "id": str(point.get("id", "") or ""),
+            "label": str(point.get("label", "") or point.get("id", "") or "站点"),
+            "layer": str(layer.get("id", "") or ""),
+            "layer_label": str(layer.get("label", "") or ""),
+        }
+        for key in ("station_type", "station_type_label"):
+            value = str(point.get(key, "") or "")
+            if value:
+                properties[key] = value
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {
-                "id": str(point.get("id", "") or ""),
-                "label": str(point.get("label", "") or point.get("id", "") or "站点"),
-                "layer": str(layer.get("id", "") or ""),
-                "layer_label": str(layer.get("label", "") or ""),
-            },
+            "properties": properties,
         })
     return {
         "type": "FeatureCollection",
