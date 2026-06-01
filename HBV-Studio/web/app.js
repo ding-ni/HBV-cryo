@@ -59,6 +59,9 @@ const frontendModuleContracts = [
       "renderPresetOptions",
       "manualPresetDiffSummary",
       "manualPresetCompareSummary",
+      "findPresetById",
+      "manualPresetSavePayload",
+      "manualPresetDeletePayload",
       "manualContextWarning",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -5344,7 +5347,7 @@ function applyRecommendedCalibrationSettings() {
 
 function selectedManualPreset() {
   const presetId = $("#manual-preset-select")?.value || "";
-  return state.runManualPresets.find(p => p.id === presetId) || null;
+  return window.HBVStudioParameterLibrary.findPresetById(state.runManualPresets, presetId);
 }
 
 function applyManualPresetToCurrentRun(preset) {
@@ -5382,24 +5385,18 @@ async function saveCurrentManualPreset() {
     showToast("请输入参数集名称。", true);
     return;
   }
-  const payload = await apiPost("/api/manual-preset/save", {
-    config_path: configPath,
+  const payload = await apiPost("/api/manual-preset/save", window.HBVStudioParameterLibrary.manualPresetSavePayload({
+    configPath,
     scope: $("#manual-preset-scope")?.value || "workspace",
-    run_path: state._runData.run?.path || "",
-    calibration_profile: state._runData?.metadata?.calibration_profile || state.currentWorkspace?.率定模式 || "daily",
-    objective_mode: effectiveObjectiveMode(state._runData?.metadata || {}) || "daily_unified_professional_v1",
-    param_bounds_profile: state._runData?.metadata?.param_bounds_profile || state._runData?.metadata?.parameter_profile?.bounds_profile || $("#task-param-bounds-profile")?.value || "qtp_alpine_default",
-    prec_source: String(
-      state._runData?.metadata?.data_sources?.runtime_prec_source
-      || state._runData?.metadata?.data_sources?.prec_source
-      || state._runData?.metadata?.data_sources?.configured_precip_source
-      || getTaskRuntimePrecipSource()
-      || "era5"
-    ).trim().toLowerCase(),
-    glacier_mode: state._runData?.metadata?.data_sources?.glacier_mode || $("#task-glacier-mode")?.value || "inline",
+    runData: state._runData,
+    workspaceProfile: state.currentWorkspace?.率定模式,
+    objectiveMode: effectiveObjectiveMode(state._runData?.metadata || {}),
+    paramBoundsProfile: $("#task-param-bounds-profile")?.value,
+    runtimePrecipSource: getTaskRuntimePrecipSource(),
+    glacierMode: $("#task-glacier-mode")?.value,
     name,
     params: state._runParams,
-  });
+  }));
   await loadRunManualPresets(configPath, { silent: true });
   if (samePath(configPath, getTaskManualPresetConfigPath())) {
     await loadTaskManualPresets(configPath, {
@@ -5437,8 +5434,8 @@ async function deleteSelectedManualPreset() {
     return;
   }
   if (!window.confirm(`确定删除参数集“${preset.name}”吗？`)) return;
-  await apiPost("/api/manual-preset/delete", { config_path: configPath, preset_id: preset.id, scope: preset.scope || "workspace" });
-  const deletedPresetId = String(preset.id || "").trim();
+  await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(configPath, preset));
+  const deletedPresetId = String(preset.id || preset.parameter_set_id || "").trim();
   await loadRunManualPresets(configPath, { silent: true });
   if (samePath(configPath, getTaskManualPresetConfigPath())) {
     await loadTaskManualPresets(configPath, {

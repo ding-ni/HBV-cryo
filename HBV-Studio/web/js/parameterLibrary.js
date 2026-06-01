@@ -92,6 +92,49 @@
     return { visible: true, statusClass, lines, deltaCalibration, deltaValidation };
   }
 
+  function findPresetById(presets = [], presetId = "") {
+    const target = String(presetId || "").trim();
+    if (!target || !Array.isArray(presets)) return null;
+    return presets.find(preset =>
+      String(preset?.id || "").trim() === target || String(preset?.parameter_set_id || "").trim() === target
+    ) || null;
+  }
+
+  function manualPresetSavePayload(options = {}) {
+    const runData = options.runData || {};
+    const metadata = runData.metadata || {};
+    const dataSources = metadata.data_sources || {};
+    return {
+      config_path: String(options.configPath || "").trim(),
+      scope: options.scope || "workspace",
+      run_path: runData.run?.path || "",
+      calibration_profile: metadata.calibration_profile || options.workspaceProfile || "daily",
+      objective_mode: options.objectiveMode || "daily_unified_professional_v1",
+      param_bounds_profile: metadata.param_bounds_profile
+        || metadata.parameter_profile?.bounds_profile
+        || options.paramBoundsProfile
+        || "qtp_alpine_default",
+      prec_source: normalizeKey(
+        dataSources.runtime_prec_source
+        || dataSources.prec_source
+        || dataSources.configured_precip_source
+        || options.runtimePrecipSource
+        || "era5"
+      ),
+      glacier_mode: dataSources.glacier_mode || options.glacierMode || "inline",
+      name: String(options.name || "").trim(),
+      params: options.params || {},
+    };
+  }
+
+  function manualPresetDeletePayload(configPath = "", preset = {}) {
+    return {
+      config_path: String(configPath || "").trim(),
+      preset_id: String(preset?.id || preset?.parameter_set_id || "").trim(),
+      scope: preset?.scope || "workspace",
+    };
+  }
+
   function manualContextWarning(preset, current = {}, helpers = {}) {
     if (!preset) return "";
     const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
@@ -259,6 +302,9 @@
     renderPresetOptions,
     manualPresetDiffSummary,
     manualPresetCompareSummary,
+    findPresetById,
+    manualPresetSavePayload,
+    manualPresetDeletePayload,
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,

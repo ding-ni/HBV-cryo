@@ -109,6 +109,71 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_preset_lookup_and_payload_builders(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            const presets = [
+              { id: "local-1", name: "Local", scope: "workspace" },
+              { parameter_set_id: "global-1", name: "Global", scope: "global" },
+            ];
+            if (library.findPresetById(presets, "global-1").name !== "Global") {
+              throw new Error("parameter_set_id lookup failed");
+            }
+            if (library.findPresetById(presets, "missing") !== null) {
+              throw new Error("missing preset should return null");
+            }
+
+            const savePayload = library.manualPresetSavePayload({
+              configPath: " C:/workspaces/A/workspace.json ",
+              scope: "global",
+              runData: {
+                run: { path: "C:/runs/source" },
+                metadata: {
+                  calibration_profile: "hourly",
+                  parameter_profile: { bounds_profile: "hourly_step" },
+                  data_sources: {
+                    runtime_prec_source: "CUSTOM_TIF",
+                    glacier_mode: "inline",
+                  },
+                },
+              },
+              objectiveMode: "daily_unified_professional_v1",
+              name: "  Trial set  ",
+              params: { TT: 0.2 },
+            });
+            if (savePayload.config_path !== "C:/workspaces/A/workspace.json") throw new Error("config path not trimmed");
+            if (savePayload.scope !== "global") throw new Error("scope not carried");
+            if (savePayload.run_path !== "C:/runs/source") throw new Error("run path not carried");
+            if (savePayload.calibration_profile !== "hourly") throw new Error("calibration profile not carried");
+            if (savePayload.param_bounds_profile !== "hourly_step") throw new Error("bounds profile not carried");
+            if (savePayload.prec_source !== "custom_tif") throw new Error("precipitation source not normalized");
+            if (savePayload.name !== "Trial set") throw new Error("name not trimmed");
+            if (savePayload.params.TT !== 0.2) throw new Error("params not carried");
+
+            const deletePayload = library.manualPresetDeletePayload("C:/workspace.json", presets[1]);
+            if (deletePayload.preset_id !== "global-1" || deletePayload.scope !== "global") {
+              throw new Error("delete payload did not use parameter_set_id and scope");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
