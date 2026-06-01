@@ -32,21 +32,30 @@ class FrontendGeoPreviewTests(unittest.TestCase):
                   label: "站点",
                   kind: "point",
                   status: "ok",
-                  message: "2 个站点",
-                  metrics: { station_count: 2 },
+                  message: "4 个站点",
+                  metrics: { station_count: 4, station_type_counts: { rain: 1, hydrology: 1, outlet: 1, station: 1 } },
                   points: [
-                    { id: "S1", label: "S<1", coord: [100.0, 31.0] },
-                    { id: "S2", label: "S2", coord: [100.3, 31.2] },
+                    { id: "S1", label: "S<1", coord: [100.0, 31.0], station_type: "rain", station_type_label: "雨量站" },
+                    { id: "S2", label: "S2", coord: [100.3, 31.2], station_type: "hydrology", station_type_label: "水文站" },
+                    { id: "OUT", label: "出口", coord: [100.4, 31.25], station_type: "outlet", station_type_label: "出口站" },
+                    { id: "REF", label: "参照站", coord: [100.1, 31.1] },
                   ],
                 },
               ],
             });
 
+            if (!html.includes("<path")) throw new Error(`typed station symbols were not rendered: ${html}`);
             if (!html.includes("<circle")) throw new Error(`station circles were not rendered: ${html}`);
             if (!html.includes("geo-layer-stations")) throw new Error("station CSS class missing");
-            if (!html.includes("S&lt;1")) throw new Error("station label should be escaped");
+            for (const cls of ["geo-station-type-rain", "geo-station-type-hydrology", "geo-station-type-outlet", "geo-station-type-station"]) {
+              if (!html.includes(cls)) throw new Error(`station type class missing: ${cls}`);
+            }
+            if (!html.includes("S&lt;1 · 雨量站")) throw new Error("station typed title should be escaped");
             if (!html.includes("站点")) throw new Error("station metric label missing");
-            if (!html.includes("2 个")) throw new Error("station count metric missing");
+            if (!html.includes("4 个")) throw new Error("station count metric missing");
+            for (const item of ["雨量站 1", "水文站 1", "出口站 1", "站点 1"]) {
+              if (!html.includes(item)) throw new Error(`station type legend missing: ${item}`);
+            }
             if (!html.includes('data-geo-layer-count="1"')) throw new Error("layer count attribute mismatch");
             """
         )

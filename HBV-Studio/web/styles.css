@@ -1024,12 +1024,28 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   stroke-width: 1.7;
 }
 .geo-layer-stations {
-  fill: #b91c1c;
+  fill: #475569;
   stroke: #ffffff;
   stroke-width: 1.3;
 }
 .geo-layer-point {
   vector-effect: non-scaling-stroke;
+}
+.geo-station-type-rain {
+  fill: #2563eb;
+  stroke: #ffffff;
+}
+.geo-station-type-hydrology {
+  fill: #0e7490;
+  stroke: #ffffff;
+}
+.geo-station-type-outlet {
+  fill: #dc2626;
+  stroke: #ffffff;
+}
+.geo-station-type-station {
+  fill: #475569;
+  stroke: #ffffff;
 }
 .geo-layer-generic {
   fill: rgba(20,184,166,0.12);
@@ -1098,7 +1114,43 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
 .geo-preview-swatch.geo-layer-basin { color: #0e7490; background: rgba(14,116,144,0.16); }
 .geo-preview-swatch.geo-layer-elevation_zone { color: #2563eb; background: rgba(59,130,246,0.16); }
 .geo-preview-swatch.geo-layer-glacier { color: #0891b2; background: rgba(34,211,238,0.22); }
-.geo-preview-swatch.geo-layer-stations { color: #b91c1c; background: rgba(185,28,28,0.16); }
+.geo-preview-swatch.geo-layer-stations { color: #0e7490; background: rgba(14,116,144,0.15); }
+.geo-station-type-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin-top: 6px;
+}
+.geo-station-type-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.geo-station-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  font-size: 10px;
+  line-height: 1;
+  color: #ffffff;
+}
+.geo-station-symbol.geo-station-type-rain {
+  color: #2563eb;
+}
+.geo-station-symbol.geo-station-type-hydrology {
+  color: #0e7490;
+}
+.geo-station-symbol.geo-station-type-outlet {
+  color: #dc2626;
+}
+.geo-station-symbol.geo-station-type-station {
+  color: #475569;
+}
 
 .phase-toolbar {
   display: flex;

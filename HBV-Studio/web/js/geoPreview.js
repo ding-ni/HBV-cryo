@@ -20,6 +20,14 @@
     return id ? `geo-layer-${id}` : "geo-layer-generic";
   }
 
+  function stationTypeMeta(type) {
+    const key = String(type || "station").trim().toLowerCase();
+    if (key === "rain") return { key, label: "雨量站", symbol: "△", radius: 5.4 };
+    if (key === "hydrology") return { key, label: "水文站", symbol: "◇", radius: 5.6 };
+    if (key === "outlet") return { key, label: "出口站", symbol: "★", radius: 6.4 };
+    return { key: "station", label: "站点", symbol: "●", radius: 4.4 };
+  }
+
   function previewBounds(overview) {
     const b = overview?.focus_bounds || overview?.bounds || null;
     if (!b) return null;
@@ -48,6 +56,58 @@
     }).join(" ") + " Z";
   }
 
+  function trianglePath(x, y, radius) {
+    return [
+      `M${x.toFixed(1)},${(y - radius).toFixed(1)}`,
+      `L${(x - radius).toFixed(1)},${(y + radius).toFixed(1)}`,
+      `L${(x + radius).toFixed(1)},${(y + radius).toFixed(1)}`,
+      "Z",
+    ].join(" ");
+  }
+
+  function diamondPath(x, y, radius) {
+    return [
+      `M${x.toFixed(1)},${(y - radius).toFixed(1)}`,
+      `L${(x + radius).toFixed(1)},${y.toFixed(1)}`,
+      `L${x.toFixed(1)},${(y + radius).toFixed(1)}`,
+      `L${(x - radius).toFixed(1)},${y.toFixed(1)}`,
+      "Z",
+    ].join(" ");
+  }
+
+  function starPath(x, y, radius) {
+    const inner = radius * 0.48;
+    const points = [];
+    for (let i = 0; i < 10; i += 1) {
+      const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+      const r = i % 2 === 0 ? radius : inner;
+      points.push([
+        (x + Math.cos(angle) * r).toFixed(1),
+        (y + Math.sin(angle) * r).toFixed(1),
+      ]);
+    }
+    return points.map((point, index) => `${index === 0 ? "M" : "L"}${point[0]},${point[1]}`).join(" ") + " Z";
+  }
+
+  function renderStationSymbol(point, layer, bounds, escapeHtml) {
+    const [x, y] = projectPoint(point.coord, bounds);
+    const label = point.label || point.id || layer.label || "站点";
+    const meta = stationTypeMeta(point.station_type);
+    const typeLabel = point.station_type_label || meta.label;
+    const title = `${label} · ${typeLabel}`;
+    const className = `geo-layer geo-layer-point ${layerCssClass(layer)} geo-station-type-${meta.key}`;
+    if (meta.key === "rain") {
+      return `<path class="${className}" d="${trianglePath(x, y, meta.radius)}"><title>${escapeHtml(title)}</title></path>`;
+    }
+    if (meta.key === "hydrology") {
+      return `<path class="${className}" d="${diamondPath(x, y, meta.radius)}"><title>${escapeHtml(title)}</title></path>`;
+    }
+    if (meta.key === "outlet") {
+      return `<path class="${className}" d="${starPath(x, y, meta.radius)}"><title>${escapeHtml(title)}</title></path>`;
+    }
+    return `<circle class="${className}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${meta.radius}"><title>${escapeHtml(title)}</title></circle>`;
+  }
+
   function renderLayerPaths(overview, bounds) {
     const layers = Array.isArray(overview?.layers) ? overview.layers : [];
     return layers
@@ -67,13 +127,28 @@
       .filter(layer => layer?.status === "ok" && layer.kind === "point")
       .map(layer => (layer.points || [])
         .slice(0, 120)
-        .map(point => {
-          const [x, y] = projectPoint(point.coord, bounds);
-          const label = point.label || point.id || layer.label || "站点";
-          return `<circle class="geo-layer geo-layer-point ${layerCssClass(layer)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.2"><title>${escapeHtml(label)}</title></circle>`;
-        })
+        .map(point => renderStationSymbol(point, layer, bounds, escapeHtml))
         .join(""))
       .join("");
+  }
+
+  function renderStationTypeLegend(layer, escapeHtml) {
+    const counts = layer?.metrics?.station_type_counts || {};
+    const items = ["rain", "hydrology", "outlet", "station"]
+      .map(type => {
+        const count = Number(counts[type] || 0);
+        if (!count) return "";
+        const meta = stationTypeMeta(type);
+        return `
+          <span class="geo-station-type-item">
+            <span class="geo-station-symbol geo-station-type-${meta.key}">${escapeHtml(meta.symbol)}</span>
+            <span>${escapeHtml(meta.label)} ${escapeHtml(String(count))}</span>
+          </span>
+        `;
+      })
+      .filter(Boolean)
+      .join("");
+    return items ? `<div class="geo-station-type-legend">${items}</div>` : "";
   }
 
   function renderLegend(overview, escapeHtml) {
@@ -84,6 +159,7 @@
         <div>
           <strong>${escapeHtml(layer.label || "")}</strong>
           <span class="status-badge ${layerStatusClass(layer)}">${escapeHtml(layer.status === "ok" ? layer.message || "已识别" : layer.message || "未识别")}</span>
+          ${layer.id === "stations" ? renderStationTypeLegend(layer, escapeHtml) : ""}
         </div>
       </div>
     `).join("");
