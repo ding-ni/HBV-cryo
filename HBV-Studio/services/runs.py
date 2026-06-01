@@ -78,6 +78,14 @@ class RunMetadataCompatibilityContext:
 
 
 @dataclass(frozen=True)
+class RunSourceReferenceContext:
+    resolve_any_path: Callable[..., Path]
+    replace_placeholders: Callable[..., Any]
+    discover_runtime_roots: Callable[[], list[Path]]
+    iter_run_parent_dirs: Callable[[Path], list[Path]]
+
+
+@dataclass(frozen=True)
 class RunDetailContext:
     resolve_path: Callable[..., Path]
     read_json_file: Callable[[Path], dict[str, Any]]
@@ -369,6 +377,73 @@ def source_run_meta(metadata: dict[str, Any], replace_placeholders: Callable[...
         except Exception:
             source_name = Path(source_path).name
     return source_path, source_name
+
+
+def resolve_source_run_reference(
+    source_run_path_raw: Any,
+    source_run_name_raw: Any,
+    context: RunSourceReferenceContext,
+) -> str:
+    source_run_path = str(source_run_path_raw or "").strip()
+    source_run_name = str(source_run_name_raw or "").strip()
+    if not source_run_path:
+        return ""
+
+    def is_run_dir(candidate: Path) -> bool:
+        return (candidate / "metadata.json").exists() and (candidate / "simulation.csv").exists()
+
+    def is_workspace_dir(candidate: Path) -> bool:
+        return any((candidate / item).exists() for item in ("\u7ed3\u679c", "results"))
+
+    try:
+        base_path = context.resolve_any_path(source_run_path, must_exist=False)
+    except Exception:
+        return source_run_path
+
+    candidates: list[Path] = [base_path]
+    search_names: list[str] = []
+    for name in (
+        source_run_name,
+        Path(str(context.replace_placeholders(source_run_path))).name,
+        base_path.name,
+    ):
+        cleaned = str(name or "").strip()
+        if cleaned and cleaned not in search_names:
+            search_names.append(cleaned)
+    if source_run_name:
+        candidates.append(base_path / source_run_name)
+        for parts in (
+            ("\u7ed3\u679c", "\u65e5\u5c3a\u5ea6", "\u8fd0\u884c\u8bb0\u5f55"),
+            ("\u7ed3\u679c", "\u5c0f\u65f6\u5c3a\u5ea6", "\u8fd0\u884c\u8bb0\u5f55"),
+            ("results", "daily", "runs"),
+            ("results", "hourly", "runs"),
+        ):
+            candidates.append(base_path.joinpath(*parts, source_run_name))
+
+    for candidate in candidates:
+        if is_run_dir(candidate):
+            return str(candidate.resolve(strict=False))
+
+    try:
+        runtime_roots = context.discover_runtime_roots()
+    except Exception:
+        runtime_roots = []
+
+    for name in search_names:
+        for root_dir in runtime_roots:
+            root = Path(root_dir).resolve(strict=False)
+            if root.name == name and (is_workspace_dir(root) or is_run_dir(root)):
+                return str(root)
+            candidate = (root / name).resolve(strict=False)
+            if is_workspace_dir(candidate) or is_run_dir(candidate):
+                return str(candidate)
+        for root_dir in runtime_roots:
+            for parent in context.iter_run_parent_dirs(Path(root_dir)):
+                candidate = (parent / name).resolve(strict=False)
+                if is_run_dir(candidate):
+                    return str(candidate)
+
+    return str(base_path.resolve(strict=False))
 
 
 def has_parameter_bounds(metadata: dict[str, Any]) -> bool:

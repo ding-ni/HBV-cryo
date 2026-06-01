@@ -18,6 +18,7 @@ from services.runs import (  # noqa: E402
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
     RunReplayConfigContext,
+    RunSourceReferenceContext,
     RunSummaryContext,
     RunWorkspaceNameContext,
     apply_run_replay_config_overrides,
@@ -41,6 +42,7 @@ from services.runs import (  # noqa: E402
     restore_forward_boundary_series,
     restore_forward_observation_state,
     restore_forward_observed_series,
+    resolve_source_run_reference,
     run_csv_date_bounds,
     run_csv_preview,
     run_parameter_context,
@@ -54,6 +56,21 @@ from services.runs import (  # noqa: E402
 
 
 class RunIdentityServiceTests(unittest.TestCase):
+    def _source_reference_context(
+        self,
+        *,
+        resolve=None,
+        replace=None,
+        roots=None,
+        parents=None,
+    ) -> RunSourceReferenceContext:
+        return RunSourceReferenceContext(
+            resolve_any_path=resolve or (lambda raw, **kwargs: Path(raw)),
+            replace_placeholders=replace or (lambda value, **kwargs: value),
+            discover_runtime_roots=roots or (lambda: []),
+            iter_run_parent_dirs=parents or (lambda root: []),
+        )
+
     def _metadata_compatibility_context(self, *, hints=None, resolve=None) -> RunMetadataCompatibilityContext:
         return RunMetadataCompatibilityContext(
             workspace_roots_hint_from_metadata=hints or (lambda metadata: (None, None)),
@@ -191,6 +208,58 @@ class RunIdentityServiceTests(unittest.TestCase):
         })
         self.assertEqual(explicit_path, "C:/runs/manual_source")
         self.assertEqual(explicit_name, "人工命名源结果")
+
+    def test_resolve_source_run_reference_returns_direct_run_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run_a"
+            run_dir.mkdir()
+            (run_dir / "metadata.json").write_text("{}", encoding="utf-8")
+            (run_dir / "simulation.csv").write_text("date,q_sim\n2026-06-01,1\n", encoding="utf-8")
+
+            resolved = resolve_source_run_reference(str(run_dir), "", self._source_reference_context())
+
+        self.assertEqual(resolved, str(run_dir.resolve(strict=False)))
+
+    def test_resolve_source_run_reference_finds_named_run_under_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_dir = Path(temp_dir) / "workspace"
+            run_dir = workspace_dir / "results" / "daily" / "runs" / "run_named"
+            run_dir.mkdir(parents=True)
+            (run_dir / "metadata.json").write_text("{}", encoding="utf-8")
+            (run_dir / "simulation.csv").write_text("date,q_sim\n2026-06-01,1\n", encoding="utf-8")
+
+            resolved = resolve_source_run_reference(
+                str(workspace_dir),
+                "run_named",
+                self._source_reference_context(),
+            )
+
+        self.assertEqual(resolved, str(run_dir.resolve(strict=False)))
+
+    def test_resolve_source_run_reference_searches_runtime_parent_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "runtime_workspace"
+            parent = root / "results" / "hourly" / "runs"
+            run_dir = parent / "run_from_root"
+            run_dir.mkdir(parents=True)
+            (run_dir / "metadata.json").write_text("{}", encoding="utf-8")
+            (run_dir / "simulation.csv").write_text("date,q_sim\n2026-06-01,1\n", encoding="utf-8")
+            context = self._source_reference_context(
+                roots=lambda: [root],
+                parents=lambda runtime_root: [parent],
+            )
+
+            resolved = resolve_source_run_reference("old/path/run_from_root", "", context)
+
+        self.assertEqual(resolved, str(run_dir.resolve(strict=False)))
+
+    def test_resolve_source_run_reference_returns_raw_path_when_resolution_fails(self) -> None:
+        def fail_resolve(*args, **kwargs):
+            raise ValueError("bad path")
+
+        resolved = resolve_source_run_reference("bad/raw/path", "run_name", self._source_reference_context(resolve=fail_resolve))
+
+        self.assertEqual(resolved, "bad/raw/path")
 
     def test_run_parameter_context_summarizes_source_result_for_forecast(self) -> None:
         run_dir = Path("C:/runs/source_run")

@@ -108,7 +108,7 @@ from services.meteo_import import meteo_import_worker_run as build_meteo_import_
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
-from services.runs import RunReplayConfigContext, RunSummaryContext, RunWorkspaceNameContext
+from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
@@ -131,6 +131,7 @@ from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
+from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
@@ -2673,67 +2674,17 @@ def _synthesized_objective_profile(profile: str, objective_mode: str, current: d
     return base
 
 
+def _run_source_reference_context() -> RunSourceReferenceContext:
+    return RunSourceReferenceContext(
+        resolve_any_path=resolve_any_path,
+        replace_placeholders=replace_placeholders,
+        discover_runtime_roots=discover_runtime_roots,
+        iter_run_parent_dirs=iter_run_parent_dirs,
+    )
+
+
 def _resolve_source_run_reference(source_run_path_raw: Any, source_run_name_raw: Any) -> str:
-    source_run_path = str(source_run_path_raw or "").strip()
-    source_run_name = str(source_run_name_raw or "").strip()
-    if not source_run_path:
-        return ""
-
-    def _is_run_dir(candidate: Path) -> bool:
-        return (candidate / "metadata.json").exists() and (candidate / "simulation.csv").exists()
-
-    def _is_workspace_dir(candidate: Path) -> bool:
-        return any((candidate / item).exists() for item in ("结果", "results"))
-
-    try:
-        base_path = resolve_any_path(source_run_path, must_exist=False)
-    except Exception:
-        return source_run_path
-
-    candidates: list[Path] = [base_path]
-    search_names: list[str] = []
-    for name in (
-        source_run_name,
-        Path(str(replace_placeholders(source_run_path))).name,
-        base_path.name,
-    ):
-        cleaned = str(name or "").strip()
-        if cleaned and cleaned not in search_names:
-            search_names.append(cleaned)
-    if source_run_name:
-        candidates.append(base_path / source_run_name)
-        for parts in (
-            ("结果", "日尺度", "运行记录"),
-            ("结果", "小时尺度", "运行记录"),
-            ("results", "daily", "runs"),
-            ("results", "hourly", "runs"),
-        ):
-            candidates.append(base_path.joinpath(*parts, source_run_name))
-
-    for candidate in candidates:
-        if _is_run_dir(candidate):
-            return str(candidate.resolve(strict=False))
-
-    try:
-        runtime_roots = discover_runtime_roots()
-    except Exception:
-        runtime_roots = []
-
-    for name in search_names:
-        for root_dir in runtime_roots:
-            root = Path(root_dir).resolve(strict=False)
-            if root.name == name and (_is_workspace_dir(root) or _is_run_dir(root)):
-                return str(root)
-            candidate = (root / name).resolve(strict=False)
-            if _is_workspace_dir(candidate) or _is_run_dir(candidate):
-                return str(candidate)
-        for root_dir in runtime_roots:
-            for parent in iter_run_parent_dirs(Path(root_dir)):
-                candidate = (parent / name).resolve(strict=False)
-                if _is_run_dir(candidate):
-                    return str(candidate)
-
-    return str(base_path.resolve(strict=False))
+    return build_resolve_source_run_reference(source_run_path_raw, source_run_name_raw, _run_source_reference_context())
 
 
 def _normalize_metadata_object_type(value: Any) -> str:
