@@ -33,6 +33,7 @@ API_ROUTE_SPECS: tuple[ApiRouteSpec, ...] = (
     ApiRouteSpec("GET", "/api/suggest/bbox", "_api_get_suggest_bbox", "geo"),
     ApiRouteSpec("GET", "/api/suggest/cfmax-threshold", "_api_get_suggest_cfmax_threshold", "geo"),
     ApiRouteSpec("GET", "/api/geo/overview", "_api_get_geo_overview", "geo"),
+    ApiRouteSpec("GET", "/api/geo/stations", "_api_get_geo_stations", "geo"),
     ApiRouteSpec("GET", "/api/data-prep/steps", "_api_get_data_prep_steps", "data_prep"),
     ApiRouteSpec("GET", "/api/data-prep/status", "_api_get_data_prep_status", "data_prep"),
     ApiRouteSpec("GET", "/api/config/validate", "_api_get_config_validate", "workspace_validation"),

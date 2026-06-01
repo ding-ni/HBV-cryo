@@ -317,6 +317,40 @@ def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[s
         return _geo_empty_layer("stations", "站点", "point", path, "error", f"读取失败：{exc}", context)
 
 
+def _point_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
+    features = []
+    for point in layer.get("points", []) or []:
+        coord = point.get("coord")
+        if not isinstance(coord, list) or len(coord) < 2:
+            continue
+        lon = float(coord[0])
+        lat = float(coord[1])
+        if not (math.isfinite(lon) and math.isfinite(lat)):
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "id": str(point.get("id", "") or ""),
+                "label": str(point.get("label", "") or point.get("id", "") or "站点"),
+                "layer": str(layer.get("id", "") or ""),
+                "layer_label": str(layer.get("label", "") or ""),
+            },
+        })
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {
+            "id": str(layer.get("id", "") or ""),
+            "label": str(layer.get("label", "") or ""),
+            "status": str(layer.get("status", "") or ""),
+            "message": str(layer.get("message", "") or ""),
+            "bounds": layer.get("bounds"),
+            "metrics": layer.get("metrics", {}),
+        },
+    }
+
+
 def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
     cfg_path, config = context.load_workspace_config(config_path_raw)
     try:
@@ -386,3 +420,11 @@ def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) ->
             "DEM 与栅格图层在此处以范围和统计摘要表达，完整栅格仍由本地工作区保存。",
         ],
     }
+
+
+def workspace_station_geojson(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    overview = workspace_geo_overview(config_path_raw, context)
+    station_layer = next((layer for layer in overview.get("layers", []) if layer.get("id") == "stations"), None)
+    if not station_layer:
+        station_layer = _geo_empty_layer("stations", "站点", "point", None, "missing", "未配置", context)
+    return _point_layer_geojson(station_layer)

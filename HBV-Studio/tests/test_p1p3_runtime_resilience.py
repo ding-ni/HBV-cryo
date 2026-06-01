@@ -78,6 +78,7 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             "/api/suggest/bbox",
             "/api/suggest/cfmax-threshold",
             "/api/geo/overview",
+            "/api/geo/stations",
             "/api/data-prep/steps",
             "/api/data-prep/status",
             "/api/config/validate",

@@ -8,7 +8,7 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.geo_overview import GeoOverviewContext, workspace_geo_overview  # noqa: E402
+from services.geo_overview import GeoOverviewContext, workspace_geo_overview, workspace_station_geojson  # noqa: E402
 
 
 class GeoOverviewStationLayerTests(unittest.TestCase):
@@ -56,6 +56,15 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
             self.assertEqual(overview["available_layer_count"], 1)
             self.assertEqual(overview["bounds"], station_layer["bounds"])
             self.assertEqual(overview["focus_bounds"], station_layer["bounds"])
+
+            geojson = workspace_station_geojson(str(cfg_path), context)
+            self.assertEqual(geojson["type"], "FeatureCollection")
+            self.assertEqual(geojson["properties"]["id"], "stations")
+            self.assertEqual(geojson["properties"]["status"], "ok")
+            self.assertEqual(geojson["properties"]["metrics"]["station_count"], 2)
+            self.assertEqual(len(geojson["features"]), 2)
+            self.assertEqual(geojson["features"][0]["geometry"], {"type": "Point", "coordinates": [100.0, 31.0]})
+            self.assertEqual(geojson["features"][0]["properties"]["label"], "S1")
 
 
 if __name__ == "__main__":

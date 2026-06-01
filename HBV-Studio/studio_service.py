@@ -56,7 +56,9 @@ from services.filesystem import (
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
-from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
+from services.geo_overview import GeoOverviewContext
+from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
+from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
 from services.manual_presets import ManualPresetContext
 from services.manual_presets import _source_run_metadata_for_preset as build_source_run_metadata_for_preset
 from services.manual_presets import delete_manual_preset as build_delete_manual_preset
@@ -2535,21 +2537,26 @@ def suggest_cfmax_threshold(shp_path: str, dem_path: str) -> dict[str, Any]:
     )
 
 
-def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
-    return build_workspace_geo_overview(
-        config_path_raw,
-        GeoOverviewContext(
-            load_workspace_config=load_workspace_config,
-            read_json_file=read_json_file,
-            current_profile=current_profile,
-            build_profile_paths=build_profile_paths,
-            resolve_config_related_path=_resolve_config_related_path,
-            workspace_dem_path=_workspace_dem_path,
-            configured_dem_kind=_configured_dem_kind,
-            to_display_path=to_display_path,
-            profile_labels=PROFILE_LABELS,
-        ),
+def _geo_overview_context() -> GeoOverviewContext:
+    return GeoOverviewContext(
+        load_workspace_config=load_workspace_config,
+        read_json_file=read_json_file,
+        current_profile=current_profile,
+        build_profile_paths=build_profile_paths,
+        resolve_config_related_path=_resolve_config_related_path,
+        workspace_dem_path=_workspace_dem_path,
+        configured_dem_kind=_configured_dem_kind,
+        to_display_path=to_display_path,
+        profile_labels=PROFILE_LABELS,
     )
+
+
+def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
+    return build_workspace_geo_overview(config_path_raw, _geo_overview_context())
+
+
+def workspace_station_geojson(config_path_raw: str) -> dict[str, Any]:
+    return build_workspace_station_geojson(config_path_raw, _geo_overview_context())
 
 
 def slugify_workspace_name(name: str) -> str:
@@ -10222,6 +10229,10 @@ class StudioHandler(BaseHTTPRequestHandler):
     def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
+
+    def _api_get_geo_stations(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self.send_json({"ok": True, "data": workspace_station_geojson(raw_path)})
 
     def _api_get_data_prep_steps(self, query: dict[str, list[str]]) -> None:
         raw_config = unquote(query.get("config_path", [""])[0])
