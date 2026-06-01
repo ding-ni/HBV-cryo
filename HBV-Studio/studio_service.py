@@ -76,7 +76,9 @@ from services.forecast_restart import ForecastRestartWorkerContext
 from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forward_simulation import ForwardSimulationStartContext
+from services.forward_simulation import ForwardSimulationWorkerContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
+from services.forward_simulation import forward_simulation_worker_run as build_forward_simulation_worker_run
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -8590,35 +8592,26 @@ def _create_manual_start_result(
         }
 
 
+def _set_forward_simulation_detected_runs(task_id: str, detected_runs: list[str]) -> None:
+    with TASK_LOCK:
+        task = TASKS.get(task_id)
+        if task is not None:
+            task.detected_runs = detected_runs
+
+
 def forward_sim_worker(task_id: str, payload: dict[str, Any]) -> None:
-    last_stage = ""
-
-    def report(stage: str, message: str | None = None) -> None:
-        nonlocal last_stage
-        last_stage = stage
-        set_task_metadata(task_id, ui_progress={"stage": stage, "label": "保存并重算"})
-        if message:
-            add_task_output(task_id, message)
-
-    try:
-        report("准备启动", "[阶段] 准备启动")
-        result = _run_forward_simulation(
-            payload,
-            stage_callback=report,
-            output_callback=lambda line: add_task_output(task_id, line),
-        )
-        if result.get("run_path"):
-            set_task_metadata(task_id, run_path=result["run_path"])
-            with TASK_LOCK:
-                task = TASKS.get(task_id)
-                if task is not None:
-                    task.detected_runs = [str(result["run_path"])]
-        _mark_task_finished(task_id, ok=True, return_code=0, result=result)
-    except Exception as exc:
-        if last_stage:
-            set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "保存并重算"})
-        add_task_exception_output(task_id, exc)
-        _mark_task_finished(task_id, ok=False, return_code=-1)
+    build_forward_simulation_worker_run(
+        task_id,
+        payload,
+        ForwardSimulationWorkerContext(
+            run_forward_simulation=_run_forward_simulation,
+            set_task_metadata=set_task_metadata,
+            add_task_output=add_task_output,
+            add_task_exception_output=add_task_exception_output,
+            mark_task_finished=_mark_task_finished,
+            set_detected_runs=_set_forward_simulation_detected_runs,
+        ),
+    )
 
 
 def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:

@@ -13,6 +13,16 @@ class ForwardSimulationStartContext:
 
 
 @dataclass(frozen=True)
+class ForwardSimulationWorkerContext:
+    run_forward_simulation: Callable[..., dict[str, Any]]
+    set_task_metadata: Callable[..., None]
+    add_task_output: Callable[[str, str], None]
+    add_task_exception_output: Callable[[str, Exception], None]
+    mark_task_finished: Callable[..., None]
+    set_detected_runs: Callable[[str, list[str]], None]
+
+
+@dataclass(frozen=True)
 class ForwardSimulationStartPlan:
     label: str
     command: list[str]
@@ -37,3 +47,36 @@ def forward_simulation_start_plan(
             "glacier_mode": forward_context["glacier_mode"],
         },
     )
+
+
+def forward_simulation_worker_run(
+    task_id: str,
+    payload: dict[str, Any],
+    context: ForwardSimulationWorkerContext,
+) -> None:
+    last_stage = ""
+
+    def report(stage: str, message: str | None = None) -> None:
+        nonlocal last_stage
+        last_stage = stage
+        context.set_task_metadata(task_id, ui_progress={"stage": stage, "label": "保存并重算"})
+        if message:
+            context.add_task_output(task_id, message)
+
+    try:
+        report("准备启动", "[阶段] 准备启动")
+        result = context.run_forward_simulation(
+            payload,
+            stage_callback=report,
+            output_callback=lambda line: context.add_task_output(task_id, line),
+        )
+        if result.get("run_path"):
+            run_path = result["run_path"]
+            context.set_task_metadata(task_id, run_path=run_path)
+            context.set_detected_runs(task_id, [str(run_path)])
+        context.mark_task_finished(task_id, ok=True, return_code=0, result=result)
+    except Exception as exc:
+        if last_stage:
+            context.set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "保存并重算"})
+        context.add_task_exception_output(task_id, exc)
+        context.mark_task_finished(task_id, ok=False, return_code=-1)
