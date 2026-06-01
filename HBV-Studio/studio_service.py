@@ -35,6 +35,9 @@ import numpy as np
 import pandas as pd
 
 import profile_runner
+from services.geo_suggestions import GeoSuggestionContext
+from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
+from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from profile_runner import (
     PROFILE_DAILY,
@@ -2755,44 +2758,18 @@ def boundary_info_messages(
 
 
 def fill_bbox_from_shp(shp_path: str) -> dict[str, float] | None:
-    if not shp_path:
-        return None
-    try:
-        import geopandas as gpd
-    except Exception:
-        return None
-    path = resolve_any_path(shp_path, must_exist=True)
-    gdf = gpd.read_file(path)
-    minx, miny, maxx, maxy = gdf.total_bounds
-    return {"北": float(maxy), "西": float(minx), "南": float(miny), "东": float(maxx)}
+    return build_bbox_from_shp(
+        shp_path,
+        GeoSuggestionContext(resolve_path=lambda raw: resolve_any_path(raw, must_exist=True)),
+    )
 
 
 def suggest_cfmax_threshold(shp_path: str, dem_path: str) -> dict[str, Any]:
-    import geopandas as gpd
-    import numpy as np
-    import rasterio
-    from rasterio.mask import mask
-
-    shp = resolve_any_path(shp_path, must_exist=True)
-    dem = resolve_any_path(dem_path, must_exist=True)
-    basin = gpd.read_file(shp)
-    with rasterio.open(dem) as src:
-        basin_reproj = basin.to_crs(src.crs)
-        masked, _ = mask(src, basin_reproj.geometry, crop=True, filled=False)
-        arr = masked[0].astype("float64")
-        if src.nodata is not None:
-            arr[arr == src.nodata] = float("nan")
-    valid = np.asarray(arr[np.isfinite(arr) & (arr > 0)], dtype="float64")
-    if valid.size == 0:
-        raise ValueError("DEM 与流域边界叠置后没有有效高程。")
-    threshold = float(np.nanmedian(valid))
-    return {
-        "suggested_threshold_m": round(threshold, 2),
-        "min_m": round(float(np.nanmin(valid)), 2),
-        "median_m": round(float(np.nanmedian(valid)), 2),
-        "max_m": round(float(np.nanmax(valid)), 2),
-        "rule": "按流域有效 DEM 的中位高程生成建议阈值，可再手工微调。",
-    }
+    return build_suggest_cfmax_threshold(
+        shp_path,
+        dem_path,
+        GeoSuggestionContext(resolve_path=lambda raw: resolve_any_path(raw, must_exist=True)),
+    )
 
 
 def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
