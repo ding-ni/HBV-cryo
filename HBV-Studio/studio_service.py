@@ -80,6 +80,11 @@ from services.runs import export_run_excel as build_export_run_excel
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import rename_run as build_rename_run
+from services.run_hydrology import RunHydrologyContext
+from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
+from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
+from services.run_hydrology import metadata_objective_family as build_metadata_objective_family
+from services.run_hydrology import objective_label_zh as build_hydrology_objective_label_zh
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -6024,298 +6029,24 @@ def _source_run_meta(metadata: dict[str, Any]) -> tuple[str, str]:
     return source_path, source_name
 
 
-HYDROLOGY_PROCESS_REVIEW_REPORT_NAME = "水文过程复核报告.md"
-HYDROLOGY_DIAGNOSTIC_REPORT_NAME = HYDROLOGY_PROCESS_REVIEW_REPORT_NAME
-LEGACY_HYDROLOGY_DIAGNOSTIC_REPORT_NAME = "水文诊断摘要.md"
-CURRENT_DAILY_OBJECTIVE_FAMILY = "daily_unified_professional_v1"
-FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1"
-HISTORICAL_OBJECTIVE_FAMILIES = {"weighted_daily_universal", "weighted_multi_criteria"}
+def _run_hydrology_context() -> RunHydrologyContext:
+    return RunHydrologyContext(to_display_path=to_display_path)
 
 
 def _metadata_objective_family(metadata: dict[str, Any]) -> str:
-    return str(
-        metadata.get("recorded_objective_family")
-        or metadata.get("objective_family")
-        or metadata.get("effective_objective_mode")
-        or metadata.get("optimization", {}).get("effective_objective_mode")
-        or metadata.get("optimization", {}).get("objective_mode")
-        or metadata.get("objective_profile", {}).get("type")
-        or metadata.get("objective", {}).get("type")
-        or ""
-    ).strip()
-
-
-def _status_zh(value: Any) -> str:
-    key = str(value or "").strip()
-    labels = {
-        "": "—",
-        "ok": "正常",
-        "pass": "通过",
-        "fail": "未通过",
-        "penalized": "—",
-        "outside_flow_floor": "径流拟合未达标",
-        "below_flow_floor": "径流拟合未达标",
-        "above_guard": "高于参考区间",
-        "above_window": "高于参考区间",
-        "below_window": "低于参考区间",
-        "in_window": "在参考区间内",
-        "takeover": "—",
-        "capped": "—",
-        "skipped": "未启用",
-        "skipped_inactive": "未启用",
-        "disabled_by_default": "未采用",
-        "not_applicable_no_glacier": "无冰川模块",
-        "skipped_insufficient_data": "—",
-        "skipped_hard_checks": "—",
-    }
-    return labels.get(key, key or "—")
-
-
-def _years_from(raw_value: Any) -> list[int]:
-    if not isinstance(raw_value, list):
-        return []
-    years: list[int] = []
-    for item in raw_value:
-        try:
-            years.append(int(item))
-        except Exception:
-            continue
-    return sorted(set(years))
-
-
-def _years_text(raw_value: Any) -> str:
-    years = _years_from(raw_value)
-    return "、".join(str(year) for year in years)
-
-
-def _percent_text(value: Any, digits: int = 1) -> str:
-    num = safe_float(value)
-    if num is None:
-        return "—"
-    return f"{num * 100:.{digits}f}%"
-
-
-def _component_basis_text(value: Any) -> str:
-    key = str(value or "").strip()
-    if key == "local_runoff_calibration_period":
-        return "率定期本地径流口径，不含上游边界入流"
-    if key in {"total_runoff_calibration_period", "calibration_period"}:
-        return "率定期模拟总流量口径"
-    return "率定期模拟径流口径"
-
-
-def _metric_text(value: Any, digits: int = 4, suffix: str = "") -> str:
-    num = safe_float(value)
-    if num is None:
-        return "—"
-    return f"{num:.{digits}f}{suffix}"
-
-
-def _flood_event_evaluation(metadata: dict[str, Any]) -> dict[str, Any]:
-    raw = metadata.get("flood_event_evaluation")
-    if isinstance(raw, dict):
-        return raw
-    diagnostics = dict(metadata.get("diagnostics", {}) or {})
-    raw = diagnostics.get("flood_event_evaluation")
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
-def _flood_event_report_lines(metadata: dict[str, Any]) -> list[str]:
-    evaluation = _flood_event_evaluation(metadata)
-    if not bool(evaluation.get("enabled")):
-        return []
-    events = list(evaluation.get("events", []) or [])
-    lines = [
-        "## 4. 洪水事件评价",
-        "",
-        f"- 事件评价状态：{evaluation.get('status', '—')}",
-        f"- 有效事件场次：{evaluation.get('valid_event_count', 0)}/{evaluation.get('event_count', 0)}",
-        f"- 事件目标函数：{'已启用' if evaluation.get('objective_enabled') else '未启用，仅作诊断'}",
-        "",
-    ]
-    if not events:
-        lines.extend(["当前结果未写出可显示的洪水事件。", ""])
-        return lines
-    lines.extend([
-        "| 事件 | 类型 | 洪峰误差 | 峰现误差 | 洪量误差 | NSE | KGE | 高流量NSE | 高流量KGE | 退水误差 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ])
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        lines.append(
-            "| "
-            + " | ".join([
-                str(event.get("name", "—") or "—"),
-                str(event.get("type", "—") or "—"),
-                _metric_text(event.get("peak_error_percent"), 2, "%"),
-                _metric_text(event.get("peak_time_error_hours"), 1, " h"),
-                _metric_text(event.get("volume_error_percent"), 2, "%"),
-                _metric_text(event.get("nse")),
-                _metric_text(event.get("kge")),
-                _metric_text(event.get("high_flow_weighted_nse")),
-                _metric_text(event.get("high_flow_kge")),
-                _metric_text(event.get("recession_slope_error_percent"), 2, "%"),
-            ])
-            + " |"
-        )
-    lines.append("")
-    return lines
-
-
-def _workflow_label_zh(metadata: dict[str, Any]) -> str:
-    family = _metadata_objective_family(metadata)
-    workflow = str(metadata.get("calibration_workflow") or "").strip()
-    workflow_status = str(metadata.get("calibration_workflow_status") or "").strip()
-    if family in HISTORICAL_OBJECTIVE_FAMILIES or workflow_status == "historical":
-        return "历史率定结果"
-    if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
-        return "事件洪水率定"
-    if workflow == "staged_calibration_v1" or workflow_status == "experimental":
-        return "过程复核结果"
-    if workflow == "single_pass" or not workflow:
-        return "单流程参数率定"
-    return "单流程参数率定"
+    return build_metadata_objective_family(metadata)
 
 
 def _objective_label_zh(metadata: dict[str, Any]) -> str:
-    family = _metadata_objective_family(metadata)
-    if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
-        return "事件洪水率定目标函数"
-    if family == CURRENT_DAILY_OBJECTIVE_FAMILY:
-        return "统一日尺度综合水文目标函数"
-    if family in HISTORICAL_OBJECTIVE_FAMILIES:
-        return "历史目标函数结果（仅兼容查看）"
-    return "统一日尺度综合水文目标函数" if not family else "其他目标函数"
-
-
-def _flow_status_zh(metadata: dict[str, Any]) -> str:
-    flow_guard = dict(metadata.get("objective_terms", {}).get("flow_guard", {}) or {})
-    status = str(flow_guard.get("status") or "").strip()
-    if status in {"ok", "pass"}:
-        return "径流拟合达标"
-    if status and status not in {"skipped", "skipped_insufficient_data"}:
-        return "径流拟合未达标"
-    metrics = dict(metadata.get("metrics", {}) or {})
-    cal = dict(metrics.get("calibration", {}) or {})
-    val = dict(metrics.get("validation", {}) or {})
-    nse_cal = safe_float(cal.get("nse"))
-    nse_val = safe_float(val.get("nse"))
-    pbias_cal = safe_float(cal.get("pbias"))
-    pbias_val = safe_float(val.get("pbias"))
-    if (
-        nse_cal is not None
-        and nse_cal >= 0.60
-        and (nse_val is None or nse_val >= 0.50)
-        and (pbias_cal is None or abs(pbias_cal) <= 20.0)
-        and (pbias_val is None or abs(pbias_val) <= 25.0)
-    ):
-        return "径流拟合达标"
-    return "径流拟合未达标"
-
-
-def _ice_status_zh(metadata: dict[str, Any]) -> str:
-    glacier_enabled = bool(metadata.get("optional_modules", {}).get("glacier", {}).get("enabled"))
-    if not glacier_enabled:
-        return "未启用冰川模块"
-    diagnostics = dict(metadata.get("diagnostics", {}) or {})
-    component_report = dict(diagnostics.get("component_fraction_report", {}) or {})
-    rain = component_report.get("rain_fraction")
-    snow = component_report.get("snow_fraction")
-    ice = component_report.get("ice_fraction")
-    if rain is None and snow is None and ice is None:
-        return "已启用冰川模块"
-    return (
-        f"降雨 {_percent_text(rain)} / "
-        f"融雪 {_percent_text(snow)} / "
-        f"裸冰 {_percent_text(ice)}"
-    )
+    return build_hydrology_objective_label_zh(metadata)
 
 
 def _build_hydrology_summary(metadata: dict[str, Any], run_dir: Path) -> dict[str, Any]:
-    report_path = run_dir / HYDROLOGY_DIAGNOSTIC_REPORT_NAME
-    return {
-        "workflow_label_zh": _workflow_label_zh(metadata),
-        "objective_label_zh": _objective_label_zh(metadata),
-        "flow_status_zh": _flow_status_zh(metadata),
-        "ice_status_zh": _ice_status_zh(metadata),
-        "diagnostics_detail_path": str(report_path.resolve(strict=False)),
-        "diagnostics_detail_display_path": to_display_path(report_path),
-        "diagnostics_detail_note": "水文模拟结果说明已保存至本地结果目录。",
-    }
-
-
-def _hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str, Any]) -> str:
-    metrics = dict(metadata.get("metrics", {}) or {})
-    cal = dict(metrics.get("calibration", {}) or {})
-    val = dict(metrics.get("validation", {}) or {})
-    diagnostics = dict(metadata.get("diagnostics", {}) or {})
-    component_report = dict(diagnostics.get("component_fraction_report", {}) or {})
-
-    lines = [
-        "# 水文模拟结果说明",
-        "",
-        "本文件由 HBV-Studio 自动生成，记录本次率定运行的关键参数与结果。",
-        "",
-        "## 1. 运行信息",
-        "",
-        f"- 率定流程：{summary.get('workflow_label_zh', '—')}",
-        f"- 评分标准：{summary.get('objective_label_zh', '—')}",
-        f"- 结果时间：{metadata.get('run_time', '—')}",
-        f"- 运行目录：{summary.get('diagnostics_detail_display_path', '—')}",
-        "",
-        "## 2. 径流拟合精度",
-        "",
-        f"- 率定期 NSE / KGE / PBIAS / RMSE：{_metric_text(cal.get('nse'))} / {_metric_text(cal.get('kge'))} / {_metric_text(cal.get('pbias'), 2, '%')} / {_metric_text(cal.get('rmse'))}",
-        f"- 验证期 NSE / KGE / PBIAS / RMSE：{_metric_text(val.get('nse'))} / {_metric_text(val.get('kge'))} / {_metric_text(val.get('pbias'), 2, '%')} / {_metric_text(val.get('rmse'))}",
-        f"- 综合判断：{summary.get('flow_status_zh', '—')}",
-        "",
-        "## 3. 三水源分量年合计",
-        "",
-        "依据 HBV 模型水源追踪机制，模拟总流量按降雨产流、融雪径流、裸冰融化三类水源分别累计，率定期内构成如下：",
-        "",
-        "| 水源类型 | 占模拟总流量比例 |",
-        "| --- | --- |",
-        f"| 降雨产流 | {_percent_text(component_report.get('rain_fraction'))} |",
-        f"| 融雪径流 | {_percent_text(component_report.get('snow_fraction'))} |",
-        f"| 裸冰融化 | {_percent_text(component_report.get('ice_fraction'))} |",
-        "",
-        f"- 口径：{_component_basis_text(component_report.get('evaluation_period'))}",
-        "",
-    ]
-    event_lines = _flood_event_report_lines(metadata)
-    if event_lines:
-        lines.extend(event_lines)
-        remarks_title = "## 5. 备注"
-    else:
-        remarks_title = "## 4. 备注"
-    lines.extend([
-        remarks_title,
-        "",
-        "- 三水源比例为模型按 HBV 标准三水源追踪算法逐时步累加得到的全流域汇总值。",
-        "- 具体数值受流域冰川面积、气温递减率、降水相态划分和参数率定结果共同影响。",
-        "",
-    ])
-    return "\n".join(lines)
+    return build_run_hydrology_summary(metadata, run_dir, _run_hydrology_context())
 
 
 def _ensure_hydrology_diagnostic_report(run_dir: Path, metadata: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
-    report_path = run_dir / HYDROLOGY_DIAGNOSTIC_REPORT_NAME
-    legacy_report_path = run_dir / LEGACY_HYDROLOGY_DIAGNOSTIC_REPORT_NAME
-    updated_summary = dict(summary)
-    try:
-        report_text = _hydrology_diagnostic_report_text(metadata, updated_summary)
-        if not report_path.exists() or report_path.read_text(encoding="utf-8") != report_text:
-            report_path.write_text(report_text, encoding="utf-8")
-        if legacy_report_path.exists():
-            legacy_report_path.write_text(report_text, encoding="utf-8")
-        updated_summary["diagnostics_detail_path"] = str(report_path.resolve(strict=False))
-        updated_summary["diagnostics_detail_display_path"] = to_display_path(report_path)
-        updated_summary["diagnostics_report_status"] = "available"
-    except Exception as exc:
-        updated_summary["diagnostics_report_status"] = "write_failed"
-        updated_summary["diagnostics_report_error"] = str(exc)
-    return updated_summary
+    return build_ensure_hydrology_diagnostic_report(run_dir, metadata, summary, _run_hydrology_context())
 
 
 def _display_run_title(
