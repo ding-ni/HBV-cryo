@@ -30,7 +30,7 @@ const frontendModuleContracts = [
   {
     script: "./js/apiClient.js",
     global: "HBVStudioApiClient",
-    exports: ["apiGet", "apiPost"],
+    exports: ["apiGet", "apiPost", "createLatestRequestGuard"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -212,6 +212,7 @@ const RUN_EXPORT_FIELDS = [
 const CURRENT_OBJECTIVE_FAMILY = "daily_unified_professional_v1";
 const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
 const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted_multi_criteria"]);
+const runDetailRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -244,7 +245,6 @@ const state = {
   logViewState: {},
   currentRun: null,
   selectedRunPath: "",
-  activeRunRequestId: 0,
   compareSeries: null,
   compareMetrics: null,
   compareLabel: "",
@@ -589,11 +589,6 @@ function currentSelectedRunPath() {
   return String(state.selectedRunPath || state.currentRun?.run?.path || state.currentRun?.path || "").trim();
 }
 
-function nextRunRequestId() {
-  state.activeRunRequestId = Number(state.activeRunRequestId || 0) + 1;
-  return state.activeRunRequestId;
-}
-
 function nextRunManualPresetRequestId() {
   state.activeRunManualPresetRequestId = Number(state.activeRunManualPresetRequestId || 0) + 1;
   return state.activeRunManualPresetRequestId;
@@ -825,7 +820,7 @@ function renderResultsFilterToolbar() {
 }
 
 function clearRunDetail(message = "请先从左侧选择一个结果。") {
-  nextRunRequestId();
+  runDetailRequestGuard.cancel();
   nextRunManualPresetRequestId();
   nextCompareRequestId();
   state.currentRun = null;
@@ -6864,13 +6859,13 @@ async function loadRun(path) {
   const targetPath = String(path || "").trim();
   const previousSelected = currentSelectedRunPath();
   const previousRunData = state.currentRun;
-  const requestId = nextRunRequestId();
+  const requestToken = runDetailRequestGuard.next();
   let detailLoaded = false;
   state.selectedRunPath = targetPath || previousSelected;
   renderRunList();
   try {
     const p = await apiGet(`/api/run?path=${encodeURIComponent(path)}`);
-    if (requestId !== state.activeRunRequestId) return;
+    if (!runDetailRequestGuard.isActive(requestToken)) return;
     const filtersChanged = alignRunFiltersForSelection(p.data?.run || {});
     if (filtersChanged) {
       renderResultsFilterToolbar();
@@ -6885,18 +6880,18 @@ async function loadRun(path) {
         calibrationProfile: p.data?.metadata?.calibration_profile || p.data?.run?.calibration_profile || "",
       });
     } catch (presetErr) {
-      if (requestId === state.activeRunRequestId) {
+      if (runDetailRequestGuard.isActive(requestToken)) {
         showToast(`手调参数集加载失败：${presetErr.message}`, true);
       }
     }
-    if (requestId !== state.activeRunRequestId) return;
+    if (!runDetailRequestGuard.isActive(requestToken)) return;
     try {
       updateSidebar();
     } catch (sidebarErr) {
       showToast(sidebarErr.message, true);
     }
   } catch (err) {
-    if (requestId !== state.activeRunRequestId) return;
+    if (!runDetailRequestGuard.isActive(requestToken)) return;
     state.selectedRunPath = previousSelected;
     renderRunList();
     if (!detailLoaded) {

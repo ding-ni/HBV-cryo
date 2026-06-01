@@ -44,8 +44,26 @@
     return parseApiResponse(response);
   }
 
+  function createLatestRequestGuard() {
+    let activeToken = 0;
+    return {
+      next() {
+        activeToken += 1;
+        return activeToken;
+      },
+      cancel() {
+        activeToken += 1;
+        return activeToken;
+      },
+      isActive(token) {
+        return token === activeToken;
+      },
+    };
+  }
+
   window.HBVStudioApiClient = {
     apiGet,
     apiPost,
+    createLatestRequestGuard,
   };
 })();
