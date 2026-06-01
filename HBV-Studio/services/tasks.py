@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import csv
 import sys
 import threading
@@ -208,6 +209,28 @@ def build_python_script_command(
 def has_running_tasks(context: TaskQueryContext) -> bool:
     with context.task_lock:
         return any(task.status == "running" for task in context.tasks.values())
+
+
+def snapshot_task_records(tasks: dict[str, TaskRecord], task_lock: threading.Lock) -> list[TaskRecord]:
+    with task_lock:
+        return [
+            TaskRecord(
+                id=task.id,
+                task_type=task.task_type,
+                label=task.label,
+                command=list(task.command),
+                cwd=task.cwd,
+                status=task.status,
+                created_at=task.created_at,
+                updated_at=task.updated_at,
+                return_code=task.return_code,
+                output=list(task.output),
+                detected_runs=list(task.detected_runs),
+                metadata=copy.deepcopy(task.metadata),
+                max_output_lines=task.max_output_lines,
+            )
+            for task in tasks.values()
+        ]
 
 
 def list_tasks(context: TaskQueryContext) -> list[dict[str, Any]]:

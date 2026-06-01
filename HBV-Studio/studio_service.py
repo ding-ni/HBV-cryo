@@ -161,6 +161,7 @@ from services.tasks import (
     mark_task_finished as build_mark_task_finished,
     monitor_process_task as build_monitor_process_task,
     set_task_detected_runs as build_set_task_detected_runs,
+    snapshot_task_records as build_snapshot_task_records,
     start_process_task as build_start_process_task,
     task_progress_snapshot as build_task_progress_snapshot,
     update_task_metadata as build_update_task_metadata,
@@ -533,24 +534,7 @@ MAX_BROWSER_FILE_ITEMS = 300
 
 def _snapshot_tasks() -> list[TaskRecord]:
     """Clone task state so expensive reads can happen outside TASK_LOCK."""
-    with TASK_LOCK:
-        return [
-            TaskRecord(
-                id=task.id,
-                task_type=task.task_type,
-                label=task.label,
-                command=list(task.command),
-                cwd=task.cwd,
-                status=task.status,
-                created_at=task.created_at,
-                updated_at=task.updated_at,
-                return_code=task.return_code,
-                output=list(task.output),
-                detected_runs=list(task.detected_runs),
-                metadata=copy.deepcopy(task.metadata),
-            )
-            for task in TASKS.values()
-        ]
+    return build_snapshot_task_records(TASKS, TASK_LOCK)
 
 
 @dataclass

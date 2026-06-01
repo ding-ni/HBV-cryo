@@ -31,6 +31,7 @@ from services.tasks import (  # noqa: E402
     mark_task_finished,
     monitor_process_task,
     set_task_detected_runs,
+    snapshot_task_records,
     start_process_task,
     task_progress_snapshot,
     update_task_metadata,
@@ -190,6 +191,45 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in payload], ["newer", "older"])
         self.assertEqual(payload[0]["progress"], {"id": "newer"})
         self.assertIsNone(payload[1]["progress"])
+
+    def test_snapshot_task_records_returns_independent_task_copies(self) -> None:
+        original = TaskRecord(
+            id="task-1",
+            task_type="calibration",
+            label="Calibration",
+            command=["python", "runner.py"],
+            cwd="project-root",
+            status="running",
+            created_at=10.0,
+            updated_at=20.0,
+            return_code=None,
+            output=["line-1"],
+            detected_runs=["runs/a"],
+            metadata={"ui_progress": {"stage": "running"}},
+            max_output_lines=5,
+        )
+        tasks = {original.id: original}
+
+        snapshots = snapshot_task_records(tasks, threading.Lock())
+
+        self.assertEqual(len(snapshots), 1)
+        snapshot = snapshots[0]
+        self.assertIsNot(snapshot, original)
+        self.assertEqual(snapshot.command, ["python", "runner.py"])
+        self.assertEqual(snapshot.output, ["line-1"])
+        self.assertEqual(snapshot.detected_runs, ["runs/a"])
+        self.assertEqual(snapshot.metadata, {"ui_progress": {"stage": "running"}})
+        self.assertEqual(snapshot.max_output_lines, 5)
+
+        snapshot.command.append("--changed")
+        snapshot.output.append("line-2")
+        snapshot.detected_runs.append("runs/b")
+        snapshot.metadata["ui_progress"]["stage"] = "changed"
+
+        self.assertEqual(original.command, ["python", "runner.py"])
+        self.assertEqual(original.output, ["line-1"])
+        self.assertEqual(original.detected_runs, ["runs/a"])
+        self.assertEqual(original.metadata, {"ui_progress": {"stage": "running"}})
 
     def test_task_progress_snapshot_reads_latest_stage_and_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
