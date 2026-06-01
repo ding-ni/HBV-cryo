@@ -111,6 +111,17 @@
     return currentId !== compareId;
   }
 
+  function manualPresetControlState(options = {}) {
+    const enabled = Boolean(options.editable && options.configPath);
+    const hasPreset = Boolean(options.preset);
+    const hasCompare = Boolean(options.compareSeries || options.compareMetrics);
+    return {
+      baseEnabled: enabled,
+      presetActionEnabled: enabled && hasPreset,
+      clearCompareEnabled: hasCompare,
+    };
+  }
+
   function manualPresetSavePayload(options = {}) {
     const runData = options.runData || {};
     const metadata = runData.metadata || {};
@@ -331,6 +342,7 @@
     findPresetById,
     manualPresetListPath,
     shouldClearManualPresetComparison,
+    manualPresetControlState,
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,

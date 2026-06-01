@@ -62,6 +62,7 @@ const frontendModuleContracts = [
       "findPresetById",
       "manualPresetListPath",
       "shouldClearManualPresetComparison",
+      "manualPresetControlState",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
@@ -3151,21 +3152,23 @@ function renderManualPresetOptions() {
 }
 
 function updateManualPresetControls() {
-  const editable = isStudioEditableRun(state._runData);
-  const hasConfigPath = Boolean(getRunManualPresetConfigPath());
-  const enabled = editable && hasConfigPath;
-  const hasPreset = Boolean(selectedManualPreset());
-  const hasCompare = Boolean(state.compareSeries || state.compareMetrics);
+  const controlState = window.HBVStudioParameterLibrary.manualPresetControlState({
+    editable: isStudioEditableRun(state._runData),
+    configPath: getRunManualPresetConfigPath(),
+    preset: selectedManualPreset(),
+    compareSeries: state.compareSeries,
+    compareMetrics: state.compareMetrics,
+  });
   ["#manual-preset-name", "#manual-preset-scope", "#manual-preset-select", "#btn-save-manual-preset"].forEach(sel => {
     const el = $(sel);
-    if (el) el.disabled = !enabled;
+    if (el) el.disabled = !controlState.baseEnabled;
   });
   ["#btn-load-manual-preset", "#btn-delete-manual-preset", "#btn-compare-manual-preset"].forEach(sel => {
     const el = $(sel);
-    if (el) el.disabled = !(enabled && hasPreset);
+    if (el) el.disabled = !controlState.presetActionEnabled;
   });
   const clearCompareBtn = $("#btn-clear-manual-compare");
-  if (clearCompareBtn) clearCompareBtn.disabled = !hasCompare;
+  if (clearCompareBtn) clearCompareBtn.disabled = !controlState.clearCompareEnabled;
 }
 
 async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(), { silent = false, calibrationProfile = "" } = {}) {

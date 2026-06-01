@@ -255,6 +255,57 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_preset_control_state(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console, encodeURIComponent };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            const ready = library.manualPresetControlState({
+              editable: true,
+              configPath: "C:/workspace.json",
+              preset: { id: "p1" },
+              compareMetrics: { nse_cal: 0.8 },
+            });
+            if (!ready.baseEnabled || !ready.presetActionEnabled || !ready.clearCompareEnabled) {
+              throw new Error(`unexpected ready state: ${JSON.stringify(ready)}`);
+            }
+
+            const noPreset = library.manualPresetControlState({
+              editable: true,
+              configPath: "C:/workspace.json",
+              preset: null,
+            });
+            if (!noPreset.baseEnabled || noPreset.presetActionEnabled || noPreset.clearCompareEnabled) {
+              throw new Error(`unexpected no-preset state: ${JSON.stringify(noPreset)}`);
+            }
+
+            const readonly = library.manualPresetControlState({
+              editable: false,
+              configPath: "C:/workspace.json",
+              preset: { id: "p1" },
+              compareSeries: { dates: [] },
+            });
+            if (readonly.baseEnabled || readonly.presetActionEnabled || !readonly.clearCompareEnabled) {
+              throw new Error(`unexpected readonly state: ${JSON.stringify(readonly)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
