@@ -33,6 +33,29 @@
     select.value = hasCurrent ? current : "";
   }
 
+  function manualPresetDiffSummary(preset, baseline = {}, helpers = {}) {
+    const params = preset && typeof preset.params === "object" ? preset.params : {};
+    const baselineParams = baseline && typeof baseline === "object" ? baseline : {};
+    const formatNumber = helpers.formatNumber || ((value, digits = 4) => Number(value).toFixed(digits));
+    const limit = Number.isFinite(Number(helpers.limit)) && Number(helpers.limit) > 0 ? Number(helpers.limit) : 8;
+    if (!preset || !Object.keys(baselineParams).length) {
+      return { visible: false, diffs: [], preview: "" };
+    }
+    const diffs = Object.entries(params)
+      .filter(([name, value]) => Number.isFinite(Number(baselineParams[name])) && Math.abs(Number(value) - Number(baselineParams[name])) > 1e-8)
+      .map(([name, value]) => ({
+        name,
+        from: Number(baselineParams[name]),
+        to: Number(value),
+        delta: Number(value) - Number(baselineParams[name]),
+      }))
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    const preview = diffs.slice(0, limit).map(item =>
+      `${item.name}: ${formatNumber(item.from, 4)} -> ${formatNumber(item.to, 4)} (${item.delta > 0 ? "+" : ""}${formatNumber(item.delta, 4)})`
+    ).join("; ");
+    return { visible: true, diffs, preview };
+  }
+
   function manualContextWarning(preset, current = {}, helpers = {}) {
     if (!preset) return "";
     const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
@@ -198,6 +221,7 @@
     normalizeKey,
     scopeLabel,
     renderPresetOptions,
+    manualPresetDiffSummary,
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,

@@ -57,6 +57,7 @@ const frontendModuleContracts = [
       "normalizeKey",
       "scopeLabel",
       "renderPresetOptions",
+      "manualPresetDiffSummary",
       "manualContextWarning",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -1435,29 +1436,19 @@ function renderManualPresetDiff() {
     host.style.display = "none";
     return;
   }
-  const diffs = Object.entries(preset.params || {})
-    .filter(([name, value]) => Number.isFinite(Number(baseline[name])) && Math.abs(Number(value) - Number(baseline[name])) > 1e-8)
-    .map(([name, value]) => ({
-      name,
-      from: Number(baseline[name]),
-      to: Number(value),
-      delta: Number(value) - Number(baseline[name]),
-    }))
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  if (!diffs.length) {
+  const summary = window.HBVStudioParameterLibrary.manualPresetDiffSummary(preset, baseline, { formatNumber });
+  if (!summary.diffs.length) {
     host.style.display = "";
     const mismatchText = manualPresetContextWarning(preset);
     host.className = `hint-box ${mismatchText ? "status-warn" : ""}`.trim();
     host.textContent = `参数集“${preset.name}”与当前率定参数一致。${mismatchText ? ` ${mismatchText}` : ""}`;
     return;
   }
-  const preview = diffs.slice(0, 8).map(item =>
-    `${item.name}: ${formatNumber(item.from, 4)} → ${formatNumber(item.to, 4)} (${item.delta > 0 ? "+" : ""}${formatNumber(item.delta, 4)})`
-  ).join("；");
+  const preview = summary.preview.split(" -> ").join(" → ").split("; ").join("；");
   host.style.display = "";
   const mismatchText = manualPresetContextWarning(preset);
   host.className = `hint-box ${mismatchText ? "status-warn" : ""}`.trim();
-  host.textContent = `参数集“${preset.name}”与当前率定值相比有 ${diffs.length} 个参数不同。${preview}${mismatchText ? ` ${mismatchText}` : ""}`;
+  host.textContent = `参数集“${preset.name}”与当前率定值相比有 ${summary.diffs.length} 个参数不同。${preview}${mismatchText ? ` ${mismatchText}` : ""}`;
 }
 
 function manualPresetContextWarning(preset, data = state._runData) {
