@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import pandas as pd
+
 
 @dataclass(frozen=True)
 class WorkspaceCatalogContext:
@@ -13,9 +15,16 @@ class WorkspaceCatalogContext:
     workspace_dir: Path
     default_workspace_path: Path
     builtin_glacier_shp: Path
+    builtin_dem: Path
     profile_daily: str
+    profile_hourly: str
     object_regression: str
+    object_interbasin: str
+    object_full_upstream: str
     observed_flow_key: str
+    meteo_key: str
+    meteo_precip_source_key: str
+    meteo_precip_source_legacy_key: str
     read_json_file: Callable[[Path], dict[str, Any]]
     read_runtime_config: Callable[[Path], dict[str, Any]]
     replace_placeholders: Callable[[Any], Any]
@@ -30,6 +39,13 @@ class WorkspaceCatalogContext:
     workspace_workflow_summary: Callable[..., dict[str, Any]]
     normalize_time_step_hours: Callable[[Any], float]
     ensure_within: Callable[[Path, Path], Path]
+    inspect_observed_csv: Callable[..., dict[str, Any]]
+    fill_bbox_from_shp: Callable[[str], dict[str, float] | None]
+    suggest_time_windows: Callable[[pd.Timestamp, pd.Timestamp, str], dict[str, str]]
+    suggest_cfmax_threshold: Callable[[str, str], dict[str, Any]]
+    build_empty_workspace: Callable[[str, str], dict[str, Any]]
+    stage_vector_shapefile: Callable[..., Path]
+    stage_observed_runoff_file: Callable[..., Path]
 
 
 def template_files(context: WorkspaceCatalogContext) -> list[Path]:
@@ -158,3 +174,85 @@ def delete_workspace(path_value: str, context: WorkspaceCatalogContext) -> dict[
     name = path.stem
     path.unlink()
     return {"deleted": True, "name": name, "path": str(path)}
+
+
+def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCatalogContext) -> dict[str, Any]:
+    basin_shp = str(payload.get("basin_shp", "")).strip()
+    obs_csv = str(payload.get("obs_csv", "")).strip()
+    calibration_mode = str(payload.get("calibration_mode", "")).strip().lower()
+    object_type = str(payload.get("object_type", "")).strip().lower() or context.object_full_upstream
+    if object_type not in {context.object_regression, context.object_interbasin, context.object_full_upstream}:
+        object_type = context.object_full_upstream
+    workspace_name = str(payload.get("workspace_name", "")).strip()
+    prec_source = str(payload.get("prec_source", "era5")).strip()
+    if not basin_shp:
+        raise ValueError("缺少流域边界 shapefile。")
+    if not obs_csv:
+        raise ValueError("缺少观测径流文件。")
+    shp_path = context.resolve_any_path(basin_shp, must_exist=True)
+    obs_path = context.resolve_any_path(obs_csv, must_exist=True)
+    obs_info = context.inspect_observed_csv(str(obs_path))
+    suggested_mode = obs_info["suggested_calibration_mode"]
+    profile = calibration_mode if calibration_mode in {context.profile_daily, context.profile_hourly} else suggested_mode
+    start_date = pd.to_datetime(obs_info["start"])
+    end_date = pd.to_datetime(obs_info["end"])
+    bbox = context.fill_bbox_from_shp(str(shp_path))
+    if bbox is None:
+        raise ValueError("无法从 shapefile 中读取范围。")
+    if not workspace_name:
+        workspace_name = shp_path.stem
+
+    windows = context.suggest_time_windows(start_date, end_date, profile)
+
+    cfmax_threshold = 5000.0
+    if context.builtin_dem.exists():
+        try:
+            cfmax_threshold = context.suggest_cfmax_threshold(str(shp_path), str(context.builtin_dem))["suggested_threshold_m"]
+        except Exception:
+            pass
+
+    config = context.build_empty_workspace(workspace_name, profile)
+    config.update(
+        {
+            "_说明": [
+                "由 HBV-Studio 导入流域向导自动生成。",
+                f"源数据: basin={shp_path.name}, obs={obs_path.name}",
+            ],
+            "项目对象": object_type,
+            "率定模式": profile,
+            "运行目录": str(context.runtime_root_for_workspace(workspace_name)),
+            "流域名称": workspace_name,
+            "流域编号": context.slugify_workspace_name(workspace_name),
+            "流域边界_shp": str(shp_path),
+            context.observed_flow_key: str(obs_path),
+            "时间步长_小时": 24.0 if profile == context.profile_daily else 1.0,
+            "默认降水源": prec_source,
+            "FAO56平均海拔_m": cfmax_threshold,
+            "CFMAX分区阈值_m": cfmax_threshold,
+            "范围_bbox": bbox,
+            "时间": {
+                "开始年份": int(start_date.year),
+                "结束年份": int(end_date.year),
+                **windows,
+            },
+        }
+    )
+    meteo = dict(config.get(context.meteo_key, {}))
+    meteo[context.meteo_precip_source_key] = prec_source
+    meteo[context.meteo_precip_source_legacy_key] = prec_source
+    config[context.meteo_key] = meteo
+    workspace_path = context.workspace_dir / f"{context.slugify_workspace_name(workspace_name)}.json"
+    config["流域边界_shp"] = str(context.stage_vector_shapefile(config, shp_path, role="basin", config_path=workspace_path))
+    if str(config.get("冰川边界_shp", "")).strip():
+        config["冰川边界_shp"] = str(
+            context.stage_vector_shapefile(config, config["冰川边界_shp"], role="glacier", config_path=workspace_path)
+        )
+    config[context.observed_flow_key] = str(context.stage_observed_runoff_file(config, obs_path, config_path=workspace_path))
+    context.write_json_file(workspace_path, context.normalize_config_before_save(config, workspace_path))
+    return {
+        "workspace_path": str(workspace_path.resolve()),
+        "config": context.read_json_file(workspace_path),
+        "obs_info": obs_info,
+        "suggested_mode": suggested_mode,
+        "profile": profile,
+    }

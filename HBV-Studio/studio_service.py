@@ -82,6 +82,7 @@ from services.tasks import (
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
     WorkspaceCatalogContext,
+    create_workspace_from_import as build_create_workspace_from_import,
     delete_workspace as build_delete_workspace,
     find_template as build_find_template,
     instantiate_template as build_instantiate_template,
@@ -3677,9 +3678,16 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         workspace_dir=WORKSPACE_DIR,
         default_workspace_path=DEFAULT_WORKSPACE_PATH,
         builtin_glacier_shp=BUILTIN_GLACIER_SHP,
+        builtin_dem=BUILTIN_DEM,
         profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
         object_regression=OBJECT_REGRESSION,
+        object_interbasin=OBJECT_INTERBASIN,
+        object_full_upstream=OBJECT_FULL_UPSTREAM,
         observed_flow_key=OBSERVED_FLOW_KEY,
+        meteo_key=METEO_KEY,
+        meteo_precip_source_key=METEO_PRECIP_SOURCE_KEY,
+        meteo_precip_source_legacy_key=METEO_PRECIP_SOURCE_LEGACY_KEY,
         read_json_file=read_json_file,
         read_runtime_config=read_runtime_config,
         replace_placeholders=replace_placeholders,
@@ -3694,6 +3702,13 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         workspace_workflow_summary=workspace_workflow_summary,
         normalize_time_step_hours=normalize_time_step_hours,
         ensure_within=ensure_within,
+        inspect_observed_csv=inspect_observed_csv,
+        fill_bbox_from_shp=fill_bbox_from_shp,
+        suggest_time_windows=suggest_time_windows,
+        suggest_cfmax_threshold=suggest_cfmax_threshold,
+        build_empty_workspace=build_empty_workspace,
+        stage_vector_shapefile=stage_vector_shapefile,
+        stage_observed_runoff_file=stage_observed_runoff_file,
     )
 
 
@@ -3813,85 +3828,7 @@ def _run_mutation_context() -> RunMutationContext:
 
 
 def create_workspace_from_import(payload: dict[str, Any]) -> dict[str, Any]:
-    basin_shp = str(payload.get("basin_shp", "")).strip()
-    obs_csv = str(payload.get("obs_csv", "")).strip()
-    calibration_mode = str(payload.get("calibration_mode", "")).strip().lower()
-    object_type = str(payload.get("object_type", "")).strip().lower() or OBJECT_FULL_UPSTREAM
-    if object_type not in {OBJECT_REGRESSION, OBJECT_INTERBASIN, OBJECT_FULL_UPSTREAM}:
-        object_type = OBJECT_FULL_UPSTREAM
-    workspace_name = str(payload.get("workspace_name", "")).strip()
-    prec_source = str(payload.get("prec_source", "era5")).strip()
-    if not basin_shp:
-        raise ValueError("缺少流域边界 shapefile。")
-    if not obs_csv:
-        raise ValueError("缺少观测径流文件。")
-    shp_path = resolve_any_path(basin_shp, must_exist=True)
-    obs_path = resolve_any_path(obs_csv, must_exist=True)
-    obs_info = inspect_observed_csv(str(obs_path))
-    suggested_mode = obs_info["suggested_calibration_mode"]
-    profile = calibration_mode if calibration_mode in {PROFILE_DAILY, PROFILE_HOURLY} else suggested_mode
-    start_date = pd.to_datetime(obs_info["start"])
-    end_date = pd.to_datetime(obs_info["end"])
-    bbox = fill_bbox_from_shp(str(shp_path))
-    if bbox is None:
-        raise ValueError("无法从 shapefile 中读取范围。")
-    if not workspace_name:
-        workspace_name = shp_path.stem
-
-    windows = suggest_time_windows(start_date, end_date, profile)
-
-    cfmax_threshold = 5000.0
-    if BUILTIN_DEM.exists():
-        try:
-            cfmax_threshold = suggest_cfmax_threshold(str(shp_path), str(BUILTIN_DEM))["suggested_threshold_m"]
-        except Exception:
-            pass
-
-    config = build_empty_workspace(workspace_name, profile)
-    config.update(
-        {
-            "_说明": [
-                "由 HBV-Studio 导入流域向导自动生成。",
-                f"源数据: basin={shp_path.name}, obs={obs_path.name}",
-            ],
-            "项目对象": object_type,
-            "率定模式": profile,
-            "运行目录": str(runtime_root_for_workspace(workspace_name)),
-            "流域名称": workspace_name,
-            "流域编号": slugify_workspace_name(workspace_name),
-            "流域边界_shp": str(shp_path),
-            OBSERVED_FLOW_KEY: str(obs_path),
-            "时间步长_小时": 24.0 if profile == PROFILE_DAILY else 1.0,
-            "默认降水源": prec_source,
-            "FAO56平均海拔_m": cfmax_threshold,
-            "CFMAX分区阈值_m": cfmax_threshold,
-            "范围_bbox": bbox,
-            "时间": {
-                "开始年份": int(start_date.year),
-                "结束年份": int(end_date.year),
-                **windows,
-            },
-        }
-    )
-    meteo = dict(config.get(METEO_KEY, {}))
-    meteo[METEO_PRECIP_SOURCE_KEY] = prec_source
-    meteo[METEO_PRECIP_SOURCE_LEGACY_KEY] = prec_source
-    config[METEO_KEY] = meteo
-    workspace_path = WORKSPACE_DIR / f"{slugify_workspace_name(workspace_name)}.json"
-    config["流域边界_shp"] = str(stage_vector_shapefile(config, shp_path, role="basin", config_path=workspace_path))
-    if str(config.get("冰川边界_shp", "")).strip():
-        config["冰川边界_shp"] = str(
-            stage_vector_shapefile(config, config["冰川边界_shp"], role="glacier", config_path=workspace_path)
-        )
-    config[OBSERVED_FLOW_KEY] = str(stage_observed_runoff_file(config, obs_path, config_path=workspace_path))
-    write_json_file(workspace_path, normalize_config_before_save(config, workspace_path))
-    return {
-        "workspace_path": str(workspace_path.resolve()),
-        "config": read_json_file(workspace_path),
-        "obs_info": obs_info,
-        "suggested_mode": suggested_mode,
-        "profile": profile,
-    }
+    return build_create_workspace_from_import(payload, _workspace_catalog_context())
 
 
 def current_profile(config: dict[str, Any]) -> str:
