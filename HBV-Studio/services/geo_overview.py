@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,7 @@ def _geo_empty_layer(
         "display_path": context.to_display_path(resolved) if resolved is not None else "",
         "bounds": None,
         "rings": [],
+        "points": [],
         "metrics": {},
     }
 
@@ -83,6 +85,40 @@ def _geo_rect_ring(bounds: dict[str, float] | None) -> list[dict[str, Any]]:
             ]
         }
     ]
+
+
+def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
+    lookup = {str(column).strip().lower(): str(column) for column in columns}
+    for candidate in candidates:
+        found = lookup.get(str(candidate).strip().lower())
+        if found:
+            return found
+    return None
+
+
+def _points_bounds(points: list[dict[str, Any]]) -> dict[str, float] | None:
+    valid: list[tuple[float, float]] = []
+    for item in points:
+        coord = item.get("coord")
+        if not isinstance(coord, list) or len(coord) < 2:
+            continue
+        lon = float(coord[0])
+        lat = float(coord[1])
+        if math.isfinite(lon) and math.isfinite(lat):
+            valid.append((lon, lat))
+    if not valid:
+        return None
+    west = min(item[0] for item in valid)
+    east = max(item[0] for item in valid)
+    south = min(item[1] for item in valid)
+    north = max(item[1] for item in valid)
+    if east <= west:
+        west -= 0.02
+        east += 0.02
+    if north <= south:
+        south -= 0.02
+        north += 0.02
+    return {"west": west, "south": south, "east": east, "north": north}
 
 
 def _thin_geo_points(coords: Any, max_points: int = 220) -> list[list[float]]:
@@ -169,6 +205,7 @@ def _vector_geo_layer(layer_id: str, label: str, path: Path | None, context: Geo
             "display_path": context.to_display_path(resolved),
             "bounds": bounds,
             "rings": rings,
+            "points": [],
             "metrics": {"feature_count": int(len(gdf))},
         }
     except Exception as exc:
@@ -218,6 +255,7 @@ def _raster_geo_layer(layer_id: str, label: str, path: Path | None, context: Geo
                 "display_path": context.to_display_path(resolved),
                 "bounds": bounds,
                 "rings": _geo_rect_ring(bounds),
+                "points": [],
                 "metrics": {
                     "width": int(src.width),
                     "height": int(src.height),
@@ -228,6 +266,55 @@ def _raster_geo_layer(layer_id: str, label: str, path: Path | None, context: Geo
             }
     except Exception as exc:
         return _geo_empty_layer(layer_id, label, "raster", path, "error", f"读取失败：{exc}", context)
+
+
+def _station_geo_layer(path: Path | None, context: GeoOverviewContext) -> dict[str, Any]:
+    if path is None:
+        return _geo_empty_layer("stations", "站点", "point", None, "missing", "未配置", context)
+    if not path.exists():
+        return _geo_empty_layer("stations", "站点", "point", path, "missing", "文件不存在", context)
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            columns = [str(column) for column in (reader.fieldnames or [])]
+            id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
+            lon_col = _detect_table_column(columns, ["lon", "longitude", "x", "经度"])
+            lat_col = _detect_table_column(columns, ["lat", "latitude", "y", "纬度"])
+            if not id_col or not lon_col or not lat_col:
+                return _geo_empty_layer("stations", "站点", "point", path, "error", "未识别到站号或经纬度字段", context)
+            points: list[dict[str, Any]] = []
+            for idx, row in enumerate(reader):
+                try:
+                    lon = float(row.get(lon_col, ""))
+                    lat = float(row.get(lat_col, ""))
+                except Exception:
+                    continue
+                if not (math.isfinite(lon) and math.isfinite(lat)):
+                    continue
+                station_id = str(row.get(id_col, "") or "").strip() or f"station_{idx + 1}"
+                points.append({
+                    "id": station_id,
+                    "label": station_id,
+                    "coord": [round(lon, 6), round(lat, 6)],
+                })
+        if not points:
+            return _geo_empty_layer("stations", "站点", "point", path, "missing", "无有效经纬度", context)
+        resolved = path.resolve(strict=False)
+        return {
+            "id": "stations",
+            "label": "站点",
+            "kind": "point",
+            "status": "ok",
+            "message": f"{len(points)} 个站点",
+            "path": str(resolved),
+            "display_path": context.to_display_path(resolved),
+            "bounds": _points_bounds(points),
+            "rings": [],
+            "points": points[:500],
+            "metrics": {"station_count": len(points)},
+        }
+    except Exception as exc:
+        return _geo_empty_layer("stations", "站点", "point", path, "error", f"读取失败：{exc}", context)
 
 
 def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
@@ -261,6 +348,9 @@ def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) ->
         else None
     )
     glacier_path = glacier_raster or glacier_vector
+    meteo = dict(config.get("气象策略", {}) or {})
+    raw_station_meta = str(meteo.get("站点信息_csv", "") or "").strip()
+    station_meta_path = context.resolve_config_related_path(config, raw_station_meta) if raw_station_meta else None
 
     layers = [
         _vector_geo_layer("basin", "流域边界", basin_path, context),
@@ -271,6 +361,7 @@ def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) ->
             if glacier_path and glacier_path.suffix.lower() in {".tif", ".tiff"}
             else _vector_geo_layer("glacier", "冰川", glacier_path, context)
         ),
+        _station_geo_layer(station_meta_path, context),
     ]
     ok_layers = [layer for layer in layers if layer.get("status") == "ok"]
     bounds = _merge_geo_bounds([layer.get("bounds") for layer in ok_layers])

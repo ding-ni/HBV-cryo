@@ -51,12 +51,27 @@
   function renderLayerPaths(overview, bounds) {
     const layers = Array.isArray(overview?.layers) ? overview.layers : [];
     return layers
-      .filter(layer => layer?.status === "ok" && layer.id !== "dem")
+      .filter(layer => layer?.status === "ok" && layer.id !== "dem" && layer.kind !== "point")
       .map(layer => (layer.rings || [])
         .map(ring => pathFromRing(ring, bounds))
         .filter(Boolean)
         .slice(0, 14)
         .map(d => `<path class="geo-layer ${layerCssClass(layer)}" d="${d}"></path>`)
+        .join(""))
+      .join("");
+  }
+
+  function renderLayerPoints(overview, bounds, escapeHtml) {
+    const layers = Array.isArray(overview?.layers) ? overview.layers : [];
+    return layers
+      .filter(layer => layer?.status === "ok" && layer.kind === "point")
+      .map(layer => (layer.points || [])
+        .slice(0, 120)
+        .map(point => {
+          const [x, y] = projectPoint(point.coord, bounds);
+          const label = point.label || point.id || layer.label || "站点";
+          return `<circle class="geo-layer geo-layer-point ${layerCssClass(layer)}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.2"><title>${escapeHtml(label)}</title></circle>`;
+        })
         .join(""))
       .join("");
   }
@@ -79,12 +94,14 @@
     const dem = layers.find(layer => layer.id === "dem" && layer.status === "ok");
     const basin = layers.find(layer => layer.id === "basin" && layer.status === "ok");
     const glacier = layers.find(layer => layer.id === "glacier" && layer.status === "ok");
+    const stations = layers.find(layer => layer.id === "stations" && layer.status === "ok");
     const demStats = dem?.metrics?.stats || {};
     const tiles = [
-      { label: "有效图层", value: `${Number(overview?.available_layer_count || 0)}/${layers.length || 4}` },
+      { label: "有效图层", value: `${Number(overview?.available_layer_count || 0)}/${layers.length || 5}` },
       { label: "流域要素", value: basin?.metrics?.feature_count != null ? String(basin.metrics.feature_count) : "未识别" },
       { label: "DEM 高程", value: demStats.min != null && demStats.max != null ? `${demStats.min} - ${demStats.max} m` : "未统计" },
       { label: "冰川图层", value: glacier ? "已识别" : "未配置" },
+      { label: "站点", value: stations?.metrics?.station_count != null ? `${stations.metrics.station_count} 个` : "未配置" },
     ];
     return tiles.map(tile => `
       <div class="geo-preview-metric">
@@ -124,6 +141,7 @@
               <rect class="geo-preview-frame" x="1" y="1" width="638" height="298" rx="4"></rect>
               ${hasDem ? '<rect class="geo-layer geo-layer-dem" x="26" y="26" width="588" height="248" rx="3"></rect>' : ""}
               ${renderLayerPaths(overview, bounds)}
+              ${renderLayerPoints(overview, bounds, escapeHtml)}
             </svg>
           </div>
           <div class="geo-preview-side">
