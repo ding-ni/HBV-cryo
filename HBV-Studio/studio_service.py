@@ -68,6 +68,7 @@ from services.forecast_input import ForecastInputCheckContext
 from services.forecast_input import ensure_forecast_input_ready as build_ensure_forecast_input_ready
 from services.forecast_input import forecast_input_check as build_forecast_input_check
 from services.forecast_restart import ForecastRestartStartContext
+from services.forecast_restart import forecast_restart_args as build_forecast_restart_args
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
@@ -8645,44 +8646,13 @@ def manual_start_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
-def _forecast_restart_args(payload: dict[str, Any]) -> argparse.Namespace:
-    config_path = str(payload.get("config_path", payload.get("config", "")) or "").strip()
-    source_run = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
-    if not config_path:
-        run_path = resolve_any_path(source_run, must_exist=True)
-        metadata = read_json_file(run_path / "metadata.json")
-        config_path = str(metadata.get("workspace_config", "") or "").strip()
-    if not config_path:
-        raise ValueError("缺少工作区配置路径。")
-    if not source_run:
-        raise ValueError("缺少源结果目录。")
-    forecast_end = str(payload.get("forecast_end", "") or "").strip()
-    if not forecast_end:
-        raise ValueError("缺少预报结束时间 forecast_end。")
-    return argparse.Namespace(
-        config=config_path,
-        source_run=source_run,
-        forecast_start=str(payload.get("forecast_start", "") or "").strip(),
-        forecast_end=forecast_end,
-        forecast_prec_dir=str(payload.get("forecast_prec_dir", payload.get("prec_dir", "")) or "").strip(),
-        forecast_temp_dir=str(payload.get("forecast_temp_dir", payload.get("temp_dir", "")) or "").strip(),
-        forecast_evap_dir=str(payload.get("forecast_evap_dir", payload.get("evap_dir", "")) or "").strip(),
-        profile=str(payload.get("profile", payload.get("calibration_mode", "")) or "").strip(),
-        objective_mode=str(payload.get("objective_mode", "") or "").strip(),
-        prec_source=str(payload.get("prec_source", "custom_tif") or "custom_tif").strip(),
-        glacier_mode=str(payload.get("glacier_mode", "inline") or "inline").strip(),
-        output_dir=str(payload.get("output_dir", "") or "").strip(),
-        forecast_input_check=dict(payload.get("_forecast_input_check") or payload.get("forecast_input_check") or {}),
-        output_json="",
-    )
-
-
 def forecast_restart(payload: dict[str, Any]) -> dict[str, Any]:
     import forecast_run
 
     input_check = ensure_forecast_input_ready(payload)
     checked_payload = {**payload, "_forecast_input_check": input_check}
-    return forecast_run.run_forecast(_forecast_restart_args(checked_payload))
+    args = build_forecast_restart_args(checked_payload, resolve_path=resolve_any_path, read_json_file=read_json_file)
+    return forecast_run.run_forecast(args)
 
 
 def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Callable[[str, str | None], None]) -> dict[str, Any]:
@@ -8692,7 +8662,8 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     if not input_check:
         input_check = ensure_forecast_input_ready(payload)
     checked_payload = {**payload, "_forecast_input_check": input_check}
-    return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
+    args = build_forecast_restart_args(checked_payload, resolve_path=resolve_any_path, read_json_file=read_json_file)
+    return forecast_run.run_forecast(args, stage_callback=stage_callback)
 
 
 def _forecast_input_check_context() -> ForecastInputCheckContext:
@@ -8779,7 +8750,11 @@ def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
 
 def _forecast_restart_start_context() -> ForecastRestartStartContext:
     return ForecastRestartStartContext(
-        build_args=_forecast_restart_args,
+        build_args=lambda payload: build_forecast_restart_args(
+            payload,
+            resolve_path=resolve_any_path,
+            read_json_file=read_json_file,
+        ),
         resolve_path=resolve_any_path,
         ensure_input_ready=ensure_forecast_input_ready,
     )

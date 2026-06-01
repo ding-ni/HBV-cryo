@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +21,43 @@ class ForecastRestartStartPlan:
     command: list[str]
     metadata: dict[str, Any]
     checked_payload: dict[str, Any]
+
+
+def forecast_restart_args(
+    payload: dict[str, Any],
+    *,
+    resolve_path: Callable[..., Path],
+    read_json_file: Callable[[Path], dict[str, Any]],
+) -> argparse.Namespace:
+    config_path = str(payload.get("config_path", payload.get("config", "")) or "").strip()
+    source_run = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
+    if not config_path:
+        run_path = resolve_path(source_run, must_exist=True)
+        metadata = read_json_file(run_path / "metadata.json")
+        config_path = str(metadata.get("workspace_config", "") or "").strip()
+    if not config_path:
+        raise ValueError("缺少工作区配置路径。")
+    if not source_run:
+        raise ValueError("缺少源结果目录。")
+    forecast_end = str(payload.get("forecast_end", "") or "").strip()
+    if not forecast_end:
+        raise ValueError("缺少预报结束时间 forecast_end。")
+    return argparse.Namespace(
+        config=config_path,
+        source_run=source_run,
+        forecast_start=str(payload.get("forecast_start", "") or "").strip(),
+        forecast_end=forecast_end,
+        forecast_prec_dir=str(payload.get("forecast_prec_dir", payload.get("prec_dir", "")) or "").strip(),
+        forecast_temp_dir=str(payload.get("forecast_temp_dir", payload.get("temp_dir", "")) or "").strip(),
+        forecast_evap_dir=str(payload.get("forecast_evap_dir", payload.get("evap_dir", "")) or "").strip(),
+        profile=str(payload.get("profile", payload.get("calibration_mode", "")) or "").strip(),
+        objective_mode=str(payload.get("objective_mode", "") or "").strip(),
+        prec_source=str(payload.get("prec_source", "custom_tif") or "custom_tif").strip(),
+        glacier_mode=str(payload.get("glacier_mode", "inline") or "inline").strip(),
+        output_dir=str(payload.get("output_dir", "") or "").strip(),
+        forecast_input_check=dict(payload.get("_forecast_input_check") or payload.get("forecast_input_check") or {}),
+        output_json="",
+    )
 
 
 def forecast_restart_start_plan(
