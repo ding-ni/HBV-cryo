@@ -52,6 +52,11 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
+from services.system_status import (
+    HealthContext,
+    health_payload as build_health_payload,
+    source_files_latest_mtime as build_source_files_latest_mtime,
+)
 from services.tasks import (
     TaskQueryContext,
     find_running_task as build_find_running_task,
@@ -332,37 +337,19 @@ SERVER_STARTED_AT = time.time()
 
 
 def source_files_latest_mtime() -> tuple[float, str]:
-    candidates = [
-        GUI_ROOT / "studio_service.py",
-        GUI_ROOT / "launch.py",
-        GUI_ROOT / "forecast_run.py",
-        GUI_ROOT / "profile_runner.py",
-        GUI_ROOT / "precipitation_strategy_runner.py",
-        GUI_ROOT / "web" / "app.js",
-        GUI_ROOT / "web" / "index.html",
-        GUI_ROOT / "web" / "styles.css",
-        GUI_ROOT / "web" / "js" / "forecastView.js",
-        GUI_ROOT / "web" / "js" / "eventMode.js",
-        GUI_ROOT / "web" / "js" / "geoPreview.js",
-        GUI_ROOT / "web" / "js" / "parameterLibrary.js",
-        GUI_ROOT / "web" / "js" / "stationPrecip.js",
-        GUI_ROOT / "web" / "js" / "taskView.js",
-        GUI_ROOT / "web" / "js" / "workspaceLayout.js",
-    ]
-    services_dir = GUI_ROOT / "services"
-    if services_dir.exists():
-        candidates.extend(sorted(services_dir.glob("*.py")))
-    latest = 0.0
-    latest_file = ""
-    for path in candidates:
-        try:
-            stamp = path.stat().st_mtime
-        except OSError:
-            continue
-        if stamp > latest:
-            latest = stamp
-            latest_file = str(path)
-    return latest, latest_file
+    return build_source_files_latest_mtime(_health_context())
+
+
+def _health_context() -> HealthContext:
+    return HealthContext(
+        gui_root=GUI_ROOT,
+        app_version=APP_VERSION,
+        server_started_at=SERVER_STARTED_AT,
+    )
+
+
+def health_payload() -> dict[str, Any]:
+    return build_health_payload(_health_context())
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -11275,18 +11262,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if parsed.path == "/api/health":
-                latest_source_mtime, latest_source_file = source_files_latest_mtime()
-                self.send_json({
-                    "ok": True,
-                    "time": time.time(),
-                    "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "server_started_at": SERVER_STARTED_AT,
-                    "server_started_at_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(SERVER_STARTED_AT)),
-                    "version": APP_VERSION,
-                    "source_latest_mtime": latest_source_mtime,
-                    "source_latest_file": latest_source_file,
-                    "source_stale": bool(latest_source_mtime and latest_source_mtime > SERVER_STARTED_AT + 1.0),
-                })
+                self.send_json(health_payload())
             elif parsed.path == "/api/dashboard":
                 self.send_json({"ok": True, "data": dashboard_payload()})
             elif parsed.path == "/api/templates":
