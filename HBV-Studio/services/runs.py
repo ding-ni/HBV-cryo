@@ -2,13 +2,25 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import re
 import shutil
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
+
+
+RUN_KIND_LABELS = {
+    "manual_starter": "手调起点",
+    "manual_result": "手调结果",
+    "forecast_restart": "连续状态预报",
+    "calibration": "正式率定",
+    "legacy": "历史结果",
+}
+SYSTEM_RESULT_TITLES = frozenset({"手调起点", "手调结果"})
 
 
 @dataclass(frozen=True)
@@ -58,6 +70,114 @@ class RunMutationContext:
 _RUN_LIST_CACHE_LOCK = threading.Lock()
 _RUN_LIST_CACHE_SIGNATURE: tuple[tuple[Any, ...], ...] | None = None
 _RUN_LIST_CACHE_ITEMS: list[dict[str, Any]] = []
+
+
+def run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
+    meta = dict(metadata or {})
+    forecast_result = dict(meta.get("forecast_result", {}) or {})
+    manual_result = dict(meta.get("manual_result", {}) or {})
+    starter_result = dict(meta.get("starter_result", {}) or {})
+    if bool(forecast_result.get("enabled")) or str(meta.get("run_class", "") or "") == "forecast_restart":
+        return "forecast_restart"
+    if bool(manual_result.get("enabled")):
+        return "manual_result"
+    if bool(starter_result.get("enabled")):
+        return "manual_starter"
+    if studio_compatible:
+        return "calibration"
+    return "legacy"
+
+
+def run_kind_label(kind: str) -> str:
+    return RUN_KIND_LABELS.get(kind, "结果")
+
+
+def normalize_result_title(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text.strip()
+
+
+def has_custom_result_title(run_dir: Path, title: str) -> bool:
+    normalized = normalize_result_title(title)
+    if not normalized:
+        return False
+    if normalized.lower() == run_dir.name.lower():
+        return False
+    if normalized in SYSTEM_RESULT_TITLES:
+        return False
+    return True
+
+
+def run_time_label(raw_value: Any, updated_at: float | None = None) -> str:
+    text = str(raw_value or "").strip()
+    if text:
+        return text
+    if updated_at:
+        try:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(updated_at)))
+        except Exception:
+            return ""
+    return ""
+
+
+def source_run_meta(metadata: dict[str, Any], replace_placeholders: Callable[..., Any] | None = None) -> tuple[str, str]:
+    manual_result = dict(metadata.get("manual_result", {}) or {})
+    optimization = dict(metadata.get("optimization", {}) or {})
+    replay_context = dict(metadata.get("replay_context", {}) or {})
+    source_path = str(
+        replay_context.get("source_run_path")
+        or manual_result.get("source_run_path")
+        or optimization.get("source_run_path")
+        or ""
+    ).strip()
+    source_name = str(
+        replay_context.get("source_run_name")
+        or manual_result.get("source_run_name")
+        or optimization.get("source_run_name")
+        or ""
+    ).strip()
+    if not source_name and source_path:
+        try:
+            resolved = replace_placeholders(source_path) if replace_placeholders else source_path
+            source_name = Path(str(resolved)).name
+        except Exception:
+            source_name = Path(source_path).name
+    return source_path, source_name
+
+
+def display_run_title(
+    run_dir: Path,
+    metadata: dict[str, Any],
+    workspace_name: str,
+    studio_compatible: bool,
+    updated_at: float | None = None,
+) -> dict[str, Any]:
+    raw_title = normalize_result_title(metadata.get("result_title", ""))
+    run_kind = run_kind_from_metadata(metadata, studio_compatible)
+    kind_label = run_kind_label(run_kind)
+    time_text = run_time_label(metadata.get("run_time"), updated_at)
+    has_custom_title = has_custom_result_title(run_dir, raw_title)
+    if has_custom_title:
+        display_name = raw_title
+        subtitle_parts = [workspace_name, kind_label, time_text]
+    else:
+        display_name = " · ".join(part for part in (workspace_name, kind_label, time_text) if part)
+        subtitle_parts = []
+    display_name = display_name or raw_title or run_dir.name
+    subtitle = " · ".join(part for part in subtitle_parts if part)
+    if not subtitle and display_name != run_dir.name:
+        subtitle = f"目录名：{run_dir.name}"
+    return {
+        "name": raw_title or run_dir.name,
+        "raw_title": raw_title,
+        "display_name": display_name,
+        "display_subtitle": subtitle,
+        "has_custom_title": has_custom_title,
+        "run_type": run_kind,
+        "run_type_label": kind_label,
+        "workspace_name": workspace_name,
+        "run_time_label": time_text,
+    }
 
 
 def list_runs(context: RunListContext) -> list[dict[str, Any]]:

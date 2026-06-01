@@ -75,11 +75,19 @@ from services.manual_presets import write_manual_preset_store as build_write_man
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import RUN_KIND_LABELS
 from services.runs import delete_run as build_delete_run
+from services.runs import display_run_title as build_display_run_title
 from services.runs import export_run_excel as build_export_run_excel
+from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
+from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import rename_run as build_rename_run
+from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
+from services.runs import run_kind_label as build_run_kind_label
+from services.runs import run_time_label as build_run_time_label
+from services.runs import source_run_meta as build_source_run_meta
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
 from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
@@ -171,13 +179,6 @@ DEFAULT_MANUAL_START_VECTOR = [
     0.05, 0.05, 3.5, 5.5, 0.25, 0.05,
     0.005, 30.0, 1.8, 2.0, 1.2, 0.05,
 ]
-RUN_KIND_LABELS = {
-    "manual_starter": "手调起点",
-    "manual_result": "手调结果",
-    "forecast_restart": "连续状态预报",
-    "calibration": "正式率定",
-    "legacy": "历史结果",
-}
 TIME_BASIS_CONTINUOUS = "continuous"
 TIME_BASIS_EVENT_WINDOWS = "event_windows"
 TIME_BASIS_FORECAST_WINDOW = "forecast_window"
@@ -259,7 +260,6 @@ EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
         "warning": "连续状态策略不适合事件之间存在资料缺口的事件窗口集合。",
     },
 }
-SYSTEM_RESULT_TITLES = frozenset({"手调起点", "手调结果"})
 RUN_EXPORT_FIELD_LABELS = {
     "q_sim": "模拟总径流(m3/s)",
     "q_sim_model": "模型本地产流(m3/s)",
@@ -5958,75 +5958,27 @@ def _workspace_name_for_summary(metadata: dict[str, Any], resolved_config: Path 
 
 
 def _run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
-    meta = dict(metadata or {})
-    forecast_result = dict(meta.get("forecast_result", {}) or {})
-    manual_result = dict(meta.get("manual_result", {}) or {})
-    starter_result = dict(meta.get("starter_result", {}) or {})
-    if bool(forecast_result.get("enabled")) or str(meta.get("run_class", "") or "") == "forecast_restart":
-        return "forecast_restart"
-    if bool(manual_result.get("enabled")):
-        return "manual_result"
-    if bool(starter_result.get("enabled")):
-        return "manual_starter"
-    if studio_compatible:
-        return "calibration"
-    return "legacy"
+    return build_run_kind_from_metadata(metadata, studio_compatible)
 
 
 def _run_kind_label(kind: str) -> str:
-    return RUN_KIND_LABELS.get(kind, "结果")
+    return build_run_kind_label(kind)
 
 
 def _normalized_result_title(value: Any) -> str:
-    text = re.sub(r"\s+", " ", str(value or "").strip())
-    return text.strip()
+    return build_normalize_result_title(value)
 
 
 def _has_custom_result_title(run_dir: Path, title: str) -> bool:
-    normalized = _normalized_result_title(title)
-    if not normalized:
-        return False
-    if normalized.lower() == run_dir.name.lower():
-        return False
-    if normalized in SYSTEM_RESULT_TITLES:
-        return False
-    return True
+    return build_has_custom_result_title(run_dir, title)
 
 
 def _run_time_label(raw_value: Any, updated_at: float | None = None) -> str:
-    text = str(raw_value or "").strip()
-    if text:
-        return text
-    if updated_at:
-        try:
-            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(updated_at)))
-        except Exception:
-            return ""
-    return ""
+    return build_run_time_label(raw_value, updated_at)
 
 
 def _source_run_meta(metadata: dict[str, Any]) -> tuple[str, str]:
-    manual_result = dict(metadata.get("manual_result", {}) or {})
-    optimization = dict(metadata.get("optimization", {}) or {})
-    replay_context = dict(metadata.get("replay_context", {}) or {})
-    source_path = str(
-        replay_context.get("source_run_path")
-        or manual_result.get("source_run_path")
-        or optimization.get("source_run_path")
-        or ""
-    ).strip()
-    source_name = str(
-        replay_context.get("source_run_name")
-        or manual_result.get("source_run_name")
-        or optimization.get("source_run_name")
-        or ""
-    ).strip()
-    if not source_name and source_path:
-        try:
-            source_name = Path(str(replace_placeholders(source_path))).name
-        except Exception:
-            source_name = Path(source_path).name
-    return source_path, source_name
+    return build_source_run_meta(metadata, replace_placeholders)
 
 
 def _run_hydrology_context() -> RunHydrologyContext:
@@ -6056,33 +6008,8 @@ def _display_run_title(
     studio_compatible: bool,
     updated_at: float | None = None,
 ) -> dict[str, Any]:
-    raw_title = _normalized_result_title(metadata.get("result_title", ""))
     workspace_name = _workspace_name_for_summary(metadata, resolved_config)
-    run_kind = _run_kind_from_metadata(metadata, studio_compatible)
-    run_kind_label = _run_kind_label(run_kind)
-    run_time_text = _run_time_label(metadata.get("run_time"), updated_at)
-    has_custom_title = _has_custom_result_title(run_dir, raw_title)
-    if has_custom_title:
-        display_name = raw_title
-        subtitle_parts = [workspace_name, run_kind_label, run_time_text]
-    else:
-        display_name = " · ".join(part for part in (workspace_name, run_kind_label, run_time_text) if part)
-        subtitle_parts = []
-    display_name = display_name or raw_title or run_dir.name
-    subtitle = " · ".join(part for part in subtitle_parts if part)
-    if not subtitle and display_name != run_dir.name:
-        subtitle = f"目录名：{run_dir.name}"
-    return {
-        "name": raw_title or run_dir.name,
-        "raw_title": raw_title,
-        "display_name": display_name,
-        "display_subtitle": subtitle,
-        "has_custom_title": has_custom_title,
-        "run_type": run_kind,
-        "run_type_label": run_kind_label,
-        "workspace_name": workspace_name,
-        "run_time_label": run_time_text,
-    }
+    return build_display_run_title(run_dir, metadata, workspace_name, studio_compatible, updated_at=updated_at)
 
 
 def _run_parameter_context(
