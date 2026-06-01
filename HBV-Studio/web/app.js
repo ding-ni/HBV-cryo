@@ -61,6 +61,22 @@ const frontendModuleContracts = [
     ],
   },
   {
+    script: "./js/resultMetadata.js",
+    global: "HBVStudioResultMetadata",
+    exports: [
+      "boundaryEnabledFromMeta",
+      "boundaryModuleSummary",
+      "dataCacheSummary",
+      "glacierModuleSummary",
+      "optimizationPolishSummary",
+      "optimizationRefineSummary",
+      "optimizationResultLabel",
+      "optimizationSummary",
+      "replayCompatibilityInfo",
+      "runPrecipSummary",
+    ],
+  },
+  {
     script: "./js/stationPrecip.js",
     global: "HBVStudioStationPrecip",
     exports: ["renderTaskScopeSummary", "renderEventCoverageMatrix"],
@@ -2270,141 +2286,53 @@ function dataPathAlias(path, fallback = "—") {
 }
 
 function dataCacheSummary(meta) {
-  const cache = meta?.data_cache || {};
-  const items = ["prec", "temp", "evap"].filter(key => cache[key]);
-  if (!items.length) return "未记录";
-  const exactHits = items.filter(key => cache[key]?.cache_hit && (!cache[key]?.cache_hit_type || cache[key]?.cache_hit_type === "exact")).length;
-  const coveringHits = items.filter(key => cache[key]?.cache_hit && cache[key]?.cache_hit_type === "covering_slice").length;
-  const hits = exactHits + coveringHits;
-  if (!hits) return `已建缓存 ${items.length} 项`;
-  if (coveringHits > 0) return `已复用 ${hits}/${items.length}（精确 ${exactHits} · 切片 ${coveringHits}）`;
-  return `已复用 ${hits}/${items.length}`;
+  return window.HBVStudioResultMetadata.dataCacheSummary(meta);
 }
 
 function glacierModuleSummary(meta) {
-  const glacier = meta?.optional_modules?.glacier || {};
-  if (!glacier.enabled) {
-    return glacier.mask_exists === false ? "关闭（未生成冰川掩膜）" : "关闭";
-  }
-  return glacier.reference_available ? "开启 · 已提供参考场" : "开启";
+  return window.HBVStudioResultMetadata.glacierModuleSummary(meta);
 }
 
 function boundaryModuleSummary(meta) {
-  return meta?.optional_modules?.boundary_inflow?.enabled ? "开启" : "关闭";
+  return window.HBVStudioResultMetadata.boundaryModuleSummary(meta);
 }
 
 
 function boundaryEnabledFromMeta(meta) {
-  return Boolean(
-    meta?.project_object_type === "interbasin_with_boundary"
-    || meta?.optional_modules?.boundary_inflow?.enabled
-    || meta?.boundary_condition?.enabled
-    || meta?.boundary_condition?.boundary_inflow_file
-  );
+  return window.HBVStudioResultMetadata.boundaryEnabledFromMeta(meta);
 }
 
 
 function replayCompatibilityInfo(meta) {
-  const replay = meta?.replay_context || {};
-  const obsReplay = Boolean(replay.obs_replayed_from_source_run);
-  const boundaryReplay = Boolean(replay.boundary_replayed_from_source_run);
-  if (!obsReplay && !boundaryReplay) {
-    return {
-      value: "未启用",
-      detail: "当前结果直接使用现工作区输入",
-      obsReplay: false,
-      boundaryReplay: false,
-    };
-  }
-  const labels = [];
-  const details = [];
-  if (obsReplay) {
-    labels.push("观测回放");
-    details.push("观测序列来自源结果");
-  }
-  if (boundaryReplay) {
-    labels.push("边界回放");
-    details.push("上游边界沿用源结果已汇流序列");
-  }
-  if (replay.source_run_path) {
-    details.push(`源结果 ${shortPath(replay.source_run_path)}`);
-  }
-  return {
-    value: labels.join(" + "),
-    detail: details.join("；"),
-    obsReplay,
-    boundaryReplay,
-  };
+  return window.HBVStudioResultMetadata.replayCompatibilityInfo(meta, { shortPath });
 }
 
 
 function optimizationResultLabel(optimization) {
-  const stage = String(optimization?.selected_result_stage || "").trim().toLowerCase();
-  if (stage === "global") return optimization?.polish ? "精细搜索结果（含末端精修）" : "精细搜索结果";
-  if (stage === "refine") return "局部精修结果";
-  if (stage === "mc") return "快速筛选结果";
-  return String(optimization?.selected_result_label || "").trim();
+  return window.HBVStudioResultMetadata.optimizationResultLabel(optimization);
 }
 
 function optimizationRefineSummary(optimization) {
-  const refine = optimization?.stage_stats?.refine;
-  if (!refine?.requested) {
-    if (optimization?.polish) return "未启用独立局部精修，仅执行全局末端精修（polish）";
-    return "未启用";
-  }
-  if (refine?.valid) {
-    const nit = Number(refine.nit || 0);
-    return nit > 0 ? `已执行（${nit} 代）` : "已执行";
-  }
-  if (String(refine?.skipped_reason || "").trim().toLowerCase() === "global_result_invalid") {
-    return "已跳过（全局阶段结果无效）";
-  }
-  if (refine && refine.success === false) return "执行失败";
-  return "未产出有效结果";
+  return window.HBVStudioResultMetadata.optimizationRefineSummary(optimization);
 }
 
 function optimizationPolishSummary(optimization) {
-  if (!optimization) return "未记录";
-  if (optimization.polish) {
-    return optimization.requested_polish ? "已启用（显式请求）" : "已启用（单线程自动开启）";
-  }
-  if (optimization.requested_polish) return "请求启用但未生效";
-  return "未启用";
+  return window.HBVStudioResultMetadata.optimizationPolishSummary(optimization);
 }
 
 function optimizationSummary(meta) {
-  const optimization = meta?.optimization || {};
-  const parts = [optimizationMethodLabel(optimization)];
-  if (Number(optimization.debug_days || 0) > 0) parts.push(`辅助计算窗口 ${optimization.debug_days} 天`);
-  if (String(optimization.method || "").trim().toLowerCase() !== "de" && Number(optimization.mc_samples || 0) > 0) {
-    parts.push(`随机样本 ${optimization.mc_samples}`);
-  }
-  if (String(optimization.method || "").trim().toLowerCase() !== "mc_only" && Number(optimization.maxiter || 0) > 0) {
-    parts.push(`最大迭代 ${optimization.maxiter}`);
-  }
-  if (Number(optimization.workers || 0) > 0) parts.push(`线程 ${optimization.workers}`);
-  if (optimizationResultLabel(optimization)) parts.push(`最终采用 ${optimizationResultLabel(optimization)}`);
-  if (optimization.objective_value !== undefined && optimization.objective_value !== null) {
-    parts.push(`综合评分值 ${formatNumber(optimization.objective_value, 4)}`);
-  }
-  if (Number(optimization.selected_stage_evaluations || 0) > 0) {
-    parts.push(`最终阶段评估 ${optimization.selected_stage_evaluations}`);
-  }
-  const refineSummary = optimizationRefineSummary(optimization);
-  if (optimization?.stage_stats?.refine?.requested) {
-    parts.push(`局部精修 ${refineSummary}`);
-  } else if (optimization.polish) {
-    parts.push("全局末端精修（polish）");
-  }
-  return parts.filter(Boolean).join(" · ");
+  return window.HBVStudioResultMetadata.optimizationSummary(meta, {
+    optimizationMethodLabel,
+    formatNumber,
+  });
 }
 
 function runPrecipSummary(meta) {
-  const sources = meta?.data_sources || {};
-  const runtimeSource = String(sources.runtime_prec_source || sources.prec_source || sources.configured_precip_source || "").trim().toLowerCase();
-  const sourceLabel = getConfiguredPrecipSourceLabel(runtimeSource || "era5");
-  const directoryLabel = sources.prec_dir ? dataPathAlias(sources.prec_dir) : getRuntimePrecipDirectoryLabel(runtimeSource || "era5");
-  return `${sourceLabel} · ${directoryLabel}`;
+  return window.HBVStudioResultMetadata.runPrecipSummary(meta, {
+    dataPathAlias,
+    getConfiguredPrecipSourceLabel,
+    getRuntimePrecipDirectoryLabel,
+  });
 }
 
 function finiteSeriesStats(values) {
