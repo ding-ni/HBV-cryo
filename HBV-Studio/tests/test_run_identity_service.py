@@ -39,6 +39,7 @@ from services.runs import (  # noqa: E402
     run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
+    run_update_timestamps,
     snapshot_run_paths,
     source_run_meta,
 )
@@ -105,6 +106,23 @@ class RunIdentityServiceTests(unittest.TestCase):
             snapshot_run_paths(lambda: [{"path": "runs/a"}, {"path": "runs/b"}]),
             {"runs/a", "runs/b"},
         )
+
+    def test_run_update_timestamps_uses_newest_run_file_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            metadata_path = run_dir / "metadata.json"
+            simulation_path = run_dir / "simulation.csv"
+            metadata_path.write_text("{}", encoding="utf-8")
+            simulation_path.write_text("date,q_sim\n2026-06-01,1\n", encoding="utf-8")
+            os.utime(run_dir, ns=(1_000_000_000, 1_000_000_000))
+            os.utime(metadata_path, ns=(2_000_000_000, 2_000_000_000))
+            os.utime(simulation_path, ns=(3_000_000_000, 3_000_000_000))
+
+            updated_at, updated_at_ns = run_update_timestamps(run_dir)
+
+        self.assertEqual(updated_at, 3.0)
+        self.assertEqual(updated_at_ns, 3_000_000_000)
 
     def test_result_titles_distinguish_custom_names_from_system_names(self) -> None:
         run_dir = Path("C:/runs/run_20260602_100000")

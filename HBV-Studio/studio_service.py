@@ -134,6 +134,7 @@ from services.runs import default_run_export_fields as build_default_run_export_
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import run_time_label as build_run_time_label
+from services.runs import run_update_timestamps as build_run_update_timestamps
 from services.runs import snapshot_run_paths as build_snapshot_run_paths
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
@@ -5596,16 +5597,7 @@ def iter_run_dirs() -> list[Path]:
 
 
 def _run_update_timestamps(run_dir: Path) -> tuple[float, int]:
-    updated_at = run_dir.stat().st_mtime
-    updated_at_ns = int(getattr(run_dir.stat(), "st_mtime_ns", int(updated_at * 1e9)))
-    for candidate in (run_dir / "metadata.json", run_dir / "simulation.csv"):
-        try:
-            stat = candidate.stat()
-            updated_at = max(updated_at, stat.st_mtime)
-            updated_at_ns = max(updated_at_ns, int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))))
-        except (FileNotFoundError, PermissionError, OSError):
-            pass
-    return updated_at, updated_at_ns
+    return build_run_update_timestamps(run_dir)
 
 
 def _workspace_name_for_summary(metadata: dict[str, Any], resolved_config: Path | None = None) -> str:

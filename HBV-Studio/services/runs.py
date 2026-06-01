@@ -249,6 +249,23 @@ def snapshot_run_paths(list_runs: Callable[[], list[dict[str, Any]]]) -> set[str
     return {item["path"] for item in list_runs()}
 
 
+def run_update_timestamps(run_dir: Path) -> tuple[float, int]:
+    stat = run_dir.stat()
+    updated_at = stat.st_mtime
+    updated_at_ns = int(getattr(stat, "st_mtime_ns", int(updated_at * 1e9)))
+    for candidate in (run_dir / "metadata.json", run_dir / "simulation.csv"):
+        try:
+            candidate_stat = candidate.stat()
+            updated_at = max(updated_at, candidate_stat.st_mtime)
+            updated_at_ns = max(
+                updated_at_ns,
+                int(getattr(candidate_stat, "st_mtime_ns", int(candidate_stat.st_mtime * 1e9))),
+            )
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+    return updated_at, updated_at_ns
+
+
 def run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
     meta = dict(metadata or {})
     forecast_result = dict(meta.get("forecast_result", {}) or {})
