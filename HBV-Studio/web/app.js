@@ -28,6 +28,11 @@ const viewRenderers = {
 
 const frontendModuleContracts = [
   {
+    script: "./js/apiClient.js",
+    global: "HBVStudioApiClient",
+    exports: ["apiGet", "apiPost"],
+  },
+  {
     script: "./js/stationPrecip.js",
     global: "HBVStudioStationPrecip",
     exports: ["renderTaskScopeSummary", "renderEventCoverageMatrix"],
@@ -2955,40 +2960,11 @@ function renderRunEngineeringSummary(data) {
 // --------------- API helpers ---------------
 
 async function apiGet(path) {
-  let r;
-  try { r = await fetch(path); }
-  catch { throw new Error("未连接到 HBV-Studio 本地服务，请使用 python HBV-Studio/launch.py 启动。"); }
-  const text = await r.text();
-  let p;
-  try {
-    p = text ? JSON.parse(text) : {};
-  } catch {
-    const snippet = String(text || "").replace(/\s+/g, " ").trim().slice(0, 120);
-    throw new Error(`本地服务返回了无法识别的内容：${r.status}${snippet ? `，响应片段：${snippet}` : ""}`);
-  }
-  if (!r.ok || !p.ok) throw new Error(p.error || `请求失败：${r.status}`);
-  return p;
+  return window.HBVStudioApiClient.apiGet(path);
 }
 
 async function apiPost(path, body) {
-  let r;
-  try {
-    r = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch { throw new Error("未连接到 HBV-Studio 本地服务，请使用 python HBV-Studio/launch.py 启动。"); }
-  const text = await r.text();
-  let p;
-  try {
-    p = text ? JSON.parse(text) : {};
-  } catch {
-    const snippet = String(text || "").replace(/\s+/g, " ").trim().slice(0, 120);
-    throw new Error(`本地服务返回了无法识别的内容：${r.status}${snippet ? `，响应片段：${snippet}` : ""}`);
-  }
-  if (!r.ok || !p.ok) throw new Error(p.error || `请求失败：${r.status}`);
-  return p;
+  return window.HBVStudioApiClient.apiPost(path, body);
 }
 
 // --------------- service pill ---------------
