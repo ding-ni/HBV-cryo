@@ -70,6 +70,7 @@ from services.runs import (  # noqa: E402
     synthesized_parameter_profile,
     sync_objective_profile_metadata,
     sync_run_boundary_condition_path,
+    sync_run_config_profile_metadata,
     sync_run_data_source_paths,
     sync_source_run_reference,
     workspace_name_for_summary,
@@ -515,6 +516,60 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(metadata["objective"]["formula"], "NSE + PBIAS")
         self.assertEqual(metadata["objective"]["weights"], {"nse": 0.8})
         self.assertEqual(metadata["objective"]["diagnostic_only_constraints"], ["winter_ice"])
+
+    def test_sync_run_config_profile_metadata_fills_missing_profiles_and_preserves_existing_rate(self) -> None:
+        metadata = {
+            "rate_mode": "hourly",
+            "objective": {"label": "\u5386\u53f2\u76ee\u6807"},
+        }
+        optimization = {}
+
+        effective = sync_run_config_profile_metadata(
+            metadata,
+            optimization,
+            profile=profile_runner.PROFILE_DAILY,
+            objective_mode=profile_runner.OBJECTIVE_MODE_MULTI,
+            workspace_label="\u6c71\u5730\u6d41\u57df",
+            resolved_object_type="full_upstream_basin",
+        )
+
+        self.assertEqual(effective, profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["calibration_profile"], profile_runner.PROFILE_DAILY)
+        self.assertEqual(metadata["rate_mode"], "hourly")
+        self.assertEqual(metadata["project_object_type"], "full_upstream_basin")
+        self.assertEqual(metadata["workspace_label"], "\u6c71\u5730\u6d41\u57df")
+        self.assertIn("bounds", metadata["parameter_profile"])
+        self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["objective"]["label"], "\u5386\u53f2\u76ee\u6807")
+        self.assertEqual(optimization["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_MULTI)
+
+    def test_sync_run_config_profile_metadata_keeps_existing_profile_payloads(self) -> None:
+        parameter_profile = {"bounds": {"TT": [-2.0, 2.0]}}
+        objective_profile = {"type": profile_runner.OBJECTIVE_MODE_SINGLE, "summary": "\u65e7\u6458\u8981"}
+        metadata = {
+            "calibration_profile": "hourly",
+            "parameter_profile": parameter_profile,
+            "objective_profile": objective_profile,
+        }
+        optimization = {}
+
+        effective = sync_run_config_profile_metadata(
+            metadata,
+            optimization,
+            profile=profile_runner.PROFILE_DAILY,
+            objective_mode="",
+            workspace_label="  \u73b0\u6709\u6d41\u57df  ",
+        )
+
+        self.assertEqual(effective, "")
+        self.assertIs(metadata["parameter_profile"], parameter_profile)
+        self.assertIs(metadata["objective_profile"], objective_profile)
+        self.assertEqual(metadata["calibration_profile"], "hourly")
+        self.assertEqual(metadata["rate_mode"], profile_runner.PROFILE_DAILY)
+        self.assertEqual(metadata["workspace_label"], "\u73b0\u6709\u6d41\u57df")
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertNotIn("effective_objective_mode", optimization)
 
     def test_effective_objective_mode_helpers_normalize_and_apply_to_metadata(self) -> None:
         metadata = {

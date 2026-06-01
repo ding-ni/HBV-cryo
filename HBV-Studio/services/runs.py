@@ -826,6 +826,32 @@ def sync_objective_profile_metadata(metadata: dict[str, Any]) -> None:
         metadata["objective"] = objective_meta
 
 
+def sync_run_config_profile_metadata(
+    metadata: dict[str, Any],
+    optimization: dict[str, Any],
+    *,
+    profile: str,
+    objective_mode: str,
+    workspace_label: str,
+    resolved_object_type: str = "",
+) -> str:
+    metadata["calibration_profile"] = str(metadata.get("calibration_profile") or profile)
+    metadata["rate_mode"] = str(metadata.get("rate_mode") or profile)
+    if resolved_object_type:
+        metadata["project_object_type"] = resolved_object_type
+    effective_objective_mode = ""
+    if objective_mode:
+        effective_objective_mode = str(objective_mode).strip().lower()
+        optimization["effective_objective_mode"] = effective_objective_mode
+    metadata["workspace_label"] = str(workspace_label or "").strip()
+    if not isinstance(metadata.get("parameter_profile"), dict):
+        metadata["parameter_profile"] = synthesized_parameter_profile(profile, objective_mode)
+    if not isinstance(metadata.get("objective_profile"), dict):
+        metadata["objective_profile"] = synthesized_objective_profile(profile, objective_mode, metadata.get("objective"))
+    sync_objective_profile_metadata(metadata)
+    return effective_objective_mode
+
+
 def infer_effective_objective_mode(metadata: dict[str, Any], optimization: dict[str, Any]) -> str:
     objective_profile = metadata.get("objective_profile") if isinstance(metadata.get("objective_profile"), dict) else {}
     objective_meta = metadata.get("objective") if isinstance(metadata.get("objective"), dict) else {}

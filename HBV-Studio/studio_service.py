@@ -155,9 +155,8 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
-from services.runs import synthesized_objective_profile as build_synthesized_objective_profile
-from services.runs import synthesized_parameter_profile as build_synthesized_parameter_profile
 from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
+from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
 from services.runs import sync_run_data_source_paths as build_sync_run_data_source_paths
 from services.runs import sync_objective_profile_metadata as build_sync_objective_profile_metadata
 from services.runs import sync_source_run_reference as build_sync_source_run_reference
@@ -2638,14 +2637,6 @@ def is_studio_editable_metadata(metadata: dict[str, Any], resolved_config: Path 
     return build_is_studio_editable_metadata(metadata, resolved_config, _run_metadata_compatibility_context())
 
 
-def _synthesized_parameter_profile(profile: str, objective_mode: str) -> dict[str, Any]:
-    return build_synthesized_parameter_profile(profile, objective_mode)
-
-
-def _synthesized_objective_profile(profile: str, objective_mode: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
-    return build_synthesized_objective_profile(profile, objective_mode, current)
-
-
 def _run_source_reference_context() -> RunSourceReferenceContext:
     return RunSourceReferenceContext(
         resolve_any_path=resolve_any_path,
@@ -2787,21 +2778,18 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
                 resolved_prec_dir,
                 obs_path,
             )
-            normalized["calibration_profile"] = str(normalized.get("calibration_profile") or profile)
-            normalized["rate_mode"] = str(normalized.get("rate_mode") or profile)
             if not resolved_object_type:
                 resolved_object_type = _resolve_metadata_object_type(normalized, config)
-            if resolved_object_type:
-                normalized["project_object_type"] = resolved_object_type
-            if objective_mode:
-                effective_objective_mode = str(objective_mode).strip().lower()
-                optimization["effective_objective_mode"] = effective_objective_mode
-            normalized["workspace_label"] = str(config.get("流域名称", resolved_config.stem)).strip() or resolved_config.stem
-            if not isinstance(normalized.get("parameter_profile"), dict):
-                normalized["parameter_profile"] = _synthesized_parameter_profile(profile, objective_mode)
-            if not isinstance(normalized.get("objective_profile"), dict):
-                normalized["objective_profile"] = _synthesized_objective_profile(profile, objective_mode, normalized.get("objective"))
-            build_sync_objective_profile_metadata(normalized)
+            config_objective_mode = build_sync_run_config_profile_metadata(
+                normalized,
+                optimization,
+                profile=profile,
+                objective_mode=objective_mode,
+                workspace_label=str(config.get("流域名称", resolved_config.stem)).strip() or resolved_config.stem,
+                resolved_object_type=resolved_object_type,
+            )
+            if config_objective_mode:
+                effective_objective_mode = config_objective_mode
 
             boundary_cfg = dict(config.get("边界条件", {}) or {})
             boundary_path = _resolve_config_related_path(config, boundary_cfg.get("上游边界入流_csv"))
