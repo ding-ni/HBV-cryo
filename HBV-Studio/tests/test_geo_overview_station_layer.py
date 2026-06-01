@@ -194,7 +194,7 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
             (gis_dir / "elevation_zone_high.tif").write_bytes(b"high")
 
             context = GeoOverviewContext(
-                load_workspace_config=lambda raw: (cfg_path, {"流域名称": "测试流域"}),
+                load_workspace_config=lambda raw: (cfg_path, {"流域名称": "测试流域", "CFMAX分区阈值_m": 4900}),
                 read_json_file=lambda path: {},
                 current_profile=lambda cfg: "daily",
                 build_profile_paths=lambda cfg, profile: {"gis_dir": str(gis_dir)},
@@ -233,6 +233,16 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
         self.assertEqual(len(geojson["features"]), 2)
         zones = [feature["properties"]["zone"] for feature in geojson["features"]]
         self.assertEqual(zones, ["low", "high"])
+        low_props = geojson["features"][0]["properties"]
+        high_props = geojson["features"][1]["properties"]
+        self.assertEqual(low_props["elev"], 4900.0)
+        self.assertEqual(low_props["cfmax_threshold_m"], 4900.0)
+        self.assertEqual(low_props["elev_max_m"], 4900.0)
+        self.assertEqual(low_props["elev_label"], "<= 4900 m")
+        self.assertEqual(high_props["elev"], 4900.0)
+        self.assertEqual(high_props["elev_min_m"], 4900.0)
+        self.assertEqual(high_props["elev_label"], "> 4900 m")
+        self.assertEqual(geojson["properties"]["layers"][0]["elev"], 4900.0)
         self.assertEqual(geojson["properties"]["bounds"]["west"], 100.0)
         self.assertEqual(geojson["properties"]["bounds"]["east"], 100.3)
 

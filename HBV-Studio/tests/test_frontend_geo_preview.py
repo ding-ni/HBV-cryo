@@ -107,6 +107,10 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             for (const id of ["dem", "elevation-zones-fill", "glacier-fill", "basin-line", "stations"]) {
               if (!ids.includes(id)) throw new Error(`missing layer ${id}: ${ids.join(",")}`);
             }
+            const zonesPaint = plan.layers.find(layer => layer.id === "elevation-zones-fill").paint["fill-color"];
+            if (!Array.isArray(zonesPaint) || zonesPaint[0] !== "match" || !zonesPaint.includes("low") || !zonesPaint.includes("high")) {
+              throw new Error(`elevation zones should use banded fill colors: ${JSON.stringify(zonesPaint)}`);
+            }
             if (JSON.stringify(style.sources) !== JSON.stringify(plan.sources)) {
               throw new Error("style sources should reuse the layer plan");
             }

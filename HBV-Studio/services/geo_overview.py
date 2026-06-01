@@ -17,6 +17,16 @@ _ELEVATION_ZONE_SPECS: tuple[tuple[str, str, str], ...] = (
     ("high", "高高程带", "elevation_zone_high.tif"),
 )
 
+_ELEVATION_ZONE_PROPERTY_KEYS = (
+    "zone",
+    "elev",
+    "elev_min_m",
+    "elev_max_m",
+    "elev_label",
+    "cfmax_threshold_m",
+    "class_order",
+)
+
 
 @dataclass(frozen=True)
 class GeoOverviewContext:
@@ -81,6 +91,36 @@ def _geo_bounds_dict(values: Any) -> dict[str, float] | None:
     if east <= west or north <= south:
         return None
     return {"west": west, "south": south, "east": east, "north": north}
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except Exception:
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _fmt_elevation(value: float) -> str:
+    return str(int(round(value))) if math.isfinite(value) else ""
+
+
+def _elevation_zone_metadata(zone: str, threshold_m: float | None) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "zone": zone,
+        "class_order": {"low": 1, "mid": 2, "high": 3}.get(zone, 0),
+    }
+    if threshold_m is None:
+        return base
+    base["elev"] = threshold_m
+    base["cfmax_threshold_m"] = threshold_m
+    if zone == "high":
+        base["elev_min_m"] = threshold_m
+        base["elev_label"] = f"> {_fmt_elevation(threshold_m)} m"
+    elif zone in {"low", "mid"}:
+        base["elev_max_m"] = threshold_m
+        base["elev_label"] = f"<= {_fmt_elevation(threshold_m)} m"
+    return base
 
 
 def _merge_geo_bounds(bounds_items: list[dict[str, float] | None]) -> dict[str, float] | None:
@@ -509,9 +549,9 @@ def _polygon_layers_geojson(layer_id: str, label: str, layers: list[dict[str, An
             "source_layer": str(layer.get("id", "") or ""),
             "source_label": str(layer.get("label", "") or ""),
         }
-        zone = layer.get("zone")
-        if zone:
-            extra["zone"] = str(zone)
+        for key in _ELEVATION_ZONE_PROPERTY_KEYS:
+            if layer.get(key) is not None:
+                extra[key] = layer[key]
         for feature in _polygon_layer_geojson(layer, extra).get("features", []):
             features.append(feature)
 
@@ -539,7 +579,11 @@ def _polygon_layers_geojson(layer_id: str, label: str, layers: list[dict[str, An
                     "message": str(layer.get("message", "") or ""),
                     "bounds": layer.get("bounds"),
                     "metrics": layer.get("metrics", {}),
-                    "zone": str(layer.get("zone", "") or ""),
+                    **{
+                        key: layer[key]
+                        for key in _ELEVATION_ZONE_PROPERTY_KEYS
+                        if layer.get(key) is not None
+                    },
                 }
                 for layer in layers
             ],
@@ -652,14 +696,15 @@ def workspace_glacier_geojson(config_path_raw: str, context: GeoOverviewContext)
 
 
 def workspace_elevation_zones_geojson(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
-    _cfg_path, _config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    _cfg_path, config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    threshold_m = _finite_float(config.get("CFMAX分区阈值_m", 5000.0))
     layers: list[dict[str, Any]] = []
     for zone, label, filename in _ELEVATION_ZONE_SPECS:
         path = gis_dir / filename
         if not path.exists():
             continue
         layer = _raster_geo_layer(f"elevation_zone_{zone}", label, path, context)
-        layer["zone"] = zone
+        layer.update(_elevation_zone_metadata(zone, threshold_m))
         layers.append(layer)
     if not layers:
         return _empty_geojson_layer("elevation_zones", "高程分区", message="未生成高程分区")

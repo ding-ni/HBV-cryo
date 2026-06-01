@@ -75,7 +75,10 @@
         id: "elevation-zones-fill",
         type: "fill",
         source: "elevation_zones",
-        paint: { "fill-color": "#2563eb", "fill-opacity": 0.24 },
+        paint: {
+          "fill-color": ["match", ["get", "zone"], "low", "#7fcdbb", "mid", "#38bdf8", "high", "#2563eb", "#64748b"],
+          "fill-opacity": 0.24,
+        },
       });
     }
     if (glacierLayer) {
