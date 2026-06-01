@@ -93,6 +93,9 @@ const frontendModuleContracts = [
     global: "HBVStudioEventMode",
     exports: [
       "floodEventEvaluation",
+      "floodEventObjectiveText",
+      "floodEventRows",
+      "floodEventStatusText",
       "eventChartEvents",
       "initialStatePolicyLabel",
       "renderFloodEventChart",
@@ -2396,60 +2399,22 @@ function metadataSection(title, rows) {
 }
 
 function floodEventEvaluation(meta = {}) {
-  return meta?.flood_event_evaluation || meta?.diagnostics?.flood_event_evaluation || {};
+  return window.HBVStudioEventMode.floodEventEvaluation(meta);
 }
 
 function floodEventStatusText(evaluation = {}) {
-  if (!evaluation?.enabled) return "未启用";
-  const valid = Number(evaluation.valid_event_count || 0);
-  const total = Number(evaluation.event_count || 0);
-  const mode = evaluation.objective_enabled ? "事件目标函数" : "事件诊断";
-  return `${mode}：${valid}/${total} 场有效`;
+  return window.HBVStudioEventMode.floodEventStatusText(evaluation);
 }
 
 function floodEventObjectiveText(evaluation = {}) {
-  const score = evaluation?.summary?.all?.mean_diagnostic_objective;
-  return Number.isFinite(Number(score)) ? formatNumber(score, 4) : "—";
+  return window.HBVStudioEventMode.floodEventObjectiveText(evaluation, { formatNumber });
 }
 
 function floodEventRows(meta = {}) {
-  const evaluation = floodEventEvaluation(meta);
-  if (!evaluation?.enabled) return [];
-  const rows = [
-    ["事件评价", floodEventStatusText(evaluation), ""],
-    ["事件目标值", floodEventObjectiveText(evaluation), "数值越小表示洪水过程偏差越小"],
-  ];
-  const eventMode = meta?.event_mode || meta?.time_config?.event_runtime || {};
-  if (eventMode?.enabled) {
-    const modeText = eventMode.runtime_mode === "independent_event_windows" ? "事件窗口独立运行" : "事件窗口资料";
-    const initialPolicy = eventMode.initial_state_policy_label
-      || window.HBVStudioEventMode?.initialStatePolicyLabel?.(eventMode.initial_state_policy)
-      || eventMode.initial_state_policy
-      || "事件预热";
-    rows.push([
-      "事件资料模式",
-      `${modeText}，${Number(eventMode.event_count || 0)} 场`,
-      `初始条件：${initialPolicy}`,
-    ]);
-  }
-  const events = Array.isArray(evaluation.events) ? evaluation.events : [];
-  events.slice(0, 12).forEach(event => {
-    const name = event?.name || "未命名事件";
-    const value = [
-      `洪峰 ${formatMetricValue(event?.peak_error_percent, 2, "%")}`,
-      `峰现 ${formatMetricValue(event?.peak_time_error_hours, 1, " h")}`,
-      `洪量 ${formatMetricValue(event?.volume_error_percent, 2, "%")}`,
-    ].join(" / ");
-    const detail = [
-      `NSE ${formatMetricValue(event?.nse, 4)}`,
-      `KGE ${formatMetricValue(event?.kge, 4)}`,
-    ].join("，");
-    rows.push([String(name), value, detail]);
+  return window.HBVStudioEventMode.floodEventRows(meta, {
+    formatMetricValue,
+    formatNumber,
   });
-  if (events.length > 12) {
-    rows.push(["更多事件", `还有 ${events.length - 12} 场`, "完整事件表见结果目录 flood_events.csv"]);
-  }
-  return rows;
 }
 
 function renderFloodEventChart(meta = {}, plotCfg = {}) {
