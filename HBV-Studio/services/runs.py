@@ -115,6 +115,11 @@ class RunConfigBoundaryContext:
 
 
 @dataclass(frozen=True)
+class RunConfigIdentityContext:
+    resolve_metadata_object_type: Callable[[dict[str, Any], dict[str, Any] | None], str]
+
+
+@dataclass(frozen=True)
 class RunMetadataSections:
     data_sources: dict[str, Any]
     boundary_condition: dict[str, Any]
@@ -946,6 +951,36 @@ def sync_run_config_profile_metadata(
         metadata["objective_profile"] = synthesized_objective_profile(profile, objective_mode, metadata.get("objective"))
     sync_objective_profile_metadata(metadata)
     return effective_objective_mode
+
+
+def run_config_workspace_label(config: dict[str, Any], resolved_config: Path) -> str:
+    return str(config.get("\u6d41\u57df\u540d\u79f0", resolved_config.stem)).strip() or resolved_config.stem
+
+
+def sync_run_config_identity_metadata(
+    metadata: dict[str, Any],
+    optimization: dict[str, Any],
+    config: dict[str, Any],
+    resolved_config: Path,
+    *,
+    profile: str,
+    objective_mode: str,
+    resolved_object_type: str,
+    effective_objective_mode: str,
+    context: RunConfigIdentityContext,
+) -> tuple[str, str]:
+    object_type = str(resolved_object_type or "").strip()
+    if not object_type:
+        object_type = context.resolve_metadata_object_type(metadata, config)
+    config_objective_mode = sync_run_config_profile_metadata(
+        metadata,
+        optimization,
+        profile=profile,
+        objective_mode=objective_mode,
+        workspace_label=run_config_workspace_label(config, resolved_config),
+        resolved_object_type=object_type,
+    )
+    return object_type, config_objective_mode or effective_objective_mode
 
 
 def infer_effective_objective_mode(metadata: dict[str, Any], optimization: dict[str, Any]) -> str:

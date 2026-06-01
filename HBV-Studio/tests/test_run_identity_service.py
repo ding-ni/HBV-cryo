@@ -19,6 +19,7 @@ from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
     RunConfigBoundaryContext,
     RunConfigDataSourceContext,
+    RunConfigIdentityContext,
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
     RunMetadataObjectTypeContext,
@@ -64,6 +65,7 @@ from services.runs import (  # noqa: E402
     resolve_run_workspace_config,
     resolve_source_run_reference,
     rebase_run_data_cache_paths,
+    run_config_workspace_label,
     run_precip_source_key,
     run_precip_dir_candidates,
     run_csv_date_bounds,
@@ -80,6 +82,7 @@ from services.runs import (  # noqa: E402
     sync_run_boundary_condition_path,
     sync_run_config_boundary_condition,
     sync_run_config_data_sources,
+    sync_run_config_identity_metadata,
     sync_run_config_profile_metadata,
     sync_run_data_source_paths,
     sync_source_run_reference,
@@ -642,6 +645,46 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(metadata["workspace_label"], "\u73b0\u6709\u6d41\u57df")
         self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
         self.assertNotIn("effective_objective_mode", optimization)
+
+    def test_run_config_workspace_label_uses_config_name_or_config_stem(self) -> None:
+        self.assertEqual(
+            run_config_workspace_label({"\u6d41\u57df\u540d\u79f0": "  \u901a\u5929\u6cb3  "}, Path("C:/ws/config.json")),
+            "\u901a\u5929\u6cb3",
+        )
+        self.assertEqual(run_config_workspace_label({"\u6d41\u57df\u540d\u79f0": "   "}, Path("C:/ws/default.json")), "default")
+
+    def test_sync_run_config_identity_metadata_resolves_object_type_and_effective_mode(self) -> None:
+        observed = {}
+
+        def resolve_object_type(metadata, config):
+            observed["metadata"] = metadata
+            observed["config"] = config
+            return "interbasin_with_boundary"
+
+        metadata = {"objective": {"label": "\u5386\u53f2\u76ee\u6807"}}
+        optimization = {}
+        config = {"\u6d41\u57df\u540d\u79f0": "  \u901a\u5929\u6cb3  "}
+
+        object_type, effective = sync_run_config_identity_metadata(
+            metadata,
+            optimization,
+            config,
+            Path("C:/workspace/config.json"),
+            profile=profile_runner.PROFILE_DAILY,
+            objective_mode=profile_runner.OBJECTIVE_MODE_SINGLE,
+            resolved_object_type="",
+            effective_objective_mode="",
+            context=RunConfigIdentityContext(resolve_metadata_object_type=resolve_object_type),
+        )
+
+        self.assertIs(observed["metadata"], metadata)
+        self.assertIs(observed["config"], config)
+        self.assertEqual(object_type, "interbasin_with_boundary")
+        self.assertEqual(effective, profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["project_object_type"], "interbasin_with_boundary")
+        self.assertEqual(metadata["workspace_label"], "\u901a\u5929\u6cb3")
+        self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(optimization["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
 
     def test_effective_objective_mode_helpers_normalize_and_apply_to_metadata(self) -> None:
         metadata = {

@@ -107,7 +107,7 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
@@ -156,7 +156,7 @@ from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import sync_run_config_boundary_condition as build_sync_run_config_boundary_condition
 from services.runs import sync_run_config_data_sources as build_sync_run_config_data_sources
-from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
+from services.runs import sync_run_config_identity_metadata as build_sync_run_config_identity_metadata
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2680,6 +2680,10 @@ def _run_config_boundary_context() -> RunConfigBoundaryContext:
     )
 
 
+def _run_config_identity_context() -> RunConfigIdentityContext:
+    return RunConfigIdentityContext(resolve_metadata_object_type=_resolve_metadata_object_type)
+
+
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
@@ -2738,18 +2742,17 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
                 paths,
                 _run_config_data_source_context(),
             )
-            if not resolved_object_type:
-                resolved_object_type = _resolve_metadata_object_type(normalized, config)
-            config_objective_mode = build_sync_run_config_profile_metadata(
+            resolved_object_type, effective_objective_mode = build_sync_run_config_identity_metadata(
                 normalized,
                 optimization,
+                config,
+                resolved_config,
                 profile=profile,
                 objective_mode=objective_mode,
-                workspace_label=str(config.get("流域名称", resolved_config.stem)).strip() or resolved_config.stem,
                 resolved_object_type=resolved_object_type,
+                effective_objective_mode=effective_objective_mode,
+                context=_run_config_identity_context(),
             )
-            if config_objective_mode:
-                effective_objective_mode = config_objective_mode
 
             build_sync_run_config_boundary_condition(
                 boundary_condition,
