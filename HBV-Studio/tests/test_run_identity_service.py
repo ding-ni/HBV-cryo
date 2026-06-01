@@ -8,6 +8,8 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.runs import (  # noqa: E402
+    RunSummaryContext,
+    build_run_summary,
     display_run_title,
     has_custom_result_title,
     normalize_result_title,
@@ -120,6 +122,81 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(context["param_bounds_profile_label"], "小时尺度稳定范围")
         self.assertEqual(context["state_snapshot_time"], "2026-06-02 08:00:00")
         self.assertEqual(context["parameter_count"], 2)
+
+    def test_build_run_summary_keeps_result_api_fields(self) -> None:
+        run_dir = Path("C:/runs/source_run")
+        metadata = {
+            "result_title": "手调起点",
+            "run_id": "run-1",
+            "run_time": "2026-06-02 10:00:00",
+            "workspace_config": "C:/workspace/config.json",
+            "calibration_profile": "daily",
+            "project_object_type": "full_upstream_basin",
+            "recorded_objective_family": "daily_unified_professional_v1",
+            "metrics": {
+                "calibration": {"nse": 0.76, "pbias": -2.4},
+                "validation": {"nse": 0.61, "pbias": 7.3},
+            },
+            "optional_modules": {
+                "glacier": {"enabled": True},
+                "boundary_inflow": {"enabled": False},
+            },
+            "time_config": {"time_step_hours": 24},
+            "initial_state": {"state_snapshot_available": True, "state_snapshot_time": "2026-06-02 00:00:00"},
+            "forecast_result": {
+                "source_state_time": "2026-06-01 00:00:00",
+                "source_state_summary": {"source": "state"},
+                "source_parameter_summary": {"parameter_count": 2},
+                "forecast_input_archive": {"variable_count": 3},
+            },
+            "starter_result": {"enabled": True},
+            "manual_result": {"source_run_path": "{ROOT}/manual_source"},
+            "optimized_params": {"TT": -1.0, "FC": 850.0},
+        }
+        context = RunSummaryContext(
+            to_display_path=lambda path: f"display:{Path(path).name}",
+            is_studio_editable_metadata=lambda meta, resolved: True,
+            build_hydrology_summary=lambda meta, path: {"flow_status_zh": "径流拟合达标"},
+            workspace_name_for_summary=lambda meta, resolved: "沱沱河",
+            param_bounds_profile_labels={},
+            replace_placeholders=lambda value: str(value).replace("{ROOT}", "D:/resolved"),
+        )
+
+        summary = build_run_summary(
+            run_dir,
+            metadata,
+            Path("C:/workspace/config.json"),
+            updated_at=123.0,
+            updated_at_ns=123000,
+            context=context,
+        )
+
+        self.assertEqual(summary["path"], str(run_dir.resolve()))
+        self.assertEqual(summary["display_path"], "display:source_run")
+        self.assertEqual(summary["run_id"], "run-1")
+        self.assertEqual(summary["nse_cal"], 0.76)
+        self.assertEqual(summary["pbias_val"], 7.3)
+        self.assertTrue(summary["glacier_enabled"])
+        self.assertFalse(summary["boundary_enabled"])
+        self.assertEqual(summary["workspace_display_path"], "display:config.json")
+        self.assertTrue(summary["studio_compatible"])
+        self.assertEqual(summary["run_origin"], "studio")
+        self.assertEqual(summary["objective_family"], "daily_unified_professional_v1")
+        self.assertEqual(summary["hydrology_summary"]["flow_status_zh"], "径流拟合达标")
+        self.assertTrue(summary["optimized_params_available"])
+        self.assertEqual(summary["optimized_param_count"], 2)
+        self.assertTrue(summary["state_snapshot_available"])
+        self.assertEqual(summary["state_snapshot_time"], "2026-06-02 00:00:00")
+        self.assertEqual(summary["source_state_snapshot_time"], "2026-06-01 00:00:00")
+        self.assertEqual(summary["source_state_summary"], {"source": "state"})
+        self.assertEqual(summary["source_parameter_summary"], {"parameter_count": 2})
+        self.assertEqual(summary["forecast_input_archive"], {"variable_count": 3})
+        self.assertTrue(summary["forecast_source_ready"])
+        self.assertEqual(summary["display_name"], "沱沱河 · 手调起点 · 2026-06-02 10:00:00")
+        self.assertEqual(summary["display_subtitle"], "目录名：source_run")
+        self.assertEqual(summary["run_type"], "manual_starter")
+        self.assertEqual(summary["source_run_name"], "manual_source")
+        self.assertEqual(summary["parameter_context"]["source_workspace"], "沱沱河")
 
 
 if __name__ == "__main__":

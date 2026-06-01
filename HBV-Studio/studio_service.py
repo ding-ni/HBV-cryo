@@ -74,11 +74,10 @@ from services.manual_presets import save_manual_preset as build_save_manual_pres
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
-from services.runs import RUN_KIND_LABELS
+from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext, RunSummaryContext
 from services.runs import delete_run as build_delete_run
-from services.runs import display_run_title as build_display_run_title
 from services.runs import export_run_excel as build_export_run_excel
+from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
@@ -88,11 +87,9 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import run_time_label as build_run_time_label
-from services.runs import source_run_meta as build_source_run_meta
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
 from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
-from services.run_hydrology import metadata_objective_family as build_metadata_objective_family
 from services.run_hydrology import objective_label_zh as build_hydrology_objective_label_zh
 from services.system_status import (
     HealthContext,
@@ -5978,16 +5975,8 @@ def _run_time_label(raw_value: Any, updated_at: float | None = None) -> str:
     return build_run_time_label(raw_value, updated_at)
 
 
-def _source_run_meta(metadata: dict[str, Any]) -> tuple[str, str]:
-    return build_source_run_meta(metadata, replace_placeholders)
-
-
 def _run_hydrology_context() -> RunHydrologyContext:
     return RunHydrologyContext(to_display_path=to_display_path)
-
-
-def _metadata_objective_family(metadata: dict[str, Any]) -> str:
-    return build_metadata_objective_family(metadata)
 
 
 def _objective_label_zh(metadata: dict[str, Any]) -> str:
@@ -6000,17 +5989,6 @@ def _build_hydrology_summary(metadata: dict[str, Any], run_dir: Path) -> dict[st
 
 def _ensure_hydrology_diagnostic_report(run_dir: Path, metadata: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
     return build_ensure_hydrology_diagnostic_report(run_dir, metadata, summary, _run_hydrology_context())
-
-
-def _display_run_title(
-    run_dir: Path,
-    metadata: dict[str, Any],
-    resolved_config: Path | None,
-    studio_compatible: bool,
-    updated_at: float | None = None,
-) -> dict[str, Any]:
-    workspace_name = _workspace_name_for_summary(metadata, resolved_config)
-    return build_display_run_title(run_dir, metadata, workspace_name, studio_compatible, updated_at=updated_at)
 
 
 def _run_parameter_context(
@@ -6027,6 +6005,17 @@ def _run_parameter_context(
     )
 
 
+def _run_summary_context() -> RunSummaryContext:
+    return RunSummaryContext(
+        to_display_path=to_display_path,
+        is_studio_editable_metadata=is_studio_editable_metadata,
+        build_hydrology_summary=_build_hydrology_summary,
+        workspace_name_for_summary=_workspace_name_for_summary,
+        param_bounds_profile_labels=getattr(profile_runner, "PARAM_BOUNDS_PROFILE_LABELS", {}),
+        replace_placeholders=replace_placeholders,
+    )
+
+
 def _build_run_summary(
     run_dir: Path,
     metadata: dict[str, Any] | None = None,
@@ -6037,135 +6026,14 @@ def _build_run_summary(
 ) -> dict[str, Any]:
     if updated_at is None or updated_at_ns is None:
         updated_at, updated_at_ns = _run_update_timestamps(run_dir)
-    summary = {
-        "name": run_dir.name,
-        "raw_title": "",
-        "display_name": run_dir.name,
-        "display_subtitle": "",
-        "has_custom_title": False,
-        "path": str(run_dir.resolve()),
-        "display_path": to_display_path(run_dir),
-        "updated_at": updated_at,
-        "updated_at_ns": int(updated_at_ns),
-        "run_time": None,
-        "run_id": None,
-        "nse_cal": None,
-        "nse_val": None,
-        "pbias_cal": None,
-        "pbias_val": None,
-        "glacier_enabled": None,
-        "boundary_enabled": None,
-        "time_step_hours": None,
-        "time_config": {},
-        "calibration_profile": None,
-        "object_type": None,
-        "workspace_config": "",
-        "workspace_display_path": "",
-        "workspace_name": "",
-        "studio_compatible": False,
-        "run_origin": "legacy",
-        "run_type": "legacy",
-        "run_type_label": RUN_KIND_LABELS["legacy"],
-        "run_time_label": "",
-        "source_run_path": "",
-        "source_run_name": "",
-        "recorded_objective_family": "",
-        "objective_family": "",
-        "effective_objective_mode": "",
-        "flow_guard_status": "",
-        "hydrology_summary": {},
-        "optimized_params_available": False,
-        "optimized_param_count": 0,
-        "state_snapshot_available": False,
-        "state_snapshot_time": "",
-        "source_state_snapshot_time": "",
-        "source_state_summary": {},
-        "source_parameter_summary": {},
-        "parameter_context": {},
-        "forecast_input_archive": {},
-        "forecast_source_ready": False,
-    }
-    if metadata is None:
-        return summary
-    summary["run_time"] = metadata.get("run_time")
-    summary["run_id"] = metadata.get("run_id")
-    summary["nse_cal"] = metadata.get("metrics", {}).get("calibration", {}).get("nse")
-    summary["nse_val"] = metadata.get("metrics", {}).get("validation", {}).get("nse")
-    summary["pbias_cal"] = metadata.get("metrics", {}).get("calibration", {}).get("pbias")
-    summary["pbias_val"] = metadata.get("metrics", {}).get("validation", {}).get("pbias")
-    summary["glacier_enabled"] = metadata.get("optional_modules", {}).get("glacier", {}).get("enabled")
-    summary["boundary_enabled"] = metadata.get("optional_modules", {}).get("boundary_inflow", {}).get("enabled")
-    summary["time_step_hours"] = metadata.get("time_config", {}).get("time_step_hours")
-    summary["time_config"] = dict(metadata.get("time_config", {}) or {})
-    summary["calibration_profile"] = metadata.get("calibration_profile")
-    summary["object_type"] = metadata.get("project_object_type")
-    workspace_config = str(metadata.get("workspace_config", "") or "").strip()
-    summary["workspace_config"] = workspace_config
-    if workspace_config:
-        try:
-            summary["workspace_display_path"] = to_display_path(Path(workspace_config))
-        except Exception:
-            summary["workspace_display_path"] = workspace_config
-    studio_compatible = is_studio_editable_metadata(metadata, resolved_config)
-    summary["studio_compatible"] = studio_compatible
-    summary["run_origin"] = "studio" if studio_compatible else "legacy"
-    summary["recorded_objective_family"] = str(metadata.get("recorded_objective_family") or "").strip()
-    summary["objective_family"] = str(
-        metadata.get("recorded_objective_family")
-        or metadata.get("objective_family")
-        or metadata.get("effective_objective_mode")
-        or metadata.get("optimization", {}).get("effective_objective_mode")
-        or metadata.get("optimization", {}).get("objective_mode")
-        or metadata.get("objective_profile", {}).get("type")
-        or metadata.get("objective", {}).get("type")
-        or ""
-    ).strip()
-    summary["effective_objective_mode"] = str(
-        metadata.get("effective_objective_mode")
-        or metadata.get("optimization", {}).get("effective_objective_mode")
-        or ""
-    ).strip()
-    summary["flow_guard_status"] = str(
-        metadata.get("objective_terms", {}).get("flow_guard", {}).get("status", "")
-        or ""
-    ).strip()
-    summary["hydrology_summary"] = _build_hydrology_summary(metadata, run_dir)
-    initial_state = dict(metadata.get("initial_state", {}) or {})
-    forecast_result = dict(metadata.get("forecast_result", {}) or {})
-    snapshot_file = str(initial_state.get("state_snapshot_file", "") or "").strip()
-    snapshot_path = run_dir / snapshot_file if snapshot_file else run_dir / "state_snapshot.npz"
-    optimized_params = metadata.get("optimized_params", {})
-    summary["optimized_params_available"] = bool(isinstance(optimized_params, dict) and optimized_params)
-    summary["optimized_param_count"] = int(len(optimized_params)) if isinstance(optimized_params, dict) else 0
-    summary["state_snapshot_available"] = bool(snapshot_path.exists() or initial_state.get("state_snapshot_available"))
-    summary["state_snapshot_time"] = str(initial_state.get("state_snapshot_time", "") or "").strip()
-    summary["source_state_snapshot_time"] = str(
-        initial_state.get("source_state_snapshot_time")
-        or forecast_result.get("source_state_time")
-        or ""
-    ).strip()
-    summary["source_state_summary"] = dict(
-        forecast_result.get("source_state_summary")
-        or metadata.get("source_state_summary")
-        or {}
+    return build_run_summary_payload(
+        run_dir,
+        metadata,
+        resolved_config,
+        updated_at=updated_at,
+        updated_at_ns=updated_at_ns,
+        context=_run_summary_context(),
     )
-    summary["source_parameter_summary"] = dict(
-        forecast_result.get("source_parameter_summary")
-        or metadata.get("source_parameter_summary")
-        or {}
-    )
-    summary["forecast_input_archive"] = dict(
-        forecast_result.get("forecast_input_archive")
-        or dict(metadata.get("data_sources", {}) or {}).get("forecast_input_archive")
-        or {}
-    )
-    summary["parameter_context"] = _run_parameter_context(run_dir, metadata, resolved_config)
-    summary["forecast_source_ready"] = bool(summary["optimized_params_available"] and summary["state_snapshot_available"])
-    summary.update(_display_run_title(run_dir, metadata, resolved_config, studio_compatible, updated_at=updated_at))
-    source_run_path, source_run_name = _source_run_meta(metadata)
-    summary["source_run_path"] = source_run_path
-    summary["source_run_name"] = source_run_name
-    return summary
 
 
 def summarize_run(run_dir: Path) -> dict[str, Any]:
