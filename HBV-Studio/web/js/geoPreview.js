@@ -29,6 +29,10 @@
     return `geo-layer-toggle-${layerKey(layer)}`;
   }
 
+  function layerOpacityClass(layer, level) {
+    return `geo-layer-opacity-${layerKey(layer)}-${level}`;
+  }
+
   function stationTypeMeta(type) {
     const key = String(type || "station").trim().toLowerCase();
     if (key === "rain") return { key, label: "雨量站", symbol: "△", radius: 5.4 };
@@ -198,10 +202,20 @@
     return `
       <div class="geo-layer-control-bar" role="group" aria-label="图层">
         ${drawableLayers.map(layer => `
-          <label class="geo-layer-control ${layerCssClass(layer)}">
-            <input class="geo-layer-toggle ${layerToggleClass(layer)}" type="checkbox" checked data-geo-layer-toggle="${escapeHtml(layerKey(layer))}">
-            <span>${escapeHtml(layer.label || layer.id || "图层")}</span>
-          </label>
+          <div class="geo-layer-control ${layerCssClass(layer)}">
+            <label class="geo-layer-visible">
+              <input class="geo-layer-toggle ${layerToggleClass(layer)}" type="checkbox" checked data-geo-layer-toggle="${escapeHtml(layerKey(layer))}">
+              <span>${escapeHtml(layer.label || layer.id || "图层")}</span>
+            </label>
+            <span class="geo-layer-opacity-control" role="group" aria-label="${escapeHtml((layer.label || layer.id || "图层") + "透明度")}">
+              ${["low", "medium", "high"].map(level => `
+                <label title="${escapeHtml(level === "low" ? "淡" : level === "medium" ? "中" : "强")}">
+                  <input class="geo-layer-opacity-radio ${layerOpacityClass(layer, level)}" type="radio" name="geo-layer-opacity-${escapeHtml(layerKey(layer))}" ${level === "medium" ? "checked" : ""} data-geo-layer-opacity="${escapeHtml(layerKey(layer) + ":" + level)}">
+                  <span>${escapeHtml(level === "low" ? "淡" : level === "medium" ? "中" : "强")}</span>
+                </label>
+              `).join("")}
+            </span>
+          </div>
         `).join("")}
       </div>
     `;
