@@ -22,6 +22,33 @@ VIEWPORTS = {
 VIEWS = ("dashboard", "wizard", "calibration", "forecast", "results")
 
 
+def open_workspace_geo_preview(page: Page) -> None:
+    page.wait_for_function(
+        """
+        () => document.querySelectorAll('[data-preview-workspace]').length > 0
+          || (document.querySelector('#workspace-card-list')?.textContent || '').includes('还没有工作区')
+        """,
+        timeout=20000,
+    )
+    buttons = page.locator("[data-preview-workspace]")
+    count = buttons.count()
+    if count <= 0:
+        raise RuntimeError("dashboard: no workspace preview buttons found")
+    target_index = 0
+    for index in range(count):
+        value = buttons.nth(index).get_attribute("data-preview-workspace") or ""
+        if "tuotuohe_test.json" in value.replace("\\", "/"):
+            target_index = index
+            break
+    buttons.nth(target_index).click()
+    page.wait_for_selector(".geo-preview-card", timeout=20000)
+    layer_count = page.locator(".geo-preview-card").first.get_attribute("data-geo-layer-count")
+    if int(layer_count or "0") < 3:
+        raise RuntimeError(f"dashboard: expected at least 3 geo preview layers, got {layer_count}")
+    if page.locator(".geo-preview-svg").count() <= 0:
+        raise RuntimeError("dashboard: geo preview svg did not render")
+
+
 def overflow_report(page: Page) -> list[dict[str, Any]]:
     return page.evaluate(
         """
@@ -68,6 +95,8 @@ def check_view(page: Page, name: str, viewport_name: str, output_dir: Path) -> d
         """(name) => document.querySelector('.view.active')?.getAttribute('data-view') === name""",
         arg=name,
     )
+    if name == "dashboard":
+        open_workspace_geo_preview(page)
     page.wait_for_timeout(300)
     screenshot_path = output_dir / f"hbvstudio_{viewport_name}_{name}.png"
     page.screenshot(path=str(screenshot_path), full_page=True)

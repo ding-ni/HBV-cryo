@@ -63,6 +63,12 @@ python -m pytest HBV-Studio/tests
 python dev_tools/studio_visual_smoke.py --url http://127.0.0.1:8765/
 ```
 
+涉及空间预览或 GIS 薄接口的修改，还应在本地服务运行时检查示例工作区至少能返回三类空间图层：
+
+```powershell
+python dev_tools/studio_geo_smoke.py --url http://127.0.0.1:8765/
+```
+
 ## 数据输入说明
 
 - 流域边界通常使用矢量数据，DEM 使用栅格数据；冰川边界为可选输入。
