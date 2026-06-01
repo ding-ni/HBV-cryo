@@ -34,6 +34,8 @@ import numpy as np
 import pandas as pd
 
 import profile_runner
+from services.api_routes import GET_ROUTE_HANDLERS as GET_API_ROUTE_HANDLERS
+from services.api_routes import POST_ROUTE_HANDLERS as POST_API_ROUTE_HANDLERS
 from services.data_prep import (
     DataPrepContext,
     data_prep_status as build_data_prep_status,
@@ -10097,65 +10099,8 @@ def start_manual_start(payload: dict[str, Any]) -> TaskRecord:
 class StudioHandler(BaseHTTPRequestHandler):
     server_version = "HBVStudio/3.0"
     CONNECTION_GONE_ERRORS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
-    GET_ROUTE_HANDLERS = {
-        "/api/health": "_api_get_health",
-        "/api/dashboard": "_api_get_dashboard",
-        "/api/templates": "_api_get_templates",
-        "/api/workspaces": "_api_get_workspaces",
-        "/api/configs": "_api_get_workspaces",
-        "/api/workspace": "_api_get_workspace",
-        "/api/config": "_api_get_workspace",
-        "/api/runs": "_api_get_runs",
-        "/api/run": "_api_get_run",
-        "/api/tasks": "_api_get_tasks",
-        "/api/cdsapi/status": "_api_get_cdsapi_status",
-        "/api/fs/list": "_api_get_fs_list",
-        "/api/obs-info": "_api_get_obs_info",
-        "/api/suggest/bbox": "_api_get_suggest_bbox",
-        "/api/suggest/cfmax-threshold": "_api_get_suggest_cfmax_threshold",
-        "/api/geo/overview": "_api_get_geo_overview",
-        "/api/data-prep/steps": "_api_get_data_prep_steps",
-        "/api/data-prep/status": "_api_get_data_prep_status",
-        "/api/config/validate": "_api_get_config_validate",
-        "/api/wizard/validate-step": "_api_get_wizard_validate_step",
-        "/api/boundary-preview": "_api_get_boundary_preview",
-        "/api/workspace/completeness": "_api_get_workspace_completeness",
-        "/api/workspace/detailed-check": "_api_get_workspace_detailed_check",
-        "/api/workspace/layout": "_api_get_workspace_layout",
-        "/api/workspace/advice": "_api_get_workspace_advice",
-        "/api/manual-presets": "_api_get_manual_presets",
-    }
-    POST_ROUTE_HANDLERS = {
-        "/api/workspace/save": "_api_post_workspace_save",
-        "/api/config/save": "_api_post_workspace_save",
-        "/api/template/instantiate": "_api_post_template_instantiate",
-        "/api/import-workspace": "_api_post_import_workspace",
-        "/api/auto-config": "_api_post_import_workspace",
-        "/api/bootstrap/start": "_api_post_bootstrap_start",
-        "/api/data-prep/start": "_api_post_data_prep_start",
-        "/api/calibration/start": "_api_post_calibration_start",
-        "/api/self-check/start": "_api_post_self_check_start",
-        "/api/template/sync-tuotuohe": "_api_post_template_sync_tuotuohe",
-        "/api/wizard/save-step": "_api_post_wizard_save_step",
-        "/api/gis/import": "_api_post_gis_import",
-        "/api/meteo/import/start": "_api_post_meteo_import_start",
-        "/api/meteo/import": "_api_post_meteo_import",
-        "/api/simulate/forward/start": "_api_post_simulate_forward_start",
-        "/api/simulate/forward": "_api_post_simulate_forward",
-        "/api/forecast/restart/start": "_api_post_forecast_restart_start",
-        "/api/forecast/restart": "_api_post_forecast_restart",
-        "/api/forecast/input-check": "_api_post_forecast_input_check",
-        "/api/manual-start/start": "_api_post_manual_start_start",
-        "/api/manual-preset/save": "_api_post_manual_preset_save",
-        "/api/manual-preset/delete": "_api_post_manual_preset_delete",
-        "/api/run/export-excel": "_api_post_run_export_excel",
-        "/api/run/rename": "_api_post_run_rename",
-        "/api/run/delete": "_api_post_run_delete",
-        "/api/workspace/delete": "_api_post_workspace_delete",
-        "/api/fs/open-path": "_api_post_fs_open_path",
-        "/api/app/window-unload": "_api_post_app_window_unload",
-        "/api/app/quit": "_api_post_app_quit",
-    }
+    GET_ROUTE_HANDLERS = GET_API_ROUTE_HANDLERS
+    POST_ROUTE_HANDLERS = POST_API_ROUTE_HANDLERS
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return

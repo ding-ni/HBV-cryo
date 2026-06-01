@@ -11,6 +11,7 @@ if str(STUDIO_DIR) not in sys.path:
 
 import launch  # noqa: E402
 import studio_service as svc  # noqa: E402
+from services import api_routes  # noqa: E402
 
 
 class P1P3RuntimeResilienceTests(unittest.TestCase):
@@ -143,6 +144,16 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             svc.StudioHandler.POST_ROUTE_HANDLERS["/api/import-workspace"],
             svc.StudioHandler.POST_ROUTE_HANDLERS["/api/auto-config"],
         )
+
+    def test_api_route_specs_are_unique_grouped_and_drive_handler_maps(self) -> None:
+        route_keys = [(spec.method, spec.path) for spec in api_routes.API_ROUTE_SPECS]
+        self.assertEqual(len(route_keys), len(set(route_keys)))
+        self.assertEqual({spec.method for spec in api_routes.API_ROUTE_SPECS}, {"GET", "POST"})
+        self.assertTrue(all(spec.path.startswith("/api/") for spec in api_routes.API_ROUTE_SPECS))
+        self.assertTrue(all(spec.handler.startswith("_api_") for spec in api_routes.API_ROUTE_SPECS))
+        self.assertTrue(all(spec.group for spec in api_routes.API_ROUTE_SPECS))
+        self.assertEqual(svc.StudioHandler.GET_ROUTE_HANDLERS, api_routes.route_handlers("GET"))
+        self.assertEqual(svc.StudioHandler.POST_ROUTE_HANDLERS, api_routes.route_handlers("POST"))
 
     def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
