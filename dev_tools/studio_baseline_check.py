@@ -268,6 +268,7 @@ def check_packaging_surfaces() -> dict[str, Any]:
         GUI_ROOT / "services" / "workspace_catalog.py",
         GUI_ROOT / "services" / "workspace_completeness.py",
         GUI_ROOT / "services" / "workspace_layout.py",
+        GUI_ROOT / "services" / "workspace_validation.py",
         GUI_ROOT / "services" / "wizard_validation.py",
     ]
     for path in required:

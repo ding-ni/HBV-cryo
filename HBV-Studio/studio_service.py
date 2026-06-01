@@ -83,6 +83,7 @@ from services.workspace_completeness import (
     workspace_workflow_summary as build_workspace_workflow_summary,
 )
 from services.workspace_layout import WorkspaceLayoutContext, workspace_layout_summary as build_workspace_layout_summary
+from services.workspace_validation import WorkspaceValidationContext, validate_workspace_fields as build_validate_workspace_fields
 from services.wizard_validation import WizardValidationContext, wizard_validate_step as build_wizard_validate_step
 from profile_runner import (
     PROFILE_DAILY,
@@ -5941,279 +5942,58 @@ def validate_workspace_fields(
     precip_source: Any = None,
     config_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    missing: list[str] = []
-    warnings: list[str] = []
-    try:
-        cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-        config = copy.deepcopy(config_override) if config_override is not None else read_runtime_config(cfg_path)
-    except Exception as exc:
-        return {"valid": False, "missing": [f"配置文件无法读取：{exc}"], "warnings": []}
-
-    active_meteo_import = find_running_task("meteo_import", str(cfg_path))
-    if active_meteo_import is not None:
-        progress = dict(active_meteo_import.metadata.get("ui_progress") or {})
-        stage_label = str(progress.get("stage", "气象栅格导入任务")).strip() or "气象栅格导入任务"
-        warnings.append(f"{stage_label}仍在进行，检查结果会随导入进度变化。")
-        if stage in {"calibration", "forward"}:
-            missing.append("气象栅格导入任务仍在运行，请等待完成后再进行输入检查或启动率定。")
-            return {
-                "valid": False,
-                "missing": missing,
-                "warnings": warnings,
-                "profile": current_profile(config),
-                "object_type": detect_object_type(config),
-                "stage": stage,
-            }
-
-    profile = current_profile(config)
-    object_type = detect_object_type(config)
-    paths = build_profile_paths(config, profile)
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    time_basis = task_time_basis(config, context="calibration")
-    event_window_info = normalized_flood_events(config, step_hours=step_hours) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
-    runtime_stage = str(stage or "calibration").strip().lower() or "calibration"
-    require_observed_flow = runtime_stage != "quick_test"
-    obs_info: dict[str, Any] | None = None
-    event_observation_coverage: dict[str, Any] | None = None
-    boundary_info: dict[str, Any] | None = None
-    forcing: dict[str, Any] | None = None
-    station_precip_info: dict[str, Any] | None = None
-    for repair_key, label in (("流域边界_shp", "流域边界"), ("冰川边界_shp", "冰川边界"), (OBSERVED_FLOW_KEY, "观测径流")):
-        repair_info = dict(config.get("_path_repairs", {})).get(repair_key)
-        if isinstance(repair_info, dict) and repair_info.get("recovered_from"):
-            warnings.append(
-                f"{label}已自动恢复到当前工作区：{repair_info.get('resolved_path', '')}（来源 {repair_info.get('recovered_from', '')}）"
-            )
-    if not config.get("运行目录"):
-        missing.append("运行目录")
-    basin_path_raw = str(config.get("流域边界_shp", "")).strip()
-    basin_path = _resolve_config_related_path(config, basin_path_raw)
-    runtime_gis_ready = all(
-        file_path.exists()
-        for file_path in (
-            _workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config)),
-            Path(paths["gis_dir"]) / "flow_accumulation_masked.tif",
-        )
-    )
-    if runtime_stage == "calibration":
-        if not basin_path_raw:
-            if runtime_gis_ready:
-                warnings.append("原始流域边界 shp 未配置，但当前工作区已具备运行时 GIS 数据，可继续率定。")
-            else:
-                missing.append("流域边界_shp")
-        elif basin_path is None or not basin_path.exists():
-            if runtime_gis_ready:
-                warnings.append(f"原始流域边界文件不存在：{basin_path_raw}；当前工作区已具备运行时 GIS 数据，可继续率定。")
-            else:
-                missing.append(f"流域边界文件不存在：{basin_path_raw}")
-    obs_path = _config_text_value(config, OBSERVED_FLOW_KEY)
-    obs_file = _resolve_config_related_path(config, obs_path)
-    if require_observed_flow:
-        if not obs_path:
-            _append_unique_message(missing, OBSERVED_FLOW_KEY)
-        elif obs_file is None or not obs_file.exists():
-            _append_unique_message(missing, f"观测径流文件不存在：{obs_path}")
-    elif not obs_path:
-                warnings.append("输入预核算未配置观测径流文件；本次只检查运行资料可用性，不计算观测指标。")
-    elif obs_file is None or not obs_file.exists():
-                warnings.append(f"输入预核算未找到观测径流文件：{obs_path}；本次只检查运行资料可用性，不计算观测指标。")
-    if profile == PROFILE_DAILY and step_hours != 24.0:
-        missing.append("率定模式=日尺度 但 时间步长_小时 不是 24")
-    if profile == PROFILE_HOURLY and step_hours != 1.0:
-        missing.append("率定模式=小时尺度 但 时间步长_小时 不是 1")
-
-    time_cfg = config.get("时间", {})
-    if time_basis == TIME_BASIS_EVENT_WINDOWS:
-        warnings.append("当前工作区采用洪水事件资料口径，输入检查按每场洪水时段核验。")
-    else:
-        for key in ("预热开始", "率定开始", "率定结束", "验证结束"):
-            if not time_cfg.get(key):
-                missing.append(f"时间.{key}")
-        time_values: dict[str, pd.Timestamp] = {}
-        for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
-            value = time_cfg.get(key)
-            if not value:
-                continue
-            try:
-                time_values[key] = pd.to_datetime(value)
-            except Exception:
-                missing.append(f"时间.{key} 无法解析：{value}")
-        missing.extend(time_sequence_messages(time_values, step_hours))
-    if event_window_info is not None:
-        for item in list(event_window_info.get("errors", []) or []):
-            missing.append(str(item))
-        for item in list(event_window_info.get("warnings", []) or []):
-            warnings.append(str(item))
-        if not event_window_info.get("valid_event_count"):
-            missing.append("事件资料模式已启用，但没有可用的洪水事件窗口。")
-        else:
-            counts = dict(event_window_info.get("purpose_counts", {}) or {})
-            warnings.append(
-                "当前按洪水事件窗口检查资料："
-                f"{int(event_window_info.get('valid_event_count', 0) or 0)} 场有效，"
-                f"率定 {int(counts.get('calibration', 0) or 0)}、"
-                f"验证 {int(counts.get('validation', 0) or 0)}、"
-                f"诊断 {int(counts.get('diagnostic', 0) or 0)}。"
-            )
-
-    init_state = dict(config.get("初始状态", {}) or {})
-    for key, default_value in profile_runner.DEFAULT_INIT_STATE.items():
-        raw_value = init_state.get(key, default_value)
-        try:
-            value = float(raw_value)
-        except Exception:
-            missing.append(f"初始状态.{key} 不是有效数字：{raw_value}")
-            continue
-        if value < 0:
-            missing.append(f"初始状态.{key} 不能为负值：{raw_value}")
-
-    bbox = config.get("范围_bbox", {})
-    if not all(bbox.get(dim) is not None for dim in ("北", "西", "南", "东")):
-        warnings.append("范围_bbox 未完整填写，保存时可由 shp 自动生成。")
-
-    if obs_path and obs_file is not None and obs_file.exists():
-        try:
-            obs_info = inspect_observed_csv(
-                str(obs_file),
-                expected_index=build_expected_observation_index(config, context="calibration"),
-                target_step_hours=step_hours,
-                return_series=time_basis == TIME_BASIS_EVENT_WINDOWS,
-            )
-            observed_series = obs_info.pop("series", None)
-            obs_missing, obs_warnings = observed_window_messages(config, obs_info)
-            if require_observed_flow:
-                missing.extend(obs_missing)
-            else:
-                warnings.extend(obs_missing)
-            warnings.extend(obs_warnings)
-            if event_window_info is not None:
-                event_observation_coverage = event_observation_coverage_summary(
-                    event_window_info,
-                    observed_series,
-                    step_hours,
-                )
-                event_obs_missing, event_obs_warnings = event_observation_coverage_messages(event_observation_coverage)
-                if require_observed_flow:
-                    missing.extend(event_obs_missing)
-                else:
-                    warnings.extend(event_obs_missing)
-                warnings.extend(event_obs_warnings)
-            duplicate_count = int(obs_info.get("duplicate_count", 0) or 0)
-            if duplicate_count > 0:
-                sample = "、".join(
-                    format_timestamp_for_display(item, step_hours)
-                    for item in list(obs_info.get("duplicate_timestamps", []))[:3]
-                )
-                warnings.append(
-                    f"观测径流存在 {duplicate_count} 个重复时间戳，运行时会按同一时刻求平均，例如：{sample or '请检查原始 CSV'}"
-                )
-        except Exception as exc:
-            missing.append(f"观测径流检查失败：{exc}")
-
-    boundary_cfg = dict(config.get("边界条件", {}))
-    boundary_csv = str(boundary_cfg.get("上游边界入流_csv", "")).strip()
-    boundary_file = _resolve_config_related_path(config, boundary_csv)
-    boundary_date_field = str(boundary_cfg.get("时间字段", "date")).strip() or "date"
-    boundary_flow_field = str(boundary_cfg.get("流量字段", "inflow_m3s")).strip() or "inflow_m3s"
-    if runtime_stage in {"calibration", "forward"} and object_type == OBJECT_INTERBASIN:
-        if not boundary_csv:
-            missing.append("项目对象=区间流域时必须提供 上游边界入流_csv。")
-        elif boundary_file is None or not boundary_file.exists():
-            missing.append(f"上游边界入流文件不存在：{boundary_csv}")
-        else:
-            try:
-                boundary_info = inspect_boundary_inflow_csv(
-                    str(boundary_file),
-                    date_field=boundary_date_field,
-                    flow_field=boundary_flow_field,
-                    expected_index=build_expected_forcing_index(config, context="calibration"),
-                    expected_step_hours=step_hours,
-                )
-                boundary_missing, boundary_warnings = boundary_info_messages(
-                    boundary_info,
-                    step_hours,
-                    gap_fill=str(boundary_cfg.get("缺失填补", "zero")),
-                )
-                missing.extend(boundary_missing)
-                warnings.extend(boundary_warnings)
-            except Exception as exc:
-                missing.append(f"上游边界入流检查失败：{exc}")
-    elif runtime_stage == "calibration" and object_type == OBJECT_FULL_UPSTREAM and boundary_csv:
-        warnings.append("完整上游流域通常不需要上游边界入流；如确需使用，请确认对象类型是否正确。")
-
-    meteo = dict(config.get(METEO_KEY, {}))
-    precip_mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip()
-    precip_source_ui = resolve_precip_source(config, precip_source)
-    if runtime_stage == "calibration" and precip_mode in {"grid_plus_station_bias", "thiessen_station_only"}:
-        station_precip_info = analyze_station_precip_inputs(config, step_hours=step_hours)
-        for item in list(station_precip_info.get("missing", []) or []):
-            if item not in missing:
-                missing.append(str(item))
-        for item in list(station_precip_info.get("warnings", []) or []):
-            if item not in warnings:
-                warnings.append(str(item))
-    if precip_mode == "thiessen_station_only":
-        warnings.append("纯泰森方案建议只作为快速基线，不建议直接作为最终方案。")
-    if precip_source_ui == "custom_tif":
-        warnings.append("降水来源为“本地栅格目录”时，请在第 6 步使用“验证并导入”；系统会写入工程独立降水目录，运行时直接读取。")
-    pet_source = str(meteo.get(METEO_PET_SOURCE_KEY, "era5_fao56")).strip().lower()
-    if runtime_stage == "calibration" and pet_source == "era5_direct":
-        missing.append("潜在蒸散发来源“era5_direct”尚未接通，请改用 era5_fao56 或“本地栅格目录”。")
-
-    if runtime_stage in {"calibration", "forward"}:
-        for file_path in (_workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config)), Path(paths["gis_dir"]) / "flow_accumulation_masked.tif"):
-            if not file_path.exists():
-                missing.append(f"缺少输入文件：{file_path}")
-
-        forcing = validate_forcing_bundle(config, profile, precip_source=precip_source_ui)
-        missing.extend(forcing["errors"])
-        warnings.extend(forcing["warnings"])
-
-    glacier_requirements = glacier_formal_requirements(config, profile)
-    if glacier_requirements["enabled"]:
-        for note in glacier_requirements.get("diagnostic_notes", []):
-            warnings.append(note)
-
-    if require_observed_flow:
-        obs_path = _config_text_value(config, OBSERVED_FLOW_KEY)
-        if not obs_path:
-            _append_unique_message(missing, OBSERVED_FLOW_KEY)
-        elif obs_file is None or not obs_file.exists():
-            _append_unique_message(missing, f"观测径流文件不存在：{obs_path}")
-
-    focus_checks = build_engineering_focus_checks(
-        config,
-        profile=profile,
-        object_type=object_type,
-        step_hours=step_hours,
-        obs_info=obs_info,
-        boundary_info=boundary_info,
-        forcing=forcing,
-        station_precip_info=station_precip_info,
-        boundary_csv=boundary_csv,
+    return build_validate_workspace_fields(
+        config_path_raw,
+        _workspace_validation_context(),
+        stage=stage,
+        precip_source=precip_source,
+        config_override=config_override,
     )
 
-    return {
-        "valid": len(missing) == 0,
-        "missing": missing,
-        "warnings": warnings,
-        "profile": profile,
-        "object_type": object_type,
-        "stage": stage,
-        "focus_checks": focus_checks,
-        "input_time_summary": input_time_basis_ui_summary(
-            config,
-            time_basis=time_basis,
-            step_hours=step_hours,
-            event_info=event_window_info,
-            context="calibration",
-        ),
-        "time_basis": time_basis,
-        "time_basis_label": TIME_BASIS_LABELS.get(time_basis, "当前任务时段"),
-        "event_windows": event_windows_ui_summary(event_window_info, step_hours) if event_window_info is not None else None,
-        "event_forcing_coverage": dict(forcing.get("event_forcing_coverage") or {}) if forcing else None,
-        "event_observation_coverage": event_observation_coverage,
-    }
+
+def _workspace_validation_context() -> WorkspaceValidationContext:
+    return WorkspaceValidationContext(
+        resolve_path=resolve_any_path,
+        read_config=read_runtime_config,
+        find_running_task=find_running_task,
+        current_profile=current_profile,
+        detect_object_type=detect_object_type,
+        build_profile_paths=build_profile_paths,
+        normalize_time_step_hours=normalize_time_step_hours,
+        task_time_basis=task_time_basis,
+        normalized_flood_events=normalized_flood_events,
+        workspace_dem_path=_workspace_dem_path,
+        configured_dem_kind=_configured_dem_kind,
+        resolve_config_related_path=_resolve_config_related_path,
+        time_sequence_messages=time_sequence_messages,
+        inspect_observed_csv=inspect_observed_csv,
+        build_expected_observation_index=build_expected_observation_index,
+        observed_window_messages=observed_window_messages,
+        event_observation_coverage_summary=event_observation_coverage_summary,
+        event_observation_coverage_messages=event_observation_coverage_messages,
+        format_timestamp_for_display=format_timestamp_for_display,
+        inspect_boundary_csv=inspect_boundary_inflow_csv,
+        build_expected_forcing_index=build_expected_forcing_index,
+        boundary_info_messages=boundary_info_messages,
+        resolve_precip_source=resolve_precip_source,
+        analyze_station_precip_inputs=analyze_station_precip_inputs,
+        validate_forcing_bundle=validate_forcing_bundle,
+        glacier_formal_requirements=glacier_formal_requirements,
+        build_engineering_focus_checks=build_engineering_focus_checks,
+        input_time_basis_ui_summary=input_time_basis_ui_summary,
+        event_windows_ui_summary=event_windows_ui_summary,
+        default_init_state=profile_runner.DEFAULT_INIT_STATE,
+        observed_flow_key=OBSERVED_FLOW_KEY,
+        profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
+        object_interbasin=OBJECT_INTERBASIN,
+        object_full_upstream=OBJECT_FULL_UPSTREAM,
+        time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
+        time_basis_labels=TIME_BASIS_LABELS,
+        meteo_key=METEO_KEY,
+        meteo_precip_mode_key=METEO_PRECIP_MODE_KEY,
+        meteo_pet_source_key=METEO_PET_SOURCE_KEY,
+    )
 
 
 def wizard_step4_meteo_validation(config: dict[str, Any]) -> tuple[list[str], list[str]]:
