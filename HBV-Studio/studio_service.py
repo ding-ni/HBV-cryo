@@ -52,6 +52,12 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
+from services.tasks import (
+    TaskQueryContext,
+    find_running_task as build_find_running_task,
+    has_running_tasks as build_has_running_tasks,
+    list_tasks as build_list_tasks,
+)
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
     WorkspaceCatalogContext,
@@ -384,9 +390,17 @@ def server_activity_snapshot() -> tuple[float, float]:
         return LAST_SERVER_REQUEST_AT, LAST_WINDOW_UNLOAD_AT
 
 
+def _task_query_context() -> TaskQueryContext:
+    return TaskQueryContext(
+        tasks=TASKS,
+        task_lock=TASK_LOCK,
+        snapshot_tasks=_snapshot_tasks,
+        resolve_any_path=resolve_any_path,
+    )
+
+
 def has_running_tasks() -> bool:
-    with TASK_LOCK:
-        return any(task.status == "running" for task in TASKS.values())
+    return build_has_running_tasks(_task_query_context())
 
 
 def request_server_shutdown(server: ThreadingHTTPServer, message: str, *, delay_sec: float = 0.0) -> None:
@@ -6331,28 +6345,11 @@ def invalidate_deleted_run_refs(run_path: Path) -> None:
 
 
 def list_tasks() -> list[dict[str, Any]]:
-    items = [task.as_dict() for task in _snapshot_tasks()]
-    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+    return build_list_tasks(_task_query_context())
 
 
 def find_running_task(task_type: str, config_path_raw: str) -> TaskRecord | None:
-    try:
-        cfg_path = resolve_any_path(config_path_raw, must_exist=False).resolve(strict=False)
-    except Exception:
-        return None
-    with TASK_LOCK:
-        for task in TASKS.values():
-            if task.task_type != task_type or task.status != "running":
-                continue
-            task_cfg = str(task.metadata.get("config_path", "")).strip()
-            if not task_cfg:
-                continue
-            try:
-                if Path(task_cfg).resolve(strict=False) == cfg_path:
-                    return task
-            except Exception:
-                continue
-    return None
+    return build_find_running_task(task_type, config_path_raw, _task_query_context())
 
 
 def discover_runtime_roots() -> list[Path]:
