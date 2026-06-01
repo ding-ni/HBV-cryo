@@ -41,8 +41,11 @@ from services.api_routes import GET_ROUTE_HANDLERS as GET_API_ROUTE_HANDLERS
 from services.api_routes import POST_ROUTE_HANDLERS as POST_API_ROUTE_HANDLERS
 from services.data_prep import (
     DataPrepContext,
+    DataPrepTaskOutputContext,
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
+    verify_data_prep_step_output as build_verify_data_prep_step_output,
+    verify_data_prep_task_output as build_verify_data_prep_task_output,
 )
 from services.boundary import BoundaryPreviewContext, boundary_preview as build_boundary_preview
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
@@ -6108,38 +6111,21 @@ def verify_data_prep_step_output(
     config: dict[str, Any],
     runtime_prec_source: Any = None,
 ) -> tuple[bool, str]:
-    check = step.get("check")
-    if not callable(check):
-        return True, "该步骤没有产物检查函数。"
-    try:
-        if step.get("needs_prec_source"):
-            done, message, _ = check(config, runtime_prec_source)
-        else:
-            done, message, _ = check(config)
-    except Exception as exc:
-        return False, f"产物检查异常：{exc}"
-    return bool(done), str(message or "")
+    return build_verify_data_prep_step_output(step, config, runtime_prec_source)
+
+
+def _data_prep_task_output_context() -> DataPrepTaskOutputContext:
+    return DataPrepTaskOutputContext(
+        resolve_path=resolve_any_path,
+        read_runtime_config=read_runtime_config,
+        task_step_map=task_step_map,
+        current_profile=current_profile,
+        resolve_runtime_precip_source=profile_runner.resolve_runtime_precip_source,
+    )
 
 
 def verify_data_prep_task_output(metadata: dict[str, Any]) -> tuple[bool, str]:
-    config_path_raw = str(metadata.get("config_path", "")).strip()
-    step_id = str(metadata.get("step_id", "")).strip()
-    if not config_path_raw or not step_id:
-        return True, "缺少步骤产物检查上下文。"
-    try:
-        config_path = resolve_any_path(config_path_raw, must_exist=True)
-        config = read_runtime_config(config_path)
-        steps = task_step_map(current_profile(config), config)
-        step = steps.get(step_id)
-        if step is None:
-            return True, f"未知步骤 {step_id}，跳过产物复核。"
-        runtime_prec_source = profile_runner.resolve_runtime_precip_source(
-            config,
-            metadata.get("runtime_prec_source", None),
-        )
-        return verify_data_prep_step_output(step, config, runtime_prec_source)
-    except Exception as exc:
-        return False, f"产物检查准备失败：{exc}"
+    return build_verify_data_prep_task_output(metadata, _data_prep_task_output_context())
 
 
 def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: set[str]) -> None:

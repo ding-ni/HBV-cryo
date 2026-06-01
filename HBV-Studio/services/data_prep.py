@@ -18,6 +18,15 @@ class DataPrepContext:
     profile_daily: str
 
 
+@dataclass(frozen=True)
+class DataPrepTaskOutputContext:
+    resolve_path: Callable[..., Path]
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    task_step_map: Callable[[str, dict[str, Any]], dict[str, dict[str, Any]]]
+    current_profile: Callable[[dict[str, Any]], str]
+    resolve_runtime_precip_source: Callable[[dict[str, Any], Any], str]
+
+
 def data_prep_steps_payload(config_path_raw: str, context: DataPrepContext) -> list[dict[str, Any]]:
     profile = context.profile_daily
     config = None
@@ -93,3 +102,45 @@ def data_prep_status(
             }
         )
     return results
+
+
+def verify_data_prep_step_output(
+    step: dict[str, Any],
+    config: dict[str, Any],
+    runtime_prec_source: Any = None,
+) -> tuple[bool, str]:
+    check = step.get("check")
+    if not callable(check):
+        return True, "该步骤没有产物检查函数。"
+    try:
+        if step.get("needs_prec_source"):
+            done, message, _ = check(config, runtime_prec_source)
+        else:
+            done, message, _ = check(config)
+    except Exception as exc:
+        return False, f"产物检查异常：{exc}"
+    return bool(done), str(message or "")
+
+
+def verify_data_prep_task_output(
+    metadata: dict[str, Any],
+    context: DataPrepTaskOutputContext,
+) -> tuple[bool, str]:
+    config_path_raw = str(metadata.get("config_path", "")).strip()
+    step_id = str(metadata.get("step_id", "")).strip()
+    if not config_path_raw or not step_id:
+        return True, "缺少步骤产物检查上下文。"
+    try:
+        config_path = context.resolve_path(config_path_raw, must_exist=True)
+        config = context.read_runtime_config(config_path)
+        steps = context.task_step_map(context.current_profile(config), config)
+        step = steps.get(step_id)
+        if step is None:
+            return True, f"未知步骤 {step_id}，跳过产物复核。"
+        runtime_prec_source = context.resolve_runtime_precip_source(
+            config,
+            metadata.get("runtime_prec_source", None),
+        )
+        return verify_data_prep_step_output(step, config, runtime_prec_source)
+    except Exception as exc:
+        return False, f"产物检查准备失败：{exc}"
