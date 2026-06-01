@@ -107,6 +107,14 @@ class RunConfigDataSourceContext:
 
 
 @dataclass(frozen=True)
+class RunConfigBoundaryContext:
+    resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
+    resolve_any_path: Callable[..., Path]
+    first_existing_path: Callable[[list[Path]], Path | None]
+    boundary_inflow_key: str
+
+
+@dataclass(frozen=True)
 class RunMetadataSections:
     data_sources: dict[str, Any]
     boundary_condition: dict[str, Any]
@@ -1135,6 +1143,27 @@ def sync_run_data_source_paths(
     data_sources["prec_source"] = runtime_source
     data_sources["configured_precip_source"] = configured_source
     data_sources["runtime_prec_source"] = runtime_source
+
+
+def sync_run_config_boundary_condition(
+    boundary_condition: dict[str, Any],
+    metadata: dict[str, Any],
+    config: dict[str, Any],
+    context: RunConfigBoundaryContext,
+) -> None:
+    boundary_cfg = dict(config.get("\u8fb9\u754c\u6761\u4ef6", {}) or {})
+    boundary_path = context.resolve_config_related_path(
+        config,
+        boundary_cfg.get(context.boundary_inflow_key),
+    )
+    optional_modules = dict(metadata.get("optional_modules", {}) or {})
+    sync_run_boundary_condition_path(
+        boundary_condition,
+        optional_modules,
+        boundary_path,
+        context.resolve_any_path,
+        context.first_existing_path,
+    )
 
 
 def sync_run_boundary_condition_path(

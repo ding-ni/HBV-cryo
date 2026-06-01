@@ -107,7 +107,7 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunConfigDataSourceContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
@@ -154,7 +154,7 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
-from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
+from services.runs import sync_run_config_boundary_condition as build_sync_run_config_boundary_condition
 from services.runs import sync_run_config_data_sources as build_sync_run_config_data_sources
 from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
@@ -2671,6 +2671,15 @@ def _run_config_data_source_context() -> RunConfigDataSourceContext:
     )
 
 
+def _run_config_boundary_context() -> RunConfigBoundaryContext:
+    return RunConfigBoundaryContext(
+        resolve_config_related_path=_resolve_config_related_path,
+        resolve_any_path=resolve_any_path,
+        first_existing_path=_first_existing_path,
+        boundary_inflow_key="上游边界入流_csv",
+    )
+
+
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
@@ -2742,15 +2751,11 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
             if config_objective_mode:
                 effective_objective_mode = config_objective_mode
 
-            boundary_cfg = dict(config.get("边界条件", {}) or {})
-            boundary_path = _resolve_config_related_path(config, boundary_cfg.get("上游边界入流_csv"))
-            optional_modules = dict(normalized.get("optional_modules", {}) or {})
-            build_sync_run_boundary_condition_path(
+            build_sync_run_config_boundary_condition(
                 boundary_condition,
-                optional_modules,
-                boundary_path,
-                resolve_any_path,
-                _first_existing_path,
+                normalized,
+                config,
+                _run_config_boundary_context(),
             )
             build_rebase_run_data_cache_paths(cache, paths, data_sources)
         except Exception:

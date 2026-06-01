@@ -17,6 +17,7 @@ import profile_runner  # noqa: E402
 
 from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
+    RunConfigBoundaryContext,
     RunConfigDataSourceContext,
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
@@ -77,6 +78,7 @@ from services.runs import (  # noqa: E402
     synthesized_parameter_profile,
     sync_objective_profile_metadata,
     sync_run_boundary_condition_path,
+    sync_run_config_boundary_condition,
     sync_run_config_data_sources,
     sync_run_config_profile_metadata,
     sync_run_data_source_paths,
@@ -923,6 +925,26 @@ class RunIdentityServiceTests(unittest.TestCase):
             )
 
             self.assertEqual(boundary_condition["boundary_inflow_file"], str(config_path.resolve(strict=False)))
+
+    def test_sync_run_config_boundary_condition_uses_config_boundary_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_boundary = root / "config_boundary.csv"
+            config_boundary.write_text("date,q\n2026-06-01,1\n", encoding="utf-8")
+            raw_boundary = root / "raw_boundary.csv"
+            boundary_condition = {}
+            metadata = {"optional_modules": {"boundary_inflow": {"file": str(raw_boundary)}}}
+            config = {"边界条件": {"上游边界入流_csv": str(config_boundary)}}
+            context = RunConfigBoundaryContext(
+                resolve_config_related_path=lambda cfg, raw: Path(raw) if raw else None,
+                resolve_any_path=lambda raw, **kwargs: Path(raw),
+                first_existing_path=first_existing_path,
+                boundary_inflow_key="上游边界入流_csv",
+            )
+
+            sync_run_config_boundary_condition(boundary_condition, metadata, config, context)
+
+            self.assertEqual(boundary_condition["boundary_inflow_file"], str(config_boundary.resolve(strict=False)))
 
     def test_rebase_run_data_cache_paths_uses_current_source_dirs_and_cache_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
