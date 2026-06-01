@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -23,6 +25,7 @@ from services.tasks import (  # noqa: E402
     append_task_exception_output,
     append_task_output,
     build_python_script_command,
+    call_with_output_capture,
     create_registered_task,
     list_tasks,
     mark_task_finished,
@@ -247,6 +250,39 @@ class TaskServiceTests(unittest.TestCase):
         )
 
         self.assertIsNone(task_progress_snapshot(task))
+
+    def test_call_with_output_capture_relays_stdout_stderr_and_partial_lines(self) -> None:
+        events: list[str] = []
+
+        def emit_output(left: int, right: int) -> int:
+            print("stdout line")
+            print("stderr line", file=sys.stderr)
+            print("partial", end="")
+            return left + right
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = call_with_output_capture(events.append, emit_output, 2, 3)
+
+        self.assertEqual(result, 5)
+        self.assertEqual(events, ["stdout line", "stderr line", "partial"])
+
+    def test_call_with_output_capture_flushes_partial_output_on_exception(self) -> None:
+        events: list[str] = []
+
+        def fail_after_partial_output() -> None:
+            print("before failure", end="")
+            raise RuntimeError("boom")
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                call_with_output_capture(events.append, fail_after_partial_output)
+
+        self.assertEqual(events, ["before failure"])
+
+    def test_call_with_output_capture_skips_relay_when_callback_is_none(self) -> None:
+        result = call_with_output_capture(None, lambda value: value + 1, 4)
+
+        self.assertEqual(result, 5)
 
     def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
         command = build_python_script_command(

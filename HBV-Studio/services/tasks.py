@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import contextlib
 import csv
+import sys
 import threading
 import time
 import traceback
@@ -85,6 +87,64 @@ class TaskRecord:
             "maxiter": self.metadata.get("maxiter"),
             "refine_maxiter": self.metadata.get("refine_maxiter"),
         }
+
+
+class TaskOutputRelay:
+    """Collect line-oriented stdout/stderr and forward it into task output."""
+
+    def __init__(self, callback: Callable[[str], None], mirror: Any = None) -> None:
+        self.callback = callback
+        self.mirror = mirror
+        self._buffer = ""
+
+    def write(self, text: str) -> int:
+        if not isinstance(text, str):
+            text = str(text)
+        if self.mirror is not None:
+            try:
+                self.mirror.write(text)
+            except Exception:
+                pass
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            line = line.rstrip("\r")
+            if line.strip():
+                self.callback(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self._buffer:
+            line = self._buffer.rstrip("\r")
+            if line.strip():
+                self.callback(line)
+            self._buffer = ""
+        if self.mirror is not None:
+            try:
+                self.mirror.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        return False
+
+
+def call_with_output_capture(
+    callback: Callable[[str], None] | None,
+    fn: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    if callback is None:
+        return fn(*args, **kwargs)
+    stdout_relay = TaskOutputRelay(callback, mirror=sys.stdout)
+    stderr_relay = TaskOutputRelay(callback, mirror=sys.stderr)
+    try:
+        with contextlib.redirect_stdout(stdout_relay), contextlib.redirect_stderr(stderr_relay):
+            return fn(*args, **kwargs)
+    finally:
+        stdout_relay.flush()
+        stderr_relay.flush()
 
 
 @dataclass(frozen=True)

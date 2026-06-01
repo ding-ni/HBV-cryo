@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import copy
 import csv
 import hashlib
@@ -154,6 +153,7 @@ from services.tasks import (
     append_task_exception_output as build_append_task_exception_output,
     append_task_output as build_append_task_output,
     build_python_script_command as build_task_python_script_command,
+    call_with_output_capture,
     create_registered_task as build_create_registered_task,
     find_running_task as build_find_running_task,
     has_running_tasks as build_has_running_tasks,
@@ -514,59 +514,6 @@ def monitor_server_lifecycle(server: ThreadingHTTPServer) -> None:
         if (now - last_request_at) >= INSTALLED_IDLE_SHUTDOWN_SECONDS:
             request_server_shutdown(server, "[HBV-Studio] 安装版空闲超时，后台服务自动退出。")
             break
-
-
-class TaskOutputRelay:
-    """Collect line-oriented stdout/stderr and forward it into task output."""
-
-    def __init__(self, callback: Callable[[str], None], mirror: Any = None) -> None:
-        self.callback = callback
-        self.mirror = mirror
-        self._buffer = ""
-
-    def write(self, text: str) -> int:
-        if not isinstance(text, str):
-            text = str(text)
-        if self.mirror is not None:
-            try:
-                self.mirror.write(text)
-            except Exception:
-                pass
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            line = line.rstrip("\r")
-            if line.strip():
-                self.callback(line)
-        return len(text)
-
-    def flush(self) -> None:
-        if self._buffer:
-            line = self._buffer.rstrip("\r")
-            if line.strip():
-                self.callback(line)
-            self._buffer = ""
-        if self.mirror is not None:
-            try:
-                self.mirror.flush()
-            except Exception:
-                pass
-
-    def isatty(self) -> bool:
-        return False
-
-
-def call_with_output_capture(callback: Callable[[str], None] | None, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    if callback is None:
-        return fn(*args, **kwargs)
-    stdout_relay = TaskOutputRelay(callback, mirror=sys.stdout)
-    stderr_relay = TaskOutputRelay(callback, mirror=sys.stderr)
-    try:
-        with contextlib.redirect_stdout(stdout_relay), contextlib.redirect_stderr(stderr_relay):
-            return fn(*args, **kwargs)
-    finally:
-        stdout_relay.flush()
-        stderr_relay.flush()
 
 
 TASKS: dict[str, TaskRecord] = {}
