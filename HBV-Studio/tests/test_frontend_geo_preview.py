@@ -121,6 +121,14 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             };
             const plan = geo.buildMapLibreLayerPlan(overview, overview.config_path, { demStyle: "gray" });
             const style = geo.buildMapLibreStyle(overview, overview.config_path, { demStyle: "gray" });
+            const controlled = geo.buildMapLibreLayerPlan(overview, overview.config_path, {
+              demStyle: "gray",
+              layerControls: {
+                dem: { opacity: 0.25 },
+                glacier: { visible: false, opacity: 0.4 },
+                stations: { opacity: 0.5 },
+              },
+            });
 
             if (plan.version !== 8 || plan.offline !== true) throw new Error("plan metadata mismatch");
             if (plan.sources.dem.type !== "image") throw new Error("DEM should use image source");
@@ -141,6 +149,10 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             for (const id of ["dem", "elevation-zones-fill", "glacier-fill", "basin-line", "stations"]) {
               if (!ids.includes(id)) throw new Error(`missing layer ${id}: ${ids.join(",")}`);
             }
+            const controlIds = plan.layerControls.map(item => item.id);
+            for (const id of ["dem", "elevation_zone", "glacier", "basin", "stations"]) {
+              if (!controlIds.includes(id)) throw new Error(`missing layer control ${id}: ${controlIds.join(",")}`);
+            }
             const zonesPaint = plan.layers.find(layer => layer.id === "elevation-zones-fill").paint["fill-color"];
             if (!Array.isArray(zonesPaint) || zonesPaint[0] !== "match" || !zonesPaint.includes("low") || !zonesPaint.includes("high")) {
               throw new Error(`elevation zones should use banded fill colors: ${JSON.stringify(zonesPaint)}`);
@@ -159,6 +171,26 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             }
             if (JSON.stringify(style.sources) !== JSON.stringify(plan.sources)) {
               throw new Error("style sources should reuse the layer plan");
+            }
+            const controlledDem = controlled.layers.find(layer => layer.id === "dem");
+            if (controlledDem.paint["raster-opacity"] !== 0.22) {
+              throw new Error(`DEM opacity should apply layer control: ${JSON.stringify(controlledDem.paint)}`);
+            }
+            const controlledGlacierFill = controlled.layers.find(layer => layer.id === "glacier-fill");
+            const controlledGlacierLine = controlled.layers.find(layer => layer.id === "glacier-line");
+            if (controlledGlacierFill.layout.visibility !== "none" || controlledGlacierLine.layout.visibility !== "none") {
+              throw new Error("glacier visibility control should hide both fill and line layers");
+            }
+            if (controlledGlacierFill.paint["fill-opacity"] !== 0.136 || controlledGlacierLine.paint["line-opacity"] !== 0.4) {
+              throw new Error(`glacier opacity control mismatch: ${JSON.stringify([controlledGlacierFill.paint, controlledGlacierLine.paint])}`);
+            }
+            const controlledStations = controlled.layers.find(layer => layer.id === "stations");
+            if (controlledStations.paint["circle-opacity"] !== 0.5 || controlledStations.paint["circle-stroke-opacity"] !== 0.5) {
+              throw new Error(`station opacity should affect symbol and stroke: ${JSON.stringify(controlledStations.paint)}`);
+            }
+            const glacierControl = controlled.layerControls.find(item => item.id === "glacier");
+            if (glacierControl.visible !== false || glacierControl.opacity !== 0.4) {
+              throw new Error(`glacier control metadata mismatch: ${JSON.stringify(glacierControl)}`);
             }
             """
         )
