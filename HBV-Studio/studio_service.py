@@ -149,12 +149,16 @@ from services.runs import resolve_source_run_reference as build_resolve_source_r
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
+from services.runs import rebase_run_data_cache_paths as build_rebase_run_data_cache_paths
+from services.runs import run_precip_dir_candidates as build_run_precip_dir_candidates
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import synthesized_objective_profile as build_synthesized_objective_profile
 from services.runs import synthesized_parameter_profile as build_synthesized_parameter_profile
+from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
+from services.runs import sync_run_data_source_paths as build_sync_run_data_source_paths
 from services.runs import sync_objective_profile_metadata as build_sync_objective_profile_metadata
 from services.runs import sync_source_run_reference as build_sync_source_run_reference
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
@@ -2766,64 +2770,23 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
             ).strip().lower()
             source_key = resolve_precip_source(config, raw_source_key)
             _, effective_prec_dir, _ = effective_precip_paths(config, profile, precip_source=source_key)
-            prec_candidates: list[Path] = []
-            if source_key == "era5":
-                prec_candidates.extend(
-                    [
-                        Path(paths["aligned_prec_era5_dir"]),
-                        Path(paths["aligned_prec_era5_base_dir"]),
-                    ]
-                )
-            elif source_key == "custom_tif":
-                prec_candidates.extend(
-                    [
-                        Path(paths["aligned_prec_custom_dir"]),
-                        Path(paths["aligned_prec_custom_base_dir"]),
-                    ]
-                )
-            elif source_key == "cmfd":
-                prec_candidates.extend(
-                    [
-                        Path(paths["aligned_prec_cmfd_dir"]),
-                        Path(paths["aligned_prec_cmfd_base_dir"]),
-                    ]
-                )
-            else:
-                prec_candidates.extend(
-                    [
-                        Path(paths["aligned_prec_dir"]),
-                        Path(paths["aligned_prec_base_dir"]),
-                    ]
-                )
-            raw_prec_dir = str(data_sources.get("prec_dir", "") or "").strip()
-            if raw_prec_dir:
-                try:
-                    prec_candidates.append(resolve_any_path(raw_prec_dir, must_exist=False))
-                except Exception:
-                    pass
-            prec_candidates.append(Path(effective_prec_dir))
+            prec_candidates = build_run_precip_dir_candidates(
+                paths,
+                source_key,
+                data_sources.get("prec_dir", ""),
+                effective_prec_dir,
+                resolve_any_path,
+            )
             resolved_prec_dir = _first_existing_path(prec_candidates)
-
-            if resolved_prec_dir is not None:
-                data_sources["prec_dir"] = str(resolved_prec_dir)
-            data_sources["temp_dir"] = str(Path(paths["aligned_temp_dir"]).resolve(strict=False))
-            data_sources["evap_dir"] = str(Path(paths["aligned_evap_dir"]).resolve(strict=False))
-
-            glacier_melt_dir = Path(paths["glacier_melt_dir"]).resolve(strict=False)
-            if glacier_melt_dir.exists() or data_sources.get("glacier_melt_dir"):
-                data_sources["glacier_melt_dir"] = str(glacier_melt_dir)
-
-            glacier_mask_path = (Path(paths["gis_dir"]) / "glacier_mask.tif").resolve(strict=False)
-            if glacier_mask_path.exists() or data_sources.get("glacier_mask"):
-                data_sources["glacier_mask"] = str(glacier_mask_path)
-
             obs_path = _resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))
-            if obs_path is not None:
-                data_sources["obs_file"] = str(obs_path.resolve(strict=False))
-
-            data_sources["prec_source"] = source_key or configured_source
-            data_sources["configured_precip_source"] = configured_source
-            data_sources["runtime_prec_source"] = source_key or configured_source
+            build_sync_run_data_source_paths(
+                data_sources,
+                paths,
+                source_key,
+                configured_source,
+                resolved_prec_dir,
+                obs_path,
+            )
             normalized["calibration_profile"] = str(normalized.get("calibration_profile") or profile)
             normalized["rate_mode"] = str(normalized.get("rate_mode") or profile)
             if not resolved_object_type:
@@ -2843,41 +2806,14 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
             boundary_cfg = dict(config.get("边界条件", {}) or {})
             boundary_path = _resolve_config_related_path(config, boundary_cfg.get("上游边界入流_csv"))
             optional_modules = dict(normalized.get("optional_modules", {}) or {})
-            boundary_module = dict(optional_modules.get("boundary_inflow", {}) or {})
-            raw_boundary_file = str(
-                boundary_condition.get("boundary_inflow_file")
-                or boundary_module.get("file")
-                or ""
-            ).strip()
-            boundary_candidates: list[Path] = []
-            if raw_boundary_file:
-                try:
-                    boundary_candidates.append(resolve_any_path(raw_boundary_file, must_exist=False))
-                except Exception:
-                    pass
-            if boundary_path is not None:
-                boundary_candidates.append(boundary_path)
-            resolved_boundary_path = _first_existing_path(boundary_candidates)
-            if resolved_boundary_path is not None:
-                boundary_condition["boundary_inflow_file"] = str(resolved_boundary_path)
-
-            cache_dir = Path(paths["cache_dir"]).resolve(strict=False)
-            source_dir_map = {
-                "prec": Path(data_sources["prec_dir"]).resolve(strict=False) if data_sources.get("prec_dir") else None,
-                "temp": Path(paths["aligned_temp_dir"]).resolve(strict=False),
-                "evap": Path(paths["aligned_evap_dir"]).resolve(strict=False),
-            }
-            for key, item in list(cache.items()):
-                if not isinstance(item, dict):
-                    continue
-                current = dict(item)
-                source_dir = source_dir_map.get(key)
-                if isinstance(source_dir, Path):
-                    current["source_dir"] = str(source_dir)
-                cache_name = Path(str(item.get("cache_path", "") or "")).name
-                if cache_name:
-                    current["cache_path"] = str((cache_dir / cache_name).resolve(strict=False))
-                cache[key] = current
+            build_sync_run_boundary_condition_path(
+                boundary_condition,
+                optional_modules,
+                boundary_path,
+                resolve_any_path,
+                _first_existing_path,
+            )
+            build_rebase_run_data_cache_paths(cache, paths, data_sources)
         except Exception:
             pass
 

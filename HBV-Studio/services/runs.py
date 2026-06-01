@@ -871,6 +871,111 @@ def sync_source_run_reference(
     return source_run_path
 
 
+def run_precip_dir_candidates(
+    paths: dict[str, Any],
+    source_key: str,
+    raw_prec_dir: Any = "",
+    effective_prec_dir: Any = None,
+    resolve_any_path: Callable[..., Path] | None = None,
+) -> list[Path]:
+    source = str(source_key or "").strip().lower()
+    if source == "era5":
+        path_keys = ("aligned_prec_era5_dir", "aligned_prec_era5_base_dir")
+    elif source == "custom_tif":
+        path_keys = ("aligned_prec_custom_dir", "aligned_prec_custom_base_dir")
+    elif source == "cmfd":
+        path_keys = ("aligned_prec_cmfd_dir", "aligned_prec_cmfd_base_dir")
+    else:
+        path_keys = ("aligned_prec_dir", "aligned_prec_base_dir")
+
+    candidates = [Path(paths[key]) for key in path_keys if paths.get(key)]
+    raw_value = str(raw_prec_dir or "").strip()
+    if raw_value:
+        try:
+            candidates.append(resolve_any_path(raw_value, must_exist=False) if resolve_any_path else Path(raw_value))
+        except Exception:
+            pass
+    if effective_prec_dir:
+        candidates.append(Path(effective_prec_dir))
+    return candidates
+
+
+def sync_run_data_source_paths(
+    data_sources: dict[str, Any],
+    paths: dict[str, Any],
+    source_key: str,
+    configured_source: str,
+    resolved_prec_dir: Path | None = None,
+    obs_path: Path | None = None,
+) -> None:
+    if resolved_prec_dir is not None:
+        data_sources["prec_dir"] = str(resolved_prec_dir)
+    data_sources["temp_dir"] = str(Path(paths["aligned_temp_dir"]).resolve(strict=False))
+    data_sources["evap_dir"] = str(Path(paths["aligned_evap_dir"]).resolve(strict=False))
+
+    glacier_melt_dir = Path(paths["glacier_melt_dir"]).resolve(strict=False)
+    if glacier_melt_dir.exists() or data_sources.get("glacier_melt_dir"):
+        data_sources["glacier_melt_dir"] = str(glacier_melt_dir)
+
+    glacier_mask_path = (Path(paths["gis_dir"]) / "glacier_mask.tif").resolve(strict=False)
+    if glacier_mask_path.exists() or data_sources.get("glacier_mask"):
+        data_sources["glacier_mask"] = str(glacier_mask_path)
+
+    if obs_path is not None:
+        data_sources["obs_file"] = str(obs_path.resolve(strict=False))
+
+    runtime_source = source_key or configured_source
+    data_sources["prec_source"] = runtime_source
+    data_sources["configured_precip_source"] = configured_source
+    data_sources["runtime_prec_source"] = runtime_source
+
+
+def sync_run_boundary_condition_path(
+    boundary_condition: dict[str, Any],
+    optional_modules: dict[str, Any],
+    boundary_path: Path | None,
+    resolve_any_path: Callable[..., Path],
+    first_existing_path: Callable[[list[Path]], Path | None],
+) -> None:
+    boundary_module = dict(optional_modules.get("boundary_inflow", {}) or {})
+    raw_boundary_file = str(
+        boundary_condition.get("boundary_inflow_file")
+        or boundary_module.get("file")
+        or ""
+    ).strip()
+    candidates: list[Path] = []
+    if raw_boundary_file:
+        try:
+            candidates.append(resolve_any_path(raw_boundary_file, must_exist=False))
+        except Exception:
+            pass
+    if boundary_path is not None:
+        candidates.append(boundary_path)
+    resolved_boundary_path = first_existing_path(candidates)
+    if resolved_boundary_path is not None:
+        boundary_condition["boundary_inflow_file"] = str(resolved_boundary_path)
+
+
+def rebase_run_data_cache_paths(cache: dict[str, Any], paths: dict[str, Any], data_sources: dict[str, Any]) -> None:
+    cache_dir = Path(paths["cache_dir"]).resolve(strict=False)
+    source_dir_map = {
+        "prec": Path(data_sources["prec_dir"]).resolve(strict=False) if data_sources.get("prec_dir") else None,
+        "temp": Path(paths["aligned_temp_dir"]).resolve(strict=False),
+        "evap": Path(paths["aligned_evap_dir"]).resolve(strict=False),
+    }
+    for key, item in list(cache.items()):
+        if not isinstance(item, dict):
+            continue
+        current = dict(item)
+        source_dir = source_dir_map.get(key)
+        if isinstance(source_dir, Path):
+            current["source_dir"] = str(source_dir)
+        cache_name = Path(str(item.get("cache_path", "") or "")).name
+        if cache_name:
+            current["cache_path"] = str((cache_dir / cache_name).resolve(strict=False))
+        cache[key] = current
+
+
 def workspace_name_for_summary(
     metadata: dict[str, Any],
     resolved_config: Path | None = None,

@@ -56,6 +56,8 @@ from services.runs import (  # noqa: E402
     restore_forward_observed_series,
     resolve_metadata_object_type,
     resolve_source_run_reference,
+    rebase_run_data_cache_paths,
+    run_precip_dir_candidates,
     run_csv_date_bounds,
     run_csv_preview,
     run_parameter_context,
@@ -67,6 +69,8 @@ from services.runs import (  # noqa: E402
     synthesized_objective_profile,
     synthesized_parameter_profile,
     sync_objective_profile_metadata,
+    sync_run_boundary_condition_path,
+    sync_run_data_source_paths,
     sync_source_run_reference,
     workspace_name_for_summary,
 )
@@ -545,6 +549,114 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(replay_context["source_run_path"], "C:/resolved/manual-run")
         self.assertEqual(manual_result["source_run_path"], "C:/resolved/manual-run")
         self.assertEqual(optimization["source_run_path"], "C:/resolved/manual-run")
+
+    def test_run_precip_dir_candidates_follow_source_specific_order(self) -> None:
+        paths = {
+            "aligned_prec_era5_dir": "C:/era5/current",
+            "aligned_prec_era5_base_dir": "C:/era5/base",
+            "aligned_prec_custom_dir": "C:/custom/current",
+            "aligned_prec_custom_base_dir": "C:/custom/base",
+            "aligned_prec_cmfd_dir": "C:/cmfd/current",
+            "aligned_prec_cmfd_base_dir": "C:/cmfd/base",
+            "aligned_prec_dir": "C:/default/current",
+            "aligned_prec_base_dir": "C:/default/base",
+        }
+
+        candidates = run_precip_dir_candidates(
+            paths,
+            "custom_tif",
+            "relative/prec",
+            "C:/effective/prec",
+            lambda raw, **kwargs: Path("D:/resolved") / raw,
+        )
+
+        self.assertEqual([str(path).replace("\\", "/") for path in candidates], [
+            "C:/custom/current",
+            "C:/custom/base",
+            "D:/resolved/relative/prec",
+            "C:/effective/prec",
+        ])
+
+    def test_sync_run_data_source_paths_sets_configured_paths_and_optional_glacier_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gis_dir = root / "gis"
+            glacier_melt_dir = root / "glacier_melt"
+            gis_dir.mkdir()
+            glacier_melt_dir.mkdir()
+            (gis_dir / "glacier_mask.tif").write_text("mask", encoding="utf-8")
+            obs_path = root / "obs.csv"
+            obs_path.write_text("date,q\n2026-06-01,1\n", encoding="utf-8")
+            data_sources = {"glacier_melt_dir": "legacy", "glacier_mask": "legacy-mask"}
+            paths = {
+                "aligned_temp_dir": root / "temp",
+                "aligned_evap_dir": root / "evap",
+                "glacier_melt_dir": glacier_melt_dir,
+                "gis_dir": gis_dir,
+            }
+
+            sync_run_data_source_paths(
+                data_sources,
+                paths,
+                "cmfd",
+                "era5",
+                root / "prec",
+                obs_path,
+            )
+
+            self.assertEqual(data_sources["prec_dir"], str(root / "prec"))
+            self.assertEqual(data_sources["temp_dir"], str((root / "temp").resolve(strict=False)))
+            self.assertEqual(data_sources["evap_dir"], str((root / "evap").resolve(strict=False)))
+            self.assertEqual(data_sources["glacier_melt_dir"], str(glacier_melt_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["glacier_mask"], str((gis_dir / "glacier_mask.tif").resolve(strict=False)))
+            self.assertEqual(data_sources["obs_file"], str(obs_path.resolve(strict=False)))
+            self.assertEqual(data_sources["prec_source"], "cmfd")
+            self.assertEqual(data_sources["configured_precip_source"], "era5")
+            self.assertEqual(data_sources["runtime_prec_source"], "cmfd")
+
+    def test_sync_run_boundary_condition_path_prefers_existing_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_path = root / "raw.csv"
+            config_path = root / "config.csv"
+            config_path.write_text("date,q\n2026-06-01,1\n", encoding="utf-8")
+            boundary_condition = {}
+            optional_modules = {"boundary_inflow": {"file": str(raw_path)}}
+
+            sync_run_boundary_condition_path(
+                boundary_condition,
+                optional_modules,
+                config_path,
+                lambda raw, **kwargs: Path(raw),
+                first_existing_path,
+            )
+
+            self.assertEqual(boundary_condition["boundary_inflow_file"], str(config_path.resolve(strict=False)))
+
+    def test_rebase_run_data_cache_paths_uses_current_source_dirs_and_cache_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = {
+                "cache_dir": root / "cache",
+                "aligned_temp_dir": root / "temp",
+                "aligned_evap_dir": root / "evap",
+            }
+            data_sources = {"prec_dir": str(root / "prec")}
+            cache = {
+                "prec": {"cache_path": "old/prec.nc"},
+                "temp": {"cache_path": "old/temp.nc", "source_dir": "old-temp"},
+                "evap": {},
+                "other": "keep",
+            }
+
+            rebase_run_data_cache_paths(cache, paths, data_sources)
+
+            self.assertEqual(cache["prec"]["source_dir"], str((root / "prec").resolve(strict=False)))
+            self.assertEqual(cache["prec"]["cache_path"], str((root / "cache" / "prec.nc").resolve(strict=False)))
+            self.assertEqual(cache["temp"]["source_dir"], str((root / "temp").resolve(strict=False)))
+            self.assertEqual(cache["temp"]["cache_path"], str((root / "cache" / "temp.nc").resolve(strict=False)))
+            self.assertEqual(cache["evap"]["source_dir"], str((root / "evap").resolve(strict=False)))
+            self.assertEqual(cache["other"], "keep")
 
     def test_is_studio_editable_metadata_requires_config_and_parameter_bounds(self) -> None:
         metadata = {"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}
