@@ -76,6 +76,8 @@ from services.geo_overview import workspace_elevation_zones_geojson as build_wor
 from services.geo_overview import workspace_glacier_geojson as build_workspace_glacier_geojson
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
 from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
+from services.manual_start import ManualStartStartContext
+from services.manual_start import manual_start_start_plan as build_manual_start_start_plan
 from services.manual_presets import ManualPresetContext
 from services.manual_presets import _source_run_metadata_for_preset as build_source_run_metadata_for_preset
 from services.manual_presets import delete_manual_preset as build_delete_manual_preset
@@ -9277,28 +9279,26 @@ def start_forecast_restart(payload: dict[str, Any]) -> TaskRecord:
     return record
 
 
+def _manual_start_start_context() -> ManualStartStartContext:
+    return ManualStartStartContext(
+        build_workspace_forward_context=_build_workspace_forward_context,
+    )
+
+
 def start_manual_start(payload: dict[str, Any]) -> TaskRecord:
     config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
     current = find_running_task("manual_start", str(config_path))
     if current is not None:
         return current
-    context = _build_workspace_forward_context({**payload, "config_path": str(config_path)})
-    config = context["config"]
+    plan = build_manual_start_start_plan(payload, config_path, _manual_start_start_context())
     task_id = uuid.uuid4().hex[:10]
     record = TaskRecord(
         id=task_id,
         task_type="manual_start",
-        label=f"手调起点 | {str(config.get('流域名称', config_path.stem)).strip() or config_path.stem}",
-        command=["manual_start"],
+        label=plan.label,
+        command=plan.command,
         cwd=str(PROJECT_ROOT),
-        metadata={
-            "config_path": str(config_path.resolve()),
-            "profile": context["profile"],
-            "runtime_prec_source": context["prec_source"],
-            "objective_mode": context["objective_mode"],
-            "glacier_mode": context["glacier_mode"],
-            "ui_progress": {"stage": "准备启动", "label": "手调起点"},
-        },
+        metadata=plan.metadata,
     )
     with TASK_LOCK:
         TASKS[task_id] = record
