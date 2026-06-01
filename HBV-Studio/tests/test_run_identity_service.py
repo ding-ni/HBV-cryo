@@ -2,6 +2,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
 
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
@@ -13,6 +16,7 @@ from services.runs import (  # noqa: E402
     RunSummaryContext,
     apply_run_replay_config_overrides,
     build_run_summary,
+    capture_forward_observation_state,
     default_run_export_fields,
     display_run_title,
     has_custom_result_title,
@@ -20,6 +24,9 @@ from services.runs import (  # noqa: E402
     metadata_initial_state_override,
     normalize_result_title,
     read_sampled_csv_rows,
+    restore_forward_boundary_series,
+    restore_forward_observation_state,
+    restore_forward_observed_series,
     run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
@@ -336,6 +343,82 @@ class RunIdentityServiceTests(unittest.TestCase):
             metadata_initial_state_override({"initial_state": {"vector": {"SM": "bad"}}}, {"SM": 0.0})
         with self.assertRaisesRegex(ValueError, "不能为负值"):
             metadata_initial_state_override({"initial_state": {"vector": {"SM": "-1"}}}, {"SM": 0.0})
+
+    def test_restore_forward_observed_series_updates_objective_arrays(self) -> None:
+        module = SimpleNamespace(
+            np=np,
+            SIM_DATES=["2026-06-01", "2026-06-02", "2026-06-03"],
+            CALIB_MASK=np.asarray([True, False, True]),
+            VALID_MASK=np.asarray([False, True, False]),
+            OBS_MODE_APPLIED="original",
+            format_time_value=lambda value: value,
+        )
+
+        restored = restore_forward_observed_series(
+            module,
+            {"2026-06-01": 1.0, "2026-06-03": 3.0},
+        )
+
+        self.assertTrue(restored)
+        np.testing.assert_allclose(module.Q_OBS_FULL, np.asarray([1.0, np.nan, 3.0]), equal_nan=True)
+        np.testing.assert_allclose(module.Q_OBS_CALIB, np.asarray([1.0, 3.0]))
+        np.testing.assert_allclose(module.Q_OBS_VALID, np.asarray([np.nan]), equal_nan=True)
+        self.assertEqual(module.OBS_MODE_APPLIED, "run_replay_fallback")
+        self.assertFalse(restore_forward_observed_series(module, {}))
+
+    def test_forward_observation_state_round_trips_numpy_arrays(self) -> None:
+        module = SimpleNamespace(
+            np=np,
+            OBS_MODE_APPLIED="original",
+            Q_OBS_FULL=np.asarray([1.0, 2.0]),
+            Q_OBS_OBJ=np.asarray([3.0, 4.0]),
+            Q_OBS_CALIB=np.asarray([1.0]),
+            Q_OBS_VALID=np.asarray([2.0]),
+        )
+
+        state = capture_forward_observation_state(module)
+        module.Q_OBS_FULL[0] = 99.0
+        module.Q_OBS_FULL = None
+        module.Q_OBS_OBJ = None
+        module.Q_OBS_CALIB = None
+        module.Q_OBS_VALID = None
+        module.OBS_MODE_APPLIED = "changed"
+
+        restore_forward_observation_state(module, state)
+
+        np.testing.assert_allclose(module.Q_OBS_FULL, np.asarray([1.0, 2.0]))
+        np.testing.assert_allclose(module.Q_OBS_OBJ, np.asarray([3.0, 4.0]))
+        np.testing.assert_allclose(module.Q_OBS_CALIB, np.asarray([1.0]))
+        np.testing.assert_allclose(module.Q_OBS_VALID, np.asarray([2.0]))
+        self.assertEqual(module.OBS_MODE_APPLIED, "original")
+
+    def test_restore_forward_boundary_series_rebuilds_total_flow(self) -> None:
+        module = SimpleNamespace(
+            np=np,
+            SIM_DATES=["2026-06-01", "2026-06-02", "2026-06-03"],
+            format_time_value=lambda value: value,
+        )
+        sim = {
+            "q_total": np.asarray([10.0, 20.0]),
+            "q_local": np.asarray([7.0, 17.0]),
+        }
+
+        restored = restore_forward_boundary_series(
+            module,
+            sim,
+            {"2026-06-01": 3.0, "2026-06-02": None},
+        )
+
+        self.assertTrue(restored)
+        np.testing.assert_allclose(sim["q_local"], np.asarray([7.0, 17.0]))
+        np.testing.assert_allclose(sim["q_boundary"], np.asarray([3.0, 0.0]))
+        np.testing.assert_allclose(sim["q_total"], np.asarray([10.0, 17.0]))
+        self.assertTrue(sim["boundary_enabled"])
+        self.assertTrue(sim["boundary_replay_fixed"])
+        self.assertFalse(restore_forward_boundary_series(module, {"q_total": np.asarray([1.0])}, {}))
+        self.assertFalse(
+            restore_forward_boundary_series(module, {"q_total": np.asarray([1.0])}, {"2026-06-02": 1.0})
+        )
 
 
 if __name__ == "__main__":

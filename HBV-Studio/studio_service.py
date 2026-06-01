@@ -77,6 +77,7 @@ from services.observed import ObservedInfoContext, observed_info as build_observ
 from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
 from services.runs import RunReplayConfigContext, RunSummaryContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
+from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
 from services.runs import delete_run as build_delete_run
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
@@ -86,6 +87,9 @@ from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import rename_run as build_rename_run
+from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
+from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
+from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
@@ -6078,110 +6082,6 @@ def _apply_run_replay_config_overrides(config: dict[str, Any], metadata: dict[st
     return build_apply_run_replay_config_overrides(config, metadata, _run_replay_config_context())
 
 
-def _restore_forward_observed_series(module: Any, source_obs_series: dict[str, float | None]) -> bool:
-    if not source_obs_series or not hasattr(module, "SIM_DATES") or not hasattr(module, "np"):
-        return False
-    np_mod = module.np
-
-    restored_values: list[float] = []
-    matched = 0
-    for item in module.SIM_DATES:
-        key = module.format_time_value(item) if hasattr(module, "format_time_value") else str(item)
-        value = source_obs_series.get(key, None)
-        if value is None:
-            restored_values.append(float("nan"))
-        else:
-            restored_values.append(float(value))
-            matched += 1
-    restored = np_mod.asarray(restored_values, dtype=np_mod.float64)
-    if matched <= 0 or not np_mod.isfinite(restored).any():
-        return False
-
-    module.Q_OBS_FULL = restored
-    module.Q_OBS_OBJ = restored.copy()
-    calib_mask = getattr(module, "CALIB_MASK", None)
-    valid_mask = getattr(module, "VALID_MASK", None)
-    module.Q_OBS_CALIB = module.Q_OBS_OBJ[calib_mask] if calib_mask is not None else module.Q_OBS_OBJ.copy()
-    module.Q_OBS_VALID = module.Q_OBS_OBJ[valid_mask] if valid_mask is not None else np_mod.asarray([], dtype=np_mod.float64)
-    if hasattr(module, "OBS_MODE_APPLIED"):
-        module.OBS_MODE_APPLIED = "run_replay_fallback"
-    return True
-
-
-def _capture_forward_observation_state(module: Any) -> dict[str, Any]:
-    np_mod = getattr(module, "np", None)
-    state: dict[str, Any] = {
-        "obs_mode_applied": getattr(module, "OBS_MODE_APPLIED", None),
-    }
-    for name in ("Q_OBS_FULL", "Q_OBS_OBJ", "Q_OBS_CALIB", "Q_OBS_VALID"):
-        value = getattr(module, name, None)
-        if value is None:
-            state[name] = None
-        elif np_mod is not None:
-            state[name] = np_mod.asarray(value, dtype=np_mod.float64).copy()
-        else:
-            try:
-                state[name] = value.copy()
-            except Exception:
-                state[name] = value
-    return state
-
-
-def _restore_forward_observation_state(module: Any, state: dict[str, Any] | None) -> None:
-    if not isinstance(state, dict):
-        return
-    np_mod = getattr(module, "np", None)
-    for name in ("Q_OBS_FULL", "Q_OBS_OBJ", "Q_OBS_CALIB", "Q_OBS_VALID"):
-        value = state.get(name, None)
-        if value is None:
-            setattr(module, name, None)
-        elif np_mod is not None:
-            setattr(module, name, np_mod.asarray(value, dtype=np_mod.float64).copy())
-        else:
-            try:
-                setattr(module, name, value.copy())
-            except Exception:
-                setattr(module, name, value)
-    if "obs_mode_applied" in state:
-        setattr(module, "OBS_MODE_APPLIED", state.get("obs_mode_applied"))
-
-
-def _restore_forward_boundary_series(module: Any, sim: dict[str, Any], source_boundary_series: dict[str, float | None]) -> bool:
-    if not source_boundary_series or not hasattr(module, "SIM_DATES") or not hasattr(module, "np"):
-        return False
-    q_total = sim.get("q_total")
-    if q_total is None:
-        return False
-    series_len = len(q_total)
-    sim_dates = module.SIM_DATES[:series_len]
-    restored_values: list[float] = []
-    matched = 0
-    for item in sim_dates:
-        key = module.format_time_value(item) if hasattr(module, "format_time_value") else str(item)
-        if key not in source_boundary_series:
-            return False
-        value = source_boundary_series.get(key, 0.0)
-        restored_values.append(0.0 if value is None else float(value))
-        matched += 1
-    if matched != series_len:
-        return False
-
-    np_mod = module.np
-    boundary_routed = np_mod.asarray(restored_values, dtype=np_mod.float64)
-    local_source = sim.get("q_local")
-    if local_source is None:
-        local_source = q_total
-    local_routed = np_mod.asarray(local_source, dtype=np_mod.float64)
-    if len(local_routed) != series_len:
-        local_routed = np_mod.asarray(q_total, dtype=np_mod.float64)
-    sim["q_local"] = local_routed.copy()
-    sim["q_boundary"] = boundary_routed
-    sim["q_total"] = local_routed + boundary_routed
-    sim["boundary_enabled"] = True
-    sim["boundary_replay_fixed"] = True
-    return True
-
-
 def snapshot_run_paths() -> set[str]:
     return {item["path"] for item in list_runs()}
 
@@ -8340,7 +8240,7 @@ def _get_or_create_forward_runtime(
             glacier_mode=glacier_mode,
             data_token=data_token,
             module=module,
-            observation_state=_capture_forward_observation_state(module),
+            observation_state=build_capture_forward_observation_state(module),
         )
         FORWARD_RUNTIME_CACHE[cache_key] = entry
         _trim_forward_runtime_cache_locked()
@@ -8365,18 +8265,18 @@ def _run_forward_simulation(
     with entry.lock:
         entry.last_used = time.time()
         module = entry.module
-        _restore_forward_observation_state(module, entry.observation_state)
+        build_restore_forward_observation_state(module, entry.observation_state)
         params = dict(context["params"])
         base_params = dict(context.get("source_metadata", {}).get("optimized_params", {}) or {})
         started_at = time.time()
         if stage_callback is not None:
             stage_callback("执行前向模拟", "[阶段] 执行前向模拟")
         param_vector, clean_params, adjusted = build_runtime_param_vector(module, params, base_params=base_params)
-        obs_restored = _restore_forward_observed_series(module, context.get("source_obs_series", {}))
+        obs_restored = build_restore_forward_observed_series(module, context.get("source_obs_series", {}))
         sim = call_with_output_capture(output_callback, module.run_simulation, param_vector)
         boundary_restored = False
         if bool(context.get("boundary_replay_fallback")):
-            boundary_restored = _restore_forward_boundary_series(module, sim, context.get("source_boundary_series", {}))
+            boundary_restored = build_restore_forward_boundary_series(module, sim, context.get("source_boundary_series", {}))
         if stage_callback is not None:
             stage_callback("计算指标", "[阶段] 计算指标")
         metrics = call_with_output_capture(output_callback, module.compute_metrics, sim["q_total"])
@@ -8810,7 +8710,7 @@ def _create_manual_start_result(
     with entry.lock:
         entry.last_used = time.time()
         module = entry.module
-        _restore_forward_observation_state(module, entry.observation_state)
+        build_restore_forward_observation_state(module, entry.observation_state)
         if stage_callback is not None:
             stage_callback("整理起调参数", "[阶段] 生成手调起点参数")
         param_vector, params, starter_source = _resolve_manual_start_params(module, payload)
