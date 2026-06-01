@@ -10,8 +10,10 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.data_prep import (  # noqa: E402
+    DataPrepBootstrapContext,
     DataPrepStartContext,
     DataPrepTaskOutputContext,
+    data_prep_bootstrap_plan,
     data_prep_start_plan,
     data_prep_step_command,
     data_prep_workflow_decision,
@@ -41,6 +43,29 @@ class DataPrepServiceTests(unittest.TestCase):
             build_python_script_command=lambda script, *args: ["python", str(script), *[str(item) for item in args]],
             clear_meteo_state=lambda cfg, *args: (cleared.append(cfg) if cleared is not None else None),
             forcing_pipeline_step_ids=frozenset({"meteo"}),
+        )
+
+    def _bootstrap_context(
+        self,
+        *,
+        config: dict[str, object] | None = None,
+        glacier_elev: bool = False,
+    ) -> DataPrepBootstrapContext:
+        runtime_config = config or {"profile": "daily"}
+        steps = {
+            "clip_dem": {"title": "裁剪 DEM"},
+            "flow_acc": {"title": "生成流向与流量累积"},
+            "masked_flow": {"title": "生成汇流与流域掩膜"},
+            "elevation_zone": {"title": "生成高程分区"},
+            "glacier_mask": {"title": "生成冰川掩膜"},
+            "glacier_elev": {"title": "生成冰川高程分区"},
+        }
+        return DataPrepBootstrapContext(
+            resolve_path=lambda raw, **kwargs: Path(str(raw)),
+            read_runtime_config=lambda path: runtime_config,
+            task_step_map=lambda profile, cfg: steps,
+            current_profile=lambda cfg: str(cfg.get("profile", "daily")),
+            glacier_elev_required=lambda cfg: glacier_elev,
         )
 
     def test_verify_data_prep_step_output_handles_missing_check_success_and_exception(self) -> None:
@@ -168,6 +193,32 @@ class DataPrepServiceTests(unittest.TestCase):
                 {"config_path": "workspace.json", "step_id": "blocked"},
                 self._start_context(steps=steps, status=[{"id": "blocked", "blocked_by": ["dep"]}]),
             )
+
+    def test_data_prep_bootstrap_plan_builds_base_geography_workflow(self) -> None:
+        plan = data_prep_bootstrap_plan(
+            {"config_path": "workspace.json"},
+            self._bootstrap_context(),
+        )
+
+        self.assertEqual(plan.label, "基础地理数据生成 | workspace")
+        self.assertEqual(plan.command, ["bootstrap"])
+        self.assertEqual(plan.step_ids, ["clip_dem", "flow_acc", "masked_flow", "elevation_zone"])
+        self.assertEqual(plan.metadata["profile"], "daily")
+        self.assertEqual(plan.metadata["step_titles"], ["裁剪 DEM", "生成流向与流量累积", "生成汇流与流域掩膜", "生成高程分区"])
+        self.assertEqual(plan.metadata["ui_progress"], {"stage": "准备执行", "current": 0, "total": 4, "label": "等待前置条件"})
+
+    def test_data_prep_bootstrap_plan_adds_glacier_steps_when_needed(self) -> None:
+        plan = data_prep_bootstrap_plan(
+            {"config_path": "workspace.json"},
+            self._bootstrap_context(config={"profile": "hourly", "冰川边界_shp": "glacier.shp"}, glacier_elev=True),
+        )
+
+        self.assertEqual(
+            plan.step_ids,
+            ["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"],
+        )
+        self.assertEqual(plan.metadata["profile"], "hourly")
+        self.assertEqual(plan.metadata["ui_progress"]["total"], 6)
 
     def test_data_prep_workflow_decision_marks_skips_ready_and_blocked_steps(self) -> None:
         steps = {

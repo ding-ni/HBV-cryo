@@ -40,9 +40,11 @@ from services.app_lifecycle import app_window_unload as build_app_window_unload
 from services.api_routes import GET_ROUTE_HANDLERS as GET_API_ROUTE_HANDLERS
 from services.api_routes import POST_ROUTE_HANDLERS as POST_API_ROUTE_HANDLERS
 from services.data_prep import (
+    DataPrepBootstrapContext,
     DataPrepContext,
     DataPrepStartContext,
     DataPrepTaskOutputContext,
+    data_prep_bootstrap_plan as build_data_prep_bootstrap_plan,
     data_prep_start_plan as build_data_prep_start_plan,
     data_prep_step_command as build_data_prep_step_command,
     data_prep_workflow_decision as build_data_prep_workflow_decision,
@@ -6265,6 +6267,16 @@ def _data_prep_start_context() -> DataPrepStartContext:
     )
 
 
+def _data_prep_bootstrap_context() -> DataPrepBootstrapContext:
+    return DataPrepBootstrapContext(
+        resolve_path=resolve_any_path,
+        read_runtime_config=read_runtime_config,
+        task_step_map=task_step_map,
+        current_profile=current_profile,
+        glacier_elev_required=glacier_elev_required,
+    )
+
+
 def start_data_prep(payload: dict[str, Any]) -> TaskRecord:
     plan = build_data_prep_start_plan(payload, _data_prep_start_context())
     return start_process(
@@ -6389,31 +6401,19 @@ def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payloa
 
 
 def start_bootstrap(payload: dict[str, Any]) -> TaskRecord:
-    config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
-    config = read_runtime_config(config_path)
-    step_ids = ["clip_dem", "flow_acc", "masked_flow", "elevation_zone"]
-    if str(config.get("冰川边界_shp", "")).strip():
-        step_ids.append("glacier_mask")
-    if glacier_elev_required(config):
-        step_ids.append("glacier_elev")
+    plan = build_data_prep_bootstrap_plan(payload, _data_prep_bootstrap_context())
     task_id = uuid.uuid4().hex[:10]
-    steps = task_step_map(current_profile(config), config)
     record = TaskRecord(
         id=task_id,
         task_type="bootstrap",
-        label=f"基础地理数据生成 | {config_path.stem}",
-        command=["bootstrap"],
+        label=plan.label,
+        command=plan.command,
         cwd=str(PROJECT_ROOT),
-        metadata={
-            "config_path": str(config_path.resolve()),
-            "profile": current_profile(config),
-            "step_titles": [steps[item]["title"] for item in step_ids if item in steps],
-            "ui_progress": {"stage": "准备执行", "current": 0, "total": len(step_ids), "label": "等待前置条件"},
-        },
+        metadata=plan.metadata,
     )
     with TASK_LOCK:
         TASKS[task_id] = record
-    threading.Thread(target=workflow_worker, args=(task_id, config_path, step_ids, payload), daemon=True).start()
+    threading.Thread(target=workflow_worker, args=(task_id, plan.config_path, plan.step_ids, payload), daemon=True).start()
     return record
 
 

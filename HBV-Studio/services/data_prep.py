@@ -42,10 +42,28 @@ class DataPrepStartContext:
 
 
 @dataclass(frozen=True)
+class DataPrepBootstrapContext:
+    resolve_path: Callable[..., Path]
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    task_step_map: Callable[[str, dict[str, Any]], dict[str, dict[str, Any]]]
+    current_profile: Callable[[dict[str, Any]], str]
+    glacier_elev_required: Callable[[dict[str, Any]], bool]
+
+
+@dataclass(frozen=True)
 class DataPrepStartPlan:
     label: str
     command: list[str]
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DataPrepBootstrapPlan:
+    label: str
+    command: list[str]
+    metadata: dict[str, Any]
+    config_path: Path
+    step_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -234,6 +252,31 @@ def data_prep_start_plan(payload: dict[str, Any], context: DataPrepStartContext)
         label=f"数据准备 | {step['title']} | {config_path.stem}",
         command=data_prep_step_command(step, config_path, payload, context),
         metadata=metadata,
+    )
+
+
+def data_prep_bootstrap_plan(payload: dict[str, Any], context: DataPrepBootstrapContext) -> DataPrepBootstrapPlan:
+    config_path = context.resolve_path(str(payload.get("config_path", "")), must_exist=True)
+    config = context.read_runtime_config(config_path)
+    profile = context.current_profile(config)
+    step_ids = ["clip_dem", "flow_acc", "masked_flow", "elevation_zone"]
+    if str(config.get("冰川边界_shp", "")).strip():
+        step_ids.append("glacier_mask")
+    if context.glacier_elev_required(config):
+        step_ids.append("glacier_elev")
+    steps = context.task_step_map(profile, config)
+    metadata = {
+        "config_path": str(config_path.resolve()),
+        "profile": profile,
+        "step_titles": [steps[item]["title"] for item in step_ids if item in steps],
+        "ui_progress": {"stage": "准备执行", "current": 0, "total": len(step_ids), "label": "等待前置条件"},
+    }
+    return DataPrepBootstrapPlan(
+        label=f"基础地理数据生成 | {config_path.stem}",
+        command=["bootstrap"],
+        metadata=metadata,
+        config_path=config_path,
+        step_ids=step_ids,
     )
 
 
