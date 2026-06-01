@@ -876,6 +876,22 @@ def apply_effective_objective_mode(metadata: dict[str, Any], optimization: dict[
     optimization["effective_objective_mode"] = effective_objective_mode
 
 
+def resolve_run_objective_metadata(
+    metadata: dict[str, Any],
+    optimization: dict[str, Any],
+    *,
+    effective_objective_mode: str = "",
+    resolved_object_type: str = "",
+) -> str:
+    sync_objective_profile_metadata(metadata)
+    effective_mode = str(effective_objective_mode or "").strip().lower()
+    if not effective_mode:
+        effective_mode = infer_effective_objective_mode(metadata, optimization)
+    if resolved_object_type:
+        metadata["project_object_type"] = resolved_object_type
+    return effective_mode
+
+
 def sync_source_run_reference(
     replay_context: dict[str, Any],
     manual_result: dict[str, Any],

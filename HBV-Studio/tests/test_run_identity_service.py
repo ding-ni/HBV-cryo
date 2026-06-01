@@ -55,6 +55,7 @@ from services.runs import (  # noqa: E402
     restore_forward_observation_state,
     restore_forward_observed_series,
     resolve_metadata_object_type,
+    resolve_run_objective_metadata,
     resolve_source_run_reference,
     rebase_run_data_cache_paths,
     run_precip_dir_candidates,
@@ -587,6 +588,48 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
         self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
         self.assertEqual(optimization["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+
+    def test_resolve_run_objective_metadata_syncs_profile_and_object_type(self) -> None:
+        metadata = {
+            "objective": {"label": "\u65e7\u76ee\u6807"},
+            "objective_profile": {
+                "type": profile_runner.OBJECTIVE_MODE_MULTI,
+                "summary": "\u7efc\u5408\u76ee\u6807",
+                "weights": {"nse": 0.7, "pbias": 0.3},
+            },
+        }
+        optimization = {}
+
+        mode = resolve_run_objective_metadata(
+            metadata,
+            optimization,
+            resolved_object_type="interbasin_with_boundary",
+        )
+
+        self.assertEqual(mode, profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["project_object_type"], "interbasin_with_boundary")
+        self.assertEqual(metadata["objective"]["label"], "\u65e7\u76ee\u6807")
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["objective"]["summary"], "\u7efc\u5408\u76ee\u6807")
+        self.assertEqual(metadata["objective"]["weights"], {"nse": 0.7, "pbias": 0.3})
+        self.assertNotIn("effective_objective_mode", optimization)
+
+    def test_resolve_run_objective_metadata_preserves_explicit_effective_mode(self) -> None:
+        metadata = {
+            "objective_profile": {"type": profile_runner.OBJECTIVE_MODE_MULTI},
+            "objective": {},
+        }
+        optimization = {"objective_mode": profile_runner.OBJECTIVE_MODE_MULTI}
+
+        mode = resolve_run_objective_metadata(
+            metadata,
+            optimization,
+            effective_objective_mode=profile_runner.OBJECTIVE_MODE_SINGLE.upper(),
+        )
+
+        self.assertEqual(mode, profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertNotIn("effective_objective_mode", optimization)
 
     def test_sync_source_run_reference_updates_all_present_metadata_sections(self) -> None:
         replay_context = {}

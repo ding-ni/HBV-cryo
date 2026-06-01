@@ -123,7 +123,6 @@ from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import infer_selected_result_stage as build_infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
-from services.runs import infer_effective_objective_mode as build_infer_effective_objective_mode
 from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
@@ -145,6 +144,7 @@ from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
+from services.runs import resolve_run_objective_metadata as build_resolve_run_objective_metadata
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
@@ -158,7 +158,6 @@ from services.runs import run_kind_label as build_run_kind_label
 from services.runs import sync_run_boundary_condition_path as build_sync_run_boundary_condition_path
 from services.runs import sync_run_config_profile_metadata as build_sync_run_config_profile_metadata
 from services.runs import sync_run_data_source_paths as build_sync_run_data_source_paths
-from services.runs import sync_objective_profile_metadata as build_sync_objective_profile_metadata
 from services.runs import sync_source_run_reference as build_sync_source_run_reference
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
@@ -2805,12 +2804,12 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         except Exception:
             pass
 
-    build_sync_objective_profile_metadata(normalized)
-
-    if not effective_objective_mode:
-        effective_objective_mode = build_infer_effective_objective_mode(normalized, optimization)
-    if resolved_object_type:
-        normalized["project_object_type"] = resolved_object_type
+    effective_objective_mode = build_resolve_run_objective_metadata(
+        normalized,
+        optimization,
+        effective_objective_mode=effective_objective_mode,
+        resolved_object_type=resolved_object_type,
+    )
 
     if data_sources:
         normalized["data_sources"] = data_sources
