@@ -216,6 +216,8 @@ const runDetailRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard
 const cdsApiStatusRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const forecastInputCheckRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const forecastResultRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const runManualPresetRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const taskManualPresetRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -255,10 +257,8 @@ const state = {
   compareAdjusted: false,
   runManualPresets: [],
   runManualPresetConfigPath: "",
-  activeRunManualPresetRequestId: 0,
   taskManualPresets: [],
   taskManualPresetConfigPath: "",
-  activeTaskManualPresetRequestId: 0,
   forecastSourceRunPath: "",
   forecastResultRunPath: "",
   forecastResultData: null,
@@ -589,16 +589,6 @@ function currentSelectedRunPath() {
   return String(state.selectedRunPath || state.currentRun?.run?.path || state.currentRun?.path || "").trim();
 }
 
-function nextRunManualPresetRequestId() {
-  state.activeRunManualPresetRequestId = Number(state.activeRunManualPresetRequestId || 0) + 1;
-  return state.activeRunManualPresetRequestId;
-}
-
-function nextTaskManualPresetRequestId() {
-  state.activeTaskManualPresetRequestId = Number(state.activeTaskManualPresetRequestId || 0) + 1;
-  return state.activeTaskManualPresetRequestId;
-}
-
 function nextCompareRequestId() {
   state.activeCompareRequestId = Number(state.activeCompareRequestId || 0) + 1;
   return state.activeCompareRequestId;
@@ -816,7 +806,7 @@ function renderResultsFilterToolbar() {
 
 function clearRunDetail(message = "请先从左侧选择一个结果。") {
   runDetailRequestGuard.cancel();
-  nextRunManualPresetRequestId();
+  runManualPresetRequestGuard.cancel();
   nextCompareRequestId();
   state.currentRun = null;
   state.selectedRunPath = "";
@@ -3187,11 +3177,10 @@ function updateManualPresetControls() {
 async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(), { silent = false, calibrationProfile = "" } = {}) {
   const path = String(configPath || "").trim();
   const resolvedProfile = resolveManualPresetProfile(path, calibrationProfile);
-  const requestId = nextRunManualPresetRequestId();
+  const requestToken = runManualPresetRequestGuard.next();
   const pathChanged = !samePath(path, state.runManualPresetConfigPath);
   state.runManualPresetConfigPath = path;
   if (!path) {
-    if (requestId !== state.activeRunManualPresetRequestId) return [];
     state.runManualPresets = [];
     renderManualPresetOptions();
     updateManualPresetControls();
@@ -3206,7 +3195,7 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
   }
   try {
     const p = await apiGet(`/api/manual-presets?config_path=${encodeURIComponent(path)}&calibration_profile=${encodeURIComponent(resolvedProfile)}&scope=all`);
-    if (requestId !== state.activeRunManualPresetRequestId || !samePath(path, state.runManualPresetConfigPath)) {
+    if (!runManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.runManualPresetConfigPath)) {
       return p.data?.presets || [];
     }
     state.runManualPresets = p.data?.presets || [];
@@ -3216,7 +3205,7 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
     clearStaleManualPresetComparison({ silent: true });
     return state.runManualPresets;
   } catch (err) {
-    if (requestId !== state.activeRunManualPresetRequestId || !samePath(path, state.runManualPresetConfigPath)) {
+    if (!runManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.runManualPresetConfigPath)) {
       return [];
     }
     state.runManualPresets = [];
@@ -3232,11 +3221,10 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
 async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(), { silent = false, calibrationProfile = "" } = {}) {
   const path = String(configPath || "").trim();
   const resolvedProfile = resolveManualPresetProfile(path, calibrationProfile);
-  const requestId = nextTaskManualPresetRequestId();
+  const requestToken = taskManualPresetRequestGuard.next();
   const pathChanged = !samePath(path, state.taskManualPresetConfigPath);
   state.taskManualPresetConfigPath = path;
   if (!path) {
-    if (requestId !== state.activeTaskManualPresetRequestId) return [];
     state.taskManualPresets = [];
     renderManualPresetOptions();
     refreshCalibrationControls();
@@ -3249,7 +3237,7 @@ async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(
   }
   try {
     const p = await apiGet(`/api/manual-presets?config_path=${encodeURIComponent(path)}&calibration_profile=${encodeURIComponent(resolvedProfile)}&scope=all`);
-    if (requestId !== state.activeTaskManualPresetRequestId || !samePath(path, state.taskManualPresetConfigPath)) {
+    if (!taskManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.taskManualPresetConfigPath)) {
       return p.data?.presets || [];
     }
     state.taskManualPresets = p.data?.presets || [];
@@ -3257,7 +3245,7 @@ async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(
     refreshCalibrationControls();
     return state.taskManualPresets;
   } catch (err) {
-    if (requestId !== state.activeTaskManualPresetRequestId || !samePath(path, state.taskManualPresetConfigPath)) {
+    if (!taskManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.taskManualPresetConfigPath)) {
       return [];
     }
     state.taskManualPresets = [];
@@ -3891,7 +3879,7 @@ function resetWizard() {
 
   state.taskManualPresets = [];
   state.taskManualPresetConfigPath = "";
-  nextTaskManualPresetRequestId();
+  taskManualPresetRequestGuard.cancel();
   if ($("#task-kind")) $("#task-kind").value = "calibration";
   if ($("#task-prec-source")) $("#task-prec-source").value = "era5";
   if ($("#task-glacier-mode")) $("#task-glacier-mode").value = "inline";

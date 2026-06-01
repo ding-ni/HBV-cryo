@@ -103,10 +103,14 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertNotIn("activeCdsApiRequestId", state_keys)
         self.assertNotIn("activeForecastInputCheckRequestId", state_keys)
         self.assertNotIn("activeForecastResultRequestId", state_keys)
+        self.assertNotIn("activeRunManualPresetRequestId", state_keys)
+        self.assertNotIn("activeTaskManualPresetRequestId", state_keys)
         self.assertIn("runDetailRequestGuard", app_js)
         self.assertIn("cdsApiStatusRequestGuard", app_js)
         self.assertIn("forecastInputCheckRequestGuard", app_js)
         self.assertIn("forecastResultRequestGuard", app_js)
+        self.assertIn("runManualPresetRequestGuard", app_js)
+        self.assertIn("taskManualPresetRequestGuard", app_js)
 
 
 if __name__ == "__main__":
