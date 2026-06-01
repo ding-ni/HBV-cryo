@@ -55,6 +55,60 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_preset_compare_summary_builds_status_and_lines(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            if (typeof library.manualPresetCompareSummary !== "function") {
+              throw new Error("manualPresetCompareSummary was not exported");
+            }
+
+            const summary = library.manualPresetCompareSummary(
+              {
+                label: "Trial A",
+                compareMetrics: { nse_cal: 0.81, nse_val: 0.72 },
+                baseCalibration: { nse: 0.76 },
+                baseValidation: { nse: 0.75 },
+                adjusted: true,
+              },
+              {
+                title: label => `comparing ${label}`,
+                metricSummary: (label, current, baseline) => `${label}:${current}-${baseline}`,
+                calibrationLabel: "cal",
+                validationLabel: "val",
+                adjustedNote: () => "adjusted",
+              },
+            );
+
+            if (!summary.visible) throw new Error("summary should be visible");
+            if (summary.statusClass !== "status-ok") throw new Error(`unexpected status: ${summary.statusClass}`);
+            if (Math.abs(summary.deltaCalibration - 0.05) > 1e-12) throw new Error("wrong calibration delta");
+            if (Math.abs(summary.deltaValidation + 0.03) > 1e-12) throw new Error("wrong validation delta");
+            if (summary.lines.join("|") !== "comparing Trial A|cal:0.81-0.76|val:0.72-0.75|adjusted") {
+              throw new Error(`unexpected lines: ${summary.lines.join("|")}`);
+            }
+
+            const hidden = library.manualPresetCompareSummary({ label: "", compareMetrics: { nse_cal: 0.8 } });
+            if (hidden.visible || hidden.lines.length) throw new Error("missing label should hide summary");
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

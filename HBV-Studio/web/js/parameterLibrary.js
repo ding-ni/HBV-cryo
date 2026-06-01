@@ -13,6 +13,11 @@
     return String(value || "").trim().toLowerCase();
   }
 
+  function finiteNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
   function scopeLabel(scope, { short = false } = {}) {
     return normalizeKey(scope) === "global"
       ? (short ? "公共" : "公共参数库")
@@ -54,6 +59,37 @@
       `${item.name}: ${formatNumber(item.from, 4)} -> ${formatNumber(item.to, 4)} (${item.delta > 0 ? "+" : ""}${formatNumber(item.delta, 4)})`
     ).join("; ");
     return { visible: true, diffs, preview };
+  }
+
+  function manualPresetCompareSummary(options = {}, helpers = {}) {
+    const label = String(options.label || "").trim();
+    const compareMetrics = options.compareMetrics || null;
+    if (!compareMetrics || !label) {
+      return { visible: false, statusClass: "", lines: [], deltaCalibration: null, deltaValidation: null };
+    }
+    const baseCalibration = options.baseCalibration || {};
+    const baseValidation = options.baseValidation || {};
+    const title = helpers.title || (value => String(value || ""));
+    const metricSummary = helpers.metricSummary || ((metricLabel, currentValue) => `${metricLabel}: ${currentValue}`);
+    const adjustedNote = helpers.adjustedNote || (() => "");
+    const calibrationLabel = helpers.calibrationLabel || "calibration";
+    const validationLabel = helpers.validationLabel || "validation";
+    const cmpCal = finiteNumber(compareMetrics.nse_cal);
+    const cmpVal = finiteNumber(compareMetrics.nse_val);
+    const baseCal = finiteNumber(baseCalibration.nse);
+    const baseVal = finiteNumber(baseValidation.nse);
+    const deltaCalibration = (cmpCal !== null && baseCal !== null) ? (cmpCal - baseCal) : null;
+    const deltaValidation = (cmpVal !== null && baseVal !== null) ? (cmpVal - baseVal) : null;
+    let statusClass = "";
+    if (deltaCalibration !== null) statusClass = deltaCalibration >= 0 ? "status-ok" : "status-warn";
+    else if (deltaValidation !== null) statusClass = deltaValidation >= 0 ? "status-ok" : "status-warn";
+    const lines = [
+      title(label),
+      metricSummary(calibrationLabel, compareMetrics.nse_cal, baseCalibration.nse),
+      metricSummary(validationLabel, compareMetrics.nse_val, baseValidation.nse),
+      options.adjusted ? adjustedNote() : "",
+    ].filter(Boolean);
+    return { visible: true, statusClass, lines, deltaCalibration, deltaValidation };
   }
 
   function manualContextWarning(preset, current = {}, helpers = {}) {
@@ -222,6 +258,7 @@
     scopeLabel,
     renderPresetOptions,
     manualPresetDiffSummary,
+    manualPresetCompareSummary,
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,

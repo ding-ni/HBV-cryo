@@ -58,6 +58,7 @@ const frontendModuleContracts = [
       "scopeLabel",
       "renderPresetOptions",
       "manualPresetDiffSummary",
+      "manualPresetCompareSummary",
       "manualContextWarning",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -1564,25 +1565,30 @@ function updateCompareSummary() {
   const baseMeta = state._runData.metadata || {};
   const baseCal = baseMeta.metrics?.calibration || {};
   const baseVal = baseMeta.metrics?.validation || {};
-  const cmp = state.compareMetrics;
-  const cmpCal = finiteNumber(cmp.nse_cal);
-  const cmpVal = finiteNumber(cmp.nse_val);
-  const baseCalValue = finiteNumber(baseCal.nse);
-  const baseValValue = finiteNumber(baseVal.nse);
-  const deltaCal = (cmpCal !== null && baseCalValue !== null) ? (cmpCal - baseCalValue) : null;
-  const deltaVal = (cmpVal !== null && baseValValue !== null) ? (cmpVal - baseValValue) : null;
-  const adjustedNote = state.compareAdjusted ? "该参数集在运行前已按约束自动修正。" : "";
-  let statusClass = "";
-  if (deltaCal !== null) statusClass = deltaCal >= 0 ? "status-ok" : "status-warn";
-  else if (deltaVal !== null) statusClass = deltaVal >= 0 ? "status-ok" : "status-warn";
+  const summary = window.HBVStudioParameterLibrary.manualPresetCompareSummary(
+    {
+      label: state.compareLabel,
+      compareMetrics: state.compareMetrics,
+      baseCalibration: baseCal,
+      baseValidation: baseVal,
+      adjusted: state.compareAdjusted,
+    },
+    {
+      title: label => `当前正在对比参数集“${label}”。`,
+      metricSummary: (label, currentValue, baselineValue) => `${compareMetricSummary(label, currentValue, baselineValue)}。`,
+      calibrationLabel: "率定纳什效率系数",
+      validationLabel: "验证纳什效率系数",
+      adjustedNote: () => "该参数集在运行前已按约束自动修正。",
+    },
+  );
+  if (!summary.visible) {
+    host.style.display = "none";
+    host.textContent = "";
+    return;
+  }
   host.style.display = "";
-  host.className = `hint-box ${statusClass}`.trim();
-  host.textContent = [
-    `当前正在对比参数集“${state.compareLabel}”。`,
-    `${compareMetricSummary("率定纳什效率系数", cmp.nse_cal, baseCal.nse)}。`,
-    `${compareMetricSummary("验证纳什效率系数", cmp.nse_val, baseVal.nse)}。`,
-    adjustedNote,
-  ].filter(Boolean).join(" ");
+  host.className = `hint-box ${summary.statusClass}`.trim();
+  host.textContent = summary.lines.join(" ");
 }
 
 function clearStaleManualPresetComparison({ silent = true } = {}) {
