@@ -16,10 +16,13 @@ from services.tasks import (  # noqa: E402
     PythonScriptCommandContext,
     TaskCreateContext,
     TaskMutationContext,
+    TaskQueryContext,
+    TaskRecord,
     append_task_exception_output,
     append_task_output,
     build_python_script_command,
     create_registered_task,
+    list_tasks,
     mark_task_finished,
     monitor_process_task,
     set_task_detected_runs,
@@ -117,6 +120,70 @@ class TaskServiceTests(unittest.TestCase):
 
         self.assertEqual(record.metadata, {})
         self.assertIs(tasks["task-1"], record)
+
+    def test_task_record_append_trims_output_and_as_dict_uses_progress_callback(self) -> None:
+        task = TaskRecord(
+            id="task-1",
+            task_type="calibration",
+            label="Calibration",
+            command=["calibrate"],
+            cwd="project-root",
+            metadata={
+                "ui_progress": {"stage": "running"},
+                "config_path": "workspace.json",
+                "method": "de",
+                "maxiter": 20,
+            },
+            max_output_lines=3,
+        )
+
+        task.append("line-1\n")
+        task.append("")
+        task.append("line-2")
+        task.append("line-3")
+        task.append("line-4")
+        payload = task.as_dict(lambda current: {"task_id": current.id, "gen": 2})
+
+        self.assertEqual(task.output, ["line-2", "line-3", "line-4"])
+        self.assertEqual(payload["id"], "task-1")
+        self.assertEqual(payload["task_type"], "calibration")
+        self.assertEqual(payload["output"], ["line-2", "line-3", "line-4"])
+        self.assertEqual(payload["progress"], {"task_id": "task-1", "gen": 2})
+        self.assertEqual(payload["ui_progress"], {"stage": "running"})
+        self.assertEqual(payload["config_path"], "workspace.json")
+        self.assertEqual(payload["method"], "de")
+        self.assertEqual(payload["maxiter"], 20)
+
+    def test_list_tasks_sorts_snapshots_and_injects_progress_snapshot(self) -> None:
+        older = TaskRecord(
+            id="older",
+            task_type="sync",
+            label="Older",
+            command=["sync"],
+            cwd="root",
+            updated_at=1.0,
+        )
+        newer = TaskRecord(
+            id="newer",
+            task_type="calibration",
+            label="Newer",
+            command=["calibrate"],
+            cwd="root",
+            updated_at=2.0,
+        )
+        context = TaskQueryContext(
+            tasks={older.id: older, newer.id: newer},
+            task_lock=threading.Lock(),
+            snapshot_tasks=lambda: [older, newer],
+            resolve_any_path=lambda value, **kwargs: Path(value),
+            task_progress_snapshot=lambda task: {"id": task.id} if task.task_type == "calibration" else None,
+        )
+
+        payload = list_tasks(context)
+
+        self.assertEqual([item["id"] for item in payload], ["newer", "older"])
+        self.assertEqual(payload[0]["progress"], {"id": "newer"})
+        self.assertIsNone(payload[1]["progress"])
 
     def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
         command = build_python_script_command(

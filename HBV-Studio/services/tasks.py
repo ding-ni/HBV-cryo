@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+DEFAULT_MAX_TASK_OUTPUT = 1200
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,72 @@ class TaskQueryContext:
     task_lock: threading.Lock
     snapshot_tasks: Callable[[], list[Any]]
     resolve_any_path: Callable[..., Path]
+    task_progress_snapshot: Callable[[Any], dict[str, Any] | None]
+
+
+@dataclass
+class TaskRecord:
+    id: str
+    task_type: str
+    label: str
+    command: list[str]
+    cwd: str
+    status: str = "running"
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    return_code: int | None = None
+    output: list[str] = field(default_factory=list)
+    detected_runs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    max_output_lines: int = DEFAULT_MAX_TASK_OUTPUT
+
+    def append(self, line: str) -> None:
+        text = line.rstrip("\n")
+        if not text:
+            return
+        self.output.append(text)
+        if len(self.output) > self.max_output_lines:
+            self.output = self.output[-self.max_output_lines :]
+        self.updated_at = time.time()
+
+    def as_dict(
+        self,
+        progress_snapshot: Callable[[Any], dict[str, Any] | None] | None = None,
+    ) -> dict[str, Any]:
+        progress = progress_snapshot(self) if progress_snapshot else None
+        return {
+            "id": self.id,
+            "task_type": self.task_type,
+            "label": self.label,
+            "command": self.command,
+            "cwd": self.cwd,
+            "status": self.status,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "return_code": self.return_code,
+            "output": self.output[-200:],
+            "detected_runs": self.detected_runs,
+            "progress": progress,
+            "ui_progress": self.metadata.get("ui_progress"),
+            "forecast_input_check": self.metadata.get("forecast_input_check"),
+            "result": self.metadata.get("result"),
+            "config_path": self.metadata.get("config_path"),
+            "run_path": self.metadata.get("run_path"),
+            "step_id": self.metadata.get("step_id"),
+            "step_title": self.metadata.get("step_title"),
+            "step_titles": self.metadata.get("step_titles"),
+            "profile": self.metadata.get("profile"),
+            "calibration_workflow": self.metadata.get("calibration_workflow"),
+            "calibration_workflow_status": self.metadata.get("calibration_workflow_status"),
+            "runtime_prec_source": self.metadata.get("runtime_prec_source"),
+            "objective_mode": self.metadata.get("objective_mode"),
+            "glacier_mode": self.metadata.get("glacier_mode"),
+            "method": self.metadata.get("method"),
+            "quick_test": self.metadata.get("quick_test"),
+            "mc_samples": self.metadata.get("mc_samples"),
+            "maxiter": self.metadata.get("maxiter"),
+            "refine_maxiter": self.metadata.get("refine_maxiter"),
+        }
 
 
 @dataclass(frozen=True)
@@ -81,7 +150,7 @@ def has_running_tasks(context: TaskQueryContext) -> bool:
 
 
 def list_tasks(context: TaskQueryContext) -> list[dict[str, Any]]:
-    items = [task.as_dict() for task in context.snapshot_tasks()]
+    items = [task.as_dict(context.task_progress_snapshot) for task in context.snapshot_tasks()]
     return sorted(items, key=lambda item: item["updated_at"], reverse=True)
 
 

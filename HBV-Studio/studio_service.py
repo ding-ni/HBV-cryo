@@ -150,6 +150,7 @@ from services.tasks import (
     TaskMutationContext,
     ProcessMonitorContext,
     TaskQueryContext,
+    TaskRecord,
     append_task_exception_output as build_append_task_exception_output,
     append_task_output as build_append_task_output,
     build_python_script_command as build_task_python_script_command,
@@ -379,7 +380,6 @@ def _find_python() -> str:
 PYTHON_EXE = _find_python()
 SELF_CHECK = PROJECT_ROOT / "系统自检.py"
 TUOTUOHE_SYNC_SCRIPT = GUI_ROOT / "sync_tuotuohe_data.py"
-MAX_TASK_OUTPUT = 1200
 FORWARD_SIM_TIMEOUT_SEC = 900
 DEFAULT_WORKSPACE_PATH = WORKSPACE_DIR / "新流域工作区.json"
 METEO_STATE_FILENAME = "_meteo_state.json"
@@ -459,6 +459,7 @@ def _task_query_context() -> TaskQueryContext:
         task_lock=TASK_LOCK,
         snapshot_tasks=_snapshot_tasks,
         resolve_any_path=resolve_any_path,
+        task_progress_snapshot=task_progress_snapshot,
     )
 
 
@@ -512,67 +513,6 @@ def monitor_server_lifecycle(server: ThreadingHTTPServer) -> None:
         if (now - last_request_at) >= INSTALLED_IDLE_SHUTDOWN_SECONDS:
             request_server_shutdown(server, "[HBV-Studio] 安装版空闲超时，后台服务自动退出。")
             break
-
-
-@dataclass
-class TaskRecord:
-    id: str
-    task_type: str
-    label: str
-    command: list[str]
-    cwd: str
-    status: str = "running"
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
-    return_code: int | None = None
-    output: list[str] = field(default_factory=list)
-    detected_runs: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def append(self, line: str) -> None:
-        text = line.rstrip("\n")
-        if not text:
-            return
-        self.output.append(text)
-        if len(self.output) > MAX_TASK_OUTPUT:
-            self.output = self.output[-MAX_TASK_OUTPUT:]
-        self.updated_at = time.time()
-
-    def as_dict(self) -> dict[str, Any]:
-        progress = task_progress_snapshot(self)
-        return {
-            "id": self.id,
-            "task_type": self.task_type,
-            "label": self.label,
-            "command": self.command,
-            "cwd": self.cwd,
-            "status": self.status,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "return_code": self.return_code,
-            "output": self.output[-200:],
-            "detected_runs": self.detected_runs,
-            "progress": progress,
-            "ui_progress": self.metadata.get("ui_progress"),
-            "forecast_input_check": self.metadata.get("forecast_input_check"),
-            "result": self.metadata.get("result"),
-            "config_path": self.metadata.get("config_path"),
-            "run_path": self.metadata.get("run_path"),
-            "step_id": self.metadata.get("step_id"),
-            "step_title": self.metadata.get("step_title"),
-            "step_titles": self.metadata.get("step_titles"),
-            "profile": self.metadata.get("profile"),
-            "calibration_workflow": self.metadata.get("calibration_workflow"),
-            "calibration_workflow_status": self.metadata.get("calibration_workflow_status"),
-            "runtime_prec_source": self.metadata.get("runtime_prec_source"),
-            "objective_mode": self.metadata.get("objective_mode"),
-            "glacier_mode": self.metadata.get("glacier_mode"),
-            "method": self.metadata.get("method"),
-            "quick_test": self.metadata.get("quick_test"),
-            "mc_samples": self.metadata.get("mc_samples"),
-            "maxiter": self.metadata.get("maxiter"),
-            "refine_maxiter": self.metadata.get("refine_maxiter"),
-        }
 
 
 class TaskOutputRelay:
