@@ -18,6 +18,14 @@ const viewMeta = {
   results:   { title: "结果分析", subtitle: "查看率定结果与诊断图表" },
 };
 
+const viewRenderers = {
+  dashboard: renderDashboardView,
+  wizard: renderWizardView,
+  calibration: renderCalibrationView,
+  forecast: renderForecastView,
+  results: renderResultsView,
+};
+
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
 const CHECK_STEP_IDS = new Set(["check_inputs"]);
 
@@ -2901,6 +2909,34 @@ function setServiceState(ok, msg) {
 
 // --------------- view switching ---------------
 
+function renderDashboardView() {
+  renderTemplates();
+  renderWorkspaceCards();
+  renderDashboardWorkspaceLayout();
+}
+
+function renderWizardView() {
+  refreshWizardWorkspacePreview();
+  renderPrepSteps();
+}
+
+function renderCalibrationView() {
+  refreshCalibrationControls();
+  renderManualPresetOptions();
+  updateManualPresetControls();
+}
+
+function renderResultsView() {
+  renderResultsFilterToolbar();
+  renderRunList();
+  if (state.currentRun) renderRunDetail(state.currentRun);
+}
+
+function renderView(view) {
+  const renderer = viewRenderers[view];
+  if (renderer) renderer();
+}
+
 function setView(view) {
   if (!viewMeta[view]) view = "dashboard";
   state.currentView = view;
@@ -2908,7 +2944,7 @@ function setView(view) {
   $all(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.viewTarget === view));
   $("#page-title").textContent    = viewMeta[view].title;
   $("#page-subtitle").textContent = viewMeta[view].subtitle;
-  if (view === "forecast") renderForecastView();
+  renderView(view);
 }
 
 // --------------- sidebar ---------------
