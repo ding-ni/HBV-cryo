@@ -68,9 +68,9 @@ class FrontendGeoPreviewTests(unittest.TestCase):
 
             const context = { window: {}, console, URLSearchParams };
             vm.createContext(context);
-            vm.runInContext(fs.readFileSync("web/js/geoPreview.js", "utf8"), context);
+            vm.runInContext(fs.readFileSync("web/js/mapLayerPlan.js", "utf8"), context);
 
-            const geo = context.window.HBVStudioGeoPreview;
+            const geo = context.window.HBVStudioMapLayerPlan;
             if (!geo?.buildMapLibreLayerPlan || !geo?.buildMapLibreStyle) {
               throw new Error("geo map planning exports are missing");
             }
