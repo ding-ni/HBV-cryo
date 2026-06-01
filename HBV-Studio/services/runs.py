@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
 import re
 import shutil
 import threading
@@ -23,6 +24,19 @@ RUN_KIND_LABELS = {
     "legacy": "历史结果",
 }
 SYSTEM_RESULT_TITLES = frozenset({"手调起点", "手调结果"})
+RUN_EXPORT_FIELD_LABELS = {
+    "q_sim": "模拟总径流(m3/s)",
+    "q_sim_model": "模型本地产流(m3/s)",
+    "q_boundary_inflow": "边界入流(m3/s)",
+    "q_obs": "观测径流(m3/s)",
+    "q_rain": "降雨径流(m3/s)",
+    "q_snow": "融雪径流(m3/s)",
+    "q_ice": "裸冰融化径流(m3/s)",
+    "q_ice_raw": "裸冰融化原始分量(m3/s)",
+    "q_ice_reference": "冰川参考径流(m3/s)",
+    "q_ice_reference_raw": "冰川参考原始融水(m3/s)",
+}
+DEFAULT_RUN_EXPORT_FIELDS = ("q_sim", "q_obs", "q_rain", "q_snow", "q_ice")
 
 
 @dataclass(frozen=True)
@@ -47,7 +61,6 @@ class RunDetailContext:
     read_json_file: Callable[[Path], dict[str, Any]]
     normalize_run_metadata: Callable[..., tuple[dict[str, Any], Path | None]]
     run_update_timestamps: Callable[[Path], tuple[float, int]]
-    read_sampled_csv_rows: Callable[[Path], tuple[list[dict[str, str]], int]]
     safe_float: Callable[[Any], float | None]
     build_hydrology_summary: Callable[[dict[str, Any], Path], dict[str, Any]]
     ensure_hydrology_diagnostic_report: Callable[[Path, dict[str, Any], dict[str, Any]], dict[str, Any]]
@@ -64,8 +77,6 @@ class RunExportContext:
     format_timestamp_for_display: Callable[[pd.Timestamp, float], str]
     slugify_workspace_name: Callable[[str], str]
     to_display_path: Callable[[Path], str]
-    default_export_fields: Callable[[dict[str, Any] | None], list[str]]
-    export_field_labels: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -98,6 +109,25 @@ def run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: b
     if studio_compatible:
         return "calibration"
     return "legacy"
+
+
+def run_boundary_enabled(metadata: dict[str, Any] | None) -> bool:
+    meta = dict(metadata or {})
+    optional_modules = dict(meta.get("optional_modules", {}) or {})
+    boundary_meta = dict(meta.get("boundary_condition", {}) or {})
+    return bool(
+        meta.get("project_object_type") == "interbasin_with_boundary"
+        or dict(optional_modules.get("boundary_inflow", {}) or {}).get("enabled")
+        or boundary_meta.get("enabled")
+        or boundary_meta.get("boundary_inflow_file")
+    )
+
+
+def default_run_export_fields(metadata: dict[str, Any] | None) -> list[str]:
+    fields = list(DEFAULT_RUN_EXPORT_FIELDS)
+    if run_boundary_enabled(metadata):
+        fields.append("q_boundary_inflow")
+    return fields
 
 
 def run_kind_label(kind: str) -> str:
@@ -391,6 +421,26 @@ def build_run_summary(
     return summary
 
 
+def read_sampled_csv_rows(path: Path, max_points: int = 900) -> tuple[list[dict[str, str]], int]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        total_rows = max(sum(1 for _ in handle) - 1, 0)
+    if total_rows <= 0:
+        return [], 0
+
+    stride = 1 if total_rows <= max_points else max(1, total_rows // max_points)
+    sampled: list[dict[str, str]] = []
+    last_row: dict[str, str] | None = None
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for idx, row in enumerate(reader):
+            last_row = row
+            if stride == 1 or idx % stride == 0:
+                sampled.append(row)
+    if last_row is not None and (not sampled or sampled[-1] != last_row):
+        sampled.append(last_row)
+    return sampled, total_rows
+
+
 def list_runs(context: RunListContext) -> list[dict[str, Any]]:
     global _RUN_LIST_CACHE_SIGNATURE, _RUN_LIST_CACHE_ITEMS
     entries = context.discover_run_entries()
@@ -418,7 +468,7 @@ def load_run_detail(run_path: str, context: RunDetailContext) -> dict[str, Any]:
         raise FileNotFoundError("结果目录缺少 simulation.csv 或 metadata.json。")
     metadata, resolved_config = context.normalize_run_metadata(context.read_json_file(metadata_path), run_path=run_dir)
     updated_at, updated_at_ns = context.run_update_timestamps(run_dir)
-    sampled, total_rows = context.read_sampled_csv_rows(simulation_path)
+    sampled, total_rows = read_sampled_csv_rows(simulation_path)
     fields = [
         "q_sim",
         "q_sim_model",
@@ -496,8 +546,8 @@ def export_run_excel(payload: dict[str, Any], context: RunExportContext) -> dict
         field
         for field in [str(item).strip() for item in list(payload.get("fields", []) or [])]
         if field
-    ] or context.default_export_fields(metadata)
-    invalid_fields = [field for field in selected_fields if field not in context.export_field_labels]
+    ] or default_run_export_fields(metadata)
+    invalid_fields = [field for field in selected_fields if field not in RUN_EXPORT_FIELD_LABELS]
     if invalid_fields:
         raise ValueError("存在不支持的导出字段：" + "、".join(invalid_fields[:6]))
 
@@ -535,7 +585,7 @@ def export_run_excel(payload: dict[str, Any], context: RunExportContext) -> dict
     export_frame = pd.DataFrame()
     export_frame["日期"] = filtered["date"].dt.strftime("%Y-%m-%d" if step_hours >= 24.0 else "%Y-%m-%d %H:%M")
     for field in selected_fields:
-        export_frame[context.export_field_labels[field]] = filtered[field] if field in filtered.columns else pd.NA
+        export_frame[RUN_EXPORT_FIELD_LABELS[field]] = filtered[field] if field in filtered.columns else pd.NA
 
     export_dir = run_dir / "导出"
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -562,7 +612,7 @@ def export_run_excel(payload: dict[str, Any], context: RunExportContext) -> dict
         "display_path": context.to_display_path(export_path),
         "row_count": int(len(export_frame)),
         "fields": list(selected_fields),
-        "labels": [context.export_field_labels[field] for field in selected_fields],
+        "labels": [RUN_EXPORT_FIELD_LABELS[field] for field in selected_fields],
         "start": export_frame.iloc[0, 0],
         "end": export_frame.iloc[-1, 0],
     }

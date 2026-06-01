@@ -84,6 +84,7 @@ from services.runs import load_run_detail as build_load_run_detail
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import rename_run as build_rename_run
 from services.runs import run_parameter_context as build_run_parameter_context
+from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import run_time_label as build_run_time_label
@@ -258,38 +259,8 @@ EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
         "warning": "连续状态策略不适合事件之间存在资料缺口的事件窗口集合。",
     },
 }
-RUN_EXPORT_FIELD_LABELS = {
-    "q_sim": "模拟总径流(m3/s)",
-    "q_sim_model": "模型本地产流(m3/s)",
-    "q_boundary_inflow": "边界入流(m3/s)",
-    "q_obs": "观测径流(m3/s)",
-    "q_rain": "降雨径流(m3/s)",
-    "q_snow": "融雪径流(m3/s)",
-    "q_ice": "裸冰融化径流(m3/s)",
-    "q_ice_raw": "裸冰融化原始分量(m3/s)",
-    "q_ice_reference": "冰川参考径流(m3/s)",
-    "q_ice_reference_raw": "冰川参考原始融水(m3/s)",
-}
-DEFAULT_RUN_EXPORT_FIELDS = ("q_sim", "q_obs", "q_rain", "q_snow", "q_ice")
-
-
-def run_boundary_enabled(metadata: dict[str, Any] | None) -> bool:
-    meta = dict(metadata or {})
-    optional_modules = dict(meta.get("optional_modules", {}) or {})
-    boundary_meta = dict(meta.get("boundary_condition", {}) or {})
-    return bool(
-        meta.get("project_object_type") == OBJECT_INTERBASIN
-        or dict(optional_modules.get("boundary_inflow", {}) or {}).get("enabled")
-        or boundary_meta.get("enabled")
-        or boundary_meta.get("boundary_inflow_file")
-    )
-
-
 def default_run_export_fields(metadata: dict[str, Any] | None) -> list[str]:
-    fields = ["q_sim", "q_obs", "q_rain", "q_snow", "q_ice"]
-    if run_boundary_enabled(metadata):
-        fields.append("q_boundary_inflow")
-    return fields
+    return build_default_run_export_fields(metadata)
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -6058,26 +6029,6 @@ def list_runs() -> list[dict[str, Any]]:
     return build_list_runs(RunListContext(discover_run_entries=_discover_run_entries, summarize_run=summarize_run))
 
 
-def read_sampled_csv_rows(path: Path, max_points: int = 900) -> tuple[list[dict[str, str]], int]:
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        total_rows = max(sum(1 for _ in handle) - 1, 0)
-    if total_rows <= 0:
-        return [], 0
-
-    stride = 1 if total_rows <= max_points else max(1, total_rows // max_points)
-    sampled: list[dict[str, str]] = []
-    last_row: dict[str, str] | None = None
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for idx, row in enumerate(reader):
-            last_row = row
-            if stride == 1 or idx % stride == 0:
-                sampled.append(row)
-    if last_row is not None and (not sampled or sampled[-1] != last_row):
-        sampled.append(last_row)
-    return sampled, total_rows
-
-
 def export_run_excel(payload: dict[str, Any]) -> dict[str, Any]:
     return build_export_run_excel(payload, _run_export_context())
 
@@ -6091,8 +6042,6 @@ def _run_export_context() -> RunExportContext:
         format_timestamp_for_display=format_timestamp_for_display,
         slugify_workspace_name=slugify_workspace_name,
         to_display_path=to_display_path,
-        default_export_fields=default_run_export_fields,
-        export_field_labels=RUN_EXPORT_FIELD_LABELS,
     )
 
 
@@ -6106,7 +6055,6 @@ def _run_detail_context() -> RunDetailContext:
         read_json_file=read_json_file,
         normalize_run_metadata=normalize_run_metadata,
         run_update_timestamps=_run_update_timestamps,
-        read_sampled_csv_rows=read_sampled_csv_rows,
         safe_float=safe_float,
         build_hydrology_summary=_build_hydrology_summary,
         ensure_hydrology_diagnostic_report=_ensure_hydrology_diagnostic_report,

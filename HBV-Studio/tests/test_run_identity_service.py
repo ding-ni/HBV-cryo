@@ -1,4 +1,5 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,9 +11,11 @@ if str(STUDIO_DIR) not in sys.path:
 from services.runs import (  # noqa: E402
     RunSummaryContext,
     build_run_summary,
+    default_run_export_fields,
     display_run_title,
     has_custom_result_title,
     normalize_result_title,
+    read_sampled_csv_rows,
     run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
@@ -197,6 +200,36 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(summary["run_type"], "manual_starter")
         self.assertEqual(summary["source_run_name"], "manual_source")
         self.assertEqual(summary["parameter_context"]["source_workspace"], "沱沱河")
+
+    def test_default_run_export_fields_include_boundary_when_configured(self) -> None:
+        self.assertEqual(default_run_export_fields({}), ["q_sim", "q_obs", "q_rain", "q_snow", "q_ice"])
+
+        boundary_cases = [
+            {"project_object_type": "interbasin_with_boundary"},
+            {"optional_modules": {"boundary_inflow": {"enabled": True}}},
+            {"boundary_condition": {"enabled": True}},
+            {"boundary_condition": {"boundary_inflow_file": "boundary.csv"}},
+        ]
+        for metadata in boundary_cases:
+            with self.subTest(metadata=metadata):
+                self.assertEqual(
+                    default_run_export_fields(metadata),
+                    ["q_sim", "q_obs", "q_rain", "q_snow", "q_ice", "q_boundary_inflow"],
+                )
+
+    def test_read_sampled_csv_rows_preserves_total_and_last_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "simulation.csv"
+            rows = ["date,q_sim,q_obs"]
+            rows.extend(f"2026-06-{day:02d},{day},{day + 0.5}" for day in range(1, 12))
+            csv_path.write_text("\n".join(rows), encoding="utf-8")
+
+            sampled, total_rows = read_sampled_csv_rows(csv_path, max_points=3)
+
+        self.assertEqual(total_rows, 11)
+        self.assertEqual(sampled[0]["date"], "2026-06-01")
+        self.assertEqual(sampled[-1]["date"], "2026-06-11")
+        self.assertLess(len(sampled), total_rows)
 
 
 if __name__ == "__main__":
