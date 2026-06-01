@@ -39,6 +39,7 @@ from services.data_prep import (
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
 )
+from services.boundary import BoundaryPreviewContext, boundary_preview as build_boundary_preview
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
 from services.filesystem import (
     FilesystemContext,
@@ -8453,6 +8454,17 @@ def wizard_validate_step(config_path_raw: str, step: int, precip_source: Any = N
     return result
 
 
+def _boundary_preview_context() -> BoundaryPreviewContext:
+    return BoundaryPreviewContext(
+        resolve_path=resolve_any_path,
+        read_config=read_runtime_config,
+        build_expected_time_index=build_expected_time_index,
+        normalize_time_step_hours=normalize_time_step_hours,
+        inspect_boundary_csv=inspect_boundary_inflow_csv,
+        is_date_only_string=is_date_only_string,
+    )
+
+
 def boundary_preview(
     csv_path_raw: str,
     date_field: str = "date",
@@ -8463,54 +8475,16 @@ def boundary_preview(
     expected_end: str = "",
     expected_step_hours: float | None = None,
 ) -> dict[str, Any]:
-    """Preview the first rows and stats of a boundary inflow CSV."""
-    expected_index = None
-    expected_step = expected_step_hours
-    if config_path_raw:
-        cfg_path = resolve_any_path(config_path_raw, must_exist=True)
-        config = read_runtime_config(cfg_path)
-        expected_index = build_expected_time_index(config)
-        expected_step = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    elif expected_start and expected_end and expected_step_hours is not None:
-        try:
-            step = pd.Timedelta(hours=float(expected_step_hours))
-            end_ts = pd.to_datetime(expected_end)
-            if float(expected_step_hours) < 24.0 and is_date_only_string(expected_end):
-                end_ts = end_ts + pd.Timedelta(days=1) - step
-            expected_index = pd.date_range(
-                start=pd.to_datetime(expected_start),
-                end=end_ts,
-                freq=step,
-            )
-            expected_step = normalize_time_step_hours(expected_step_hours)
-        except Exception:
-            expected_index = None
-    data = inspect_boundary_inflow_csv(
+    return build_boundary_preview(
         csv_path_raw,
-        date_field=date_field,
-        flow_field=flow_field,
-        expected_index=expected_index,
-        expected_step_hours=expected_step,
+        date_field,
+        flow_field,
+        _boundary_preview_context(),
+        config_path_raw=config_path_raw,
+        expected_start=expected_start,
+        expected_end=expected_end,
+        expected_step_hours=expected_step_hours,
     )
-    return {
-        "columns": data["columns"],
-        "total_rows": data["total_rows"],
-        "valid_rows": data["valid_rows"],
-        "invalid_rows": data["invalid_rows"],
-        "duplicate_count": data["duplicate_count"],
-        "time_step_hours": data["time_step_hours"],
-        "expected_time_step_hours": data["expected_time_step_hours"],
-        "suggested_calibration_mode": data.get("suggested_calibration_mode"),
-        "negative_count": data["negative_count"],
-        "zero_count": data["zero_count"],
-        "coverage_ratio": data.get("coverage_ratio"),
-        "expected_steps": data.get("expected_steps"),
-        "missing_count": len(data.get("missing_steps", [])),
-        "out_of_range_count": len(data.get("out_of_range_steps", [])),
-        "date_range": data["date_range"],
-        "flow_stats": data["flow_stats"],
-        "preview": data["preview"],
-    }
 
 
 def _workspace_completeness_context() -> WorkspaceCompletenessContext:
