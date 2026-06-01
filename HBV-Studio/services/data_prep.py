@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -39,6 +41,27 @@ class DataPrepStartContext:
     build_python_script_command: Callable[..., list[str]]
     clear_meteo_state: Callable[..., None]
     forcing_pipeline_step_ids: frozenset[str]
+
+
+@dataclass(frozen=True)
+class DataPrepWorkflowWorkerContext:
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    resolve_runtime_precip_source: Callable[[dict[str, Any], Any], str]
+    task_step_map: Callable[[str, dict[str, Any]], dict[str, dict[str, Any]]]
+    current_profile: Callable[[dict[str, Any]], str]
+    data_prep_status: Callable[..., list[dict[str, Any]]]
+    step_command: Callable[[dict[str, Any], Path, dict[str, Any]], list[str]]
+    verify_step_output: Callable[[dict[str, Any], dict[str, Any], Any], tuple[bool, str]]
+    clear_meteo_state: Callable[..., None]
+    add_task_output: Callable[[str, str], None]
+    set_task_metadata: Callable[..., None]
+    mark_task_finished: Callable[..., None]
+    popen: Callable[..., Any]
+    subprocess_env: Callable[[], dict[str, str]]
+    decode_subprocess_output_line: Callable[[Any], str]
+    project_root: Path
+    forcing_pipeline_step_ids: frozenset[str]
+    max_workers: int = 4
 
 
 @dataclass(frozen=True)
@@ -318,3 +341,112 @@ def data_prep_workflow_decision(
         completed_ids=completed,
         remaining=[sid for sid in remaining if sid not in completed],
     )
+
+
+def data_prep_workflow_worker_run(
+    task_id: str,
+    config_path: Path,
+    step_ids: list[str],
+    payload: dict[str, Any],
+    context: DataPrepWorkflowWorkerContext,
+) -> None:
+    config = context.read_runtime_config(config_path)
+    runtime_prec_source = context.resolve_runtime_precip_source(config, payload.get("prec_source", None))
+    steps = context.task_step_map(context.current_profile(config), config)
+    completed_ids: set[str] = set()
+    total_steps = len(step_ids)
+
+    def update_ui_progress(stage: str, label: str = "", current: int | None = None) -> None:
+        context.set_task_metadata(
+            task_id,
+            ui_progress={
+                "stage": stage,
+                "current": int(len(completed_ids) if current is None else current),
+                "total": int(total_steps),
+                "label": label,
+            },
+        )
+
+    def run_step(step_id: str) -> tuple[str, bool]:
+        step = steps[step_id]
+        update_ui_progress("正在执行", step["title"])
+        context.add_task_output(task_id, f"[运行] {step['title']}")
+        if step_id in context.forcing_pipeline_step_ids:
+            context.clear_meteo_state(config, context.current_profile(config))
+        proc = context.popen(
+            context.step_command(step, config_path, payload),
+            cwd=str(context.project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
+            env=context.subprocess_env(),
+        )
+        if proc.stdout:
+            for raw_line in proc.stdout:
+                context.add_task_output(task_id, context.decode_subprocess_output_line(raw_line))
+        rc = proc.wait()
+        if rc != 0:
+            context.add_task_output(task_id, f"[失败] {step['title']} 返回码 {rc}")
+            update_ui_progress("执行失败", step["title"])
+            return step_id, False
+        output_ok, output_message = context.verify_step_output(step, config, runtime_prec_source)
+        if not output_ok:
+            context.add_task_output(task_id, f"[失败] {step['title']} 产物检查未通过：{output_message}")
+            update_ui_progress("产物检查失败", step["title"])
+            return step_id, False
+        context.add_task_output(task_id, f"[完成] {step['title']}")
+        return step_id, True
+
+    try:
+        update_ui_progress("准备执行", "等待前置条件")
+        remaining = list(step_ids)
+        while remaining:
+            status_map = {
+                item["id"]: item
+                for item in context.data_prep_status(str(config_path), precip_source=runtime_prec_source)
+            }
+            decision = data_prep_workflow_decision(
+                remaining,
+                completed_ids,
+                steps,
+                status_map,
+                overwrite=bool(payload.get("overwrite", False)),
+            )
+            for sid in decision.skipped_done:
+                context.add_task_output(task_id, f"[跳过] {steps[sid]['title']} 已完成")
+                update_ui_progress("跳过已完成", steps[sid]["title"])
+            for sid in decision.skipped_manual:
+                context.add_task_output(task_id, f"[跳过] {steps[sid]['title']} (手动步骤)")
+                update_ui_progress("跳过手动步骤", steps[sid]["title"])
+            completed_ids = set(decision.completed_ids)
+            remaining = list(decision.remaining)
+            ready = list(decision.ready)
+            blocked = list(decision.blocked)
+            if not ready:
+                if blocked:
+                    titles = [steps[s]["title"] for s in blocked]
+                    context.add_task_output(task_id, f"[阻塞] 以下步骤依赖未完成：{', '.join(titles)}")
+                    update_ui_progress("依赖未满足", "、".join(titles))
+                break
+
+            if len(ready) > 1:
+                context.add_task_output(task_id, f"[并行] 同时执行 {len(ready)} 个步骤")
+                update_ui_progress("并行执行", f"{len(ready)} 个步骤")
+            with ThreadPoolExecutor(max_workers=min(len(ready), context.max_workers)) as pool:
+                futures = {pool.submit(run_step, sid): sid for sid in ready}
+                for future in as_completed(futures):
+                    sid, ok = future.result()
+                    if ok:
+                        completed_ids.add(sid)
+                        update_ui_progress("已完成阶段", steps[sid]["title"])
+                    else:
+                        context.mark_task_finished(task_id, ok=False, return_code=1)
+                        return
+            remaining = [sid for sid in remaining if sid not in completed_ids]
+
+        context.mark_task_finished(task_id, ok=True, return_code=0)
+        update_ui_progress("全部完成", "所有步骤已完成", total_steps)
+    except Exception as exc:
+        context.add_task_output(task_id, f"[HBV-Studio] {exc}")
+        context.mark_task_finished(task_id, ok=False, return_code=-1)
+        update_ui_progress("执行异常", str(exc))

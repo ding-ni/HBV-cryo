@@ -44,10 +44,11 @@ from services.data_prep import (
     DataPrepContext,
     DataPrepStartContext,
     DataPrepTaskOutputContext,
+    DataPrepWorkflowWorkerContext,
     data_prep_bootstrap_plan as build_data_prep_bootstrap_plan,
     data_prep_start_plan as build_data_prep_start_plan,
     data_prep_step_command as build_data_prep_step_command,
-    data_prep_workflow_decision as build_data_prep_workflow_decision,
+    data_prep_workflow_worker_run as build_data_prep_workflow_worker_run,
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
     verify_data_prep_step_output as build_verify_data_prep_step_output,
@@ -6314,115 +6315,30 @@ def start_data_prep(payload: dict[str, Any]) -> TaskRecord:
 
 
 def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payload: dict[str, Any]) -> None:
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    config = read_runtime_config(config_path)
-    runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
-    steps = task_step_map(current_profile(config), config)
-    completed_ids: set[str] = set()
-    total_steps = len(step_ids)
-
-    def update_ui_progress(stage: str, label: str = "", current: int | None = None) -> None:
-        set_task_metadata(
-            task_id,
-            ui_progress={
-                "stage": stage,
-                "current": int(len(completed_ids) if current is None else current),
-                "total": int(total_steps),
-                "label": label,
-            },
-        )
-
-    def _run_step(step_id: str) -> tuple[str, bool]:
-        step = steps[step_id]
-        update_ui_progress("正在执行", step["title"])
-        add_task_output(task_id, f"[运行] {step['title']}")
-        if step_id in FORCING_PIPELINE_STEP_IDS:
-            clear_meteo_state(config, current_profile(config))
-        proc = subprocess.Popen(
-            step_command(step, config_path, payload),
-            cwd=str(PROJECT_ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            bufsize=0, env=_subprocess_env(),
-        )
-        if proc.stdout:
-            for raw_line in proc.stdout:
-                add_task_output(task_id, _decode_subprocess_output_line(raw_line))
-        rc = proc.wait()
-        if rc != 0:
-            add_task_output(task_id, f"[失败] {step['title']} 返回码 {rc}")
-            update_ui_progress("执行失败", step["title"])
-            return step_id, False
-        output_ok, output_message = verify_data_prep_step_output(step, config, runtime_prec_source)
-        if not output_ok:
-            add_task_output(task_id, f"[失败] {step['title']} 产物检查未通过：{output_message}")
-            update_ui_progress("产物检查失败", step["title"])
-            return step_id, False
-        add_task_output(task_id, f"[完成] {step['title']}")
-        return step_id, True
-
-    try:
-        update_ui_progress("准备执行", "等待前置条件")
-        remaining = list(step_ids)
-        while remaining:
-            status_map = {item["id"]: item for item in get_data_prep_status(str(config_path), precip_source=runtime_prec_source)}
-            decision = build_data_prep_workflow_decision(
-                remaining,
-                completed_ids,
-                steps,
-                status_map,
-                overwrite=bool(payload.get("overwrite", False)),
-            )
-            for sid in decision.skipped_done:
-                add_task_output(task_id, f"[跳过] {steps[sid]['title']} 已完成")
-                update_ui_progress("跳过已完成", steps[sid]["title"])
-            for sid in decision.skipped_manual:
-                add_task_output(task_id, f"[跳过] {steps[sid]['title']} (手动步骤)")
-                update_ui_progress("跳过手动步骤", steps[sid]["title"])
-            completed_ids = set(decision.completed_ids)
-            remaining = list(decision.remaining)
-            ready = list(decision.ready)
-            blocked = list(decision.blocked)
-            if not ready:
-                if blocked:
-                    titles = [steps[s]["title"] for s in blocked]
-                    add_task_output(task_id, f"[阻塞] 以下步骤依赖未完成：{', '.join(titles)}")
-                    update_ui_progress("依赖未满足", "、".join(titles))
-                break
-
-            # Run ready steps in parallel
-            if len(ready) > 1:
-                add_task_output(task_id, f"[并行] 同时执行 {len(ready)} 个步骤")
-                update_ui_progress("并行执行", f"{len(ready)} 个步骤")
-            with ThreadPoolExecutor(max_workers=min(len(ready), 4)) as pool:
-                futures = {pool.submit(_run_step, sid): sid for sid in ready}
-                for future in as_completed(futures):
-                    sid, ok = future.result()
-                    if ok:
-                        completed_ids.add(sid)
-                        update_ui_progress("已完成阶段", steps[sid]["title"])
-                    else:
-                        with TASK_LOCK:
-                            t = TASKS[task_id]
-                            t.status = "failed"
-                            t.return_code = 1
-                            t.updated_at = time.time()
-                        return
-            remaining = [s for s in remaining if s not in completed_ids]
-
-        with TASK_LOCK:
-            t = TASKS[task_id]
-            t.status = "completed"
-            t.return_code = 0
-            t.updated_at = time.time()
-        update_ui_progress("全部完成", "所有步骤已完成", total_steps)
-    except Exception as exc:
-        add_task_output(task_id, f"[HBV-Studio] {exc}")
-        with TASK_LOCK:
-            t = TASKS[task_id]
-            t.status = "failed"
-            t.return_code = -1
-            t.updated_at = time.time()
-        update_ui_progress("执行异常", str(exc))
+    build_data_prep_workflow_worker_run(
+        task_id,
+        config_path,
+        step_ids,
+        payload,
+        DataPrepWorkflowWorkerContext(
+            read_runtime_config=read_runtime_config,
+            resolve_runtime_precip_source=profile_runner.resolve_runtime_precip_source,
+            task_step_map=task_step_map,
+            current_profile=current_profile,
+            data_prep_status=get_data_prep_status,
+            step_command=step_command,
+            verify_step_output=verify_data_prep_step_output,
+            clear_meteo_state=clear_meteo_state,
+            add_task_output=add_task_output,
+            set_task_metadata=set_task_metadata,
+            mark_task_finished=_mark_task_finished,
+            popen=subprocess.Popen,
+            subprocess_env=_subprocess_env,
+            decode_subprocess_output_line=_decode_subprocess_output_line,
+            project_root=PROJECT_ROOT,
+            forcing_pipeline_step_ids=FORCING_PIPELINE_STEP_IDS,
+        ),
+    )
 
 
 def start_bootstrap(payload: dict[str, Any]) -> TaskRecord:

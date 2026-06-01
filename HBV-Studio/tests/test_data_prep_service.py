@@ -13,9 +13,11 @@ from services.data_prep import (  # noqa: E402
     DataPrepBootstrapContext,
     DataPrepStartContext,
     DataPrepTaskOutputContext,
+    DataPrepWorkflowWorkerContext,
     data_prep_bootstrap_plan,
     data_prep_start_plan,
     data_prep_step_command,
+    data_prep_workflow_worker_run,
     data_prep_workflow_decision,
     verify_data_prep_step_output,
     verify_data_prep_task_output,
@@ -23,6 +25,39 @@ from services.data_prep import (  # noqa: E402
 
 
 class DataPrepServiceTests(unittest.TestCase):
+    def _workflow_context(
+        self,
+        *,
+        steps: dict[str, dict[str, object]],
+        status: list[dict[str, object]],
+        popen,
+        events: list[tuple],
+        config: dict[str, object] | None = None,
+        verify_result: tuple[bool, str] = (True, "ok"),
+        forcing_steps: frozenset[str] = frozenset(),
+        data_prep_status=None,
+    ) -> DataPrepWorkflowWorkerContext:
+        runtime_config = config or {"profile": "daily"}
+        return DataPrepWorkflowWorkerContext(
+            read_runtime_config=lambda path: runtime_config,
+            resolve_runtime_precip_source=lambda cfg, source: str(source or "era5"),
+            task_step_map=lambda profile, cfg: steps,
+            current_profile=lambda cfg: str(cfg.get("profile", "daily")),
+            data_prep_status=data_prep_status or (lambda path, precip_source=None: status),
+            step_command=lambda step, config_path, payload: ["python", str(step["script"]), str(config_path)],
+            verify_step_output=lambda step, cfg, source: verify_result,
+            clear_meteo_state=lambda cfg, profile=None: events.append(("clear", cfg, profile)),
+            add_task_output=lambda task_id, message: events.append(("output", task_id, message)),
+            set_task_metadata=lambda task_id, **kwargs: events.append(("metadata", task_id, kwargs)),
+            mark_task_finished=lambda task_id, **kwargs: events.append(("finished", task_id, kwargs)),
+            popen=popen,
+            subprocess_env=lambda: {"PYTHONUTF8": "1"},
+            decode_subprocess_output_line=lambda raw: raw.decode("utf-8").rstrip("\r\n") if isinstance(raw, bytes) else str(raw),
+            project_root=Path("project-root"),
+            forcing_pipeline_step_ids=forcing_steps,
+            max_workers=1,
+        )
+
     def _start_context(
         self,
         *,
@@ -257,6 +292,98 @@ class DataPrepServiceTests(unittest.TestCase):
         self.assertEqual(decision.ready, ["already"])
         self.assertEqual(decision.completed_ids, set())
         self.assertEqual(decision.remaining, ["already"])
+
+    def test_data_prep_workflow_worker_run_skips_and_records_success(self) -> None:
+        events: list[tuple] = []
+        popen_calls: list[tuple[list[str], dict[str, object]]] = []
+
+        class FakeProcess:
+            stdout = [b"line one\n"]
+
+            def wait(self) -> int:
+                return 0
+
+        def popen(command, **kwargs):
+            popen_calls.append((command, kwargs))
+            return FakeProcess()
+
+        steps = {
+            "done": {"id": "done", "title": "已完成步骤", "script": Path("done.py")},
+            "manual": {"id": "manual", "title": "手动步骤", "manual": True, "script": Path("manual.py")},
+            "ready": {
+                "id": "ready",
+                "title": "可执行步骤",
+                "depends_on": ["done", "manual"],
+                "script": Path("ready.py"),
+            },
+        }
+        context = self._workflow_context(
+            steps=steps,
+            status=[{"id": "done", "done": True}],
+            popen=popen,
+            events=events,
+            forcing_steps=frozenset({"ready"}),
+        )
+
+        data_prep_workflow_worker_run("task-1", Path("workspace.json"), ["done", "manual", "ready"], {"prec_source": "cmfd"}, context)
+
+        self.assertIn(("output", "task-1", "[跳过] 已完成步骤 已完成"), events)
+        self.assertIn(("output", "task-1", "[跳过] 手动步骤 (手动步骤)"), events)
+        self.assertIn(("output", "task-1", "[运行] 可执行步骤"), events)
+        self.assertIn(("output", "task-1", "line one"), events)
+        self.assertIn(("output", "task-1", "[完成] 可执行步骤"), events)
+        self.assertIn(("clear", {"profile": "daily"}, "daily"), events)
+        self.assertIn(("finished", "task-1", {"ok": True, "return_code": 0}), events)
+        self.assertIn(
+            ("metadata", "task-1", {"ui_progress": {"stage": "全部完成", "current": 3, "total": 3, "label": "所有步骤已完成"}}),
+            events,
+        )
+        self.assertEqual(popen_calls[0][0], ["python", "ready.py", "workspace.json"])
+        self.assertEqual(popen_calls[0][1]["cwd"], "project-root")
+        self.assertEqual(popen_calls[0][1]["env"], {"PYTHONUTF8": "1"})
+
+    def test_data_prep_workflow_worker_run_marks_failed_on_process_error(self) -> None:
+        events: list[tuple] = []
+
+        class FakeProcess:
+            stdout: list[bytes] = []
+
+            def wait(self) -> int:
+                return 2
+
+        steps = {"bad": {"id": "bad", "title": "失败步骤", "script": Path("bad.py")}}
+        context = self._workflow_context(
+            steps=steps,
+            status=[],
+            popen=lambda command, **kwargs: FakeProcess(),
+            events=events,
+        )
+
+        data_prep_workflow_worker_run("task-1", Path("workspace.json"), ["bad"], {}, context)
+
+        self.assertIn(("output", "task-1", "[失败] 失败步骤 返回码 2"), events)
+        self.assertIn(("metadata", "task-1", {"ui_progress": {"stage": "执行失败", "current": 0, "total": 1, "label": "失败步骤"}}), events)
+        self.assertIn(("finished", "task-1", {"ok": False, "return_code": 1}), events)
+        self.assertFalse(any(event == ("finished", "task-1", {"ok": True, "return_code": 0}) for event in events))
+
+    def test_data_prep_workflow_worker_run_marks_failed_on_exception(self) -> None:
+        events: list[tuple] = []
+        steps = {"ready": {"id": "ready", "title": "可执行步骤", "script": Path("ready.py")}}
+        context = self._workflow_context(
+            steps=steps,
+            status=[],
+            popen=lambda command, **kwargs: (_ for _ in ()).throw(RuntimeError("process failed")),
+            events=events,
+        )
+
+        data_prep_workflow_worker_run("task-1", Path("workspace.json"), ["ready"], {}, context)
+
+        self.assertIn(("output", "task-1", "[HBV-Studio] process failed"), events)
+        self.assertIn(("finished", "task-1", {"ok": False, "return_code": -1}), events)
+        self.assertIn(
+            ("metadata", "task-1", {"ui_progress": {"stage": "执行异常", "current": 0, "total": 1, "label": "process failed"}}),
+            events,
+        )
 
 
 if __name__ == "__main__":
