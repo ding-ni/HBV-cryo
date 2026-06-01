@@ -163,6 +163,7 @@ from services.tasks import (
     set_task_detected_runs as build_set_task_detected_runs,
     snapshot_task_records as build_snapshot_task_records,
     start_process_task as build_start_process_task,
+    subprocess_task_env as build_subprocess_task_env,
     task_progress_snapshot as build_task_progress_snapshot,
     update_task_metadata as build_update_task_metadata,
 )
@@ -6009,15 +6010,6 @@ def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: se
     )
 
 
-def _subprocess_env() -> dict[str, str]:
-    """Return env dict that forces child Python to use UTF-8 I/O and unbuffered output."""
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONUNBUFFERED"] = "1"
-    return env
-
-
 def build_python_script_command(script: Path | str, *args: Any) -> list[str]:
     return build_task_python_script_command(
         script,
@@ -6056,7 +6048,7 @@ def start_process(task_type: str, label: str, command: list[str], cwd: Path, met
         cwd,
         ProcessTaskStartContext(
             popen=subprocess.Popen,
-            subprocess_env=_subprocess_env,
+            subprocess_env=build_subprocess_task_env,
             create_registered_task=create_registered_task,
             snapshot_run_paths=snapshot_run_paths,
             start_monitor_thread=lambda task_id, process, previous_runs: threading.Thread(
@@ -6140,7 +6132,7 @@ def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payloa
             set_task_metadata=set_task_metadata,
             mark_task_finished=_mark_task_finished,
             popen=subprocess.Popen,
-            subprocess_env=_subprocess_env,
+            subprocess_env=build_subprocess_task_env,
             decode_subprocess_output_line=build_decode_subprocess_output_line,
             project_root=PROJECT_ROOT,
             forcing_pipeline_step_ids=FORCING_PIPELINE_STEP_IDS,

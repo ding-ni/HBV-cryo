@@ -6,6 +6,7 @@ import contextlib
 import copy
 import csv
 import locale
+import os
 import sys
 import threading
 import time
@@ -166,6 +167,14 @@ def decode_subprocess_output_line(raw_line: Any) -> str:
         except (UnicodeDecodeError, LookupError):
             continue
     return data.decode("utf-8", errors="replace").rstrip("\r\n")
+
+
+def subprocess_task_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base_env is None else base_env)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
 
 
 @dataclass(frozen=True)

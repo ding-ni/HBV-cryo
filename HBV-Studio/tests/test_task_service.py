@@ -34,6 +34,7 @@ from services.tasks import (  # noqa: E402
     set_task_detected_runs,
     snapshot_task_records,
     start_process_task,
+    subprocess_task_env,
     task_progress_snapshot,
     update_task_metadata,
 )
@@ -332,6 +333,17 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(decode_subprocess_output_line("line\r\n"), "line")
         self.assertEqual(decode_subprocess_output_line(b"\xef\xbb\xbfhello\r\n"), "hello")
         self.assertEqual(decode_subprocess_output_line(gb18030_text.encode("gb18030") + b"\r\n"), gb18030_text)
+
+    def test_subprocess_task_env_forces_utf8_and_keeps_base_env_unchanged(self) -> None:
+        base_env = {"EXISTING": "yes", "PYTHONUTF8": "0"}
+
+        env = subprocess_task_env(base_env)
+
+        self.assertEqual(base_env, {"EXISTING": "yes", "PYTHONUTF8": "0"})
+        self.assertEqual(env["EXISTING"], "yes")
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(env["PYTHONUTF8"], "1")
+        self.assertEqual(env["PYTHONUNBUFFERED"], "1")
 
     def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
         command = build_python_script_command(
