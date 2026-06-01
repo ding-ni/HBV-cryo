@@ -215,6 +215,7 @@ const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted
 const runDetailRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const cdsApiStatusRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const forecastInputCheckRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const forecastResultRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -262,7 +263,6 @@ const state = {
   forecastResultRunPath: "",
   forecastResultData: null,
   forecastResultLoadingPath: "",
-  activeForecastResultRequestId: 0,
   forecastInputCheckTimer: null,
   lastForecastExportPath: "",
   activeCompareRequestId: 0,
@@ -597,11 +597,6 @@ function nextRunManualPresetRequestId() {
 function nextTaskManualPresetRequestId() {
   state.activeTaskManualPresetRequestId = Number(state.activeTaskManualPresetRequestId || 0) + 1;
   return state.activeTaskManualPresetRequestId;
-}
-
-function nextForecastResultRequestId() {
-  state.activeForecastResultRequestId = Number(state.activeForecastResultRequestId || 0) + 1;
-  return state.activeForecastResultRequestId;
 }
 
 function nextCompareRequestId() {
@@ -6446,8 +6441,11 @@ function renderForecastResultDetail(data = state.forecastResultData) {
 
 async function loadForecastResultDetail(path) {
   const targetPath = String(path || "").trim();
-  if (!targetPath) return;
-  const requestId = nextForecastResultRequestId();
+  if (!targetPath) {
+    forecastResultRequestGuard.cancel();
+    return;
+  }
+  const requestToken = forecastResultRequestGuard.next();
   state.forecastResultRunPath = targetPath;
   state.forecastResultLoadingPath = targetPath;
   state.lastForecastExportPath = "";
@@ -6457,12 +6455,12 @@ async function loadForecastResultDetail(path) {
   setForecastResultButtons({ path: targetPath });
   try {
     const payload = await apiGet(`/api/run?path=${encodeURIComponent(targetPath)}`);
-    if (requestId !== state.activeForecastResultRequestId || !samePath(targetPath, state.forecastResultRunPath)) return;
+    if (!forecastResultRequestGuard.isActive(requestToken) || !samePath(targetPath, state.forecastResultRunPath)) return;
     state.forecastResultData = payload.data;
     state.forecastResultLoadingPath = "";
     renderForecastResultDetail(payload.data);
   } catch (err) {
-    if (requestId !== state.activeForecastResultRequestId) return;
+    if (!forecastResultRequestGuard.isActive(requestToken)) return;
     state.forecastResultData = null;
     state.forecastResultLoadingPath = "";
     if (window.HBVStudioForecastView) {
@@ -6477,6 +6475,7 @@ function renderForecastResultPanel() {
   if (!select) return;
   const runs = forecastResultRuns();
   if (!runs.length) {
+    forecastResultRequestGuard.cancel();
     state.forecastResultRunPath = "";
     state.forecastResultData = null;
     state.forecastResultLoadingPath = "";
