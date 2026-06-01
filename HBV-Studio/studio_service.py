@@ -108,6 +108,7 @@ from services.meteo_import import meteo_import_worker_run as build_meteo_import_
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
+from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
@@ -125,7 +126,9 @@ from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
+from services.runs import metadata_boundary_enabled as build_metadata_boundary_enabled
 from services.runs import normalize_result_title as build_normalize_result_title
+from services.runs import normalize_metadata_object_type as build_normalize_metadata_object_type
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
 from services.runs import rename_run as build_rename_run
@@ -133,6 +136,7 @@ from services.runs import restore_forward_boundary_series as build_restore_forwa
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
+from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
@@ -2677,43 +2681,19 @@ def _resolve_source_run_reference(source_run_path_raw: Any, source_run_name_raw:
 
 
 def _normalize_metadata_object_type(value: Any) -> str:
-    object_type = str(value or "").strip().lower()
-    if object_type == "regression_test":
-        return OBJECT_REGRESSION
-    if object_type in {OBJECT_REGRESSION, OBJECT_INTERBASIN, OBJECT_FULL_UPSTREAM}:
-        return object_type
-    return ""
+    return build_normalize_metadata_object_type(value)
 
 
 def _metadata_boundary_enabled(metadata: dict[str, Any]) -> bool | None:
-    optional_modules = dict(metadata.get("optional_modules", {}) or {})
-    boundary_module = dict(optional_modules.get("boundary_inflow", {}) or {})
-    boundary_meta = dict(metadata.get("boundary_condition", {}) or {})
-    for value in (boundary_module.get("enabled"), boundary_meta.get("enabled")):
-        if isinstance(value, bool):
-            return value
-    boundary_file = str(
-        boundary_meta.get("boundary_inflow_file")
-        or boundary_module.get("file")
-        or ""
-    ).strip()
-    if boundary_file:
-        return True
-    return None
+    return build_metadata_boundary_enabled(metadata)
+
+
+def _run_metadata_object_type_context() -> RunMetadataObjectTypeContext:
+    return RunMetadataObjectTypeContext(detect_object_type=detect_object_type)
 
 
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
-    object_type = _normalize_metadata_object_type(metadata.get("project_object_type"))
-    if object_type:
-        return object_type
-    boundary_enabled = _metadata_boundary_enabled(metadata)
-    if boundary_enabled is True:
-        return OBJECT_INTERBASIN
-    if boundary_enabled is False:
-        return OBJECT_FULL_UPSTREAM
-    if config is not None:
-        return detect_object_type(config)
-    return ""
+    return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
 
 def _optimization_stage_payload(value: Any) -> dict[str, Any]:

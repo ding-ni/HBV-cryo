@@ -38,6 +38,9 @@ RUN_EXPORT_FIELD_LABELS = {
     "q_ice_reference_raw": "冰川参考原始融水(m3/s)",
 }
 DEFAULT_RUN_EXPORT_FIELDS = ("q_sim", "q_obs", "q_rain", "q_snow", "q_ice")
+OBJECT_REGRESSION = "regression_validation"
+OBJECT_INTERBASIN = "interbasin_with_boundary"
+OBJECT_FULL_UPSTREAM = "full_upstream_basin"
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,11 @@ class RunSourceReferenceContext:
     replace_placeholders: Callable[..., Any]
     discover_runtime_roots: Callable[[], list[Path]]
     iter_run_parent_dirs: Callable[[Path], list[Path]]
+
+
+@dataclass(frozen=True)
+class RunMetadataObjectTypeContext:
+    detect_object_type: Callable[[dict[str, Any]], str]
 
 
 @dataclass(frozen=True)
@@ -460,6 +468,50 @@ def first_existing_path(candidates: list[Path]) -> Path | None:
         if resolved.exists():
             return resolved
     return fallback
+
+
+def normalize_metadata_object_type(value: Any) -> str:
+    object_type = str(value or "").strip().lower()
+    if object_type == "regression_test":
+        return OBJECT_REGRESSION
+    if object_type in {OBJECT_REGRESSION, OBJECT_INTERBASIN, OBJECT_FULL_UPSTREAM}:
+        return object_type
+    return ""
+
+
+def metadata_boundary_enabled(metadata: dict[str, Any]) -> bool | None:
+    optional_modules = dict(metadata.get("optional_modules", {}) or {})
+    boundary_module = dict(optional_modules.get("boundary_inflow", {}) or {})
+    boundary_meta = dict(metadata.get("boundary_condition", {}) or {})
+    for value in (boundary_module.get("enabled"), boundary_meta.get("enabled")):
+        if isinstance(value, bool):
+            return value
+    boundary_file = str(
+        boundary_meta.get("boundary_inflow_file")
+        or boundary_module.get("file")
+        or ""
+    ).strip()
+    if boundary_file:
+        return True
+    return None
+
+
+def resolve_metadata_object_type(
+    metadata: dict[str, Any],
+    config: dict[str, Any] | None = None,
+    context: RunMetadataObjectTypeContext | None = None,
+) -> str:
+    object_type = normalize_metadata_object_type(metadata.get("project_object_type"))
+    if object_type:
+        return object_type
+    boundary_enabled = metadata_boundary_enabled(metadata)
+    if boundary_enabled is True:
+        return OBJECT_INTERBASIN
+    if boundary_enabled is False:
+        return OBJECT_FULL_UPSTREAM
+    if config is not None and context is not None:
+        return context.detect_object_type(config)
+    return ""
 
 
 def has_parameter_bounds(metadata: dict[str, Any]) -> bool:

@@ -17,6 +17,7 @@ from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
+    RunMetadataObjectTypeContext,
     RunReplayConfigContext,
     RunSourceReferenceContext,
     RunSummaryContext,
@@ -35,7 +36,9 @@ from services.runs import (  # noqa: E402
     is_studio_editable_metadata,
     iter_run_parent_dirs,
     load_run_series_map,
+    metadata_boundary_enabled,
     metadata_initial_state_override,
+    normalize_metadata_object_type,
     normalize_result_title,
     pick_latest_run_path,
     read_sampled_csv_rows,
@@ -43,6 +46,7 @@ from services.runs import (  # noqa: E402
     restore_forward_boundary_series,
     restore_forward_observation_state,
     restore_forward_observed_series,
+    resolve_metadata_object_type,
     resolve_source_run_reference,
     run_csv_date_bounds,
     run_csv_preview,
@@ -57,6 +61,9 @@ from services.runs import (  # noqa: E402
 
 
 class RunIdentityServiceTests(unittest.TestCase):
+    def _metadata_object_type_context(self, detect=None) -> RunMetadataObjectTypeContext:
+        return RunMetadataObjectTypeContext(detect_object_type=detect or (lambda config: ""))
+
     def _source_reference_context(
         self,
         *,
@@ -283,6 +290,40 @@ class RunIdentityServiceTests(unittest.TestCase):
 
         self.assertEqual(resolved, first.resolve(strict=False))
         self.assertIsNone(first_existing_path([]))
+
+    def test_metadata_object_type_rules_normalize_explicit_values(self) -> None:
+        self.assertEqual(normalize_metadata_object_type("regression_test"), "regression_validation")
+        self.assertEqual(normalize_metadata_object_type(" interbasin_with_boundary "), "interbasin_with_boundary")
+        self.assertEqual(normalize_metadata_object_type("full_upstream_basin"), "full_upstream_basin")
+        self.assertEqual(normalize_metadata_object_type("unknown"), "")
+
+    def test_metadata_boundary_enabled_prefers_boolean_flags_then_files(self) -> None:
+        self.assertTrue(metadata_boundary_enabled({"optional_modules": {"boundary_inflow": {"enabled": True}}}))
+        self.assertFalse(metadata_boundary_enabled({"boundary_condition": {"enabled": False, "boundary_inflow_file": "b.csv"}}))
+        self.assertTrue(metadata_boundary_enabled({"optional_modules": {"boundary_inflow": {"file": "b.csv"}}}))
+        self.assertIsNone(metadata_boundary_enabled({}))
+
+    def test_resolve_metadata_object_type_uses_metadata_boundary_and_config(self) -> None:
+        self.assertEqual(
+            resolve_metadata_object_type({"project_object_type": "regression_test"}),
+            "regression_validation",
+        )
+        self.assertEqual(
+            resolve_metadata_object_type({"boundary_condition": {"boundary_inflow_file": "b.csv"}}),
+            "interbasin_with_boundary",
+        )
+        self.assertEqual(
+            resolve_metadata_object_type({"optional_modules": {"boundary_inflow": {"enabled": False}}}),
+            "full_upstream_basin",
+        )
+        self.assertEqual(
+            resolve_metadata_object_type(
+                {},
+                {"dummy": True},
+                self._metadata_object_type_context(lambda config: "full_upstream_basin"),
+            ),
+            "full_upstream_basin",
+        )
 
     def test_run_parameter_context_summarizes_source_result_for_forecast(self) -> None:
         run_dir = Path("C:/runs/source_run")
