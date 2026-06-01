@@ -46,6 +46,7 @@ from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
+from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
     WorkspaceCatalogContext,
@@ -8168,26 +8169,7 @@ def dashboard_payload() -> dict[str, Any]:
 
 
 def cdsapi_status() -> dict[str, Any]:
-    home_dir = Path.home().resolve(strict=False)
-    config_path = (home_dir / ".cdsapirc").resolve(strict=False)
-    exists = config_path.exists() and config_path.is_file()
-    looks_valid = False
-    readable = False
-    if exists:
-        try:
-            text = config_path.read_text(encoding="utf-8", errors="ignore")
-            lower = text.lower()
-            readable = True
-            looks_valid = ("url:" in lower) and ("key:" in lower)
-        except Exception:
-            readable = False
-    return {
-        "exists": bool(exists),
-        "readable": bool(readable),
-        "looks_valid": bool(looks_valid),
-        "path": str(config_path),
-        "home_dir": str(home_dir),
-    }
+    return build_cdsapi_status()
 
 
 # ---------------------------------------------------------------------------
