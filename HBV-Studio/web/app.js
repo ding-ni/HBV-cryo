@@ -214,6 +214,7 @@ const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
 const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted_multi_criteria"]);
 const runDetailRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 const cdsApiStatusRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
+const forecastInputCheckRequestGuard = window.HBVStudioApiClient.createLatestRequestGuard();
 
 // --------------- state ---------------
 
@@ -262,7 +263,6 @@ const state = {
   forecastResultData: null,
   forecastResultLoadingPath: "",
   activeForecastResultRequestId: 0,
-  activeForecastInputCheckRequestId: 0,
   forecastInputCheckTimer: null,
   lastForecastExportPath: "",
   activeCompareRequestId: 0,
@@ -6329,19 +6329,20 @@ function renderForecastInputSummary(check = null, stateLabel = "") {
 async function refreshForecastInputCheck({ loading = false } = {}) {
   const run = selectedForecastRun();
   if (!run?.path) {
+    forecastInputCheckRequestGuard.cancel();
     renderForecastInputSummary(null);
     return null;
   }
-  const requestId = ++state.activeForecastInputCheckRequestId;
+  const requestToken = forecastInputCheckRequestGuard.next();
   if (loading) renderForecastInputSummary(null, "loading");
   try {
     const response = await apiPost("/api/forecast/input-check", forecastInputPayload(run));
-    if (requestId !== state.activeForecastInputCheckRequestId) return;
+    if (!forecastInputCheckRequestGuard.isActive(requestToken)) return;
     const check = response.data || null;
     renderForecastInputSummary(check);
     return check;
   } catch (err) {
-    if (requestId !== state.activeForecastInputCheckRequestId) return;
+    if (!forecastInputCheckRequestGuard.isActive(requestToken)) return;
     const check = {
       status: "fail",
       headline: "预报气象输入检查失败。",
