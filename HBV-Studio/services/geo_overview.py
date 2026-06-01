@@ -801,7 +801,10 @@ def workspace_dem_png(config_path_raw: str, context: GeoOverviewContext, style: 
             out_width = max(2, int(round(src.width * scale)))
             out_height = max(2, int(round(src.height * scale)))
             arr = src.read(1, out_shape=(out_height, out_width), masked=True)
-            values = np.asarray(arr.filled(np.nan) if hasattr(arr, "filled") else arr, dtype="float64")
+            if np.ma.isMaskedArray(arr):
+                values = np.asarray(arr.astype("float64").filled(np.nan), dtype="float64")
+            else:
+                values = np.asarray(arr, dtype="float64")
             body = _dem_array_to_png(values, style=clean_style)
             return {
                 "content_type": "image/png",
