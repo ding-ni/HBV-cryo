@@ -306,6 +306,7 @@ def source_files_latest_mtime() -> tuple[float, str]:
         GUI_ROOT / "web" / "js" / "geoPreview.js",
         GUI_ROOT / "web" / "js" / "parameterLibrary.js",
         GUI_ROOT / "web" / "js" / "stationPrecip.js",
+        GUI_ROOT / "web" / "js" / "taskView.js",
         GUI_ROOT / "web" / "js" / "workspaceLayout.js",
     ]
     services_dir = GUI_ROOT / "services"

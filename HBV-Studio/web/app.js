@@ -1620,75 +1620,27 @@ function goToWizardTarget(step, selector = "") {
 }
 
 function taskStageLabel(stage) {
-  const normalized = String(stage || "").toLowerCase();
-  return ({
-    mc: "快速筛选",
-    global: "精细搜索",
-    refine: "局部精修",
-  })[normalized] || (normalized ? `未知阶段（${normalized}）` : "未知阶段");
+  return window.HBVStudioTaskView?.taskStageLabel(stage) || "未知阶段";
 }
 
 function taskStatusLabel(status) {
-  return ({
-    running: "运行中",
-    completed: "已完成",
-    failed: "失败",
-    pending: "等待中",
-  })[String(status || "").toLowerCase()] || String(status || "未知");
+  return window.HBVStudioTaskView?.taskStatusLabel(status) || String(status || "未知");
 }
 
 function taskStatusClass(status) {
-  return status === "completed" ? "status-ok" : status === "failed" ? "status-fail" : "status-warn";
+  return window.HBVStudioTaskView?.taskStatusClass(status) || "status-warn";
 }
 
 function taskTypeLabel(taskType) {
-  return ({
-    calibration: "率定任务",
-    data_prep: "数据准备",
-    bootstrap: "基础地理处理",
-    meteo_import: "气象导入",
-    manual_start: "手调起点",
-    forward_sim: "保存并重算",
-    forecast_restart: "连续状态预报",
-    self_check: "系统自检",
-    sync: "模板同步",
-  })[String(taskType || "").toLowerCase()] || "任务";
+  return window.HBVStudioTaskView?.taskTypeLabel(taskType) || "任务";
 }
 
 function methodLabel(method) {
-  return ({
-    manual_adjustment: "手调后重算",
-    manual_start: "手调起点",
-    mc_screen_de: "快速筛选 + 精细搜索",
-    de: "精细搜索（差分进化）",
-    mc_only: "仅快速筛选",
-  })[String(method || "").toLowerCase()] || String(method || "未设置");
+  return window.HBVStudioTaskView?.methodLabel(method) || String(method || "未设置");
 }
 
 function optimizationMethodLabel(optimization) {
-  const methodKey = String(optimization?.method || "").trim().toLowerCase();
-  const refine = optimization?.stage_stats?.refine || {};
-  const refineRequested = Boolean(optimization?.refine_requested || optimization?.refine_enabled || refine?.requested);
-  const refineExecuted = Boolean(optimization?.refine_executed || refine?.executed);
-  const refineSkipped = Boolean(String(refine?.skipped_reason || "").trim());
-  const polishEnabled = Boolean(optimization?.polish);
-  if (methodKey === "de") {
-    if (refineExecuted) return "精细搜索 + 局部精修";
-    if (refineRequested && refineSkipped) return "精细搜索（局部精修已跳过）";
-    if (refineRequested) return "精细搜索（局部精修未产出有效结果）";
-    if (polishEnabled) return "精细搜索（含末端精修）";
-    return "精细搜索（差分进化）";
-  }
-  if (methodKey === "mc_screen_de") {
-    if (refineExecuted) return "快速筛选 + 精细搜索 + 局部精修";
-    if (refineRequested && refineSkipped) return "快速筛选 + 精细搜索（局部精修已跳过）";
-    if (refineRequested) return "快速筛选 + 精细搜索（局部精修未产出有效结果）";
-    if (polishEnabled) return "快速筛选 + 精细搜索（含末端精修）";
-    return "快速筛选 + 精细搜索";
-  }
-  if (methodKey === "mc_only") return "仅快速筛选";
-  const explicit = String(optimization?.method_label || "").trim();
-  return explicit || methodLabel(methodKey);
+  return window.HBVStudioTaskView?.optimizationMethodLabel(optimization) || methodLabel(optimization?.method);
 }
 
 function objectiveLabel(value) {
@@ -2246,457 +2198,50 @@ function clearBoundaryPreview() {
   if (host) host.innerHTML = "";
 }
 
-function taskLabelParts(task) {
-  return String(task?.label || "").split("|").map(part => part.trim()).filter(Boolean);
-}
-
 function taskPrimaryTitle(task) {
-  const parts = taskLabelParts(task);
-  if (task?.task_type === "data_prep") return task.step_title || parts[1] || parts[0] || task.label || "数据准备";
-  return parts[0] || task.label || taskTypeLabel(task?.task_type);
+  return window.HBVStudioTaskView?.taskPrimaryTitle(task) || taskTypeLabel(task?.task_type);
 }
 
 function taskContextSummary(task) {
-  const parts = taskLabelParts(task);
-  const bits = [];
-  const workspace = task?.config_path ? workspaceLabelByPath(task.config_path) : "";
-  if (workspace && workspace !== "未命名工作区") {
-    bits.push(`工作区：${workspace}`);
-  }
-  if (task?.task_type === "forward_sim") {
-    const sourceRunPath = String(task?.run_path || "").trim();
-    const newRunPath = String(task?.result?.run_path || "").trim();
-    const sourceLabel = parts[1] || shortPath(sourceRunPath) || "";
-    if (sourceLabel) {
-      bits.push(`源结果：${sourceLabel}`);
-    }
-    if (newRunPath && (!sourceRunPath || !samePath(newRunPath, sourceRunPath))) {
-      bits.push(`新结果：${shortPath(newRunPath)}`);
-    }
-  } else if (parts.length > 1) {
-    bits.push(parts.slice(1).join(" · "));
-  }
-  if (task?.profile) {
-    bits.push(`模式：${profileLabel(task.profile)}`);
-  }
-  return bits.join(" · ");
-}
-
-function parseTaskTagLine(line) {
-  const match = String(line || "").trim().match(/^\[([^\]]+)\]\s*(.*)$/);
-  return match ? { tag: match[1].trim(), message: match[2].trim() } : null;
+  return window.HBVStudioTaskView?.taskContextSummary(task, {
+    workspaceLabelByPath,
+    shortPath,
+    samePath,
+    profileLabel,
+  }) || "";
 }
 
 function cleanTaskLogMessage(line) {
-  const tagged = parseTaskTagLine(line);
-  return tagged ? tagged.message : String(line || "").trim();
-}
-
-function summarizeTaskLogMessage(line) {
-  const tagged = parseTaskTagLine(line);
-  let message = tagged ? tagged.message : String(line || "").trim();
-  if (tagged && ["缓存写入", "缓存命中", "扫描", "导入", "校验"].includes(tagged.tag)) {
-    message = `${tagged.tag}：${message}`;
-  }
-  message = message.replace(/(->\s*)([A-Za-z]:[\\/][^\s]+)$/i, (_, prefix, rawPath) => `${prefix}${shortPath(rawPath)}`);
-  return message;
+  return window.HBVStudioTaskView?.cleanTaskLogMessage(line) || String(line || "").trim();
 }
 
 function taskLastMeaningfulLog(task) {
-  const lines = (task?.output || []).map(line => String(line || "").trim()).filter(Boolean);
-  return lines.length ? summarizeTaskLogMessage(lines[lines.length - 1]) : "";
-}
-
-function normalizeWorkflowStepTitle(text) {
-  return String(text || "")
-    .replace(/\s+返回码.*$/, "")
-    .replace(/\s+已完成$/, "")
-    .replace(/\s+\(手动步骤\).*$/, "")
-    .trim();
-}
-
-function workflowTaskSnapshot(task) {
-  const titles = Array.isArray(task?.step_titles) && task.step_titles.length
-    ? task.step_titles.filter(Boolean)
-    : (task?.step_title ? [task.step_title] : []);
-  const statusMap = new Map(titles.map(title => [title, "pending"]));
-  const runningLabels = new Set();
-  let blockedMessage = "";
-  let failedMessage = "";
-  let stageMessage = String(task?.ui_progress?.stage || "").trim();
-
-  (task?.output || []).forEach(line => {
-    const tagged = parseTaskTagLine(line);
-    if (!tagged) return;
-    const title = normalizeWorkflowStepTitle(tagged.message);
-    if (tagged.tag === "运行") {
-      runningLabels.add(title);
-      if (statusMap.has(title)) statusMap.set(title, "running");
-    } else if (tagged.tag === "完成") {
-      runningLabels.delete(title);
-      if (statusMap.has(title)) statusMap.set(title, "completed");
-    } else if (tagged.tag === "跳过") {
-      runningLabels.delete(title);
-      if (statusMap.has(title)) statusMap.set(title, "skipped");
-    } else if (tagged.tag === "失败") {
-      failedMessage = tagged.message;
-      if (statusMap.has(title)) statusMap.set(title, "failed");
-    } else if (tagged.tag === "阻塞") {
-      blockedMessage = tagged.message;
-    } else if (tagged.tag === "并行" || tagged.tag === "阶段") {
-      stageMessage = tagged.message;
-    }
-  });
-
-  if (task?.status === "completed") {
-    [...statusMap.keys()].forEach(title => {
-      if (statusMap.get(title) === "pending" || statusMap.get(title) === "running") {
-        statusMap.set(title, "completed");
-      }
-    });
-  } else if (task?.status === "failed") {
-    runningLabels.forEach(title => {
-      if (statusMap.has(title) && statusMap.get(title) !== "completed") {
-        statusMap.set(title, "failed");
-      }
-    });
-  }
-
-  const entries = [...statusMap.entries()].map(([label, status]) => ({ label, status }));
-  const finished = entries.filter(item => item.status === "completed" || item.status === "skipped").length;
-  return {
-    entries,
-    finished,
-    total: entries.length || Number(task?.ui_progress?.total || 0),
-    runningLabels: [...runningLabels],
-    blockedMessage,
-    failedMessage,
-    stageMessage,
-  };
-}
-
-function calibrationStageSequence(task) {
-  const method = String(task?.method || "").trim().toLowerCase();
-  if (method === "mc_only") return ["mc"];
-  const stages = method === "mc_screen_de" ? ["mc", "global"] : ["global"];
-  if (Number(task?.refine_maxiter || 0) > 0) stages.push("refine");
-  return stages;
-}
-
-function calibrationTaskStageEntries(task) {
-  const stages = calibrationStageSequence(task);
-  if (!stages.length) return [];
-  const progressStages = task?.progress?.stages || {};
-  const optimization = task?.result?.optimization || {};
-  const resultStages = optimization?.stage_stats || {};
-  const selectedResultStage = String(optimization?.selected_result_stage || "").trim().toLowerCase();
-  const currentStage = String(task?.progress?.stage || stages[0]).trim().toLowerCase() || stages[0];
-  const currentIndex = Math.max(0, stages.indexOf(currentStage));
-  return stages.map((stage, idx) => {
-    const stageInfo = progressStages?.[stage];
-    const resultStage = resultStages?.[stage];
-    let status = "pending";
-    if (task?.status === "completed") {
-      if (resultStage && typeof resultStage === "object") {
-        if (resultStage.executed || resultStage.selected || selectedResultStage === stage || stageInfo) status = "completed";
-        else if (resultStage.requested === false || resultStage.skipped_reason) status = "skipped";
-        else if (idx > currentIndex) status = "skipped";
-        else status = "completed";
-      } else if (stageInfo) status = "completed";
-      else if (idx > currentIndex) status = "skipped";
-      else status = "completed";
-    } else if (task?.status === "failed") {
-      status = idx < currentIndex ? "completed" : idx === currentIndex ? "failed" : "pending";
-    } else {
-      status = idx < currentIndex ? "completed" : idx === currentIndex ? "running" : "pending";
-    }
-    return { label: taskStageLabel(stage), status, stage };
-  });
-}
-
-function meteoImportStageEntries(task) {
-  const stageText = String(task?.ui_progress?.stage || "");
-  let phase = 0;
-  if (/完成|校验/.test(stageText)) phase = 2;
-  else if (/导入|复用/.test(stageText)) phase = 1;
-  return ["目录扫描", "文件导入", "导入后检查"].map((label, idx) => {
-    let status = "pending";
-    if (task?.status === "completed") status = "completed";
-    else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
-    else status = idx < phase ? "completed" : idx === phase ? "running" : "pending";
-    return { label, status };
-  });
-}
-
-function forwardSimStageEntries(task) {
-  const stageText = String(task?.ui_progress?.stage || "");
-  let phase = 0;
-  if (/整理结果|完成/.test(stageText)) phase = 4;
-  else if (/写出手调结果|保存/.test(stageText)) phase = 3;
-  else if (/计算|执行前向模拟/.test(stageText)) phase = 2;
-  else if (/加载|命中缓存/.test(stageText)) phase = 1;
-  return ["读取工程配置", "装载模型与驱动", "执行前向模拟", "写出结果目录", "整理结果元数据"].map((label, idx) => {
-    let status = "pending";
-    if (task?.status === "completed") status = "completed";
-    else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
-    else status = idx < phase ? "completed" : idx === phase ? "running" : "pending";
-    return { label, status };
-  });
-}
-
-function manualStartStageEntries(task) {
-  const stageText = String(task?.ui_progress?.stage || "");
-  let phase = 0;
-  if (/整理结果|写出|完成/.test(stageText)) phase = 3;
-  else if (/整理起调参数/.test(stageText)) phase = 2;
-  else if (/加载|命中缓存/.test(stageText)) phase = 1;
-  return ["读取工作区配置", "装载模型与驱动", "整理起调参数", "写出手调起点结果"].map((label, idx) => {
-    let status = "pending";
-    if (task?.status === "completed") status = "completed";
-    else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
-    else status = idx < phase ? "completed" : idx === phase ? "running" : "pending";
-    return { label, status };
-  });
-}
-
-function forecastRestartStageEntries(task) {
-  const stageText = String(task?.ui_progress?.stage || "");
-  let phase = 0;
-  if (/预报完成|完成/.test(stageText)) phase = 12;
-  else if (/生成预报元数据|元数据/.test(stageText)) phase = 11;
-  else if (/写出/.test(stageText)) phase = 10;
-  else if (/执行连续状态预报/.test(stageText)) phase = 9;
-  else if (/整理参数/.test(stageText)) phase = 8;
-  else if (/加载未来气象|加载模型数据|地理数据/.test(stageText)) phase = 7;
-  else if (/归档预报气象|归档/.test(stageText)) phase = 6;
-  else if (/检查预报气象|时间覆盖/.test(stageText)) phase = 5;
-  else if (/检查预报时段|连续性/.test(stageText)) phase = 4;
-  else if (/加载 HBV|加载模型|核心/.test(stageText)) phase = 3;
-  else if (/源结果参数/.test(stageText)) phase = 2;
-  else if (/保存状态|状态快照|源状态/.test(stageText)) phase = 1;
-  return ["读取源结果", "读取起报状态", "读取参数", "加载模型", "检查起报", "检查气象", "归档气象", "加载数据", "整理起报", "执行预报", "写出结果", "生成元数据", "完成"].map((label, idx) => {
-    let status = "pending";
-    if (task?.status === "completed") status = "completed";
-    else if (task?.status === "failed") status = idx < phase ? "completed" : idx === phase ? "failed" : "pending";
-    else status = idx < phase ? "completed" : idx === phase ? "running" : "pending";
-    return { label, status };
-  });
-}
-
-function taskMilestoneEntries(task) {
-  if (task?.task_type === "calibration") return calibrationTaskStageEntries(task);
-  if (task?.task_type === "bootstrap" || task?.task_type === "data_prep") return workflowTaskSnapshot(task).entries;
-  if (task?.task_type === "meteo_import") return meteoImportStageEntries(task);
-  if (task?.task_type === "manual_start") return manualStartStageEntries(task);
-  if (task?.task_type === "forward_sim") return forwardSimStageEntries(task);
-  if (task?.task_type === "forecast_restart") return forecastRestartStageEntries(task);
-  return [];
+  return window.HBVStudioTaskView?.taskLastMeaningfulLog(task, { shortPath }) || "";
 }
 
 function renderTaskMilestones(task) {
-  const entries = taskMilestoneEntries(task);
-  if (!entries.length) return "";
-  return `
-    <div class="task-chip-row">
-      ${entries.map(item => `<span class="task-chip is-${escapeHtml(item.status || "pending")}">${escapeHtml(item.label || "")}</span>`).join("")}
-    </div>
-  `;
-}
-
-function calibrationTaskSummary(task) {
-  const progress = task?.progress;
-  if (task?.status === "completed") {
-    const result = task?.result || {};
-    const optimization = result.optimization || {};
-    const parts = [
-      task?.detected_runs?.length
-        ? `率定完成，已生成 ${task.detected_runs.length} 个结果目录`
-        : "率定已完成",
-    ];
-    const selectedLabel = optimizationResultLabel(optimization);
-    if (selectedLabel) parts.push(`最终采用${selectedLabel}`);
-    if (optimization?.stage_stats?.refine?.requested || optimization?.polish) {
-      parts.push(`局部精修：${optimizationRefineSummary(optimization)}`);
-    }
-    const metricParts = [];
-    if (result?.metrics?.nse_cal !== undefined && result?.metrics?.nse_cal !== null) {
-      metricParts.push(`率定纳什效率系数 ${formatNumber(result.metrics.nse_cal, 4)}`);
-    }
-    if (result?.metrics?.nse_val !== undefined && result?.metrics?.nse_val !== null) {
-      metricParts.push(`验证纳什效率系数 ${formatNumber(result.metrics.nse_val, 4)}`);
-    }
-    if (metricParts.length) parts.push(metricParts.join("，"));
-    return parts.join(" · ");
-  }
-  if (task?.status === "failed") {
-    return taskLastMeaningfulLog(task) || "率定任务失败。";
-  }
-  if (progress) {
-    const stepText = progress.maxiter ? `第 ${progress.gen}/${progress.maxiter} 步` : `第 ${progress.gen || "—"} 步`;
-    const timeText = `已耗时 ${formatDurationSeconds(progress.elapsed_sec)}${progress.eta_sec !== null && progress.eta_sec !== undefined ? `，预计剩余 ${formatDurationSeconds(progress.eta_sec)}` : ""}`;
-    return `${taskStageLabel(progress.stage || "global")} · ${stepText} · 率定纳什效率系数 ${formatNumber(progress.nse_cal, 4)}，验证纳什效率系数 ${formatNumber(progress.nse_val, 4)}，综合评分值 ${formatNumber(progress.obj, 4)} · ${timeText}`;
-  }
-  return taskLastMeaningfulLog(task) || task?.ui_progress?.label || task?.ui_progress?.stage || "率定任务已启动，正在加载模型与驱动，首个进度点尚未写出。";
-}
-
-function workflowTaskSummary(task) {
-  const snapshot = workflowTaskSnapshot(task);
-  if (task?.status === "failed") {
-    return taskLastMeaningfulLog(task) || snapshot.failedMessage || "任务执行失败。";
-  }
-  if (task?.status === "completed") {
-    return snapshot.total ? `已完成 ${snapshot.finished || snapshot.total}/${snapshot.total} 个步骤。` : "任务已完成。";
-  }
-  if (snapshot.blockedMessage) return snapshot.blockedMessage;
-  if (snapshot.runningLabels.length > 1) {
-    return `正在并行执行 ${snapshot.runningLabels.length} 个步骤，已完成 ${snapshot.finished}/${snapshot.total || "—"}。`;
-  }
-  if (snapshot.runningLabels[0]) {
-    return `正在执行 ${snapshot.runningLabels[0]}，已完成 ${snapshot.finished}/${snapshot.total || "—"}。`;
-  }
-  if (task?.ui_progress?.label) {
-    return `${task.ui_progress.stage || "正在执行"}：${task.ui_progress.label}`;
-  }
-  return taskLastMeaningfulLog(task) || "任务已创建，正在等待脚本输出。";
-}
-
-function meteoImportTaskSummary(task) {
-  const progress = task?.ui_progress || {};
-  if (task?.status === "running") {
-    const lastLog = taskLastMeaningfulLog(task);
-    const total = Number(progress.total || 0);
-    const current = Number(progress.current || 0);
-    const label = progress.label || "导入";
-    const itemCurrent = Number(progress.item_current || 0);
-    const itemTotal = Number(progress.item_total || 0);
-    const ts = progress.timestamp ? `，当前时间 ${progress.timestamp}` : "";
-    if (lastLog) {
-      return `${progress.stage || "正在导入"}：${lastLog}`;
-    }
-    return total > 0
-      ? `${progress.stage || "正在导入"}：总进度 ${current}/${total}；${label} ${itemCurrent}/${itemTotal}${ts}`
-      : (progress.stage || "正在准备导入，请稍候...");
-  }
-  if (task?.status === "completed") {
-    const result = task?.result || {};
-    const issues = [...(result.validation_errors || []), ...(result.validation_warnings || [])];
-    const tail = result.validation_ok ? "导入后检查通过。" : `仍需继续检查：${issues.slice(0, 2).join("；") || "请到第 7 步继续检查。"} `;
-    return `已导入降水 ${result.prec_count || 0}、气温 ${result.temp_count || 0}、蒸散 ${result.evap_count || 0} 个文件；${result.aligned ? "网格已一致。" : "已自动裁剪对齐到 DEM 网格。"}${tail}`;
-  }
-  return taskLastMeaningfulLog(task) || "气象导入失败。";
-}
-
-function forwardSimTaskSummary(task) {
-  if (task?.status === "running") {
-    const stage = task?.ui_progress?.stage || "正在保存并重算当前结果。";
-    const lastLog = taskLastMeaningfulLog(task);
-    return lastLog && lastLog !== stage ? `${stage} · ${lastLog}` : stage;
-  }
-  if (task?.status === "completed" && task?.result) {
-    const metrics = task.result.metrics || {};
-    return task.result.run_path
-      ? `手调结果已保存：率定纳什效率系数 ${formatNumber(metrics.nse_cal, 4)}，验证纳什效率系数 ${formatNumber(metrics.nse_val, 4)}。`
-      : `结果重算完成：率定纳什效率系数 ${formatNumber(metrics.nse_cal, 4)}，验证纳什效率系数 ${formatNumber(metrics.nse_val, 4)}。`;
-  }
-  return taskLastMeaningfulLog(task) || "保存并重算失败。";
-}
-
-function manualStartTaskSummary(task) {
-  if (task?.status === "running") {
-    const stage = task?.ui_progress?.stage || "正在生成手调起点。";
-    const lastLog = taskLastMeaningfulLog(task);
-    if (lastLog && lastLog !== stage) return `${stage} · ${lastLog}`;
-    if (/加载气象与地理数据/.test(stage)) {
-      return `${stage} · 首次运行通常会先写出 prec/temp/evap 缓存，请耐心等待。`;
-    }
-    return stage;
-  }
-  if (task?.status === "completed" && task?.result) {
-    const metrics = task.result.metrics || {};
-    return `手调起点已生成：率定纳什效率系数 ${formatNumber(metrics.nse_cal, 4)}，验证纳什效率系数 ${formatNumber(metrics.nse_val, 4)}。`;
-  }
-  return taskLastMeaningfulLog(task) || "手调起点生成失败。";
-}
-
-function forecastRestartTaskSummary(task) {
-  if (task?.status === "running") {
-    const stage = task?.ui_progress?.stage || "正在执行连续状态预报。";
-    const lastLog = taskLastMeaningfulLog(task);
-    return lastLog && lastLog !== stage ? `${stage} · ${lastLog}` : stage;
-  }
-  if (task?.status === "completed" && task?.result) {
-    const result = task.result || {};
-    const meta = result.metadata?.forecast_result || {};
-    const range = meta.forecast_start && meta.forecast_end ? `${meta.forecast_start} 至 ${meta.forecast_end}` : "未来时段";
-    return result.run_path ? `连续状态预报已生成：${range}。` : "连续状态预报已完成。";
-  }
-  return taskLastMeaningfulLog(task) || "连续状态预报失败。";
-}
-
-function selfCheckTaskSummary(task) {
-  if (task?.status === "running") {
-    return task?.ui_progress?.stage || "正在检查本地环境、脚本与关键依赖。";
-  }
-  if (task?.status === "completed") return "系统自检完成。";
-  return taskLastMeaningfulLog(task) || "系统自检失败。";
+  return window.HBVStudioTaskView?.renderTaskMilestones(task, { escapeHtml }) || "";
 }
 
 function taskSummaryLine(task) {
-  if (task?.task_type === "calibration") return calibrationTaskSummary(task);
-  if (task?.task_type === "bootstrap" || task?.task_type === "data_prep") return workflowTaskSummary(task);
-  if (task?.task_type === "meteo_import") return meteoImportTaskSummary(task);
-  if (task?.task_type === "manual_start") return manualStartTaskSummary(task);
-  if (task?.task_type === "forward_sim") return forwardSimTaskSummary(task);
-  if (task?.task_type === "forecast_restart") return forecastRestartTaskSummary(task);
-  if (task?.task_type === "self_check") return selfCheckTaskSummary(task);
-  if (task?.status === "completed") return "任务已完成。";
-  if (task?.status === "failed") return taskLastMeaningfulLog(task) || "任务失败。";
-  return taskLastMeaningfulLog(task) || "任务已创建，等待输出。";
+  return window.HBVStudioTaskView?.taskSummaryLine(task, {
+    shortPath,
+    formatNumber,
+    formatDurationSeconds,
+    optimizationResultLabel,
+    optimizationRefineSummary,
+  }) || "";
 }
 
 function renderTaskActions(task) {
-  const buttons = [];
-  if (task?.config_path && !["calibration", "forward_sim"].includes(String(task?.task_type || ""))) {
-    buttons.push(`<button class="ghost-button" data-task-open-workspace="${escapeHtml(task.config_path)}">查看向导</button>`);
-  }
-  if (task?.task_type === "forward_sim") {
-    const sourceRunPath = String(task?.run_path || "").trim();
-    const newRunPath = String(task?.result?.run_path || "").trim();
-    const hasDistinctNewRun = Boolean(newRunPath && sourceRunPath && !samePath(newRunPath, sourceRunPath));
-    const primaryRunPath = newRunPath || sourceRunPath;
-    if (primaryRunPath) {
-      buttons.push(`<button class="ghost-button" data-task-open-result="${escapeHtml(primaryRunPath)}">${hasDistinctNewRun ? "查看新结果" : "查看结果"}</button>`);
-      buttons.push(`<button class="ghost-button" data-task-open-run-dir="${escapeHtml(primaryRunPath)}">${hasDistinctNewRun ? "打开新结果目录" : "打开结果目录"}</button>`);
-    }
-    if (hasDistinctNewRun) {
-      buttons.push(`<button class="ghost-button" data-task-open-result="${escapeHtml(sourceRunPath)}">查看源结果</button>`);
-      buttons.push(`<button class="ghost-button" data-task-open-run-dir="${escapeHtml(sourceRunPath)}">打开源结果目录</button>`);
-    }
-  } else {
-    const runPath = task?.result?.run_path || task?.detected_runs?.[0] || task?.run_path || "";
-    if (runPath) {
-      buttons.push(`<button class="ghost-button" data-task-open-result="${escapeHtml(runPath)}">查看结果</button>`);
-      buttons.push(`<button class="ghost-button" data-task-open-run-dir="${escapeHtml(runPath)}">打开结果目录</button>`);
-    }
-  }
-  return buttons.length ? `<div class="workspace-card-actions task-actions">${buttons.join("")}</div>` : "";
+  return window.HBVStudioTaskView?.renderTaskActions(task, { escapeHtml, samePath }) || "";
 }
 
 function taskDebugDetails(task, { lines = 80 } = {}) {
-  const output = (task?.output || []);
-  if (!output.length) return "";
-  const shownLines = output.slice(-lines);
-  const rememberedOpen = Boolean(state.taskDebugOpen?.[task.id]);
-  const openAttr = (task?.status === "failed" || rememberedOpen) ? " open" : "";
-  return `
-    <details class="task-debug-details" data-task-debug-id="${escapeHtml(task.id)}"${openAttr}>
-      <summary class="task-debug-summary">运行日志（最近 ${shownLines.length} 行）</summary>
-      <div class="task-debug-actions">
-        <button class="ghost-button" data-copy-task-log="${escapeHtml(task.id)}">复制日志</button>
-      </div>
-      <pre class="task-log" data-log-key="task:${escapeHtml(task.id)}" data-log-default-stick-bottom="${task?.status === "running" ? "1" : "0"}" tabindex="0">${escapeHtml(shownLines.join("\n"))}</pre>
-    </details>
-  `;
+  return window.HBVStudioTaskView?.taskDebugDetails(task, { lines }, {
+    escapeHtml,
+    taskDebugOpen: state.taskDebugOpen,
+  }) || "";
 }
 
 function dataPathAlias(path, fallback = "—") {
