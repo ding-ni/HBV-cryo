@@ -15,6 +15,7 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
+    RunDiscoveryContext,
     RunReplayConfigContext,
     RunSummaryContext,
     apply_run_replay_config_overrides,
@@ -22,8 +23,11 @@ from services.runs import (  # noqa: E402
     build_calibration_task_result,
     capture_forward_observation_state,
     default_run_export_fields,
+    discover_run_entries,
+    discover_runtime_roots,
     display_run_title,
     has_custom_result_title,
+    iter_run_parent_dirs,
     load_run_series_map,
     metadata_initial_state_override,
     normalize_result_title,
@@ -35,6 +39,7 @@ from services.runs import (  # noqa: E402
     run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
+    snapshot_run_paths,
     source_run_meta,
 )
 
@@ -48,6 +53,58 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(run_kind_from_metadata({}), "legacy")
         self.assertEqual(run_kind_label("manual_result"), "手调结果")
         self.assertEqual(run_kind_label("unknown"), "结果")
+
+    def test_run_discovery_finds_runtime_workspace_and_complete_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_root = root / "runtime"
+            workspace_root = runtime_root / "workspace_a"
+            direct_run = workspace_root / "results" / "runs" / "run_a"
+            nested_run = workspace_root / "results" / "nested" / "runs" / "run_b"
+            incomplete_run = workspace_root / "results" / "runs" / "missing_simulation"
+            for run_dir in (direct_run, nested_run):
+                run_dir.mkdir(parents=True)
+                (run_dir / "metadata.json").write_text("{}", encoding="utf-8")
+                (run_dir / "simulation.csv").write_text("date,q_sim\n2026-06-01,1\n", encoding="utf-8")
+            incomplete_run.mkdir(parents=True)
+            (incomplete_run / "metadata.json").write_text("{}", encoding="utf-8")
+
+            def workspace_path_candidates(base: Path, zh_names: tuple[str, ...], en_names: tuple[str, ...]) -> list[Path]:
+                return [Path(base) / name for name in (*zh_names, *en_names)]
+
+            def safe_iterdir(path: Path) -> list[Path]:
+                try:
+                    return sorted(Path(path).iterdir(), key=lambda item: item.name)
+                except (OSError, FileNotFoundError):
+                    return []
+
+            context = RunDiscoveryContext(
+                project_runtime_dir=runtime_root,
+                list_workspaces=lambda: [
+                    {"workspace_root": str(workspace_root)},
+                    {"workspace_root": str(workspace_root)},
+                    {"workspace_root": str(root / "missing")},
+                ],
+                workspace_path_candidates=workspace_path_candidates,
+                safe_iterdir=safe_iterdir,
+            )
+
+            roots = discover_runtime_roots(context)
+            parents = iter_run_parent_dirs(workspace_root, context)
+            entries = discover_run_entries(context)
+
+        self.assertEqual(roots, [runtime_root.resolve(), workspace_root.resolve()])
+        self.assertEqual({path.name for path in parents}, {"runs"})
+        self.assertEqual({path.parent.name for path in parents}, {"results", "nested"})
+        self.assertEqual({path.name for _, path in entries}, {"run_a", "run_b"})
+        self.assertNotIn("missing_simulation", {path.name for _, path in entries})
+        self.assertTrue(all(len(signature) == 5 for signature, _ in entries))
+
+    def test_snapshot_run_paths_collects_list_run_paths(self) -> None:
+        self.assertEqual(
+            snapshot_run_paths(lambda: [{"path": "runs/a"}, {"path": "runs/b"}]),
+            {"runs/a", "runs/b"},
+        )
 
     def test_result_titles_distinguish_custom_names_from_system_names(self) -> None:
         run_dir = Path("C:/runs/run_20260602_100000")

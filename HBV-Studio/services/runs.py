@@ -47,6 +47,14 @@ class RunListContext:
 
 
 @dataclass(frozen=True)
+class RunDiscoveryContext:
+    project_runtime_dir: Path
+    list_workspaces: Callable[[], list[dict[str, Any]]]
+    workspace_path_candidates: Callable[..., list[Path]]
+    safe_iterdir: Callable[[Path], list[Path]]
+
+
+@dataclass(frozen=True)
 class RunSummaryContext:
     to_display_path: Callable[[Path], str]
     is_studio_editable_metadata: Callable[[dict[str, Any], Path | None], bool]
@@ -111,6 +119,134 @@ class RunCalibrationTaskContext:
 _RUN_LIST_CACHE_LOCK = threading.Lock()
 _RUN_LIST_CACHE_SIGNATURE: tuple[tuple[Any, ...], ...] | None = None
 _RUN_LIST_CACHE_ITEMS: list[dict[str, Any]] = []
+
+
+def discover_runtime_roots(context: RunDiscoveryContext) -> list[Path]:
+    roots: list[Path] = []
+    if context.project_runtime_dir.exists():
+        roots.append(context.project_runtime_dir.resolve())
+    for workspace in context.list_workspaces():
+        runtime_root = workspace.get("workspace_root")
+        if runtime_root:
+            try:
+                path = Path(runtime_root).resolve()
+                if path.exists():
+                    roots.append(path)
+            except Exception:
+                pass
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return unique
+
+
+def iter_run_parent_dirs(root_dir: Path, context: RunDiscoveryContext) -> list[Path]:
+    workspace_dirs: list[Path] = []
+    direct_results_roots = [
+        path for path in context.workspace_path_candidates(root_dir, ("结果",), ("results",))
+        if path.exists()
+    ]
+    if direct_results_roots:
+        workspace_dirs.append(root_dir.resolve())
+    for child in context.safe_iterdir(root_dir):
+        try:
+            if not child.is_dir():
+                continue
+            child_results_roots = [
+                path for path in context.workspace_path_candidates(child, ("结果",), ("results",))
+                if path.exists()
+            ]
+            if not child_results_roots:
+                continue
+            workspace_dirs.append(child.resolve())
+        except (PermissionError, OSError):
+            continue
+
+    parents: list[Path] = []
+    for workspace_dir in workspace_dirs:
+        results_roots = [
+            path for path in context.workspace_path_candidates(workspace_dir, ("结果",), ("results",))
+            if path.exists()
+        ]
+        for results_root in results_roots:
+            direct_runs_dirs = [
+                path for path in context.workspace_path_candidates(results_root, ("运行记录",), ("runs",))
+                if path.exists()
+            ]
+            for direct_runs_dir in direct_runs_dirs:
+                parents.append(direct_runs_dir.resolve())
+            for child in context.safe_iterdir(results_root):
+                try:
+                    if not child.is_dir():
+                        continue
+                except (PermissionError, OSError):
+                    continue
+                for candidate in context.workspace_path_candidates(child, ("运行记录",), ("runs",)):
+                    try:
+                        if candidate.exists() and candidate.is_dir():
+                            parents.append(candidate.resolve())
+                    except (PermissionError, OSError):
+                        continue
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for parent in parents:
+        key = str(parent).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(parent)
+    return unique
+
+
+def discover_run_entries(context: RunDiscoveryContext) -> list[tuple[tuple[Any, ...], Path]]:
+    entries: list[tuple[tuple[Any, ...], Path]] = []
+    seen: set[str] = set()
+    for root_dir in discover_runtime_roots(context):
+        for runs_dir in iter_run_parent_dirs(root_dir, context):
+            for candidate in context.safe_iterdir(runs_dir):
+                try:
+                    if not candidate.is_dir():
+                        continue
+                    metadata_path = candidate / "metadata.json"
+                    simulation_path = candidate / "simulation.csv"
+                    if not metadata_path.exists() or not simulation_path.exists():
+                        continue
+                    resolved = candidate.resolve()
+                    key = str(resolved).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    run_stat = resolved.stat()
+                    metadata_stat = metadata_path.stat()
+                    simulation_stat = simulation_path.stat()
+                except (FileNotFoundError, PermissionError, OSError):
+                    continue
+                entries.append(
+                    (
+                        (
+                            key,
+                            int(getattr(run_stat, "st_mtime_ns", int(run_stat.st_mtime * 1e9))),
+                            int(getattr(metadata_stat, "st_mtime_ns", int(metadata_stat.st_mtime * 1e9))),
+                            int(getattr(simulation_stat, "st_mtime_ns", int(simulation_stat.st_mtime * 1e9))),
+                            int(simulation_stat.st_size),
+                        ),
+                        resolved,
+                    )
+                )
+    entries.sort(key=lambda item: item[0][0])
+    return entries
+
+
+def iter_run_dirs(context: RunDiscoveryContext) -> list[Path]:
+    return [path for _, path in discover_run_entries(context)]
+
+
+def snapshot_run_paths(list_runs: Callable[[], list[dict[str, Any]]]) -> set[str]:
+    return {item["path"] for item in list_runs()}
 
 
 def run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:

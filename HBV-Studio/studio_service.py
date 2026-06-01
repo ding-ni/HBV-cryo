@@ -107,15 +107,19 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunDetailContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMutationContext
 from services.runs import RunReplayConfigContext, RunSummaryContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
 from services.runs import delete_run as build_delete_run
+from services.runs import discover_run_entries as build_discover_run_entries
+from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import has_custom_result_title as build_has_custom_result_title
+from services.runs import iter_run_dirs as build_iter_run_dirs
+from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
@@ -130,6 +134,7 @@ from services.runs import default_run_export_fields as build_default_run_export_
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import run_time_label as build_run_time_label
+from services.runs import snapshot_run_paths as build_snapshot_run_paths
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
 from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
@@ -5565,128 +5570,29 @@ def find_running_task(task_type: str, config_path_raw: str) -> TaskRecord | None
     return build_find_running_task(task_type, config_path_raw, _task_query_context())
 
 
+def _run_discovery_context() -> RunDiscoveryContext:
+    return RunDiscoveryContext(
+        project_runtime_dir=PROJECT_RUNTIME_DIR,
+        list_workspaces=list_workspaces,
+        workspace_path_candidates=profile_runner.workspace_path_candidates,
+        safe_iterdir=_safe_iterdir,
+    )
+
+
 def discover_runtime_roots() -> list[Path]:
-    roots: list[Path] = []
-    if PROJECT_RUNTIME_DIR.exists():
-        roots.append(PROJECT_RUNTIME_DIR.resolve())
-    for workspace in list_workspaces():
-        runtime_root = workspace.get("workspace_root")
-        if runtime_root:
-            try:
-                path = Path(runtime_root).resolve()
-                if path.exists():
-                    roots.append(path)
-            except Exception:
-                pass
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        key = str(root).lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(root)
-    return unique
+    return build_discover_runtime_roots(_run_discovery_context())
 
 
 def iter_run_parent_dirs(root_dir: Path) -> list[Path]:
-    workspace_dirs: list[Path] = []
-    direct_results_roots = [
-        path for path in profile_runner.workspace_path_candidates(root_dir, ("结果",), ("results",))
-        if path.exists()
-    ]
-    if direct_results_roots:
-        workspace_dirs.append(root_dir.resolve())
-    for child in _safe_iterdir(root_dir):
-        try:
-            if not child.is_dir():
-                continue
-            child_results_roots = [
-                path for path in profile_runner.workspace_path_candidates(child, ("结果",), ("results",))
-                if path.exists()
-            ]
-            if not child_results_roots:
-                continue
-            workspace_dirs.append(child.resolve())
-        except (PermissionError, OSError):
-            continue
-
-    parents: list[Path] = []
-    for workspace_dir in workspace_dirs:
-        results_roots = [
-            path for path in profile_runner.workspace_path_candidates(workspace_dir, ("结果",), ("results",))
-            if path.exists()
-        ]
-        for results_root in results_roots:
-            direct_runs_dirs = [
-                path for path in profile_runner.workspace_path_candidates(results_root, ("运行记录",), ("runs",))
-                if path.exists()
-            ]
-            for direct_runs_dir in direct_runs_dirs:
-                parents.append(direct_runs_dir.resolve())
-            for child in _safe_iterdir(results_root):
-                try:
-                    if not child.is_dir():
-                        continue
-                except (PermissionError, OSError):
-                    continue
-                for candidate in profile_runner.workspace_path_candidates(child, ("运行记录",), ("runs",)):
-                    try:
-                        if candidate.exists() and candidate.is_dir():
-                            parents.append(candidate.resolve())
-                    except (PermissionError, OSError):
-                        continue
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for parent in parents:
-        key = str(parent).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(parent)
-    return unique
+    return build_iter_run_parent_dirs(root_dir, _run_discovery_context())
 
 
 def _discover_run_entries() -> list[tuple[tuple[Any, ...], Path]]:
-    entries: list[tuple[tuple[Any, ...], Path]] = []
-    seen: set[str] = set()
-    for root_dir in discover_runtime_roots():
-        for runs_dir in iter_run_parent_dirs(root_dir):
-            for candidate in _safe_iterdir(runs_dir):
-                try:
-                    if not candidate.is_dir():
-                        continue
-                    metadata_path = candidate / "metadata.json"
-                    simulation_path = candidate / "simulation.csv"
-                    if not metadata_path.exists() or not simulation_path.exists():
-                        continue
-                    resolved = candidate.resolve()
-                    key = str(resolved).lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    run_stat = resolved.stat()
-                    metadata_stat = metadata_path.stat()
-                    simulation_stat = simulation_path.stat()
-                except (FileNotFoundError, PermissionError, OSError):
-                    continue
-                entries.append(
-                    (
-                        (
-                            key,
-                            int(getattr(run_stat, "st_mtime_ns", int(run_stat.st_mtime * 1e9))),
-                            int(getattr(metadata_stat, "st_mtime_ns", int(metadata_stat.st_mtime * 1e9))),
-                            int(getattr(simulation_stat, "st_mtime_ns", int(simulation_stat.st_mtime * 1e9))),
-                            int(simulation_stat.st_size),
-                        ),
-                        resolved,
-                    )
-                )
-    entries.sort(key=lambda item: item[0][0])
-    return entries
+    return build_discover_run_entries(_run_discovery_context())
 
 
 def iter_run_dirs() -> list[Path]:
-    return [path for _, path in _discover_run_entries()]
+    return build_iter_run_dirs(_run_discovery_context())
 
 
 def _run_update_timestamps(run_dir: Path) -> tuple[float, int]:
@@ -5881,7 +5787,7 @@ def _apply_run_replay_config_overrides(config: dict[str, Any], metadata: dict[st
 
 
 def snapshot_run_paths() -> set[str]:
-    return {item["path"] for item in list_runs()}
+    return build_snapshot_run_paths(list_runs)
 
 
 def _calibration_task_context() -> RunCalibrationTaskContext:
