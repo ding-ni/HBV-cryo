@@ -34,6 +34,9 @@ import numpy as np
 import pandas as pd
 
 import profile_runner
+from services.app_lifecycle import AppLifecycleContext
+from services.app_lifecycle import app_quit as build_app_quit
+from services.app_lifecycle import app_window_unload as build_app_window_unload
 from services.api_routes import GET_ROUTE_HANDLERS as GET_API_ROUTE_HANDLERS
 from services.api_routes import POST_ROUTE_HANDLERS as POST_API_ROUTE_HANDLERS
 from services.data_prep import (
@@ -376,6 +379,13 @@ def _health_context() -> HealthContext:
 
 def health_payload() -> dict[str, Any]:
     return build_health_payload(_health_context())
+
+
+def _app_lifecycle_context() -> AppLifecycleContext:
+    return AppLifecycleContext(
+        mark_activity=mark_server_activity,
+        has_running_tasks=has_running_tasks,
+    )
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -10415,15 +10425,17 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "data": open_path_in_explorer(payload)})
 
     def _api_post_app_window_unload(self, payload: dict[str, Any]) -> None:
-        mark_server_activity(unload=True)
-        self.send_json({"ok": True, "data": {"accepted": True}})
+        result = build_app_window_unload(_app_lifecycle_context())
+        self.send_json({"ok": True, "data": result.data}, status=result.status)
 
     def _api_post_app_quit(self, payload: dict[str, Any]) -> None:
-        if has_running_tasks():
-            self.send_error_json("当前仍有运行中的任务，请等待结束后再退出程序。", status=409)
+        result = build_app_quit(_app_lifecycle_context())
+        if not result.ok:
+            self.send_error_json(result.error, status=result.status)
             return
-        self.send_json({"ok": True, "data": {"accepted": True}})
-        request_server_shutdown(self.server, "[HBV-Studio] 收到退出请求，正在关闭本地服务。", delay_sec=0.2)
+        self.send_json({"ok": True, "data": result.data}, status=result.status)
+        if result.shutdown_message:
+            request_server_shutdown(self.server, result.shutdown_message, delay_sec=result.shutdown_delay_sec)
 
     def serve_static(self, raw_path: str) -> None:
         request_path = raw_path or "/"
