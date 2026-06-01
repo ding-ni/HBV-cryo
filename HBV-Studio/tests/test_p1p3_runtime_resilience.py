@@ -155,6 +155,21 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(svc.StudioHandler.GET_ROUTE_HANDLERS, api_routes.route_handlers("GET"))
         self.assertEqual(svc.StudioHandler.POST_ROUTE_HANDLERS, api_routes.route_handlers("POST"))
 
+    def test_api_route_dispatcher_maps_handlers_and_errors(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+        calls: list[tuple[str, object, int | None]] = []
+        handler.send_error_json = lambda message, status=400: calls.append(("error", message, status)) or True
+        handler._api_get_probe = lambda argument: calls.append(("probe", argument, None))
+        handler._api_get_bad_value = lambda argument: (_ for _ in ()).throw(ValueError("bad input"))
+
+        handler._dispatch_api_route({"/api/probe": "_api_get_probe"}, "/api/probe", {"a": ["1"]})
+        handler._dispatch_api_route({}, "/api/missing", {})
+        handler._dispatch_api_route({"/api/bad": "_api_get_bad_value"}, "/api/bad", {})
+
+        self.assertEqual(calls[0], ("probe", {"a": ["1"]}, None))
+        self.assertEqual(calls[1], ("error", "未知接口。", 404))
+        self.assertEqual(calls[2], ("error", "bad input", 400))
+
     def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)

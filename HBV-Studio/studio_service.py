@@ -10142,14 +10142,13 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
         self.handle_api_post(parsed)
 
-    def handle_api_get(self, parsed: Any) -> None:
-        query = parse_qs(parsed.query)
-        handler_name = self.GET_ROUTE_HANDLERS.get(parsed.path)
+    def _dispatch_api_route(self, route_handlers: dict[str, str], path: str, argument: Any) -> None:
+        handler_name = route_handlers.get(path)
         if handler_name is None:
             self.send_error_json("未知接口。", status=404)
             return
         try:
-            getattr(self, handler_name)(query)
+            getattr(self, handler_name)(argument)
         except FileNotFoundError as exc:
             self.send_error_json(str(exc), status=404)
         except ValueError as exc:
@@ -10157,6 +10156,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_error_json(str(exc), status=500)
             traceback.print_exc()
+
+    def handle_api_get(self, parsed: Any) -> None:
+        self._dispatch_api_route(self.GET_ROUTE_HANDLERS, parsed.path, parse_qs(parsed.query))
 
     def _api_get_health(self, query: dict[str, list[str]]) -> None:
         self.send_json(health_payload())
@@ -10319,20 +10321,14 @@ class StudioHandler(BaseHTTPRequestHandler):
     def handle_api_post(self, parsed: Any) -> None:
         try:
             payload = self.read_json_body()
-            handler_name = self.POST_ROUTE_HANDLERS.get(parsed.path)
-            if handler_name is None:
-                self.send_error_json("未知接口。", status=404)
-                return
-            getattr(self, handler_name)(payload)
-        except FileNotFoundError as exc:
-            self.send_error_json(str(exc), status=404)
         except ValueError as exc:
             self.send_error_json(str(exc), status=400)
-        except json.JSONDecodeError as exc:
-            self.send_error_json(f"JSON 请求体无效：{exc}", status=400)
+            return
         except Exception as exc:
             self.send_error_json(str(exc), status=500)
             traceback.print_exc()
+            return
+        self._dispatch_api_route(self.POST_ROUTE_HANDLERS, parsed.path, payload)
 
     def _api_post_workspace_save(self, payload: dict[str, Any]) -> None:
         raw_path = str(payload.get("path", "")).strip()
