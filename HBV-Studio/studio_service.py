@@ -47,6 +47,16 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
+from services.workspace_catalog import (
+    WorkspaceCatalogContext,
+    delete_workspace as build_delete_workspace,
+    find_template as build_find_template,
+    instantiate_template as build_instantiate_template,
+    list_templates as build_list_templates,
+    list_workspaces as build_list_workspaces,
+    load_workspace_config as build_load_workspace_config,
+    template_files as build_template_files,
+)
 from services.workspace_completeness import (
     WorkspaceCompletenessContext,
     quick_workspace_completeness as build_quick_workspace_completeness,
@@ -3942,124 +3952,54 @@ def suggest_time_windows(start_date: pd.Timestamp, end_date: pd.Timestamp, profi
     }
 
 
+def _workspace_catalog_context() -> WorkspaceCatalogContext:
+    return WorkspaceCatalogContext(
+        template_dir=TEMPLATE_DIR,
+        workspace_dir=WORKSPACE_DIR,
+        default_workspace_path=DEFAULT_WORKSPACE_PATH,
+        builtin_glacier_shp=BUILTIN_GLACIER_SHP,
+        profile_daily=PROFILE_DAILY,
+        object_regression=OBJECT_REGRESSION,
+        observed_flow_key=OBSERVED_FLOW_KEY,
+        read_json_file=read_json_file,
+        read_runtime_config=read_runtime_config,
+        replace_placeholders=replace_placeholders,
+        resolve_any_path=resolve_any_path,
+        resolve_profile=resolve_profile,
+        normalize_config_before_save=normalize_config_before_save,
+        detect_object_type=detect_object_type,
+        slugify_workspace_name=slugify_workspace_name,
+        runtime_root_for_workspace=runtime_root_for_workspace,
+        write_json_file=write_json_file,
+        to_display_path=to_display_path,
+        workspace_workflow_summary=workspace_workflow_summary,
+        normalize_time_step_hours=normalize_time_step_hours,
+        ensure_within=ensure_within,
+    )
+
+
 def template_files() -> list[Path]:
-    if not TEMPLATE_DIR.exists():
-        return []
-    files = {path.resolve(): path for path in TEMPLATE_DIR.glob("*.json")}
-    files.update({path.resolve(): path for path in TEMPLATE_DIR.glob("*.template.json")})
-    return sorted(files.values())
+    return build_template_files(_workspace_catalog_context())
 
 
 def list_templates() -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    for path in template_files():
-        try:
-            raw = read_json_file(path)
-            resolved = replace_placeholders(raw)
-            meta = raw.get("_studio_template", {})
-            runtime_root = resolved.get("运行目录", "")
-            runtime_path = Path(runtime_root) if runtime_root else None
-            asset_ok = True
-            for key in ("流域边界_shp", OBSERVED_FLOW_KEY):
-                candidate = resolved.get(key, "")
-                candidate_path = None
-                if candidate:
-                    try:
-                        candidate_path = resolve_any_path(str(candidate), must_exist=False)
-                    except Exception:
-                        candidate_path = Path(str(candidate)).expanduser()
-                if candidate and (candidate_path is None or not candidate_path.exists()):
-                    asset_ok = False
-                    break
-            results.append(
-                {
-                    "id": meta.get("id", path.stem),
-                    "title": meta.get("title", path.stem),
-                    "description": meta.get("description", ""),
-                    "calibration_mode": resolved.get("率定模式", PROFILE_DAILY),
-                    "object_type": detect_object_type(resolved),
-                    "path": str(path.resolve()),
-                    "display_path": to_display_path(path),
-                    "builtin": bool(meta.get("builtin", True)),
-                    "runtime_root": str(runtime_path) if runtime_path else "",
-                    "runtime_ready": bool(runtime_path and runtime_path.exists()),
-                    "assets_ready": asset_ok,
-                    "sync_hint": meta.get("sync_hint", ""),
-                }
-            )
-        except Exception:
-            continue
-    return results
+    return build_list_templates(_workspace_catalog_context())
 
 
 def find_template(template_id: str) -> Path:
-    for path in template_files():
-        raw = read_json_file(path)
-        meta = raw.get("_studio_template", {})
-        if meta.get("id") == template_id or path.stem == template_id:
-            return path
-    raise FileNotFoundError(template_id)
+    return build_find_template(template_id, _workspace_catalog_context())
 
 
 def instantiate_template(payload: dict[str, Any]) -> dict[str, Any]:
-    template_id = str(payload.get("template_id", "")).strip()
-    if not template_id:
-        raise ValueError("缺少模板 ID。")
-    target_name = str(payload.get("workspace_name", "")).strip() or "新流域工作区"
-    template_path = find_template(template_id)
-    raw = replace_placeholders(read_json_file(template_path))
-    profile = resolve_profile(raw, None)
-    config = normalize_config_before_save(raw, DEFAULT_WORKSPACE_PATH)
-    if (not str(config.get("冰川边界_shp", "")).strip()) and BUILTIN_GLACIER_SHP.exists():
-        config["冰川边界_shp"] = str(BUILTIN_GLACIER_SHP.resolve())
-    if detect_object_type(config) != OBJECT_REGRESSION:
-        config["流域名称"] = target_name
-        config["流域编号"] = slugify_workspace_name(target_name)
-    if template_id == "blank-workspace":
-        config["运行目录"] = str(runtime_root_for_workspace(target_name))
-    workspace_path = WORKSPACE_DIR / f"{slugify_workspace_name(target_name)}.json"
-    write_json_file(workspace_path, normalize_config_before_save(config, workspace_path))
-    return {
-        "workspace_path": str(workspace_path.resolve()),
-        "config": read_json_file(workspace_path),
-        "template_id": template_id,
-        "profile": profile,
-    }
+    return build_instantiate_template(payload, _workspace_catalog_context())
 
 
 def list_workspaces() -> list[dict[str, Any]]:
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    results: list[dict[str, Any]] = []
-    for path in sorted(WORKSPACE_DIR.glob("*.json")):
-        try:
-            data = read_runtime_config(path)
-            workflow = workspace_workflow_summary(str(path.resolve()), quick=True)
-        except Exception:
-            continue
-        profile = resolve_profile(data, None)
-        runtime_root = str(data.get("运行目录", "")).strip()
-        results.append(
-            {
-                "name": path.stem,
-                "path": str(path.resolve()),
-                "display_path": to_display_path(path),
-                "flow_name": data.get("流域名称", path.stem),
-                "flow_id": data.get("流域编号", path.stem),
-                "object_type": detect_object_type(data),
-                "calibration_mode": profile,
-                "time_step_hours": normalize_time_step_hours(data.get("时间步长_小时", 24.0)),
-                "workspace_root": runtime_root,
-                "runtime_display_path": (to_display_path(Path(runtime_root)) if runtime_root else ""),
-                "workflow": workflow,
-                "updated_at": path.stat().st_mtime,
-            }
-        )
-    return sorted(results, key=lambda item: item["updated_at"], reverse=True)
+    return build_list_workspaces(_workspace_catalog_context())
 
 
 def load_workspace_config(path_value: str) -> tuple[Path, dict[str, Any]]:
-    path = resolve_any_path(path_value, must_exist=True)
-    return path, read_runtime_config(path)
+    return build_load_workspace_config(path_value, _workspace_catalog_context())
 
 
 def _path_entry_count_signature(path: Path) -> tuple[Any, ...] | None:
@@ -4130,11 +4070,7 @@ def workspace_layout_summary(config_path_raw: str) -> dict[str, Any]:
 
 
 def delete_workspace(path_value: str) -> dict[str, Any]:
-    path = resolve_any_path(path_value, must_exist=True)
-    ensure_within(WORKSPACE_DIR, path)
-    name = path.stem
-    path.unlink()
-    return {"deleted": True, "name": name, "path": str(path)}
+    return build_delete_workspace(path_value, _workspace_catalog_context())
 
 
 def delete_run(run_path_raw: str) -> dict[str, Any]:
