@@ -52,6 +52,7 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
+from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -2566,6 +2567,15 @@ def inspect_observed_csv(
         allow_hourly_to_daily=True,
         min_daily_hours=DEFAULT_MIN_DAILY_HOURS,
         return_series=return_series,
+    )
+
+
+def observed_info(csv_path: str, *, date_field: str | None = None, target_step_hours: float | None = None) -> dict[str, Any]:
+    return build_observed_info(
+        csv_path,
+        ObservedInfoContext(inspect_observed_csv=inspect_observed_csv),
+        date_field=date_field,
+        target_step_hours=target_step_hours,
     )
 
 
@@ -11290,16 +11300,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                 date_field = query.get("date_field", [""])[0] or None
                 target_step_hours_raw = query.get("target_step_hours", [""])[0]
                 target_step_hours = float(target_step_hours_raw) if target_step_hours_raw else None
-                self.send_json(
-                    {
-                        "ok": True,
-                        "data": inspect_observed_csv(
-                            csv_path,
-                            date_field=date_field,
-                            target_step_hours=target_step_hours,
-                        ),
-                    }
-                )
+                self.send_json({"ok": True, "data": observed_info(csv_path, date_field=date_field, target_step_hours=target_step_hours)})
             elif parsed.path == "/api/suggest/bbox":
                 self.send_json({"ok": True, "data": fill_bbox_from_shp(unquote(query.get("shp_path", [""])[0]))})
             elif parsed.path == "/api/suggest/cfmax-threshold":
