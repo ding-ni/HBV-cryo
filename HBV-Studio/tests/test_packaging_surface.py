@@ -114,6 +114,69 @@ class PackagingSurfaceTests(unittest.TestCase):
         ):
             self.assertIn(name, copied_files)
 
+    def test_installer_stage_collects_geo_frontend_services_and_base_layers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_root = root / "project"
+            gui_root = project_root / "HBV-Studio"
+            bundle_root = root / "stage" / "HBVStudio"
+            common_source = project_root / "公共"
+            prep_source = project_root / "数据准备"
+            config_source = project_root / "配置"
+            dem_source_dir = project_root / "基础数据" / "DEM源"
+            glacier_source_dir = project_root / "基础数据" / "冰川源" / "Second_Glacier_Inventory_China"
+
+            for path in (
+                gui_root / "services",
+                gui_root / "web" / "js",
+                gui_root / "templates",
+                gui_root / "installer_assets",
+                project_root / "HBV-Cryo",
+                common_source,
+                prep_source,
+                config_source,
+                dem_source_dir,
+                glacier_source_dir,
+            ):
+                path.mkdir(parents=True, exist_ok=True)
+
+            (gui_root / "studio_service.py").write_text("# service\n", encoding="utf-8")
+            (gui_root / "services" / "geo_overview.py").write_text("# geo\n", encoding="utf-8")
+            (gui_root / "web" / "index.html").write_text(
+                '<script src="./js/mapLayerPlan.js"></script>\n<script src="./js/geoPreview.js"></script>\n',
+                encoding="utf-8",
+            )
+            (gui_root / "web" / "js" / "mapLayerPlan.js").write_text("window.HBVStudioMapLayerPlan = {};\n", encoding="utf-8")
+            (gui_root / "web" / "js" / "geoPreview.js").write_text("window.HBVStudioGeoPreview = {};\n", encoding="utf-8")
+            (dem_source_dir / installer.DEFAULT_DEM_NAME).write_bytes(b"dem")
+            for suffix in (".shp", ".dbf", ".shx", ".prj"):
+                (glacier_source_dir / f"glacier{suffix}").write_bytes(b"glacier")
+            (project_root / "系统自检.py").write_text("# check\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(installer, "PROJECT_ROOT", project_root),
+                mock.patch.object(installer, "GUI_ROOT", gui_root),
+                mock.patch.object(installer, "COMMON_SOURCE", common_source),
+                mock.patch.object(installer, "PREP_SOURCE", prep_source),
+                mock.patch.object(installer, "CONFIG_SOURCE", config_source),
+                mock.patch.object(installer, "DEM_SOURCE_DIR", dem_source_dir),
+                mock.patch.object(installer, "GLACIER_SOURCE_DIR", glacier_source_dir),
+                mock.patch.object(installer.portable, "STUDIO_FILES", ["studio_service.py"]),
+                mock.patch.object(installer.portable, "STUDIO_DIRS", ["services"]),
+            ):
+                installer.copy_installer_files(bundle_root)
+
+            expected_files = [
+                bundle_root / "HBV-Studio" / "web" / "js" / "mapLayerPlan.js",
+                bundle_root / "HBV-Studio" / "web" / "js" / "geoPreview.js",
+                bundle_root / "HBV-Studio" / "services" / "geo_overview.py",
+                bundle_root / installer.CN_BASE_DATA / installer.CN_DEM_DIR / installer.DEFAULT_DEM_NAME,
+                bundle_root / installer.CN_BASE_DATA / "冰川源" / glacier_source_dir.name / "glacier.shp",
+            ]
+
+            for path in expected_files:
+                self.assertTrue(path.is_file(), str(path))
+
 
 if __name__ == "__main__":
     unittest.main()
