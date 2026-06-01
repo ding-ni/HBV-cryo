@@ -64,6 +64,8 @@ from services.filesystem import (
 )
 from services.forecast_restart import ForecastRestartStartContext
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
+from services.forward_simulation import ForwardSimulationStartContext
+from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -9227,24 +9229,22 @@ def forecast_restart_worker(task_id: str, payload: dict[str, Any]) -> None:
         _mark_task_finished(task_id, ok=False, return_code=-1)
 
 
+def _forward_simulation_start_context() -> ForwardSimulationStartContext:
+    return ForwardSimulationStartContext(
+        build_forward_payload_context=_build_forward_payload_context,
+    )
+
+
 def start_forward_simulation(payload: dict[str, Any]) -> TaskRecord:
-    context = _build_forward_payload_context(payload)
-    run_path = Path(context["run_dir"])
+    plan = build_forward_simulation_start_plan(payload, _forward_simulation_start_context())
     task_id = uuid.uuid4().hex[:10]
     record = TaskRecord(
         id=task_id,
         task_type="forward_sim",
-        label=f"保存并重算 | {run_path.name}",
-        command=["forward_sim"],
+        label=plan.label,
+        command=plan.command,
         cwd=str(PROJECT_ROOT),
-        metadata={
-            "config_path": str(Path(context["config_path"]).resolve()),
-            "run_path": str(run_path.resolve()),
-            "profile": context["profile"],
-            "runtime_prec_source": context["prec_source"],
-            "objective_mode": context["objective_mode"],
-            "glacier_mode": context["glacier_mode"],
-        },
+        metadata=plan.metadata,
     )
     with TASK_LOCK:
         TASKS[task_id] = record
