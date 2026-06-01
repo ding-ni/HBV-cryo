@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -65,6 +66,39 @@ def main() -> int:
     if dashboard_count != len(runs):
         raise RuntimeError(f"dashboard run count mismatch: dashboard={dashboard_count}, runs={len(runs)}")
 
+    run_detail_summary = None
+    if runs:
+        detail_query = urllib.parse.urlencode({"path": str(runs[0].get("path") or "")})
+        detail_payload = request_json(f"{base_url}/api/run?{detail_query}")
+        if not detail_payload.get("ok"):
+            raise RuntimeError(detail_payload.get("error") or "run detail endpoint returned ok=false")
+        detail = detail_payload.get("data") or {}
+        require_keys(
+            detail,
+            {"run", "metadata", "hydrology_summary", "series", "series_range", "sampling", "parameters", "studio_compatible"},
+            "run detail",
+        )
+        run_summary = detail.get("run") or {}
+        require_keys(run_summary, {"name", "path", "updated_at", "hydrology_summary"}, "run detail summary")
+        series = detail.get("series") or {}
+        sampling = detail.get("sampling") or {}
+        if not isinstance(series.get("dates"), list):
+            raise RuntimeError(f"run detail should return date series: {detail!r}")
+        sampled_points = int(sampling.get("sampled_points") or 0)
+        total_points = int(sampling.get("total_points") or 0)
+        if sampled_points <= 0 or total_points <= 0:
+            raise RuntimeError(f"run detail should include positive sampling counts: {detail!r}")
+        if sampled_points != len(series.get("dates") or []):
+            raise RuntimeError(
+                f"run detail sampled_points mismatch: sampled={sampled_points}, dates={len(series.get('dates') or [])}"
+            )
+        run_detail_summary = {
+            "name": run_summary.get("name"),
+            "sampled_points": sampled_points,
+            "total_points": total_points,
+            "studio_compatible": detail.get("studio_compatible"),
+        }
+
     summary = {
         "run_count": len(runs),
         "first_run": {
@@ -76,6 +110,7 @@ def main() -> int:
         if runs
         else None,
         "dashboard_count": dashboard_count,
+        "run_detail": run_detail_summary,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

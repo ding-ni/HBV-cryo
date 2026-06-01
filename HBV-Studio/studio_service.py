@@ -54,7 +54,9 @@ from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cf
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunListContext, list_runs as build_list_runs
+from services.runs import RunDetailContext, RunListContext
+from services.runs import list_runs as build_list_runs
+from services.runs import load_run_detail as build_load_run_detail
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -7025,60 +7027,22 @@ def export_run_excel(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_run_detail(run_path: str) -> dict[str, Any]:
-    run_dir = resolve_any_path(run_path, must_exist=True)
-    simulation_path = run_dir / "simulation.csv"
-    metadata_path = run_dir / "metadata.json"
-    if not simulation_path.exists() or not metadata_path.exists():
-        raise FileNotFoundError("结果目录缺少 simulation.csv 或 metadata.json。")
-    metadata, resolved_config = normalize_run_metadata(read_json_file(metadata_path), run_path=run_dir)
-    updated_at, updated_at_ns = _run_update_timestamps(run_dir)
-    sampled, total_rows = read_sampled_csv_rows(simulation_path)
-    fields = ["q_sim", "q_sim_model", "q_boundary_inflow", "q_obs", "q_rain", "q_snow", "q_ice", "q_ice_raw", "q_ice_reference", "q_ice_reference_raw"]
-    series = {field: [] for field in fields}
-    dates: list[str] = []
-    residuals: list[float | None] = []
-    for row in sampled:
-        dates.append(row.get("date", ""))
-        q_sim = safe_float(row.get("q_sim"))
-        q_obs = safe_float(row.get("q_obs"))
-        residuals.append((q_sim - q_obs) if (q_sim is not None and q_obs is not None) else None)
-        for field in fields:
-            series[field].append(safe_float(row.get(field)))
-    time_cfg = dict(metadata.get("time_config", {}) or {})
-    actual_start = dates[0] if dates else ""
-    actual_end = dates[-1] if dates else ""
-    warmup_start = str(time_cfg.get("warmup_start", "") or "")
-    warmup_covered = bool(actual_start and (not warmup_start or str(actual_start).strip() == warmup_start.strip()))
-    hydrology_summary = _ensure_hydrology_diagnostic_report(
-        run_dir,
-        metadata,
-        _build_hydrology_summary(metadata, run_dir),
+    return build_load_run_detail(run_path, _run_detail_context())
+
+
+def _run_detail_context() -> RunDetailContext:
+    return RunDetailContext(
+        resolve_path=resolve_any_path,
+        read_json_file=read_json_file,
+        normalize_run_metadata=normalize_run_metadata,
+        run_update_timestamps=_run_update_timestamps,
+        read_sampled_csv_rows=read_sampled_csv_rows,
+        safe_float=safe_float,
+        build_hydrology_summary=_build_hydrology_summary,
+        ensure_hydrology_diagnostic_report=_ensure_hydrology_diagnostic_report,
+        build_run_summary=_build_run_summary,
+        is_studio_editable_metadata=is_studio_editable_metadata,
     )
-    metadata["hydrology_summary"] = hydrology_summary
-    run_summary = _build_run_summary(
-        run_dir,
-        metadata,
-        resolved_config,
-        updated_at=updated_at,
-        updated_at_ns=updated_at_ns,
-    )
-    run_summary["hydrology_summary"] = hydrology_summary
-    return {
-        "run": run_summary,
-        "metadata": metadata,
-        "hydrology_summary": hydrology_summary,
-        "series": {"dates": dates, "residuals": residuals, **series},
-        "series_range": {
-            "actual_start": actual_start,
-            "actual_end": actual_end,
-            "warmup_start": warmup_start,
-            "warmup_end": str(time_cfg.get("warmup_end", "") or ""),
-            "warmup_covered": warmup_covered,
-        },
-        "sampling": {"sampled_points": len(sampled), "total_points": total_rows},
-        "parameters": [{"name": key, "value": value} for key, value in metadata.get("optimized_params", {}).items()],
-        "studio_compatible": is_studio_editable_metadata(metadata, resolved_config),
-    }
 
 
 def _load_run_series_map(run_path: Path, field: str) -> dict[str, float | None]:
