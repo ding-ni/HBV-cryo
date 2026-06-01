@@ -54,10 +54,12 @@ from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cf
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunDetailContext, RunExportContext, RunListContext
+from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import delete_run as build_delete_run
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
+from services.runs import rename_run as build_rename_run
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -4095,49 +4097,23 @@ def delete_workspace(path_value: str) -> dict[str, Any]:
 
 
 def delete_run(run_path_raw: str) -> dict[str, Any]:
-    run_dir = resolve_any_path(run_path_raw, must_exist=True)
-    metadata_path = run_dir / "metadata.json"
-    simulation_path = run_dir / "simulation.csv"
-    if not run_dir.is_dir() or not metadata_path.exists() or not simulation_path.exists():
-        raise ValueError("目标目录不是可识别的结果目录。")
-    known_runs = {Path(item["path"]).resolve(strict=False) for item in list_runs()}
-    if run_dir.resolve(strict=False) not in known_runs:
-        raise ValueError("该结果目录不在当前工程可管理范围内。")
-    name = summarize_run(run_dir).get("name") or run_dir.name
-    shutil.rmtree(run_dir)
-    invalidate_deleted_run_refs(run_dir)
-    return {"deleted": True, "name": name, "path": str(run_dir.resolve(strict=False))}
+    return build_delete_run(run_path_raw, _run_mutation_context())
 
 
 def rename_run(payload: dict[str, Any]) -> dict[str, Any]:
-    run_path_raw = str(payload.get("path", "")).strip()
-    if not run_path_raw:
-        raise ValueError("缺少结果路径。")
-    run_dir = resolve_any_path(run_path_raw, must_exist=True)
-    metadata_path = run_dir / "metadata.json"
-    simulation_path = run_dir / "simulation.csv"
-    if not run_dir.is_dir() or not metadata_path.exists() or not simulation_path.exists():
-        raise ValueError("目标目录不是可识别的结果目录。")
-    known_runs = {Path(item["path"]).resolve(strict=False) for item in list_runs()}
-    if run_dir.resolve(strict=False) not in known_runs:
-        raise ValueError("该结果目录不在当前工程可管理范围内。")
-    new_title = _normalized_result_title(payload.get("title", ""))
-    if len(new_title) > 60:
-        raise ValueError("结果标题请控制在 60 个字符以内。")
-    metadata = read_json_file(metadata_path)
-    if new_title:
-        metadata["result_title"] = new_title
-    else:
-        metadata.pop("result_title", None)
-    write_json_file(metadata_path, metadata)
-    updated = summarize_run(run_dir)
-    return {
-        "renamed": True,
-        "path": str(run_dir.resolve(strict=False)),
-        "title": new_title,
-        "auto_named": not bool(new_title),
-        "run": updated,
-    }
+    return build_rename_run(payload, _run_mutation_context())
+
+
+def _run_mutation_context() -> RunMutationContext:
+    return RunMutationContext(
+        resolve_path=resolve_any_path,
+        list_runs=list_runs,
+        summarize_run=summarize_run,
+        read_json_file=read_json_file,
+        write_json_file=write_json_file,
+        normalize_result_title=_normalized_result_title,
+        invalidate_deleted_run_refs=invalidate_deleted_run_refs,
+    )
 
 
 def create_workspace_from_import(payload: dict[str, Any]) -> dict[str, Any]:

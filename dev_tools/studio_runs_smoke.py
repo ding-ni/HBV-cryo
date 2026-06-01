@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import tempfile
 import urllib.parse
@@ -164,6 +165,62 @@ def main() -> int:
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+    runtime_root = Path(
+        os.environ.get("HBV_STUDIO_RUNTIME_ROOT", "")
+        or Path(__file__).resolve().parents[1] / "运行目录"
+    )
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    mutation_workspace = Path(tempfile.mkdtemp(prefix="hbvstudio_run_mutation_", dir=str(runtime_root)))
+    mutation_summary = None
+    try:
+        run_dir = mutation_workspace / "结果" / "运行记录" / "sample_run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "result_title": "Smoke Mutation Run",
+                    "time_config": {"time_step_hours": 24.0},
+                    "metrics": {"calibration": {"nse": 0.8}, "validation": {"nse": 0.7}},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "simulation.csv").write_text(
+            "date,q_sim,q_obs\n2020-01-01,1.0,0.9\n2020-01-02,1.2,1.1\n",
+            encoding="utf-8",
+        )
+
+        rename_response = request_json(
+            f"{base_url}/api/run/rename",
+            data={"path": str(run_dir), "title": "Smoke Renamed Run"},
+        )
+        if not rename_response.get("ok"):
+            raise RuntimeError(rename_response.get("error") or "run rename endpoint returned ok=false")
+        rename_data = rename_response.get("data") or {}
+        require_keys(rename_data, {"renamed", "path", "title", "auto_named", "run"}, "run rename")
+        if not rename_data.get("renamed") or rename_data.get("title") != "Smoke Renamed Run":
+            raise RuntimeError(f"run rename should return the requested title: {rename_data!r}")
+        metadata_after_rename = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+        if metadata_after_rename.get("result_title") != "Smoke Renamed Run":
+            raise RuntimeError(f"run rename should persist metadata title: {metadata_after_rename!r}")
+
+        delete_response = request_json(f"{base_url}/api/run/delete", data={"path": str(run_dir)})
+        if not delete_response.get("ok"):
+            raise RuntimeError(delete_response.get("error") or "run delete endpoint returned ok=false")
+        delete_data = delete_response.get("data") or {}
+        require_keys(delete_data, {"deleted", "name", "path"}, "run delete")
+        if not delete_data.get("deleted") or run_dir.exists():
+            raise RuntimeError(f"run delete should remove the temporary run directory: {delete_data!r}")
+        mutation_summary = {
+            "renamed": True,
+            "deleted": True,
+            "title": rename_data.get("title"),
+        }
+    finally:
+        shutil.rmtree(mutation_workspace, ignore_errors=True)
+
     summary = {
         "run_count": len(runs),
         "first_run": {
@@ -177,6 +234,7 @@ def main() -> int:
         "dashboard_count": dashboard_count,
         "run_detail": run_detail_summary,
         "run_export": export_summary,
+        "run_mutation": mutation_summary,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

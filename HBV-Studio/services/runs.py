@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,17 @@ class RunExportContext:
     to_display_path: Callable[[Path], str]
     default_export_fields: Callable[[dict[str, Any] | None], list[str]]
     export_field_labels: dict[str, str]
+
+
+@dataclass(frozen=True)
+class RunMutationContext:
+    resolve_path: Callable[..., Path]
+    list_runs: Callable[[], list[dict[str, Any]]]
+    summarize_run: Callable[[Path], dict[str, Any]]
+    read_json_file: Callable[[Path], dict[str, Any]]
+    write_json_file: Callable[[Path, dict[str, Any]], None]
+    normalize_result_title: Callable[[Any], str]
+    invalidate_deleted_run_refs: Callable[[Path], None]
 
 
 _RUN_LIST_CACHE_LOCK = threading.Lock()
@@ -222,4 +234,55 @@ def export_run_excel(payload: dict[str, Any], context: RunExportContext) -> dict
         "labels": [context.export_field_labels[field] for field in selected_fields],
         "start": export_frame.iloc[0, 0],
         "end": export_frame.iloc[-1, 0],
+    }
+
+
+def _managed_run_paths(context: RunMutationContext) -> set[Path]:
+    return {
+        Path(str(item["path"])).resolve(strict=False)
+        for item in context.list_runs()
+    }
+
+
+def delete_run(run_path_raw: str, context: RunMutationContext) -> dict[str, Any]:
+    run_dir = context.resolve_path(run_path_raw, must_exist=True)
+    metadata_path = run_dir / "metadata.json"
+    simulation_path = run_dir / "simulation.csv"
+    if not run_dir.is_dir() or not metadata_path.exists() or not simulation_path.exists():
+        raise ValueError("目标目录不是可识别的结果目录。")
+    if run_dir.resolve(strict=False) not in _managed_run_paths(context):
+        raise ValueError("该结果目录不在当前工程可管理范围内。")
+    name = context.summarize_run(run_dir).get("name") or run_dir.name
+    shutil.rmtree(run_dir)
+    context.invalidate_deleted_run_refs(run_dir)
+    return {"deleted": True, "name": name, "path": str(run_dir.resolve(strict=False))}
+
+
+def rename_run(payload: dict[str, Any], context: RunMutationContext) -> dict[str, Any]:
+    run_path_raw = str(payload.get("path", "")).strip()
+    if not run_path_raw:
+        raise ValueError("缺少结果路径。")
+    run_dir = context.resolve_path(run_path_raw, must_exist=True)
+    metadata_path = run_dir / "metadata.json"
+    simulation_path = run_dir / "simulation.csv"
+    if not run_dir.is_dir() or not metadata_path.exists() or not simulation_path.exists():
+        raise ValueError("目标目录不是可识别的结果目录。")
+    if run_dir.resolve(strict=False) not in _managed_run_paths(context):
+        raise ValueError("该结果目录不在当前工程可管理范围内。")
+    new_title = context.normalize_result_title(payload.get("title", ""))
+    if len(new_title) > 60:
+        raise ValueError("结果标题请控制在 60 个字符以内。")
+    metadata = context.read_json_file(metadata_path)
+    if new_title:
+        metadata["result_title"] = new_title
+    else:
+        metadata.pop("result_title", None)
+    context.write_json_file(metadata_path, metadata)
+    updated = context.summarize_run(run_dir)
+    return {
+        "renamed": True,
+        "path": str(run_dir.resolve(strict=False)),
+        "title": new_title,
+        "auto_named": not bool(new_title),
+        "run": updated,
     }
