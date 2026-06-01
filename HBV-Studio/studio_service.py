@@ -8695,26 +8695,6 @@ def forecast_restart_with_progress(payload: dict[str, Any], stage_callback: Call
     return forecast_run.run_forecast(_forecast_restart_args(checked_payload), stage_callback=stage_callback)
 
 
-def _forecast_parameter_check_context(
-    payload: dict[str, Any],
-    source_run: Path,
-    metadata: dict[str, Any],
-) -> dict[str, Any]:
-    config_path_raw = str(
-        payload.get("config_path")
-        or payload.get("config")
-        or metadata.get("workspace_config")
-        or ""
-    ).strip()
-    resolved_config: Path | None = None
-    if config_path_raw:
-        try:
-            resolved_config = resolve_any_path(config_path_raw, must_exist=True)
-        except Exception:
-            resolved_config = None
-    return _run_parameter_context(source_run, metadata, resolved_config)
-
-
 def _forecast_parameter_detail_text(context: dict[str, Any]) -> str:
     parts: list[str] = []
     workspace = str(context.get("source_workspace", "") or "").strip()
@@ -8803,7 +8783,7 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         read_runtime_config=read_runtime_config,
         build_profile_paths=build_profile_paths,
         resolve_profile=resolve_profile,
-        parameter_check_context=_forecast_parameter_check_context,
+        run_parameter_context=_run_parameter_context,
         normalize_time_step_hours=normalize_time_step_hours,
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,

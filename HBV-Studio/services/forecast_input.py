@@ -16,7 +16,7 @@ class ForecastInputCheckContext:
     read_runtime_config: Callable[[Path], dict[str, Any]]
     build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
     resolve_profile: Callable[[dict[str, Any], str | None], str]
-    parameter_check_context: Callable[[dict[str, Any], Path, dict[str, Any]], dict[str, Any]]
+    run_parameter_context: Callable[[Path, dict[str, Any], Path | None], dict[str, Any]]
     normalize_time_step_hours: Callable[[Any], float]
     is_date_only_string: Callable[[str], bool]
     validate_tif_time_series: Callable[..., dict[str, Any]]
@@ -214,6 +214,29 @@ def forecast_output_preview(
     }
 
 
+def forecast_parameter_check_context(
+    payload: dict[str, Any],
+    source_run: Path,
+    metadata: dict[str, Any],
+    *,
+    resolve_path: Callable[..., Path],
+    run_parameter_context: Callable[[Path, dict[str, Any], Path | None], dict[str, Any]],
+) -> dict[str, Any]:
+    config_path_raw = str(
+        payload.get("config_path")
+        or payload.get("config")
+        or metadata.get("workspace_config")
+        or ""
+    ).strip()
+    resolved_config: Path | None = None
+    if config_path_raw:
+        try:
+            resolved_config = resolve_path(config_path_raw, must_exist=True)
+        except Exception:
+            resolved_config = None
+    return run_parameter_context(source_run, metadata, resolved_config)
+
+
 def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckContext) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -230,7 +253,13 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
     initial_state = dict(metadata.get("initial_state", {}) or {})
     time_config = dict(metadata.get("time_config", {}) or {})
     params = dict(metadata.get("optimized_params", {}) or {})
-    parameter_context = context.parameter_check_context(payload, source_run, metadata)
+    parameter_context = forecast_parameter_check_context(
+        payload,
+        source_run,
+        metadata,
+        resolve_path=context.resolve_path,
+        run_parameter_context=context.run_parameter_context,
+    )
     step_hours = context.normalize_time_step_hours(time_config.get("time_step_hours", payload.get("time_step_hours", 24.0)))
     source_state_time = forecast_source_state_time(source_run, metadata)
     errors: list[str] = []

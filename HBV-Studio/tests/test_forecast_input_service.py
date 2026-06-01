@@ -19,6 +19,7 @@ from services.forecast_input import (  # noqa: E402
     forecast_input_check,
     forecast_input_dir_summary,
     forecast_output_preview,
+    forecast_parameter_check_context,
     forecast_source_state_time,
 )
 
@@ -34,7 +35,7 @@ class ForecastInputServiceTests(unittest.TestCase):
             read_runtime_config=fail,
             build_profile_paths=fail,
             resolve_profile=fail,
-            parameter_check_context=fail,
+            run_parameter_context=fail,
             normalize_time_step_hours=fail,
             is_date_only_string=fail,
             validate_tif_time_series=fail,
@@ -178,6 +179,57 @@ class ForecastInputServiceTests(unittest.TestCase):
 
             self.assertFalse(preview["explicit"])
             self.assertEqual(preview["result_parent"], str(root.resolve(strict=False)))
+
+    def test_forecast_parameter_check_context_prefers_payload_config_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_run = root / "source_run"
+            payload_config = root / "payload_workspace.json"
+            metadata_config = root / "metadata_workspace.json"
+            source_run.mkdir()
+            payload_config.write_text("{}", encoding="utf-8")
+            metadata_config.write_text("{}", encoding="utf-8")
+
+            captured: dict[str, object] = {}
+            expected = {"ok": True}
+
+            def run_parameter_context(run, metadata, config):
+                captured["run"] = run
+                captured["metadata"] = metadata
+                captured["config"] = config
+                return expected
+
+            result = forecast_parameter_check_context(
+                {"config_path": str(payload_config)},
+                source_run,
+                {"workspace_config": str(metadata_config)},
+                resolve_path=lambda raw, **kwargs: Path(str(raw)),
+                run_parameter_context=run_parameter_context,
+            )
+
+            self.assertIs(result, expected)
+            self.assertEqual(captured["run"], source_run)
+            self.assertEqual(captured["metadata"], {"workspace_config": str(metadata_config)})
+            self.assertEqual(captured["config"], payload_config)
+
+    def test_forecast_parameter_check_context_uses_none_when_config_cannot_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_run = root / "source_run"
+            source_run.mkdir()
+
+            def resolve_path(raw, **kwargs):
+                raise FileNotFoundError(str(raw))
+
+            result = forecast_parameter_check_context(
+                {},
+                source_run,
+                {"workspace_config": str(root / "missing_workspace.json")},
+                resolve_path=resolve_path,
+                run_parameter_context=lambda run, metadata, config: {"config": config},
+            )
+
+            self.assertIsNone(result["config"])
 
 
 if __name__ == "__main__":
