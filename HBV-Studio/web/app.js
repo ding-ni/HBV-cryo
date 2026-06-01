@@ -33,6 +33,11 @@ const frontendModuleContracts = [
     exports: ["apiGet", "apiPost", "createLatestRequestGuard"],
   },
   {
+    script: "./js/chartPalette.js",
+    global: "HBVStudioChartPalette",
+    exports: ["chartColors"],
+  },
+  {
     script: "./js/stationPrecip.js",
     global: "HBVStudioStationPrecip",
     exports: ["renderTaskScopeSummary", "renderEventCoverageMatrix"],
@@ -118,14 +123,7 @@ const frontendModuleContracts = [
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
 const CHECK_STEP_IDS = new Set(["check_inputs"]);
 
-const colors = {
-  qSim: "#1d6d74",
-  qObs: "#b36a28",
-  qRain: "#317f95",
-  qSnow: "#b7ced8",
-  qIce: "#2d7c52",
-  residual: "#b54538",
-};
+const colors = window.HBVStudioChartPalette.chartColors();
 
 const wizardStepLabels = {
   1: "基本设置",
@@ -5786,7 +5784,7 @@ function renderCharts(data) {
     });
   }
   if (boundaryEnabled) {
-    hydrographTraces.push({ x: dates, y: data.series?.q_boundary_inflow || [], name: "边界入流", mode: "lines", line: { color: "#7c5c99", width: 1.2 } });
+    hydrographTraces.push({ x: dates, y: data.series?.q_boundary_inflow || [], name: "边界入流", mode: "lines", line: { color: colors.boundary, width: 1.2 } });
   }
 
   drawPlot("hydrograph-chart", hydrographTraces, plotLayout, plotCfg);

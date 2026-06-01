@@ -11,6 +11,17 @@
     return Array.isArray(values) && values.some(value => Number.isFinite(Number(value)));
   }
 
+  function chartColors() {
+    return window.HBVStudioChartPalette?.chartColors?.() || {
+      qObs: "#1e293b",
+      qSim: "#0e7490",
+      qRain: "#2563eb",
+      qSnow: "#38bdf8",
+      qIce: "#06b6d4",
+      boundary: "#64748b",
+    };
+  }
+
   function setHint(message, status = "") {
     const hint = document.getElementById("forecast-result-hint");
     if (!hint) return;
@@ -400,14 +411,15 @@
       chart.innerHTML = '<div class="hint-box">图表组件未加载，预报数据仍可通过 Excel 导出或打开结果目录查看。</div>';
       return;
     }
+    const colors = chartColors();
     const traces = [
-      { x: dates, y: series.q_sim || [], name: "预报流量", mode: "lines", line: { color: "#1d6d74", width: 2.1 } },
+      { x: dates, y: series.q_sim || [], name: "预报流量", mode: "lines", line: { color: colors.qSim, width: 2.1 } },
     ];
     [
-      ["q_rain", "降雨产流", "#317f95"],
-      ["q_snow", "融雪流量", "#8aa9b7"],
-      ["q_ice", "裸冰融化流量", "#2d7c52"],
-      ["q_boundary_inflow", "边界入流", "#7c5c99"],
+      ["q_rain", "降雨产流", colors.qRain],
+      ["q_snow", "融雪流量", colors.qSnow],
+      ["q_ice", "裸冰融化流量", colors.qIce],
+      ["q_boundary_inflow", "边界入流", colors.boundary],
     ].forEach(([key, label, color]) => {
       if (finiteSeries(series[key])) {
         traces.push({ x: dates, y: series[key], name: label, mode: "lines", line: { color, width: 1.35 } });

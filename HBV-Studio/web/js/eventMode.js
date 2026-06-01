@@ -22,6 +22,14 @@
     return Number.isFinite(number) ? `${defaultFormatNumber(number, digits)}${suffix}` : "—";
   }
 
+  function chartColors() {
+    return window.HBVStudioChartPalette?.chartColors?.() || {
+      qSim: "#0e7490",
+      residual: "#b91c1c",
+      temp: "#ef4444",
+    };
+  }
+
   function defaultStatusClass(status) {
     return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
   }
@@ -110,6 +118,7 @@
     const names = events.map(event => event._chartName);
     const customdata = eventChartCustomData(events, formatMetricValue);
     const hoverSuffix = "<br>NSE %{customdata[0]}<br>KGE %{customdata[1]}<extra></extra>";
+    const colors = chartColors();
     const traces = [
       {
         x: names,
@@ -117,7 +126,7 @@
         customdata,
         name: "洪峰误差 %",
         type: "bar",
-        marker: { color: "#b36a28" },
+        marker: { color: colors.residual },
         hovertemplate: "%{x}<br>洪峰误差 %{y:.2f}%" + hoverSuffix,
       },
       {
@@ -126,7 +135,7 @@
         customdata,
         name: "洪量误差 %",
         type: "bar",
-        marker: { color: "#1d6d74" },
+        marker: { color: colors.qSim },
         hovertemplate: "%{x}<br>洪量误差 %{y:.2f}%" + hoverSuffix,
       },
       {
@@ -137,7 +146,7 @@
         type: "scatter",
         mode: "lines+markers",
         yaxis: "y2",
-        line: { color: "#7c5c99", width: 2 },
+        line: { color: colors.temp, width: 2 },
         marker: { size: 7 },
         hovertemplate: "%{x}<br>峰现误差 %{y:.1f} h" + hoverSuffix,
       },
