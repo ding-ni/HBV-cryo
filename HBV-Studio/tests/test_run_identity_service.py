@@ -13,6 +13,8 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
+import profile_runner  # noqa: E402
+
 from services.runs import (  # noqa: E402
     RunCalibrationTaskContext,
     RunDiscoveryContext,
@@ -59,6 +61,8 @@ from services.runs import (  # noqa: E402
     run_update_timestamps,
     snapshot_run_paths,
     source_run_meta,
+    synthesized_objective_profile,
+    synthesized_parameter_profile,
     workspace_name_for_summary,
 )
 
@@ -421,6 +425,46 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertFalse(has_parameter_bounds({"parameter_profile": {"bounds": {"TT": [0]}}}))
         self.assertTrue(has_parameter_bounds({"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}))
         self.assertTrue(has_parameter_bounds({"parameter_profile": {"bounds": {"FC": (100.0, 1000.0)}}}))
+
+    def test_synthesized_parameter_profile_uses_hourly_objective_notes_and_bounds(self) -> None:
+        profile = synthesized_parameter_profile(profile_runner.PROFILE_HOURLY, profile_runner.OBJECTIVE_MODE_MULTI)
+
+        self.assertEqual(profile["name"], profile_runner.PROFILE_HOURLY)
+        self.assertEqual(profile["label"], profile_runner.PROFILE_LABELS[profile_runner.PROFILE_HOURLY])
+        self.assertEqual(profile["bounds_profile"], profile_runner.PARAM_BOUNDS_PROFILE_HOURLY)
+        self.assertEqual(profile["notes"][0], "\u5c0f\u65f6\u5c3a\u5ea6\u5f53\u524d\u542f\u7528\u7efc\u5408\u6c34\u6587\u8bc4\u4ef7\u53e3\u5f84\u3002")
+        self.assertIn("K_MUSK", profile["bounds"])
+        self.assertGreaterEqual(len(profile["bounds"]["K_MUSK"]), 2)
+
+    def test_synthesized_parameter_profile_uses_daily_qtp_bounds(self) -> None:
+        profile = synthesized_parameter_profile(profile_runner.PROFILE_DAILY, profile_runner.OBJECTIVE_MODE_MULTI)
+
+        self.assertEqual(profile["name"], profile_runner.PROFILE_DAILY)
+        self.assertEqual(profile["bounds_profile"], profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE)
+        self.assertEqual(
+            profile["bounds_profile_label"],
+            profile_runner.PARAM_BOUNDS_PROFILE_LABELS[profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE],
+        )
+        self.assertTrue(profile["label"].startswith(profile_runner.PROFILE_LABELS[profile_runner.PROFILE_DAILY]))
+        self.assertIn("CFMAX_low", profile["bounds"])
+
+    def test_synthesized_objective_profile_preserves_recorded_fields_but_sets_type(self) -> None:
+        profile = synthesized_objective_profile(
+            profile_runner.PROFILE_DAILY,
+            profile_runner.OBJECTIVE_MODE_MULTI,
+            {
+                "label": "\u5df2\u8bb0\u5f55\u76ee\u6807",
+                "summary": "\u5386\u53f2\u8bf4\u660e",
+                "weights": {"nse": 0.7, "pbias": 0.3},
+                "notes": ["\u5df2\u8bb0\u5f55\u5907\u6ce8"],
+            },
+        )
+
+        self.assertEqual(profile["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(profile["label"], "\u5df2\u8bb0\u5f55\u76ee\u6807")
+        self.assertEqual(profile["summary"], "\u5386\u53f2\u8bf4\u660e")
+        self.assertEqual(profile["weights"], {"nse": 0.7, "pbias": 0.3})
+        self.assertEqual(profile["notes"], ["\u5df2\u8bb0\u5f55\u5907\u6ce8"])
 
     def test_is_studio_editable_metadata_requires_config_and_parameter_bounds(self) -> None:
         metadata = {"parameter_profile": {"bounds": {"TT": [-2.0, 2.0]}}}

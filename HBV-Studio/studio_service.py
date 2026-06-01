@@ -150,6 +150,8 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
+from services.runs import synthesized_objective_profile as build_synthesized_objective_profile
+from services.runs import synthesized_parameter_profile as build_synthesized_parameter_profile
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2628,50 +2630,11 @@ def is_studio_editable_metadata(metadata: dict[str, Any], resolved_config: Path 
 
 
 def _synthesized_parameter_profile(profile: str, objective_mode: str) -> dict[str, Any]:
-    if profile == PROFILE_HOURLY:
-        bounds = profile_runner.parameter_bounds_for_profile(PROFILE_HOURLY)
-        notes = [
-            (
-                "小时尺度当前启用综合水文评价口径。"
-                if objective_mode == profile_runner.OBJECTIVE_MODE_MULTI
-                else "小时尺度当前使用简化径流评价口径。"
-            ),
-            "Muskingum 路由参数范围已按 1 小时步长的离散稳定性收紧，避免大面积无效搜索。",
-            "小时尺度结果与日尺度结果分开保存，互不覆盖。",
-        ]
-        label = PROFILE_LABELS[PROFILE_HOURLY]
-        bounds_profile = profile_runner.PARAM_BOUNDS_PROFILE_HOURLY
-    else:
-        bounds_profile = profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE
-        bounds = profile_runner.parameter_bounds_for_profile(PROFILE_DAILY, bounds_profile)
-        notes = [
-            "日尺度当前固定使用统一日尺度综合水文目标函数，不再提供多目标函数产品分支。",
-            profile_runner.PARAM_BOUNDS_PROFILE_NOTES.get(bounds_profile, "日尺度参数范围与小时尺度分开管理。"),
-        ]
-        label = f"{PROFILE_LABELS[PROFILE_DAILY]} · {profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(bounds_profile, bounds_profile)}"
-    return {
-        "name": profile,
-        "label": label,
-        "bounds_profile": bounds_profile,
-        "bounds_profile_label": profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(bounds_profile, bounds_profile),
-        "notes": notes,
-        "bounds": {name: list(bound) for name, bound in zip(CALIBRATION_PARAM_NAMES, bounds)},
-    }
+    return build_synthesized_parameter_profile(profile, objective_mode)
 
 
 def _synthesized_objective_profile(profile: str, objective_mode: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
-    current = dict(current or {})
-    base = (
-        profile_runner.build_weighted_multi_objective_meta(profile)
-        if objective_mode == profile_runner.OBJECTIVE_MODE_MULTI
-        else profile_runner.build_single_objective_meta(profile)
-    )
-    for key in ("profile", "label", "summary", "formula", "weights", "diagnostic_only_constraints", "notes"):
-        value = current.get(key)
-        if value not in (None, "", [], {}):
-            base[key] = value
-    base["type"] = objective_mode
-    return base
+    return build_synthesized_objective_profile(profile, objective_mode, current)
 
 
 def _run_source_reference_context() -> RunSourceReferenceContext:

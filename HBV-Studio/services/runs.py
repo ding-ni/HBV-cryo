@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+import profile_runner
 from services.run_hydrology import metadata_objective_family, safe_float
 
 
@@ -748,6 +749,53 @@ def is_studio_editable_metadata(
             gui_root=hint_gui_root,
         )
     return bool(config_path and has_parameter_bounds(metadata))
+
+
+def synthesized_parameter_profile(profile: str, objective_mode: str) -> dict[str, Any]:
+    if profile == profile_runner.PROFILE_HOURLY:
+        bounds = profile_runner.parameter_bounds_for_profile(profile_runner.PROFILE_HOURLY)
+        notes = [
+            (
+                "\u5c0f\u65f6\u5c3a\u5ea6\u5f53\u524d\u542f\u7528\u7efc\u5408\u6c34\u6587\u8bc4\u4ef7\u53e3\u5f84\u3002"
+                if objective_mode == profile_runner.OBJECTIVE_MODE_MULTI
+                else "\u5c0f\u65f6\u5c3a\u5ea6\u5f53\u524d\u4f7f\u7528\u7b80\u5316\u5f84\u6d41\u8bc4\u4ef7\u53e3\u5f84\u3002"
+            ),
+            "Muskingum \u8def\u7531\u53c2\u6570\u8303\u56f4\u5df2\u6309 1 \u5c0f\u65f6\u6b65\u957f\u7684\u79bb\u6563\u7a33\u5b9a\u6027\u6536\u7d27\uff0c\u907f\u514d\u5927\u9762\u79ef\u65e0\u6548\u641c\u7d22\u3002",
+            "\u5c0f\u65f6\u5c3a\u5ea6\u7ed3\u679c\u4e0e\u65e5\u5c3a\u5ea6\u7ed3\u679c\u5206\u5f00\u4fdd\u5b58\uff0c\u4e92\u4e0d\u8986\u76d6\u3002",
+        ]
+        label = profile_runner.PROFILE_LABELS[profile_runner.PROFILE_HOURLY]
+        bounds_profile = profile_runner.PARAM_BOUNDS_PROFILE_HOURLY
+    else:
+        bounds_profile = profile_runner.DEFAULT_DAILY_PARAM_BOUNDS_PROFILE
+        bounds = profile_runner.parameter_bounds_for_profile(profile_runner.PROFILE_DAILY, bounds_profile)
+        notes = [
+            "\u65e5\u5c3a\u5ea6\u5f53\u524d\u56fa\u5b9a\u4f7f\u7528\u7edf\u4e00\u65e5\u5c3a\u5ea6\u7efc\u5408\u6c34\u6587\u76ee\u6807\u51fd\u6570\uff0c\u4e0d\u518d\u63d0\u4f9b\u591a\u76ee\u6807\u51fd\u6570\u4ea7\u54c1\u5206\u652f\u3002",
+            profile_runner.PARAM_BOUNDS_PROFILE_NOTES.get(bounds_profile, "\u65e5\u5c3a\u5ea6\u53c2\u6570\u8303\u56f4\u4e0e\u5c0f\u65f6\u5c3a\u5ea6\u5206\u5f00\u7ba1\u7406\u3002"),
+        ]
+        label = f"{profile_runner.PROFILE_LABELS[profile_runner.PROFILE_DAILY]} \u00b7 {profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(bounds_profile, bounds_profile)}"
+    return {
+        "name": profile,
+        "label": label,
+        "bounds_profile": bounds_profile,
+        "bounds_profile_label": profile_runner.PARAM_BOUNDS_PROFILE_LABELS.get(bounds_profile, bounds_profile),
+        "notes": notes,
+        "bounds": {name: list(bound) for name, bound in zip(profile_runner.CALIBRATION_PARAM_NAMES, bounds)},
+    }
+
+
+def synthesized_objective_profile(profile: str, objective_mode: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    current = dict(current or {})
+    base = (
+        profile_runner.build_weighted_multi_objective_meta(profile)
+        if objective_mode == profile_runner.OBJECTIVE_MODE_MULTI
+        else profile_runner.build_single_objective_meta(profile)
+    )
+    for key in ("profile", "label", "summary", "formula", "weights", "diagnostic_only_constraints", "notes"):
+        value = current.get(key)
+        if value not in (None, "", [], {}):
+            base[key] = value
+    base["type"] = objective_mode
+    return base
 
 
 def workspace_name_for_summary(
