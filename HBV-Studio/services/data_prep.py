@@ -48,6 +48,16 @@ class DataPrepStartPlan:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class DataPrepWorkflowDecision:
+    ready: list[str]
+    skipped_done: list[str]
+    skipped_manual: list[str]
+    blocked: list[str]
+    completed_ids: set[str]
+    remaining: list[str]
+
+
 def data_prep_steps_payload(config_path_raw: str, context: DataPrepContext) -> list[dict[str, Any]]:
     profile = context.profile_daily
     config = None
@@ -224,4 +234,44 @@ def data_prep_start_plan(payload: dict[str, Any], context: DataPrepStartContext)
         label=f"数据准备 | {step['title']} | {config_path.stem}",
         command=data_prep_step_command(step, config_path, payload, context),
         metadata=metadata,
+    )
+
+
+def data_prep_workflow_decision(
+    remaining: list[str],
+    completed_ids: set[str],
+    steps: dict[str, dict[str, Any]],
+    status_map: dict[str, dict[str, Any]],
+    *,
+    overwrite: bool = False,
+) -> DataPrepWorkflowDecision:
+    completed = set(completed_ids)
+    ready: list[str] = []
+    skipped_done: list[str] = []
+    skipped_manual: list[str] = []
+    blocked: list[str] = []
+
+    for sid in remaining:
+        step = steps[sid]
+        if status_map.get(sid, {}).get("done") and not overwrite:
+            skipped_done.append(sid)
+            completed.add(sid)
+            continue
+        deps = step.get("depends_on", [])
+        unmet = [dep for dep in deps if dep not in completed]
+        if unmet:
+            blocked.append(sid)
+        elif step.get("manual"):
+            skipped_manual.append(sid)
+            completed.add(sid)
+        else:
+            ready.append(sid)
+
+    return DataPrepWorkflowDecision(
+        ready=ready,
+        skipped_done=skipped_done,
+        skipped_manual=skipped_manual,
+        blocked=blocked,
+        completed_ids=completed,
+        remaining=[sid for sid in remaining if sid not in completed],
     )

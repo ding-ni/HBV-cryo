@@ -45,6 +45,7 @@ from services.data_prep import (
     DataPrepTaskOutputContext,
     data_prep_start_plan as build_data_prep_start_plan,
     data_prep_step_command as build_data_prep_step_command,
+    data_prep_workflow_decision as build_data_prep_workflow_decision,
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
     verify_data_prep_step_output as build_verify_data_prep_step_output,
@@ -6326,29 +6327,24 @@ def workflow_worker(task_id: str, config_path: Path, step_ids: list[str], payloa
         update_ui_progress("准备执行", "等待前置条件")
         remaining = list(step_ids)
         while remaining:
-            # Find steps whose dependencies are all completed
-            ready = []
-            blocked = []
-            for sid in remaining:
-                step = steps[sid]
-                status_map = {item["id"]: item for item in get_data_prep_status(str(config_path), precip_source=runtime_prec_source)}
-                if status_map.get(sid, {}).get("done") and not bool(payload.get("overwrite", False)):
-                    add_task_output(task_id, f"[跳过] {step['title']} 已完成")
-                    completed_ids.add(sid)
-                    update_ui_progress("跳过已完成", step["title"])
-                    continue
-                deps = step.get("depends_on", [])
-                unmet = [d for d in deps if d not in completed_ids]
-                if unmet:
-                    blocked.append(sid)
-                elif step.get("manual"):
-                    add_task_output(task_id, f"[跳过] {step['title']} (手动步骤)")
-                    completed_ids.add(sid)
-                    update_ui_progress("跳过手动步骤", step["title"])
-                else:
-                    ready.append(sid)
-
-            remaining = [s for s in remaining if s not in completed_ids]
+            status_map = {item["id"]: item for item in get_data_prep_status(str(config_path), precip_source=runtime_prec_source)}
+            decision = build_data_prep_workflow_decision(
+                remaining,
+                completed_ids,
+                steps,
+                status_map,
+                overwrite=bool(payload.get("overwrite", False)),
+            )
+            for sid in decision.skipped_done:
+                add_task_output(task_id, f"[跳过] {steps[sid]['title']} 已完成")
+                update_ui_progress("跳过已完成", steps[sid]["title"])
+            for sid in decision.skipped_manual:
+                add_task_output(task_id, f"[跳过] {steps[sid]['title']} (手动步骤)")
+                update_ui_progress("跳过手动步骤", steps[sid]["title"])
+            completed_ids = set(decision.completed_ids)
+            remaining = list(decision.remaining)
+            ready = list(decision.ready)
+            blocked = list(decision.blocked)
             if not ready:
                 if blocked:
                     titles = [steps[s]["title"] for s in blocked]

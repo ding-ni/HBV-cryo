@@ -14,6 +14,7 @@ from services.data_prep import (  # noqa: E402
     DataPrepTaskOutputContext,
     data_prep_start_plan,
     data_prep_step_command,
+    data_prep_workflow_decision,
     verify_data_prep_step_output,
     verify_data_prep_task_output,
 )
@@ -167,6 +168,44 @@ class DataPrepServiceTests(unittest.TestCase):
                 {"config_path": "workspace.json", "step_id": "blocked"},
                 self._start_context(steps=steps, status=[{"id": "blocked", "blocked_by": ["dep"]}]),
             )
+
+    def test_data_prep_workflow_decision_marks_skips_ready_and_blocked_steps(self) -> None:
+        steps = {
+            "already": {"id": "already", "title": "已完成"},
+            "manual": {"id": "manual", "title": "手动步骤", "manual": True},
+            "ready": {"id": "ready", "title": "可执行", "depends_on": ["already", "manual"]},
+            "blocked": {"id": "blocked", "title": "等待依赖", "depends_on": ["missing"]},
+        }
+        status_map = {"already": {"done": True}}
+
+        decision = data_prep_workflow_decision(
+            ["already", "manual", "ready", "blocked"],
+            set(),
+            steps,
+            status_map,
+        )
+
+        self.assertEqual(decision.skipped_done, ["already"])
+        self.assertEqual(decision.skipped_manual, ["manual"])
+        self.assertEqual(decision.ready, ["ready"])
+        self.assertEqual(decision.blocked, ["blocked"])
+        self.assertEqual(decision.completed_ids, {"already", "manual"})
+        self.assertEqual(decision.remaining, ["ready", "blocked"])
+
+    def test_data_prep_workflow_decision_respects_overwrite_for_completed_steps(self) -> None:
+        steps = {"already": {"id": "already", "title": "已完成"}}
+        decision = data_prep_workflow_decision(
+            ["already"],
+            set(),
+            steps,
+            {"already": {"done": True}},
+            overwrite=True,
+        )
+
+        self.assertEqual(decision.skipped_done, [])
+        self.assertEqual(decision.ready, ["already"])
+        self.assertEqual(decision.completed_ids, set())
+        self.assertEqual(decision.remaining, ["already"])
 
 
 if __name__ == "__main__":
