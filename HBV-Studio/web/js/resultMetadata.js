@@ -188,11 +188,149 @@
     return `${sourceLabel} · ${directoryLabel}`;
   }
 
+  function finiteSeriesStats(values) {
+    const arr = Array.isArray(values) ? values : [];
+    let sum = 0;
+    let count = 0;
+    let nonzero = 0;
+    for (const raw of arr) {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) continue;
+      count += 1;
+      sum += value;
+      if (Math.abs(value) > 1e-12) nonzero += 1;
+    }
+    return { sum, count, nonzero };
+  }
+
+  function ratioValue(numerator, denominator) {
+    const num = Number(numerator);
+    const den = Number(denominator);
+    if (!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den) <= 1e-12) return null;
+    return num / den;
+  }
+
+  function formatPercentValue(value, digits = 1) {
+    const num = Number(value);
+    return Number.isFinite(num) ? `${(num * 100).toFixed(digits)}%` : "—";
+  }
+
+  function componentFractionReport(meta = {}) {
+    return meta?.diagnostics?.component_fraction_report || {};
+  }
+
+  function componentFractionText(report = {}) {
+    const values = [
+      ["降雨", report.rain_fraction],
+      ["融雪", report.snow_fraction],
+      ["融冰", report.ice_fraction],
+    ];
+    if (!values.some(([, value]) => Number.isFinite(Number(value)))) return "未记录";
+    return values.map(([label, value]) => `${label} ${formatPercentValue(value)}`).join(" / ");
+  }
+
+  function componentFractionBasisText(report = {}) {
+    const basis = String(report.evaluation_period || "").trim();
+    if (basis === "local_runoff_calibration_period") {
+      return "率定期本地径流口径，不含上游边界入流";
+    }
+    if (basis === "total_runoff_calibration_period" || basis === "calibration_period") {
+      return "率定期模拟总流量口径";
+    }
+    return "率定期模拟径流口径";
+  }
+
+  function glacierFractionReport(meta) {
+    return meta?.diagnostics?.glacier_fraction_report
+      || meta?.optional_modules?.glacier?.fraction_report
+      || meta?.glacier_fraction_report
+      || {};
+  }
+
+  function glacierFractionValue(report) {
+    const raw = report?.f_ice ?? report?.result?.f_ice;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function wideIceGuardUpper(report) {
+    const window = Array.isArray(report?.window) ? report.window : [];
+    const upper = Number(window[1]);
+    if (Number.isFinite(upper) && upper > 0) return Math.max(0.35, Math.min(0.60, upper * 1.30));
+    return 0.35;
+  }
+
+  function analyzeIceContribution(data) {
+    const meta = data?.metadata || {};
+    const series = data?.series || {};
+    const glacier = meta?.optional_modules?.glacier || {};
+    const enabled = Boolean(glacier.enabled);
+    const qIce = finiteSeriesStats(series.q_ice);
+    const qTotal = finiteSeriesStats(series.q_total || series.q_sim);
+    const qLocal = finiteSeriesStats(series.q_local);
+    const qRain = finiteSeriesStats(series.q_rain);
+    const qSnow = finiteSeriesStats(series.q_snow);
+    const fracReport = glacierFractionReport(meta);
+    const fIce = glacierFractionValue(fracReport);
+    const guard = meta?.objective_terms?.cryo_consistency?.ice_dominance_guard || {};
+    const qIceToTotal = ratioValue(qIce.sum, qTotal.sum);
+    const qIceToLocal = ratioValue(qIce.sum, qLocal.sum);
+    const qRainToTotal = ratioValue(qRain.sum, qTotal.sum);
+    const qSnowToTotal = ratioValue(qSnow.sum, qTotal.sum);
+    let stateLabel = "not_applicable_no_glacier";
+    let message = "当前工作区未启用冰川模块。";
+    if (enabled && qIce.count <= 0) {
+      stateLabel = "missing_q_ice";
+      message = "冰川模块已启用，但结果文件缺少裸冰融化流量，需要复核结果输出。";
+    } else if (enabled && qIce.nonzero <= 0) {
+      stateLabel = "zero_q_ice";
+      message = "裸冰融化流量存在但全零，可能是该时段无有效融冰或冰川输入未产生贡献。";
+    } else if (enabled) {
+      stateLabel = "valid_q_ice";
+      message = "裸冰融化流量已产生有效非零序列。";
+    }
+    return {
+      enabled,
+      state: stateLabel,
+      message,
+      qIce,
+      qTotal,
+      qLocal,
+      qRain,
+      qSnow,
+      qIceToTotal,
+      qIceToLocal,
+      qRainToTotal,
+      qSnowToTotal,
+      fracReport,
+      fIce,
+      guard,
+      guardPenalty: Number(guard?.penalty || 0),
+      guardUpper: Number.isFinite(Number(guard?.upper)) ? Number(guard.upper) : wideIceGuardUpper(fracReport),
+    };
+  }
+
+  function iceContributionDetailText(analysis) {
+    if (!analysis.enabled || analysis.state !== "valid_q_ice") return analysis.message;
+    return [
+      `降雨产流占模拟总流量 ${formatPercentValue(analysis.qRainToTotal)}`,
+      `融雪径流占模拟总流量 ${formatPercentValue(analysis.qSnowToTotal)}`,
+      `裸冰融化占模拟总流量 ${formatPercentValue(analysis.qIceToTotal)}`,
+    ].join(" · ");
+  }
+
   window.HBVStudioResultMetadata = {
+    analyzeIceContribution,
     boundaryEnabledFromMeta,
     boundaryModuleSummary,
+    componentFractionBasisText,
+    componentFractionReport,
+    componentFractionText,
     dataCacheSummary,
+    glacierFractionReport,
+    glacierFractionValue,
     glacierModuleSummary,
+    iceContributionDetailText,
     optimizationPolishSummary,
     optimizationRefineSummary,
     optimizationResultLabel,

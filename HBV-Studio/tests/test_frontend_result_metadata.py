@@ -150,6 +150,95 @@ class FrontendResultMetadataTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_component_fraction_and_ice_contribution_analysis(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/resultMetadata.js", "utf8"), context);
+
+            const meta = context.window.HBVStudioResultMetadata;
+
+            const report = meta.componentFractionReport({
+              diagnostics: {
+                component_fraction_report: {
+                  rain_fraction: 0.25,
+                  snow_fraction: 0.35,
+                  ice_fraction: 0.40,
+                  evaluation_period: "local_runoff_calibration_period",
+                },
+              },
+            });
+            const text = meta.componentFractionText(report);
+            if (text !== "降雨 25.0% / 融雪 35.0% / 融冰 40.0%") {
+              throw new Error(`unexpected component fraction text: ${text}`);
+            }
+            const basis = meta.componentFractionBasisText(report);
+            if (basis !== "率定期本地径流口径，不含上游边界入流") {
+              throw new Error(`unexpected basis text: ${basis}`);
+            }
+            if (meta.componentFractionText({}) !== "未记录") {
+              throw new Error("empty component fraction should be unrecorded");
+            }
+
+            const fallbackGlacierReport = meta.glacierFractionReport({
+              optional_modules: { glacier: { fraction_report: { result: { f_ice: 0.18 } } } },
+            });
+            if (meta.glacierFractionValue(fallbackGlacierReport) !== 0.18) {
+              throw new Error("glacier fraction fallback value mismatch");
+            }
+
+            const analysis = meta.analyzeIceContribution({
+              metadata: {
+                optional_modules: { glacier: { enabled: true } },
+                diagnostics: { glacier_fraction_report: { f_ice: 0.22, window: [0.10, 0.20] } },
+                objective_terms: { cryo_consistency: { ice_dominance_guard: { penalty: 0.3 } } },
+              },
+              series: {
+                q_ice: [1, 2, null, "bad"],
+                q_total: [10, 10],
+                q_local: [5, 5],
+                q_rain: [3, 3],
+                q_snow: [2, 2],
+              },
+            });
+            if (analysis.state !== "valid_q_ice" || analysis.qIce.sum !== 3 || analysis.qIce.nonzero !== 2) {
+              throw new Error(`unexpected valid analysis: ${JSON.stringify(analysis)}`);
+            }
+            if (analysis.qIceToTotal !== 0.15 || analysis.qIceToLocal !== 0.3 || analysis.guardUpper !== 0.35) {
+              throw new Error(`unexpected ratios or guard: ${JSON.stringify(analysis)}`);
+            }
+            const detail = meta.iceContributionDetailText(analysis);
+            if (detail !== "降雨产流占模拟总流量 30.0% · 融雪径流占模拟总流量 20.0% · 裸冰融化占模拟总流量 15.0%") {
+              throw new Error(`unexpected detail text: ${detail}`);
+            }
+
+            const missing = meta.analyzeIceContribution({
+              metadata: { optional_modules: { glacier: { enabled: true } } },
+              series: {},
+            });
+            if (missing.state !== "missing_q_ice" || !missing.message.includes("缺少裸冰融化流量")) {
+              throw new Error(`unexpected missing q_ice state: ${JSON.stringify(missing)}`);
+            }
+            const noGlacier = meta.analyzeIceContribution({ metadata: {}, series: { q_ice: [1] } });
+            if (noGlacier.enabled || noGlacier.state !== "not_applicable_no_glacier") {
+              throw new Error(`unexpected no-glacier state: ${JSON.stringify(noGlacier)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
