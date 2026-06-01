@@ -36,6 +36,7 @@ class ManualPresetContext:
     task_time_basis: Callable[..., str]
     normalize_time_step_hours: Callable[[Any], float]
     resolve_profile: Callable[[dict[str, Any], Any], str]
+    source_run_metadata_for_preset: Callable[[Any], tuple[dict[str, Any], Path | None, Path | None]] | None = None
 
 
 def normalize_preset_scope(scope: Any) -> str:
@@ -313,7 +314,10 @@ def save_manual_preset(payload: dict[str, Any], context: ManualPresetContext) ->
     data = load_manual_preset_store(config_path_raw, context, scope)
     presets = list(data.get("presets", []))
     source_run_path, source_run_name = _normalize_manual_preset_source_run(payload.get("run_path", ""), "", context)
-    source_metadata, source_run_dir, source_resolved_config = _source_run_metadata_for_preset(payload.get("run_path", ""), context)
+    if context.source_run_metadata_for_preset is not None:
+        source_metadata, source_run_dir, source_resolved_config = context.source_run_metadata_for_preset(payload.get("run_path", ""))
+    else:
+        source_metadata, source_run_dir, source_resolved_config = _source_run_metadata_for_preset(payload.get("run_path", ""), context)
     existing = next(
         (
             item for item in presets

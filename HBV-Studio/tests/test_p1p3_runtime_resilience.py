@@ -59,6 +59,47 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertGreater(latest, 0)
         self.assertTrue(path.endswith((".py", ".js", ".html", ".css")))
 
+    def test_get_api_route_registry_is_complete_and_resolvable(self) -> None:
+        expected_routes = {
+            "/api/health",
+            "/api/dashboard",
+            "/api/templates",
+            "/api/workspaces",
+            "/api/configs",
+            "/api/workspace",
+            "/api/config",
+            "/api/runs",
+            "/api/run",
+            "/api/tasks",
+            "/api/cdsapi/status",
+            "/api/fs/list",
+            "/api/obs-info",
+            "/api/suggest/bbox",
+            "/api/suggest/cfmax-threshold",
+            "/api/geo/overview",
+            "/api/data-prep/steps",
+            "/api/data-prep/status",
+            "/api/config/validate",
+            "/api/wizard/validate-step",
+            "/api/boundary-preview",
+            "/api/workspace/completeness",
+            "/api/workspace/detailed-check",
+            "/api/workspace/layout",
+            "/api/workspace/advice",
+            "/api/manual-presets",
+        }
+        self.assertEqual(set(svc.StudioHandler.GET_ROUTE_HANDLERS), expected_routes)
+        for handler_name in svc.StudioHandler.GET_ROUTE_HANDLERS.values():
+            self.assertTrue(hasattr(svc.StudioHandler, handler_name), handler_name)
+        self.assertEqual(
+            svc.StudioHandler.GET_ROUTE_HANDLERS["/api/workspaces"],
+            svc.StudioHandler.GET_ROUTE_HANDLERS["/api/configs"],
+        )
+        self.assertEqual(
+            svc.StudioHandler.GET_ROUTE_HANDLERS["/api/workspace"],
+            svc.StudioHandler.GET_ROUTE_HANDLERS["/api/config"],
+        )
+
     def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)

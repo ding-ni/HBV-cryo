@@ -53,6 +53,7 @@ from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
 from services.geo_overview import GeoOverviewContext, workspace_geo_overview as build_workspace_geo_overview
 from services.manual_presets import ManualPresetContext
+from services.manual_presets import _source_run_metadata_for_preset as build_source_run_metadata_for_preset
 from services.manual_presets import delete_manual_preset as build_delete_manual_preset
 from services.manual_presets import find_manual_preset as build_find_manual_preset
 from services.manual_presets import list_manual_presets as build_list_manual_presets
@@ -1045,7 +1046,12 @@ def _manual_preset_context() -> ManualPresetContext:
         task_time_basis=task_time_basis,
         normalize_time_step_hours=normalize_time_step_hours,
         resolve_profile=resolve_profile,
+        source_run_metadata_for_preset=_source_run_metadata_for_preset,
     )
+
+
+def _source_run_metadata_for_preset(source_run_raw: Any) -> tuple[dict[str, Any], Path | None, Path | None]:
+    return build_source_run_metadata_for_preset(source_run_raw, _manual_preset_context())
 
 
 def manual_preset_store_path(config_path_raw: str, scope: str = "workspace") -> Path:
@@ -10091,6 +10097,34 @@ def start_manual_start(payload: dict[str, Any]) -> TaskRecord:
 class StudioHandler(BaseHTTPRequestHandler):
     server_version = "HBVStudio/3.0"
     CONNECTION_GONE_ERRORS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
+    GET_ROUTE_HANDLERS = {
+        "/api/health": "_api_get_health",
+        "/api/dashboard": "_api_get_dashboard",
+        "/api/templates": "_api_get_templates",
+        "/api/workspaces": "_api_get_workspaces",
+        "/api/configs": "_api_get_workspaces",
+        "/api/workspace": "_api_get_workspace",
+        "/api/config": "_api_get_workspace",
+        "/api/runs": "_api_get_runs",
+        "/api/run": "_api_get_run",
+        "/api/tasks": "_api_get_tasks",
+        "/api/cdsapi/status": "_api_get_cdsapi_status",
+        "/api/fs/list": "_api_get_fs_list",
+        "/api/obs-info": "_api_get_obs_info",
+        "/api/suggest/bbox": "_api_get_suggest_bbox",
+        "/api/suggest/cfmax-threshold": "_api_get_suggest_cfmax_threshold",
+        "/api/geo/overview": "_api_get_geo_overview",
+        "/api/data-prep/steps": "_api_get_data_prep_steps",
+        "/api/data-prep/status": "_api_get_data_prep_status",
+        "/api/config/validate": "_api_get_config_validate",
+        "/api/wizard/validate-step": "_api_get_wizard_validate_step",
+        "/api/boundary-preview": "_api_get_boundary_preview",
+        "/api/workspace/completeness": "_api_get_workspace_completeness",
+        "/api/workspace/detailed-check": "_api_get_workspace_detailed_check",
+        "/api/workspace/layout": "_api_get_workspace_layout",
+        "/api/workspace/advice": "_api_get_workspace_advice",
+        "/api/manual-presets": "_api_get_manual_presets",
+    }
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return
@@ -10134,143 +10168,12 @@ class StudioHandler(BaseHTTPRequestHandler):
 
     def handle_api_get(self, parsed: Any) -> None:
         query = parse_qs(parsed.query)
+        handler_name = self.GET_ROUTE_HANDLERS.get(parsed.path)
+        if handler_name is None:
+            self.send_error_json("未知接口。", status=404)
+            return
         try:
-            if parsed.path == "/api/health":
-                self.send_json(health_payload())
-            elif parsed.path == "/api/dashboard":
-                self.send_json({"ok": True, "data": dashboard_payload()})
-            elif parsed.path == "/api/templates":
-                self.send_json({"ok": True, "data": list_templates()})
-            elif parsed.path in {"/api/workspaces", "/api/configs"}:
-                self.send_json({"ok": True, "data": list_workspaces()})
-            elif parsed.path in {"/api/workspace", "/api/config"}:
-                path, data = load_workspace_config(unquote(query.get("path", [""])[0]))
-                self.send_json({"ok": True, "path": str(path.resolve()), "display_path": to_display_path(path), "data": data})
-            elif parsed.path == "/api/runs":
-                self.send_json({"ok": True, "data": list_runs()})
-            elif parsed.path == "/api/run":
-                self.send_json({"ok": True, "data": load_run_detail(unquote(query.get("path", [""])[0]))})
-            elif parsed.path == "/api/tasks":
-                self.send_json({"ok": True, "data": list_tasks()})
-            elif parsed.path == "/api/cdsapi/status":
-                self.send_json({"ok": True, "data": cdsapi_status()})
-            elif parsed.path == "/api/fs/list":
-                raw_path = unquote(query.get("path", [""])[0])
-                exts = [item for item in query.get("extensions", [""])[0].split(",") if item]
-                kind = query.get("kind", ["file"])[0] or "file"
-                self.send_json({"ok": True, "data": list_filesystem(raw_path, exts, kind=kind)})
-            elif parsed.path == "/api/obs-info":
-                csv_path = unquote(query.get("path", [""])[0])
-                date_field = query.get("date_field", [""])[0] or None
-                target_step_hours_raw = query.get("target_step_hours", [""])[0]
-                target_step_hours = float(target_step_hours_raw) if target_step_hours_raw else None
-                self.send_json({"ok": True, "data": observed_info(csv_path, date_field=date_field, target_step_hours=target_step_hours)})
-            elif parsed.path == "/api/suggest/bbox":
-                self.send_json({"ok": True, "data": fill_bbox_from_shp(unquote(query.get("shp_path", [""])[0]))})
-            elif parsed.path == "/api/suggest/cfmax-threshold":
-                shp = unquote(query.get("shp_path", [""])[0])
-                dem = unquote(query.get("dem_path", [""])[0]) or str(BUILTIN_DEM.resolve())
-                self.send_json({"ok": True, "data": suggest_cfmax_threshold(shp, dem)})
-            elif parsed.path == "/api/geo/overview":
-                raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
-                self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
-            elif parsed.path == "/api/data-prep/steps":
-                raw_config = unquote(query.get("config_path", [""])[0])
-                self.send_json({"ok": True, "data": get_data_prep_steps_payload(raw_config)})
-            elif parsed.path == "/api/data-prep/status":
-                self.send_json({
-                    "ok": True,
-                    "data": get_data_prep_status(
-                        unquote(query.get("config_path", [""])[0]),
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/config/validate":
-                stage = query.get("stage", ["calibration"])[0] or "calibration"
-                self.send_json({
-                    "ok": True,
-                    "data": validate_workspace_fields(
-                        unquote(query.get("config_path", [""])[0]),
-                        stage=stage,
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/wizard/validate-step":
-                config_path = unquote(query.get("config_path", [""])[0])
-                step = int(query.get("step", ["1"])[0])
-                self.send_json({
-                    "ok": True,
-                    "data": wizard_validate_step(
-                        config_path,
-                        step,
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/boundary-preview":
-                csv_path = unquote(query.get("path", [""])[0])
-                date_field = query.get("date_field", ["date"])[0] or "date"
-                flow_field = query.get("flow_field", ["inflow_m3s"])[0] or "inflow_m3s"
-                config_path = unquote(query.get("config_path", [""])[0])
-                expected_start = query.get("expected_start", [""])[0] or ""
-                expected_end = query.get("expected_end", [""])[0] or ""
-                expected_step_hours_raw = query.get("expected_step_hours", [""])[0]
-                expected_step_hours = float(expected_step_hours_raw) if expected_step_hours_raw else None
-                self.send_json(
-                    {
-                        "ok": True,
-                        "data": boundary_preview(
-                            csv_path,
-                            date_field,
-                            flow_field,
-                            config_path_raw=config_path,
-                            expected_start=expected_start,
-                            expected_end=expected_end,
-                            expected_step_hours=expected_step_hours,
-                        ),
-                    }
-                )
-            elif parsed.path == "/api/workspace/completeness":
-                quick = query.get("quick", ["0"])[0] in {"1", "true", "yes"}
-                self.send_json({
-                    "ok": True,
-                    "data": workspace_completeness(
-                        unquote(query.get("config_path", [""])[0]),
-                        quick=quick,
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/workspace/detailed-check":
-                self.send_json({
-                    "ok": True,
-                    "data": workspace_detailed_check(
-                        unquote(query.get("config_path", [""])[0]),
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/workspace/layout":
-                raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
-                self.send_json({"ok": True, "data": workspace_layout_summary(raw_path)})
-            elif parsed.path == "/api/workspace/advice":
-                self.send_json({
-                    "ok": True,
-                    "data": workspace_advice(
-                        unquote(query.get("config_path", [""])[0]),
-                        precip_source=unquote(query.get("prec_source", [""])[0]),
-                    ),
-                })
-            elif parsed.path == "/api/manual-presets":
-                self.send_json(
-                    {
-                        "ok": True,
-                        "data": list_manual_presets(
-                            unquote(query.get("config_path", [""])[0]),
-                            unquote(query.get("calibration_profile", [""])[0]),
-                            scope=unquote(query.get("scope", ["workspace"])[0]),
-                        ),
-                    }
-                )
-            else:
-                self.send_error_json("未知接口。", status=404)
+            getattr(self, handler_name)(query)
         except FileNotFoundError as exc:
             self.send_error_json(str(exc), status=404)
         except ValueError as exc:
@@ -10278,6 +10181,164 @@ class StudioHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_error_json(str(exc), status=500)
             traceback.print_exc()
+
+    def _api_get_health(self, query: dict[str, list[str]]) -> None:
+        self.send_json(health_payload())
+
+    def _api_get_dashboard(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": dashboard_payload()})
+
+    def _api_get_templates(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": list_templates()})
+
+    def _api_get_workspaces(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": list_workspaces()})
+
+    def _api_get_workspace(self, query: dict[str, list[str]]) -> None:
+        path, data = load_workspace_config(unquote(query.get("path", [""])[0]))
+        self.send_json({"ok": True, "path": str(path.resolve()), "display_path": to_display_path(path), "data": data})
+
+    def _api_get_runs(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": list_runs()})
+
+    def _api_get_run(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": load_run_detail(unquote(query.get("path", [""])[0]))})
+
+    def _api_get_tasks(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": list_tasks()})
+
+    def _api_get_cdsapi_status(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": cdsapi_status()})
+
+    def _api_get_fs_list(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("path", [""])[0])
+        exts = [item for item in query.get("extensions", [""])[0].split(",") if item]
+        kind = query.get("kind", ["file"])[0] or "file"
+        self.send_json({"ok": True, "data": list_filesystem(raw_path, exts, kind=kind)})
+
+    def _api_get_obs_info(self, query: dict[str, list[str]]) -> None:
+        csv_path = unquote(query.get("path", [""])[0])
+        date_field = query.get("date_field", [""])[0] or None
+        target_step_hours_raw = query.get("target_step_hours", [""])[0]
+        target_step_hours = float(target_step_hours_raw) if target_step_hours_raw else None
+        self.send_json({"ok": True, "data": observed_info(csv_path, date_field=date_field, target_step_hours=target_step_hours)})
+
+    def _api_get_suggest_bbox(self, query: dict[str, list[str]]) -> None:
+        self.send_json({"ok": True, "data": fill_bbox_from_shp(unquote(query.get("shp_path", [""])[0]))})
+
+    def _api_get_suggest_cfmax_threshold(self, query: dict[str, list[str]]) -> None:
+        shp = unquote(query.get("shp_path", [""])[0])
+        dem = unquote(query.get("dem_path", [""])[0]) or str(BUILTIN_DEM.resolve())
+        self.send_json({"ok": True, "data": suggest_cfmax_threshold(shp, dem)})
+
+    def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
+
+    def _api_get_data_prep_steps(self, query: dict[str, list[str]]) -> None:
+        raw_config = unquote(query.get("config_path", [""])[0])
+        self.send_json({"ok": True, "data": get_data_prep_steps_payload(raw_config)})
+
+    def _api_get_data_prep_status(self, query: dict[str, list[str]]) -> None:
+        self.send_json({
+            "ok": True,
+            "data": get_data_prep_status(
+                unquote(query.get("config_path", [""])[0]),
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_config_validate(self, query: dict[str, list[str]]) -> None:
+        stage = query.get("stage", ["calibration"])[0] or "calibration"
+        self.send_json({
+            "ok": True,
+            "data": validate_workspace_fields(
+                unquote(query.get("config_path", [""])[0]),
+                stage=stage,
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_wizard_validate_step(self, query: dict[str, list[str]]) -> None:
+        config_path = unquote(query.get("config_path", [""])[0])
+        step = int(query.get("step", ["1"])[0])
+        self.send_json({
+            "ok": True,
+            "data": wizard_validate_step(
+                config_path,
+                step,
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_boundary_preview(self, query: dict[str, list[str]]) -> None:
+        csv_path = unquote(query.get("path", [""])[0])
+        date_field = query.get("date_field", ["date"])[0] or "date"
+        flow_field = query.get("flow_field", ["inflow_m3s"])[0] or "inflow_m3s"
+        config_path = unquote(query.get("config_path", [""])[0])
+        expected_start = query.get("expected_start", [""])[0] or ""
+        expected_end = query.get("expected_end", [""])[0] or ""
+        expected_step_hours_raw = query.get("expected_step_hours", [""])[0]
+        expected_step_hours = float(expected_step_hours_raw) if expected_step_hours_raw else None
+        self.send_json(
+            {
+                "ok": True,
+                "data": boundary_preview(
+                    csv_path,
+                    date_field,
+                    flow_field,
+                    config_path_raw=config_path,
+                    expected_start=expected_start,
+                    expected_end=expected_end,
+                    expected_step_hours=expected_step_hours,
+                ),
+            }
+        )
+
+    def _api_get_workspace_completeness(self, query: dict[str, list[str]]) -> None:
+        quick = query.get("quick", ["0"])[0] in {"1", "true", "yes"}
+        self.send_json({
+            "ok": True,
+            "data": workspace_completeness(
+                unquote(query.get("config_path", [""])[0]),
+                quick=quick,
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_workspace_detailed_check(self, query: dict[str, list[str]]) -> None:
+        self.send_json({
+            "ok": True,
+            "data": workspace_detailed_check(
+                unquote(query.get("config_path", [""])[0]),
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_workspace_layout(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self.send_json({"ok": True, "data": workspace_layout_summary(raw_path)})
+
+    def _api_get_workspace_advice(self, query: dict[str, list[str]]) -> None:
+        self.send_json({
+            "ok": True,
+            "data": workspace_advice(
+                unquote(query.get("config_path", [""])[0]),
+                precip_source=unquote(query.get("prec_source", [""])[0]),
+            ),
+        })
+
+    def _api_get_manual_presets(self, query: dict[str, list[str]]) -> None:
+        self.send_json(
+            {
+                "ok": True,
+                "data": list_manual_presets(
+                    unquote(query.get("config_path", [""])[0]),
+                    unquote(query.get("calibration_profile", [""])[0]),
+                    scope=unquote(query.get("scope", ["workspace"])[0]),
+                ),
+            }
+        )
 
     def handle_api_post(self, parsed: Any) -> None:
         try:
