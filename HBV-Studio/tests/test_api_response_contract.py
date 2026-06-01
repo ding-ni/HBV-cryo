@@ -32,6 +32,13 @@ def response_shape(value):
     return type(value).__name__
 
 
+def snapshot_request(snapshot_key: str) -> tuple[str, str]:
+    if " " not in snapshot_key:
+        return "GET", snapshot_key
+    method, endpoint = snapshot_key.split(" ", 1)
+    return method.strip().upper(), endpoint.strip()
+
+
 class ApiResponseContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -46,29 +53,39 @@ class ApiResponseContractTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=5)
 
-    def get_json(self, endpoint: str) -> dict:
+    def request_json(self, snapshot_key: str) -> dict:
+        method, endpoint = snapshot_request(snapshot_key)
         url = f"http://127.0.0.1:{self.port}{endpoint}"
-        with urllib.request.urlopen(url, timeout=5) as response:
+        data = b"{}" if method == "POST" else None
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"} if data is not None else {},
+            method=method,
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
             self.assertEqual(response.status, 200)
             return json.loads(response.read().decode("utf-8"))
 
     def test_smoke_response_shapes_match_snapshot(self) -> None:
         expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
         actual = {
-            endpoint: response_shape(self.get_json(endpoint))
+            endpoint: response_shape(self.request_json(endpoint))
             for endpoint in sorted(expected)
         }
         self.assertEqual(actual, expected)
 
-    def test_snapshot_endpoints_are_registered_get_routes(self) -> None:
+    def test_snapshot_endpoints_are_registered_routes(self) -> None:
         expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
-        registered_get_paths = {
-            spec.path
+        registered_route_keys = {
+            (spec.method, spec.path)
             for spec in api_routes.API_ROUTE_SPECS
-            if spec.method == "GET"
         }
-        snapshot_paths = {urlsplit(endpoint).path for endpoint in expected}
-        self.assertTrue(snapshot_paths <= registered_get_paths)
+        snapshot_route_keys = {
+            (method, urlsplit(endpoint).path)
+            for method, endpoint in (snapshot_request(item) for item in expected)
+        }
+        self.assertTrue(snapshot_route_keys <= registered_route_keys)
 
 
 if __name__ == "__main__":

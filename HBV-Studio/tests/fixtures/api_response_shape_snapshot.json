@@ -45,5 +45,11 @@
   "/api/templates": {
     "data": "list",
     "ok": "bool"
+  },
+  "POST /api/app/window-unload": {
+    "data": {
+      "accepted": "bool"
+    },
+    "ok": "bool"
   }
 }
