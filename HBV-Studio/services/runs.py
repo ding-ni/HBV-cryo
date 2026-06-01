@@ -98,6 +98,16 @@ class RunReplayConfigContext:
     metadata_boundary_enabled: Callable[[dict[str, Any]], bool | None]
 
 
+@dataclass(frozen=True)
+class RunCalibrationTaskContext:
+    resolve_path: Callable[..., Path]
+    read_json_file: Callable[[Path], dict[str, Any]]
+    normalize_run_metadata: Callable[..., tuple[dict[str, Any], Path | None]]
+    run_update_timestamps: Callable[[Path], tuple[float, int]]
+    build_run_summary: Callable[..., dict[str, Any]]
+    is_studio_editable_metadata: Callable[[dict[str, Any], Path | None], bool]
+
+
 _RUN_LIST_CACHE_LOCK = threading.Lock()
 _RUN_LIST_CACHE_SIGNATURE: tuple[tuple[Any, ...], ...] | None = None
 _RUN_LIST_CACHE_ITEMS: list[dict[str, Any]] = []
@@ -672,6 +682,58 @@ def restore_forward_boundary_series(
     sim["boundary_enabled"] = True
     sim["boundary_replay_fixed"] = True
     return True
+
+
+def pick_latest_run_path(run_paths: list[str]) -> str:
+    def sort_key(value: str) -> tuple[float, str]:
+        try:
+            path = Path(value)
+            return (path.stat().st_mtime, str(path))
+        except Exception:
+            return (0.0, str(value))
+
+    return max(run_paths, key=sort_key) if run_paths else ""
+
+
+def build_calibration_task_result(run_path: str, context: RunCalibrationTaskContext) -> dict[str, Any] | None:
+    try:
+        run_dir = context.resolve_path(run_path, must_exist=True)
+        metadata_path = run_dir / "metadata.json"
+        if not metadata_path.exists():
+            return None
+        metadata, resolved_config = context.normalize_run_metadata(context.read_json_file(metadata_path), run_path=run_dir)
+        updated_at, updated_at_ns = context.run_update_timestamps(run_dir)
+        summary = context.build_run_summary(
+            run_dir,
+            metadata,
+            resolved_config,
+            updated_at=updated_at,
+            updated_at_ns=updated_at_ns,
+        )
+    except Exception:
+        return None
+
+    optimization = dict(metadata.get("optimization", {}) or {})
+    calibration = dict(metadata.get("metrics", {}).get("calibration", {}) or {})
+    validation = dict(metadata.get("metrics", {}).get("validation", {}) or {})
+    return {
+        "run_path": str(run_dir.resolve()),
+        "run_name": str(summary.get("display_name", "") or summary.get("name", "") or run_dir.name),
+        "workspace_config": str(metadata.get("workspace_config", "") or ""),
+        "calibration_profile": metadata.get("calibration_profile"),
+        "requested_objective_mode": metadata.get("requested_objective_mode") or optimization.get("requested_objective_mode"),
+        "effective_objective_mode": metadata.get("effective_objective_mode") or optimization.get("effective_objective_mode"),
+        "metrics": {
+            "nse_cal": calibration.get("nse"),
+            "nse_val": validation.get("nse"),
+            "kge_cal": calibration.get("kge"),
+            "kge_val": validation.get("kge"),
+            "pbias_cal": calibration.get("pbias"),
+            "pbias_val": validation.get("pbias"),
+        },
+        "optimization": optimization,
+        "studio_compatible": context.is_studio_editable_metadata(metadata, resolved_config),
+    }
 
 
 def list_runs(context: RunListContext) -> list[dict[str, Any]]:

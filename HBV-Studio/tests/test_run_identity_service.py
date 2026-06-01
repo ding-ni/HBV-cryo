@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,10 +14,12 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.runs import (  # noqa: E402
+    RunCalibrationTaskContext,
     RunReplayConfigContext,
     RunSummaryContext,
     apply_run_replay_config_overrides,
     build_run_summary,
+    build_calibration_task_result,
     capture_forward_observation_state,
     default_run_export_fields,
     display_run_title,
@@ -23,6 +27,7 @@ from services.runs import (  # noqa: E402
     load_run_series_map,
     metadata_initial_state_override,
     normalize_result_title,
+    pick_latest_run_path,
     read_sampled_csv_rows,
     restore_forward_boundary_series,
     restore_forward_observation_state,
@@ -419,6 +424,87 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertFalse(
             restore_forward_boundary_series(module, {"q_total": np.asarray([1.0])}, {"2026-06-02": 1.0})
         )
+
+    def test_pick_latest_run_path_uses_mtime_then_path_for_tie_break(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = Path(temp_dir) / "run_a"
+            second = Path(temp_dir) / "run_b"
+            first.mkdir()
+            second.mkdir()
+            first_time = 1_800_000_000
+            second_time = 1_800_000_010
+            first.touch()
+            second.touch()
+            os.utime(first, (first_time, first_time))
+            os.utime(second, (second_time, second_time))
+
+            latest = pick_latest_run_path([str(first), str(second)])
+
+        self.assertEqual(Path(latest).name, "run_b")
+        self.assertEqual(pick_latest_run_path([]), "")
+        self.assertEqual(pick_latest_run_path(["Z:/missing_a", "Z:/missing_b"]), "Z:/missing_b")
+
+    def test_build_calibration_task_result_summarizes_run_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run_1"
+            run_dir.mkdir()
+            metadata = {
+                "workspace_config": "C:/workspace/config.json",
+                "calibration_profile": "daily",
+                "requested_objective_mode": "auto",
+                "optimization": {
+                    "requested_objective_mode": "de",
+                    "effective_objective_mode": "daily_unified_professional_v1",
+                },
+                "metrics": {
+                    "calibration": {"nse": 0.82, "kge": 0.76, "pbias": -1.5},
+                    "validation": {"nse": 0.71, "kge": 0.68, "pbias": 2.3},
+                },
+            }
+            (run_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+            context = RunCalibrationTaskContext(
+                resolve_path=lambda raw, **kwargs: Path(raw).resolve(strict=bool(kwargs.get("must_exist"))),
+                read_json_file=lambda path: json.loads(Path(path).read_text(encoding="utf-8")),
+                normalize_run_metadata=lambda meta, **kwargs: (dict(meta), Path("C:/workspace/config.json")),
+                run_update_timestamps=lambda path: (123.0, 123000),
+                build_run_summary=lambda path, meta, resolved, **kwargs: {"display_name": "沱沱河率定结果"},
+                is_studio_editable_metadata=lambda meta, resolved: True,
+            )
+
+            result = build_calibration_task_result(str(run_dir), context)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(Path(result["run_path"]).name, "run_1")
+        self.assertEqual(result["run_name"], "沱沱河率定结果")
+        self.assertEqual(result["workspace_config"], "C:/workspace/config.json")
+        self.assertEqual(result["calibration_profile"], "daily")
+        self.assertEqual(result["requested_objective_mode"], "auto")
+        self.assertEqual(result["effective_objective_mode"], "daily_unified_professional_v1")
+        self.assertEqual(result["metrics"]["nse_cal"], 0.82)
+        self.assertEqual(result["metrics"]["nse_val"], 0.71)
+        self.assertEqual(result["metrics"]["kge_cal"], 0.76)
+        self.assertEqual(result["metrics"]["kge_val"], 0.68)
+        self.assertEqual(result["metrics"]["pbias_cal"], -1.5)
+        self.assertEqual(result["metrics"]["pbias_val"], 2.3)
+        self.assertTrue(result["studio_compatible"])
+
+    def test_build_calibration_task_result_returns_none_for_missing_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run_missing_metadata"
+            run_dir.mkdir()
+            context = RunCalibrationTaskContext(
+                resolve_path=lambda raw, **kwargs: Path(raw).resolve(strict=bool(kwargs.get("must_exist"))),
+                read_json_file=lambda path: {},
+                normalize_run_metadata=lambda meta, **kwargs: (dict(meta), None),
+                run_update_timestamps=lambda path: (0.0, 0),
+                build_run_summary=lambda path, meta, resolved, **kwargs: {},
+                is_studio_editable_metadata=lambda meta, resolved: False,
+            )
+
+            result = build_calibration_task_result(str(run_dir), context)
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

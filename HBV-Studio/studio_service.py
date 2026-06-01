@@ -74,9 +74,10 @@ from services.manual_presets import save_manual_preset as build_save_manual_pres
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunDetailContext, RunExportContext, RunListContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunDetailContext, RunExportContext, RunListContext, RunMutationContext
 from services.runs import RunReplayConfigContext, RunSummaryContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
+from services.runs import build_calibration_task_result as build_run_calibration_task_result
 from services.runs import capture_forward_observation_state as build_capture_forward_observation_state
 from services.runs import delete_run as build_delete_run
 from services.runs import export_run_excel as build_export_run_excel
@@ -86,6 +87,7 @@ from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import normalize_result_title as build_normalize_result_title
+from services.runs import pick_latest_run_path as build_pick_latest_run_path
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
@@ -6086,56 +6088,19 @@ def snapshot_run_paths() -> set[str]:
     return {item["path"] for item in list_runs()}
 
 
-def _pick_latest_run_path(run_paths: list[str]) -> str:
-    def sort_key(value: str) -> tuple[float, str]:
-        try:
-            path = Path(value)
-            return (path.stat().st_mtime, str(path))
-        except Exception:
-            return (0.0, str(value))
-
-    return max(run_paths, key=sort_key) if run_paths else ""
+def _calibration_task_context() -> RunCalibrationTaskContext:
+    return RunCalibrationTaskContext(
+        resolve_path=resolve_any_path,
+        read_json_file=read_json_file,
+        normalize_run_metadata=normalize_run_metadata,
+        run_update_timestamps=_run_update_timestamps,
+        build_run_summary=_build_run_summary,
+        is_studio_editable_metadata=is_studio_editable_metadata,
+    )
 
 
 def _build_calibration_task_result(run_path: str) -> dict[str, Any] | None:
-    try:
-        run_dir = resolve_any_path(run_path, must_exist=True)
-        metadata_path = run_dir / "metadata.json"
-        if not metadata_path.exists():
-            return None
-        metadata, resolved_config = normalize_run_metadata(read_json_file(metadata_path), run_path=run_dir)
-        updated_at, updated_at_ns = _run_update_timestamps(run_dir)
-        summary = _build_run_summary(
-            run_dir,
-            metadata,
-            resolved_config,
-            updated_at=updated_at,
-            updated_at_ns=updated_at_ns,
-        )
-    except Exception:
-        return None
-
-    optimization = dict(metadata.get("optimization", {}) or {})
-    calibration = dict(metadata.get("metrics", {}).get("calibration", {}) or {})
-    validation = dict(metadata.get("metrics", {}).get("validation", {}) or {})
-    return {
-        "run_path": str(run_dir.resolve()),
-        "run_name": str(summary.get("display_name", "") or summary.get("name", "") or run_dir.name),
-        "workspace_config": str(metadata.get("workspace_config", "") or ""),
-        "calibration_profile": metadata.get("calibration_profile"),
-        "requested_objective_mode": metadata.get("requested_objective_mode") or optimization.get("requested_objective_mode"),
-        "effective_objective_mode": metadata.get("effective_objective_mode") or optimization.get("effective_objective_mode"),
-        "metrics": {
-            "nse_cal": calibration.get("nse"),
-            "nse_val": validation.get("nse"),
-            "kge_cal": calibration.get("kge"),
-            "kge_val": validation.get("kge"),
-            "pbias_cal": calibration.get("pbias"),
-            "pbias_val": validation.get("pbias"),
-        },
-        "optimization": optimization,
-        "studio_compatible": is_studio_editable_metadata(metadata, resolved_config),
-    }
+    return build_run_calibration_task_result(run_path, _calibration_task_context())
 
 
 def verify_data_prep_step_output(
@@ -6196,7 +6161,7 @@ def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: se
                     rc = 1
         detected_runs = sorted(snapshot_run_paths() - previous_runs) if rc == 0 else []
         calibration_result = None
-        latest_run_path = _pick_latest_run_path(detected_runs)
+        latest_run_path = build_pick_latest_run_path(detected_runs)
         if rc == 0:
             if task_type == "calibration" and latest_run_path:
                 calibration_result = _build_calibration_task_result(latest_run_path)
