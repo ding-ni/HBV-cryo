@@ -84,6 +84,11 @@ const frontendModuleContracts = [
     ],
   },
   {
+    script: "./js/resultsView.js",
+    global: "HBVStudioResultsView",
+    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunExportFields", "resultsFilterHint"],
+  },
+  {
     script: "./js/stationPrecip.js",
     global: "HBVStudioStationPrecip",
     exports: [
@@ -728,40 +733,16 @@ function renderResultsFilterToolbar() {
     { label: "可继续手调", value: "editable" },
     { label: "仅查看", value: "readonly" },
   ];
-  host.innerHTML = `
-    <div class="results-filter-group">
-      <span class="results-filter-label">工作区</span>
-      ${workspaceOptions.map(item => `
-        <button class="phase-chip ${samePath(item.path, state.runWorkspaceFilterPath) || (!item.path && !state.runWorkspaceFilterPath) ? "active" : ""}" data-run-filter-path="${escapeHtml(item.path)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-    <div class="results-filter-group">
-      <span class="results-filter-label">率定方案</span>
-      ${profileOptions.map(item => `
-        <button class="phase-chip ${String(item.value) === String(state.runProfileFilter || "") ? "active" : ""}" data-run-filter-profile="${escapeHtml(item.value)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-    <div class="results-filter-group">
-      <span class="results-filter-label">结果阶段</span>
-      ${stageOptions.map(item => `
-        <button class="phase-chip ${String(item.value) === String(state.runTypeFilter || "") ? "active" : ""}" data-run-filter-type="${escapeHtml(item.value)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-    <div class="results-filter-group">
-      <span class="results-filter-label">手调能力</span>
-      ${editabilityOptions.map(item => `
-        <button class="phase-chip ${String(item.value) === String(state.runEditabilityFilter || "all") ? "active" : ""}" data-run-filter-editability="${escapeHtml(item.value)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-  `;
+  host.innerHTML = window.HBVStudioResultsView.renderFilterToolbar({
+    workspaceOptions,
+    profileOptions,
+    stageOptions,
+    editabilityOptions,
+    selectedWorkspacePath: state.runWorkspaceFilterPath,
+    selectedProfile: state.runProfileFilter,
+    selectedType: state.runTypeFilter,
+    selectedEditability: state.runEditabilityFilter,
+  }, { escapeHtml, samePath });
   const shown = visibleRuns();
   const workspaceText = state.runWorkspaceFilterPath ? `工作区“${workspaceLabelByPath(state.runWorkspaceFilterPath)}”` : "全部工作区";
   const profileText = state.runProfileFilter ? profileLabel(state.runProfileFilter) : "全部尺度";
@@ -779,13 +760,18 @@ function renderResultsFilterToolbar() {
     counts.forecast_restart ? `连续状态预报 ${counts.forecast_restart}` : "",
     counts.legacy ? `历史结果 ${counts.legacy}` : "",
   ].filter(Boolean).join(" / ");
-  if (!state.runWorkspaceFilterPath && !state.runProfileFilter && !state.runTypeFilter && state.runEditabilityFilter === "all") {
-    hint.textContent = `当前显示全部结果，共 ${state.runs.length} 组。${breakdown ? ` 其中 ${breakdown}。` : ""}`;
-    hint.className = "hint-box";
-  } else {
-    hint.textContent = `当前筛选：${workspaceText} / ${profileText} / ${stageText} / ${abilityText}，共 ${shown.length} 组。${breakdown ? ` 其中 ${breakdown}。` : ""}`;
-    hint.className = shown.length ? "hint-box status-ok" : "hint-box status-warn";
-  }
+  const filterHint = window.HBVStudioResultsView.resultsFilterHint({
+    filtersActive: Boolean(state.runWorkspaceFilterPath || state.runProfileFilter || state.runTypeFilter || state.runEditabilityFilter !== "all"),
+    totalRuns: state.runs.length,
+    shownCount: shown.length,
+    workspaceText,
+    profileText,
+    stageText,
+    abilityText,
+    breakdown,
+  });
+  hint.textContent = filterHint.text;
+  hint.className = filterHint.className;
 }
 
 function clearRunDetail(message = "请先从左侧选择一个结果。") {
@@ -5277,19 +5263,14 @@ function updateMetricsStrip(cal, val, meta) {
     items.push({ l: "洪水事件", v: floodEventStatusText(floodEval) });
     items.push({ l: "事件目标值", v: floodEventObjectiveText(floodEval) });
   }
-  $("#results-metric-strip").innerHTML = items.map(i => `<div class="metric-tile"><span>${i.l}</span><strong>${i.v}</strong></div>`).join("");
+  $("#results-metric-strip").innerHTML = window.HBVStudioResultsView.renderMetricStrip(items, { escapeHtml });
 }
 
 function renderRunExportFields() {
   const host = $("#run-export-fields");
   if (!host) return;
   const fields = RUN_EXPORT_FIELDS.filter(field => field.key !== "q_boundary_inflow" || boundaryEnabledFromMeta(state.currentRun?.metadata || {}));
-  host.innerHTML = fields.map(field => `
-    <label class="phase-chip" style="cursor:pointer">
-      <input type="checkbox" data-run-export-field="${escapeHtml(field.key)}" ${field.checked ? "checked" : ""} style="margin-right:6px">
-      ${escapeHtml(field.label)}
-    </label>
-  `).join("");
+  host.innerHTML = window.HBVStudioResultsView.renderRunExportFields(fields, { escapeHtml });
 }
 
 function currentRunStepHours(data = state.currentRun) {
