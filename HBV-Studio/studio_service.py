@@ -156,14 +156,17 @@ from services.tasks import (
     create_registered_task as build_create_registered_task,
     decode_subprocess_output_line as build_decode_subprocess_output_line,
     find_running_task as build_find_running_task,
+    finalize_process_task as build_finalize_process_task,
     has_running_tasks as build_has_running_tasks,
     list_tasks as build_list_tasks,
+    mark_process_task_exception as build_mark_process_task_exception,
     mark_task_finished as build_mark_task_finished,
     monitor_process_task as build_monitor_process_task,
     set_task_detected_runs as build_set_task_detected_runs,
     snapshot_task_records as build_snapshot_task_records,
     start_process_task as build_start_process_task,
     subprocess_task_env as build_subprocess_task_env,
+    task_monitor_context as build_task_monitor_context,
     task_progress_snapshot as build_task_progress_snapshot,
     update_task_metadata as build_update_task_metadata,
 )
@@ -5946,51 +5949,6 @@ def verify_data_prep_task_output(metadata: dict[str, Any]) -> tuple[bool, str]:
     return build_verify_data_prep_task_output(metadata, _data_prep_task_output_context())
 
 
-def _task_monitor_context(task_id: str) -> tuple[str, dict[str, Any]]:
-    with TASK_LOCK:
-        task = TASKS.get(task_id)
-        return (
-            task.task_type if task is not None else "",
-            dict(task.metadata or {}) if task is not None else {},
-        )
-
-
-def _finalize_process_task(
-    task_id: str,
-    return_code: int,
-    detected_runs: list[str],
-    calibration_result: dict[str, Any] | None,
-) -> None:
-    with TASK_LOCK:
-        task = TASKS[task_id]
-        task.return_code = return_code
-        task.status = "completed" if return_code == 0 else "failed"
-        progress = dict(task.metadata.get("ui_progress") or {})
-        if progress:
-            progress["stage"] = "已完成" if return_code == 0 else "执行失败"
-            if return_code == 0 and progress.get("total") is not None:
-                progress["current"] = progress.get("total")
-            task.metadata["ui_progress"] = progress
-        task.updated_at = time.time()
-        task.detected_runs = detected_runs
-        if calibration_result is not None:
-            task.metadata["result"] = calibration_result
-            task.metadata["run_path"] = calibration_result["run_path"]
-
-
-def _mark_process_task_exception(task_id: str, exc: Exception) -> None:
-    with TASK_LOCK:
-        task = TASKS[task_id]
-        task.status = "failed"
-        task.return_code = -1
-        progress = dict(task.metadata.get("ui_progress") or {})
-        if progress:
-            progress["stage"] = "执行异常"
-            task.metadata["ui_progress"] = progress
-        task.updated_at = time.time()
-        task.append(f"[HBV-Studio] {exc}")
-
-
 def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: set[str]) -> None:
     build_monitor_process_task(
         task_id,
@@ -5999,13 +5957,26 @@ def monitor_task(task_id: str, process: subprocess.Popen[Any], previous_runs: se
         ProcessMonitorContext(
             decode_output_line=build_decode_subprocess_output_line,
             add_task_output=add_task_output,
-            get_task_context=_task_monitor_context,
+            get_task_context=lambda current_task_id: build_task_monitor_context(
+                current_task_id,
+                _task_mutation_context(),
+            ),
             verify_data_prep_task_output=verify_data_prep_task_output,
             snapshot_run_paths=snapshot_run_paths,
             pick_latest_run_path=build_pick_latest_run_path,
             build_calibration_task_result=_build_calibration_task_result,
-            finalize_task=_finalize_process_task,
-            mark_task_exception=_mark_process_task_exception,
+            finalize_task=lambda current_task_id, return_code, detected_runs, result: build_finalize_process_task(
+                current_task_id,
+                return_code,
+                detected_runs,
+                result,
+                _task_mutation_context(),
+            ),
+            mark_task_exception=lambda current_task_id, exc: build_mark_process_task_exception(
+                current_task_id,
+                exc,
+                _task_mutation_context(),
+            ),
         ),
     )
 

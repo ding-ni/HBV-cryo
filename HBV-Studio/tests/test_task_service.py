@@ -28,13 +28,16 @@ from services.tasks import (  # noqa: E402
     call_with_output_capture,
     create_registered_task,
     decode_subprocess_output_line,
+    finalize_process_task,
     list_tasks,
+    mark_process_task_exception,
     mark_task_finished,
     monitor_process_task,
     set_task_detected_runs,
     snapshot_task_records,
     start_process_task,
     subprocess_task_env,
+    task_monitor_context,
     task_progress_snapshot,
     update_task_metadata,
 )
@@ -483,6 +486,70 @@ class TaskServiceTests(unittest.TestCase):
         mark_task_finished("missing", context, ok=False, return_code=-1)
 
         self.assertEqual(context.tasks, {})
+
+    def test_task_monitor_context_returns_task_type_and_metadata_copy(self) -> None:
+        task = TaskRecord(
+            id="task-1",
+            task_type="calibration",
+            label="Calibration",
+            command=["calibrate"],
+            cwd="root",
+            metadata={"config_path": "workspace.json"},
+        )
+        context = self._mutation_context({"task-1": task})
+
+        task_type, metadata = task_monitor_context("task-1", context)
+        metadata["config_path"] = "changed.json"
+
+        self.assertEqual(task_type, "calibration")
+        self.assertEqual(task.metadata["config_path"], "workspace.json")
+        self.assertEqual(task_monitor_context("missing", context), ("", {}))
+
+    def test_finalize_process_task_updates_progress_runs_and_result(self) -> None:
+        task = FakeTask()
+        task.metadata["ui_progress"] = {"stage": "running", "current": 1, "total": 3}
+        context = self._mutation_context({"task-1": task}, now=789.0)
+
+        finalize_process_task(
+            "task-1",
+            0,
+            ["runs/new"],
+            {"run_path": "runs/new", "nse": 0.8},
+            context,
+        )
+
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.return_code, 0)
+        self.assertEqual(task.detected_runs, ["runs/new"])
+        self.assertEqual(task.updated_at, 789.0)
+        self.assertEqual(task.metadata["ui_progress"], {"stage": "\u5df2\u5b8c\u6210", "current": 3, "total": 3})
+        self.assertEqual(task.metadata["result"], {"run_path": "runs/new", "nse": 0.8})
+        self.assertEqual(task.metadata["run_path"], "runs/new")
+
+    def test_finalize_process_task_marks_failed_progress(self) -> None:
+        task = FakeTask()
+        task.metadata["ui_progress"] = {"stage": "running", "current": 1, "total": 3}
+        context = self._mutation_context({"task-1": task}, now=790.0)
+
+        finalize_process_task("task-1", 2, [], None, context)
+
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(task.return_code, 2)
+        self.assertEqual(task.detected_runs, [])
+        self.assertEqual(task.metadata["ui_progress"], {"stage": "\u6267\u884c\u5931\u8d25", "current": 1, "total": 3})
+
+    def test_mark_process_task_exception_updates_task_and_output(self) -> None:
+        task = FakeTask()
+        task.metadata["ui_progress"] = {"stage": "running"}
+        context = self._mutation_context({"task-1": task}, now=791.0)
+
+        mark_process_task_exception("task-1", RuntimeError("boom"), context)
+
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(task.return_code, -1)
+        self.assertEqual(task.updated_at, 791.0)
+        self.assertEqual(task.metadata["ui_progress"], {"stage": "\u6267\u884c\u5f02\u5e38"})
+        self.assertEqual(task.output, ["[HBV-Studio] boom"])
 
     def test_append_task_exception_output_adds_prefix_and_diagnostics(self) -> None:
         task = FakeTask()

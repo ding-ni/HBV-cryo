@@ -512,6 +512,58 @@ def set_task_detected_runs(task_id: str, detected_runs: list[str], context: Task
             task.detected_runs = detected_runs
 
 
+def task_monitor_context(task_id: str, context: TaskMutationContext) -> tuple[str, dict[str, Any]]:
+    with context.task_lock:
+        task = context.tasks.get(task_id)
+        return (
+            task.task_type if task is not None else "",
+            dict(task.metadata or {}) if task is not None else {},
+        )
+
+
+def finalize_process_task(
+    task_id: str,
+    return_code: int,
+    detected_runs: list[str],
+    calibration_result: dict[str, Any] | None,
+    context: TaskMutationContext,
+) -> None:
+    with context.task_lock:
+        task = context.tasks[task_id]
+        task.return_code = return_code
+        task.status = "completed" if return_code == 0 else "failed"
+        progress = dict(task.metadata.get("ui_progress") or {})
+        if progress:
+            progress["stage"] = "\u5df2\u5b8c\u6210" if return_code == 0 else "\u6267\u884c\u5931\u8d25"
+            if return_code == 0 and progress.get("total") is not None:
+                progress["current"] = progress.get("total")
+            task.metadata["ui_progress"] = progress
+        task.updated_at = context.now()
+        task.detected_runs = detected_runs
+        if calibration_result is not None:
+            task.metadata["result"] = calibration_result
+            task.metadata["run_path"] = calibration_result["run_path"]
+
+
+def mark_process_task_exception(
+    task_id: str,
+    exc: Exception,
+    context: TaskMutationContext,
+    *,
+    prefix: str = "[HBV-Studio]",
+) -> None:
+    with context.task_lock:
+        task = context.tasks[task_id]
+        task.status = "failed"
+        task.return_code = -1
+        progress = dict(task.metadata.get("ui_progress") or {})
+        if progress:
+            progress["stage"] = "\u6267\u884c\u5f02\u5e38"
+            task.metadata["ui_progress"] = progress
+        task.updated_at = context.now()
+        task.append(f"{prefix} {exc}")
+
+
 def monitor_process_task(
     task_id: str,
     process: Any,
