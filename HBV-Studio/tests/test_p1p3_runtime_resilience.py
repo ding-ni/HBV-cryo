@@ -79,6 +79,8 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             "/api/suggest/cfmax-threshold",
             "/api/geo/overview",
             "/api/geo/basin",
+            "/api/geo/elevation-zones",
+            "/api/geo/glacier",
             "/api/geo/stations",
             "/api/data-prep/steps",
             "/api/data-prep/status",

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import tempfile
 import unittest
@@ -10,7 +12,14 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services import geo_overview as geo_service  # noqa: E402
-from services.geo_overview import GeoOverviewContext, workspace_basin_geojson, workspace_geo_overview, workspace_station_geojson  # noqa: E402
+from services.geo_overview import (  # noqa: E402
+    GeoOverviewContext,
+    workspace_basin_geojson,
+    workspace_elevation_zones_geojson,
+    workspace_geo_overview,
+    workspace_glacier_geojson,
+    workspace_station_geojson,
+)
 
 
 class GeoOverviewStationLayerTests(unittest.TestCase):
@@ -92,6 +101,83 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
         self.assertEqual(geometry["type"], "Polygon")
         self.assertEqual(geometry["coordinates"][0][0], [100.0, 31.0])
         self.assertEqual(geometry["coordinates"][0][-1], [100.0, 31.0])
+
+    def test_glacier_layer_rings_become_geojson_polygon(self) -> None:
+        context = mock.Mock()
+        glacier_layer = {
+            "id": "glacier",
+            "label": "冰川",
+            "kind": "raster",
+            "status": "ok",
+            "message": "25 x 25",
+            "bounds": {"west": 100.0, "south": 31.0, "east": 100.1, "north": 31.1},
+            "metrics": {"width": 25, "height": 25},
+            "rings": [
+                {"points": [[100.0, 31.0], [100.1, 31.0], [100.1, 31.1], [100.0, 31.1]]},
+            ],
+        }
+        with mock.patch.object(geo_service, "workspace_geo_overview", return_value={"layers": [glacier_layer]}):
+            geojson = workspace_glacier_geojson("workspace.json", context)
+
+        self.assertEqual(geojson["type"], "FeatureCollection")
+        self.assertEqual(geojson["properties"]["id"], "glacier")
+        self.assertEqual(geojson["properties"]["kind"], "raster")
+        self.assertEqual(geojson["properties"]["status"], "ok")
+        self.assertEqual(len(geojson["features"]), 1)
+        self.assertEqual(geojson["features"][0]["properties"]["source_kind"], "raster")
+        self.assertEqual(geojson["features"][0]["geometry"]["type"], "Polygon")
+
+    def test_elevation_zone_rasters_are_combined_as_geojson_features(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_path = root / "workspace.json"
+            gis_dir = root / "gis"
+            gis_dir.mkdir()
+            (gis_dir / "elevation_zone_low.tif").write_bytes(b"low")
+            (gis_dir / "elevation_zone_high.tif").write_bytes(b"high")
+
+            context = GeoOverviewContext(
+                load_workspace_config=lambda raw: (cfg_path, {"流域名称": "测试流域"}),
+                read_json_file=lambda path: {},
+                current_profile=lambda cfg: "daily",
+                build_profile_paths=lambda cfg, profile: {"gis_dir": str(gis_dir)},
+                resolve_config_related_path=lambda cfg, raw: None,
+                workspace_dem_path=lambda path, prefer=None: Path(path) / "missing_dem.tif",
+                configured_dem_kind=lambda cfg: "",
+                to_display_path=lambda path: Path(path).name,
+                profile_labels={"daily": "日尺度"},
+            )
+
+            def fake_raster_layer(layer_id: str, label: str, path: Path | None, _: GeoOverviewContext) -> dict:
+                west = 100.0 if "low" in layer_id else 100.2
+                return {
+                    "id": layer_id,
+                    "label": label,
+                    "kind": "raster",
+                    "status": "ok",
+                    "message": "10 x 10",
+                    "path": str(path or ""),
+                    "display_path": Path(path or "").name,
+                    "bounds": {"west": west, "south": 31.0, "east": west + 0.1, "north": 31.1},
+                    "rings": [
+                        {"points": [[west, 31.0], [west + 0.1, 31.0], [west + 0.1, 31.1], [west, 31.1]]},
+                    ],
+                    "points": [],
+                    "metrics": {"width": 10, "height": 10},
+                }
+
+            with mock.patch.object(geo_service, "_raster_geo_layer", side_effect=fake_raster_layer):
+                geojson = workspace_elevation_zones_geojson(str(cfg_path), context)
+
+        self.assertEqual(geojson["type"], "FeatureCollection")
+        self.assertEqual(geojson["properties"]["id"], "elevation_zones")
+        self.assertEqual(geojson["properties"]["status"], "ok")
+        self.assertEqual(geojson["properties"]["metrics"]["layer_count"], 2)
+        self.assertEqual(len(geojson["features"]), 2)
+        zones = [feature["properties"]["zone"] for feature in geojson["features"]]
+        self.assertEqual(zones, ["low", "high"])
+        self.assertEqual(geojson["properties"]["bounds"]["west"], 100.0)
+        self.assertEqual(geojson["properties"]["bounds"]["east"], 100.3)
 
 
 if __name__ == "__main__":

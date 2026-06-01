@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+_ELEVATION_ZONE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("low", "低高程带", "elevation_zone_low.tif"),
+    ("mid", "中高程带", "elevation_zone_mid.tif"),
+    ("high", "高高程带", "elevation_zone_high.tif"),
+)
+
+
 @dataclass(frozen=True)
 class GeoOverviewContext:
     load_workspace_config: Callable[[str], tuple[Path, dict[str, Any]]]
@@ -20,6 +27,21 @@ class GeoOverviewContext:
     configured_dem_kind: Callable[[dict[str, Any]], str]
     to_display_path: Callable[[Path], str]
     profile_labels: dict[str, str]
+
+
+def _load_workspace_geo_sources(
+    config_path_raw: str,
+    context: GeoOverviewContext,
+) -> tuple[Path, dict[str, Any], dict[str, Any], str, dict[str, Any], Path]:
+    cfg_path, config = context.load_workspace_config(config_path_raw)
+    try:
+        raw_config = context.read_json_file(cfg_path)
+    except Exception:
+        raw_config = {}
+    profile = context.current_profile(config)
+    paths = context.build_profile_paths(config, profile)
+    gis_dir = Path(paths["gis_dir"]).resolve(strict=False)
+    return cfg_path, config, raw_config, profile, paths, gis_dir
 
 
 def _geo_empty_layer(
@@ -351,7 +373,10 @@ def _point_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _polygon_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
+def _polygon_layer_geojson(
+    layer: dict[str, Any],
+    feature_properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     features = []
     for idx, ring in enumerate(layer.get("rings", []) or []):
         points = ring.get("points") if isinstance(ring, dict) else None
@@ -369,15 +394,18 @@ def _polygon_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
             continue
         if coords[0] != coords[-1]:
             coords.append(coords[0])
+        properties = {
+            "id": str(layer.get("id", "") or ""),
+            "label": str(layer.get("label", "") or ""),
+            "layer": str(layer.get("id", "") or ""),
+            "feature_index": idx,
+        }
+        if feature_properties:
+            properties.update(feature_properties)
         features.append({
             "type": "Feature",
             "geometry": {"type": "Polygon", "coordinates": [coords]},
-            "properties": {
-                "id": str(layer.get("id", "") or ""),
-                "label": str(layer.get("label", "") or ""),
-                "layer": str(layer.get("id", "") or ""),
-                "feature_index": idx,
-            },
+            "properties": properties,
         })
     return {
         "type": "FeatureCollection",
@@ -385,10 +413,56 @@ def _polygon_layer_geojson(layer: dict[str, Any]) -> dict[str, Any]:
         "properties": {
             "id": str(layer.get("id", "") or ""),
             "label": str(layer.get("label", "") or ""),
+            "kind": str(layer.get("kind", "") or ""),
             "status": str(layer.get("status", "") or ""),
             "message": str(layer.get("message", "") or ""),
             "bounds": layer.get("bounds"),
             "metrics": layer.get("metrics", {}),
+        },
+    }
+
+
+def _polygon_layers_geojson(layer_id: str, label: str, layers: list[dict[str, Any]]) -> dict[str, Any]:
+    features = []
+    for layer in layers:
+        extra = {
+            "source_layer": str(layer.get("id", "") or ""),
+            "source_label": str(layer.get("label", "") or ""),
+        }
+        zone = layer.get("zone")
+        if zone:
+            extra["zone"] = str(zone)
+        for feature in _polygon_layer_geojson(layer, extra).get("features", []):
+            features.append(feature)
+
+    ok_layers = [layer for layer in layers if layer.get("status") == "ok"]
+    status = "ok" if ok_layers else ("error" if any(layer.get("status") == "error" for layer in layers) else "missing")
+    message = f"{len(ok_layers)} 个图层" if ok_layers else (str(layers[0].get("message", "") or "未配置") if layers else "未配置")
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {
+            "id": layer_id,
+            "label": label,
+            "status": status,
+            "message": message,
+            "bounds": _merge_geo_bounds([layer.get("bounds") for layer in ok_layers]),
+            "metrics": {
+                "layer_count": len(ok_layers),
+                "feature_count": len(features),
+            },
+            "layers": [
+                {
+                    "id": str(layer.get("id", "") or ""),
+                    "label": str(layer.get("label", "") or ""),
+                    "status": str(layer.get("status", "") or ""),
+                    "message": str(layer.get("message", "") or ""),
+                    "bounds": layer.get("bounds"),
+                    "metrics": layer.get("metrics", {}),
+                    "zone": str(layer.get("zone", "") or ""),
+                }
+                for layer in layers
+            ],
         },
     }
 
@@ -409,14 +483,7 @@ def _empty_geojson_layer(layer_id: str, label: str, status: str = "missing", mes
 
 
 def workspace_geo_overview(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
-    cfg_path, config = context.load_workspace_config(config_path_raw)
-    try:
-        raw_config = context.read_json_file(cfg_path)
-    except Exception:
-        raw_config = {}
-    profile = context.current_profile(config)
-    paths = context.build_profile_paths(config, profile)
-    gis_dir = Path(paths["gis_dir"]).resolve(strict=False)
+    cfg_path, config, raw_config, profile, paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
     basin_path = context.resolve_config_related_path(config, config.get("流域边界_shp"))
     configured_dem_path = context.resolve_config_related_path(config, config.get("DEM_tif"))
     workspace_dem = context.workspace_dem_path(gis_dir, context.configured_dem_kind(config))
@@ -493,3 +560,29 @@ def workspace_basin_geojson(config_path_raw: str, context: GeoOverviewContext) -
     if not basin_layer:
         return _empty_geojson_layer("basin", "流域边界")
     return _polygon_layer_geojson(basin_layer)
+
+
+def workspace_glacier_geojson(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    overview = workspace_geo_overview(config_path_raw, context)
+    glacier_layer = next((layer for layer in overview.get("layers", []) if layer.get("id") == "glacier"), None)
+    if not glacier_layer:
+        return _empty_geojson_layer("glacier", "冰川")
+    return _polygon_layer_geojson(
+        glacier_layer,
+        {"source_kind": str(glacier_layer.get("kind", "") or "")},
+    )
+
+
+def workspace_elevation_zones_geojson(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    _cfg_path, _config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    layers: list[dict[str, Any]] = []
+    for zone, label, filename in _ELEVATION_ZONE_SPECS:
+        path = gis_dir / filename
+        if not path.exists():
+            continue
+        layer = _raster_geo_layer(f"elevation_zone_{zone}", label, path, context)
+        layer["zone"] = zone
+        layers.append(layer)
+    if not layers:
+        return _empty_geojson_layer("elevation_zones", "高程分区", message="未生成高程分区")
+    return _polygon_layers_geojson("elevation_zones", "高程分区", layers)
