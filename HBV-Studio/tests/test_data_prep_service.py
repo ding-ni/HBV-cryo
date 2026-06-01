@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import unittest
 from pathlib import Path
@@ -8,13 +10,38 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.data_prep import (  # noqa: E402
+    DataPrepStartContext,
     DataPrepTaskOutputContext,
+    data_prep_start_plan,
+    data_prep_step_command,
     verify_data_prep_step_output,
     verify_data_prep_task_output,
 )
 
 
 class DataPrepServiceTests(unittest.TestCase):
+    def _start_context(
+        self,
+        *,
+        steps: dict[str, dict[str, object]],
+        status: list[dict[str, object]] | None = None,
+        config: dict[str, object] | None = None,
+        cleared: list[dict[str, object]] | None = None,
+    ) -> DataPrepStartContext:
+        runtime_config = config or {"profile": "daily"}
+        return DataPrepStartContext(
+            resolve_path=lambda raw, **kwargs: Path(str(raw)),
+            read_runtime_config=lambda path: runtime_config,
+            task_step_map=lambda profile, cfg: steps,
+            current_profile=lambda cfg: str(cfg.get("profile", "daily")),
+            resolve_runtime_precip_source=lambda cfg, source: str(source or "era5"),
+            resolve_legacy_precip_source=lambda source: f"legacy:{source}",
+            data_prep_status=lambda path, source: status if status is not None else [{"id": key, "blocked_by": []} for key in steps],
+            build_python_script_command=lambda script, *args: ["python", str(script), *[str(item) for item in args]],
+            clear_meteo_state=lambda cfg, *args: (cleared.append(cfg) if cleared is not None else None),
+            forcing_pipeline_step_ids=frozenset({"meteo"}),
+        )
+
     def test_verify_data_prep_step_output_handles_missing_check_success_and_exception(self) -> None:
         self.assertEqual(verify_data_prep_step_output({}, {}), (True, "该步骤没有产物检查函数。"))
 
@@ -81,6 +108,65 @@ class DataPrepServiceTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("产物检查准备失败", message)
+
+    def test_data_prep_step_command_adds_precip_source_and_overwrite(self) -> None:
+        context = self._start_context(
+            steps={},
+            config={"profile": "daily"},
+        )
+        command = data_prep_step_command(
+            {"script": Path("prep.py"), "needs_prec_source": True, "supports_overwrite": True},
+            Path("workspace.json"),
+            {"prec_source": "station", "overwrite": True},
+            context,
+        )
+
+        self.assertEqual(
+            command,
+            ["python", "prep.py", "--配置", "workspace.json", "--降水源", "legacy:station", "--覆盖"],
+        )
+
+    def test_data_prep_start_plan_validates_and_builds_task_metadata(self) -> None:
+        cleared: list[dict[str, object]] = []
+        steps = {
+            "meteo": {
+                "id": "meteo",
+                "title": "气象数据准备",
+                "script": Path("meteo.py"),
+                "needs_prec_source": True,
+            }
+        }
+        context = self._start_context(steps=steps, cleared=cleared)
+
+        plan = data_prep_start_plan(
+            {"config_path": "workspace.json", "step_id": "meteo", "prec_source": "era5"},
+            context,
+        )
+
+        self.assertEqual(plan.label, "数据准备 | 气象数据准备 | workspace")
+        self.assertEqual(plan.command, ["python", "meteo.py", "--配置", "workspace.json", "--降水源", "era5"])
+        self.assertEqual(plan.metadata["step_id"], "meteo")
+        self.assertEqual(plan.metadata["step_title"], "气象数据准备")
+        self.assertEqual(plan.metadata["runtime_prec_source"], "era5")
+        self.assertEqual(plan.metadata["ui_progress"]["label"], "气象数据准备")
+        self.assertEqual(len(cleared), 1)
+
+    def test_data_prep_start_plan_rejects_unknown_manual_and_blocked_steps(self) -> None:
+        steps = {
+            "manual": {"id": "manual", "title": "手动导入", "script": Path("manual.py"), "manual": True},
+            "blocked": {"id": "blocked", "title": "被阻塞步骤", "script": Path("blocked.py")},
+            "dep": {"id": "dep", "title": "前置步骤", "script": Path("dep.py")},
+        }
+
+        with self.assertRaisesRegex(ValueError, "未知的数据准备步骤"):
+            data_prep_start_plan({"config_path": "workspace.json", "step_id": "missing"}, self._start_context(steps=steps))
+        with self.assertRaisesRegex(ValueError, "手动导入步骤"):
+            data_prep_start_plan({"config_path": "workspace.json", "step_id": "manual"}, self._start_context(steps=steps))
+        with self.assertRaisesRegex(ValueError, "前置依赖未完成：前置步骤"):
+            data_prep_start_plan(
+                {"config_path": "workspace.json", "step_id": "blocked"},
+                self._start_context(steps=steps, status=[{"id": "blocked", "blocked_by": ["dep"]}]),
+            )
 
 
 if __name__ == "__main__":

@@ -41,7 +41,10 @@ from services.api_routes import GET_ROUTE_HANDLERS as GET_API_ROUTE_HANDLERS
 from services.api_routes import POST_ROUTE_HANDLERS as POST_API_ROUTE_HANDLERS
 from services.data_prep import (
     DataPrepContext,
+    DataPrepStartContext,
     DataPrepTaskOutputContext,
+    data_prep_start_plan as build_data_prep_start_plan,
+    data_prep_step_command as build_data_prep_step_command,
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
     verify_data_prep_step_output as build_verify_data_prep_step_output,
@@ -6243,52 +6246,32 @@ def start_self_check() -> TaskRecord:
 
 
 def step_command(step: dict[str, Any], config_path: Path, payload: dict[str, Any]) -> list[str]:
-    command = build_python_script_command(step["script"], "--配置", str(config_path))
-    if step.get("needs_prec_source"):
-        config = read_runtime_config(config_path)
-        runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
-        command.extend([
-            "--降水源",
-            runtime_prec_source if runtime_prec_source in {"era5", "custom_tif"} else profile_runner.resolve_legacy_precip_source(runtime_prec_source),
-        ])
-    if step.get("supports_overwrite") and bool(payload.get("overwrite", False)):
-        command.append("--覆盖")
-    return command
+    return build_data_prep_step_command(step, config_path, payload, _data_prep_start_context())
+
+
+def _data_prep_start_context() -> DataPrepStartContext:
+    return DataPrepStartContext(
+        resolve_path=resolve_any_path,
+        read_runtime_config=read_runtime_config,
+        task_step_map=task_step_map,
+        current_profile=current_profile,
+        resolve_runtime_precip_source=profile_runner.resolve_runtime_precip_source,
+        resolve_legacy_precip_source=profile_runner.resolve_legacy_precip_source,
+        data_prep_status=get_data_prep_status,
+        build_python_script_command=build_python_script_command,
+        clear_meteo_state=clear_meteo_state,
+        forcing_pipeline_step_ids=FORCING_PIPELINE_STEP_IDS,
+    )
 
 
 def start_data_prep(payload: dict[str, Any]) -> TaskRecord:
-    config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
-    config = read_runtime_config(config_path)
-    runtime_prec_source = profile_runner.resolve_runtime_precip_source(config, payload.get("prec_source", None))
-    steps = task_step_map(current_profile(config), config)
-    step_id = str(payload.get("step_id", "")).strip()
-    if step_id not in steps:
-        raise ValueError(f"未知的数据准备步骤：{step_id}")
-    step = steps[step_id]
-    if step.get("manual"):
-        raise ValueError("这个步骤是手动导入步骤，不支持直接启动脚本。")
-    status_map = {item["id"]: item for item in get_data_prep_status(str(config_path), precip_source=runtime_prec_source)}
-    blocked_by = status_map[step_id]["blocked_by"]
-    if blocked_by:
-        titles = [steps[item]["title"] for item in blocked_by if item in steps]
-        raise ValueError(f"步骤前置依赖未完成：{', '.join(titles)}")
-    if step_id in FORCING_PIPELINE_STEP_IDS:
-        clear_meteo_state(config)
-    metadata = {
-        "config_path": str(config_path.resolve()),
-        "profile": current_profile(config),
-        "runtime_prec_source": runtime_prec_source,
-        "step_id": step_id,
-        "step_title": step["title"],
-        "step_titles": [step["title"]],
-        "ui_progress": {"stage": "执行脚本", "current": 0, "total": 1, "label": step["title"]},
-    }
+    plan = build_data_prep_start_plan(payload, _data_prep_start_context())
     return start_process(
         "data_prep",
-        f"数据准备 | {step['title']} | {config_path.stem}",
-        step_command(step, config_path, payload),
+        plan.label,
+        plan.command,
         PROJECT_ROOT,
-        metadata=metadata,
+        metadata=plan.metadata,
     )
 
 

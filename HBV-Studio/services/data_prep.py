@@ -27,6 +27,27 @@ class DataPrepTaskOutputContext:
     resolve_runtime_precip_source: Callable[[dict[str, Any], Any], str]
 
 
+@dataclass(frozen=True)
+class DataPrepStartContext:
+    resolve_path: Callable[..., Path]
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    task_step_map: Callable[[str, dict[str, Any]], dict[str, dict[str, Any]]]
+    current_profile: Callable[[dict[str, Any]], str]
+    resolve_runtime_precip_source: Callable[[dict[str, Any], Any], str]
+    resolve_legacy_precip_source: Callable[[str], str]
+    data_prep_status: Callable[[str, Any], list[dict[str, Any]]]
+    build_python_script_command: Callable[..., list[str]]
+    clear_meteo_state: Callable[..., None]
+    forcing_pipeline_step_ids: frozenset[str]
+
+
+@dataclass(frozen=True)
+class DataPrepStartPlan:
+    label: str
+    command: list[str]
+    metadata: dict[str, Any]
+
+
 def data_prep_steps_payload(config_path_raw: str, context: DataPrepContext) -> list[dict[str, Any]]:
     profile = context.profile_daily
     config = None
@@ -144,3 +165,63 @@ def verify_data_prep_task_output(
         return verify_data_prep_step_output(step, config, runtime_prec_source)
     except Exception as exc:
         return False, f"产物检查准备失败：{exc}"
+
+
+def data_prep_step_command(
+    step: dict[str, Any],
+    config_path: Path,
+    payload: dict[str, Any],
+    context: DataPrepStartContext,
+) -> list[str]:
+    command = context.build_python_script_command(step["script"], "--配置", str(config_path))
+    if step.get("needs_prec_source"):
+        config = context.read_runtime_config(config_path)
+        runtime_prec_source = context.resolve_runtime_precip_source(config, payload.get("prec_source", None))
+        command.extend(
+            [
+                "--降水源",
+                runtime_prec_source
+                if runtime_prec_source in {"era5", "custom_tif"}
+                else context.resolve_legacy_precip_source(runtime_prec_source),
+            ]
+        )
+    if step.get("supports_overwrite") and bool(payload.get("overwrite", False)):
+        command.append("--覆盖")
+    return command
+
+
+def data_prep_start_plan(payload: dict[str, Any], context: DataPrepStartContext) -> DataPrepStartPlan:
+    config_path = context.resolve_path(str(payload.get("config_path", "")), must_exist=True)
+    config = context.read_runtime_config(config_path)
+    runtime_prec_source = context.resolve_runtime_precip_source(config, payload.get("prec_source", None))
+    profile = context.current_profile(config)
+    steps = context.task_step_map(profile, config)
+    step_id = str(payload.get("step_id", "")).strip()
+    if step_id not in steps:
+        raise ValueError(f"未知的数据准备步骤：{step_id}")
+    step = steps[step_id]
+    if step.get("manual"):
+        raise ValueError("这个步骤是手动导入步骤，不支持直接启动脚本。")
+
+    status_map = {item["id"]: item for item in context.data_prep_status(str(config_path), runtime_prec_source)}
+    blocked_by = list(status_map.get(step_id, {}).get("blocked_by", []) or [])
+    if blocked_by:
+        titles = [steps[item]["title"] for item in blocked_by if item in steps]
+        raise ValueError(f"步骤前置依赖未完成：{', '.join(titles)}")
+    if step_id in context.forcing_pipeline_step_ids:
+        context.clear_meteo_state(config)
+
+    metadata = {
+        "config_path": str(config_path.resolve()),
+        "profile": profile,
+        "runtime_prec_source": runtime_prec_source,
+        "step_id": step_id,
+        "step_title": step["title"],
+        "step_titles": [step["title"]],
+        "ui_progress": {"stage": "执行脚本", "current": 0, "total": 1, "label": step["title"]},
+    }
+    return DataPrepStartPlan(
+        label=f"数据准备 | {step['title']} | {config_path.stem}",
+        command=data_prep_step_command(step, config_path, payload, context),
+        metadata=metadata,
+    )
