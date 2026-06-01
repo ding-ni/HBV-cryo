@@ -162,6 +162,7 @@ from services.tasks import (
     monitor_process_task as build_monitor_process_task,
     set_task_detected_runs as build_set_task_detected_runs,
     start_process_task as build_start_process_task,
+    task_progress_snapshot as build_task_progress_snapshot,
     update_task_metadata as build_update_task_metadata,
 )
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
@@ -851,117 +852,8 @@ def clear_meteo_state(config: dict[str, Any], profile: str | None = None) -> Non
         path.unlink()
 
 
-def _latest_progress_row(path: Path) -> dict[str, str] | None:
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-    except Exception:
-        return None
-    return rows[-1] if rows else None
-
-
-def _progress_history_rows(path: Path, limit: int = 160) -> list[dict[str, float | int | None]]:
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-    except Exception:
-        return []
-    history: list[dict[str, float | int | None]] = []
-    for row in rows[-limit:]:
-        history.append(
-            {
-                "gen": int(float(row.get("gen", 0) or 0)),
-                "nse_cal": safe_float(row.get("nse_cal")),
-                "nse_val": safe_float(row.get("nse_val")),
-                "obj": safe_float(row.get("obj")),
-                "elapsed_sec": safe_float(row.get("elapsed_sec")),
-            }
-        )
-    return history
-
-
-def _progress_stage_name(path: Path) -> str:
-    stem = path.stem.lower()
-    if "refine" in stem:
-        return "refine"
-    if "mc" in stem:
-        return "mc"
-    return "global"
-
-
-def _progress_stage_maxiter(task: TaskRecord, stage: str) -> int:
-    if stage == "refine":
-        return int(task.metadata.get("refine_maxiter", 0) or 0)
-    if stage == "mc":
-        return int(task.metadata.get("mc_samples", 0) or 0)
-    if str(task.metadata.get("method", "")).strip().lower() == "mc_only":
-        return int(task.metadata.get("mc_samples", 0) or 0)
-    return int(task.metadata.get("maxiter", 0) or 0)
-
-
 def task_progress_snapshot(task: TaskRecord) -> dict[str, Any] | None:
-    logs_dir_raw = str(task.metadata.get("logs_dir", "")).strip()
-    if task.task_type != "calibration" or not logs_dir_raw:
-        return None
-    logs_dir = Path(logs_dir_raw)
-    if not logs_dir.exists():
-        return None
-    candidates = [path for path in logs_dir.glob("progress*.csv") if path.stat().st_mtime >= task.created_at - 5]
-    if not candidates:
-        return None
-    candidate_rows: list[tuple[Path, dict[str, str]]] = []
-    for candidate in candidates:
-        candidate_last = _latest_progress_row(candidate)
-        if candidate_last:
-            candidate_rows.append((candidate, candidate_last))
-    if not candidate_rows:
-        return None
-    latest, last_row = max(candidate_rows, key=lambda item: item[0].stat().st_mtime)
-    stage = _progress_stage_name(latest)
-    maxiter = _progress_stage_maxiter(task, stage)
-    gen = int(float(last_row.get("gen", 0) or 0))
-    elapsed_sec = float(last_row.get("elapsed_sec", 0.0) or 0.0)
-    eta_sec = None
-    if maxiter > 0 and gen > 0 and gen <= maxiter and elapsed_sec > 0:
-        eta_sec = max(0.0, elapsed_sec / gen * (maxiter - gen))
-    stage_snapshots: dict[str, Any] = {}
-    for candidate, candidate_last in sorted(candidate_rows, key=lambda item: item[0].stat().st_mtime):
-        candidate_stage = _progress_stage_name(candidate)
-        candidate_gen = int(float(candidate_last.get("gen", 0) or 0))
-        candidate_elapsed = float(candidate_last.get("elapsed_sec", 0.0) or 0.0)
-        candidate_maxiter = _progress_stage_maxiter(task, candidate_stage)
-        candidate_eta = None
-        if candidate_maxiter > 0 and candidate_gen > 0 and candidate_gen <= candidate_maxiter and candidate_elapsed > 0:
-            candidate_eta = max(0.0, candidate_elapsed / candidate_gen * (candidate_maxiter - candidate_gen))
-        stage_snapshots[candidate_stage] = {
-            "file": str(candidate),
-            "stage": candidate_stage,
-            "gen": candidate_gen,
-            "maxiter": candidate_maxiter or None,
-            "nse_cal": safe_float(candidate_last.get("nse_cal")),
-            "nse_val": safe_float(candidate_last.get("nse_val")),
-            "obj": safe_float(candidate_last.get("obj")),
-            "convergence": safe_float(candidate_last.get("convergence")),
-            "elapsed_sec": candidate_elapsed,
-            "eta_sec": candidate_eta,
-            "timestamp": candidate_last.get("timestamp"),
-            "history": _progress_history_rows(candidate),
-        }
-    return {
-        "file": str(latest),
-        "stage": stage,
-        "gen": gen,
-        "maxiter": maxiter or None,
-        "nse_cal": safe_float(last_row.get("nse_cal")),
-        "nse_val": safe_float(last_row.get("nse_val")),
-        "obj": safe_float(last_row.get("obj")),
-        "convergence": safe_float(last_row.get("convergence")),
-        "elapsed_sec": elapsed_sec,
-        "eta_sec": eta_sec,
-        "timestamp": last_row.get("timestamp"),
-        "history": _progress_history_rows(latest),
-        "stages": stage_snapshots,
-    }
+    return build_task_progress_snapshot(task)
 
 
 def sanitize_param_values(params: dict[str, Any]) -> dict[str, float]:

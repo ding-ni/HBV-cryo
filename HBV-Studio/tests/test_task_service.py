@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -27,6 +29,7 @@ from services.tasks import (  # noqa: E402
     monitor_process_task,
     set_task_detected_runs,
     start_process_task,
+    task_progress_snapshot,
     update_task_metadata,
 )
 
@@ -184,6 +187,66 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in payload], ["newer", "older"])
         self.assertEqual(payload[0]["progress"], {"id": "newer"})
         self.assertIsNone(payload[1]["progress"])
+
+    def test_task_progress_snapshot_reads_latest_stage_and_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            logs_dir = Path(tmp)
+            mc_file = logs_dir / "progress_mc.csv"
+            refine_file = logs_dir / "progress_refine.csv"
+            mc_file.write_text(
+                "gen,nse_cal,nse_val,obj,convergence,elapsed_sec,timestamp\n"
+                "1,0.30,0.20,5.0,0.9,10,t1\n"
+                "2,0.40,0.30,4.0,0.8,20,t2\n",
+                encoding="utf-8",
+            )
+            refine_file.write_text(
+                "gen,nse_cal,nse_val,obj,convergence,elapsed_sec,timestamp\n"
+                "3,0.70,0.60,2.0,0.3,30,t3\n",
+                encoding="utf-8",
+            )
+            os.utime(mc_file, (100.0, 100.0))
+            os.utime(refine_file, (110.0, 110.0))
+            task = TaskRecord(
+                id="task-1",
+                task_type="calibration",
+                label="Calibration",
+                command=["calibrate"],
+                cwd="root",
+                created_at=0.0,
+                metadata={
+                    "logs_dir": str(logs_dir),
+                    "mc_samples": 10,
+                    "maxiter": 20,
+                    "refine_maxiter": 5,
+                },
+            )
+
+            payload = task_progress_snapshot(task)
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["stage"], "refine")
+        self.assertEqual(payload["gen"], 3)
+        self.assertEqual(payload["maxiter"], 5)
+        self.assertEqual(payload["nse_cal"], 0.70)
+        self.assertEqual(payload["eta_sec"], 20.0)
+        self.assertEqual(payload["history"], [{"gen": 3, "nse_cal": 0.70, "nse_val": 0.60, "obj": 2.0, "elapsed_sec": 30.0}])
+        self.assertEqual(payload["stages"]["mc"]["stage"], "mc")
+        self.assertEqual(payload["stages"]["mc"]["maxiter"], 10)
+        self.assertEqual(payload["stages"]["mc"]["history"][-1]["gen"], 2)
+        self.assertEqual(payload["stages"]["refine"]["timestamp"], "t3")
+
+    def test_task_progress_snapshot_ignores_non_calibration_tasks(self) -> None:
+        task = TaskRecord(
+            id="task-1",
+            task_type="sync",
+            label="Sync",
+            command=["sync"],
+            cwd="root",
+            metadata={"logs_dir": "missing"},
+        )
+
+        self.assertIsNone(task_progress_snapshot(task))
 
     def test_build_python_script_command_uses_script_path_when_not_frozen(self) -> None:
         command = build_python_script_command(

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
 import threading
 import time
 import traceback
@@ -152,6 +153,131 @@ def has_running_tasks(context: TaskQueryContext) -> bool:
 def list_tasks(context: TaskQueryContext) -> list[dict[str, Any]]:
     items = [task.as_dict(context.task_progress_snapshot) for task in context.snapshot_tasks()]
     return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
+
+def _safe_float(value: Any) -> float | None:
+    if value in (None, "", "nan", "NaN"):
+        return None
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if out != out:
+        return None
+    return out
+
+
+def _latest_progress_row(path: Path) -> dict[str, str] | None:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+    except Exception:
+        return None
+    return rows[-1] if rows else None
+
+
+def _progress_history_rows(path: Path, limit: int = 160) -> list[dict[str, float | int | None]]:
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+    except Exception:
+        return []
+    history: list[dict[str, float | int | None]] = []
+    for row in rows[-limit:]:
+        history.append(
+            {
+                "gen": int(float(row.get("gen", 0) or 0)),
+                "nse_cal": _safe_float(row.get("nse_cal")),
+                "nse_val": _safe_float(row.get("nse_val")),
+                "obj": _safe_float(row.get("obj")),
+                "elapsed_sec": _safe_float(row.get("elapsed_sec")),
+            }
+        )
+    return history
+
+
+def _progress_stage_name(path: Path) -> str:
+    stem = path.stem.lower()
+    if "refine" in stem:
+        return "refine"
+    if "mc" in stem:
+        return "mc"
+    return "global"
+
+
+def _progress_stage_maxiter(task: TaskRecord, stage: str) -> int:
+    if stage == "refine":
+        return int(task.metadata.get("refine_maxiter", 0) or 0)
+    if stage == "mc":
+        return int(task.metadata.get("mc_samples", 0) or 0)
+    if str(task.metadata.get("method", "")).strip().lower() == "mc_only":
+        return int(task.metadata.get("mc_samples", 0) or 0)
+    return int(task.metadata.get("maxiter", 0) or 0)
+
+
+def task_progress_snapshot(task: TaskRecord) -> dict[str, Any] | None:
+    logs_dir_raw = str(task.metadata.get("logs_dir", "")).strip()
+    if task.task_type != "calibration" or not logs_dir_raw:
+        return None
+    logs_dir = Path(logs_dir_raw)
+    if not logs_dir.exists():
+        return None
+    candidates = [path for path in logs_dir.glob("progress*.csv") if path.stat().st_mtime >= task.created_at - 5]
+    if not candidates:
+        return None
+    candidate_rows: list[tuple[Path, dict[str, str]]] = []
+    for candidate in candidates:
+        candidate_last = _latest_progress_row(candidate)
+        if candidate_last:
+            candidate_rows.append((candidate, candidate_last))
+    if not candidate_rows:
+        return None
+    latest, last_row = max(candidate_rows, key=lambda item: item[0].stat().st_mtime)
+    stage = _progress_stage_name(latest)
+    maxiter = _progress_stage_maxiter(task, stage)
+    gen = int(float(last_row.get("gen", 0) or 0))
+    elapsed_sec = float(last_row.get("elapsed_sec", 0.0) or 0.0)
+    eta_sec = None
+    if maxiter > 0 and gen > 0 and gen <= maxiter and elapsed_sec > 0:
+        eta_sec = max(0.0, elapsed_sec / gen * (maxiter - gen))
+    stage_snapshots: dict[str, Any] = {}
+    for candidate, candidate_last in sorted(candidate_rows, key=lambda item: item[0].stat().st_mtime):
+        candidate_stage = _progress_stage_name(candidate)
+        candidate_gen = int(float(candidate_last.get("gen", 0) or 0))
+        candidate_elapsed = float(candidate_last.get("elapsed_sec", 0.0) or 0.0)
+        candidate_maxiter = _progress_stage_maxiter(task, candidate_stage)
+        candidate_eta = None
+        if candidate_maxiter > 0 and candidate_gen > 0 and candidate_gen <= candidate_maxiter and candidate_elapsed > 0:
+            candidate_eta = max(0.0, candidate_elapsed / candidate_gen * (candidate_maxiter - candidate_gen))
+        stage_snapshots[candidate_stage] = {
+            "file": str(candidate),
+            "stage": candidate_stage,
+            "gen": candidate_gen,
+            "maxiter": candidate_maxiter or None,
+            "nse_cal": _safe_float(candidate_last.get("nse_cal")),
+            "nse_val": _safe_float(candidate_last.get("nse_val")),
+            "obj": _safe_float(candidate_last.get("obj")),
+            "convergence": _safe_float(candidate_last.get("convergence")),
+            "elapsed_sec": candidate_elapsed,
+            "eta_sec": candidate_eta,
+            "timestamp": candidate_last.get("timestamp"),
+            "history": _progress_history_rows(candidate),
+        }
+    return {
+        "file": str(latest),
+        "stage": stage,
+        "gen": gen,
+        "maxiter": maxiter or None,
+        "nse_cal": _safe_float(last_row.get("nse_cal")),
+        "nse_val": _safe_float(last_row.get("nse_val")),
+        "obj": _safe_float(last_row.get("obj")),
+        "convergence": _safe_float(last_row.get("convergence")),
+        "elapsed_sec": elapsed_sec,
+        "eta_sec": eta_sec,
+        "timestamp": last_row.get("timestamp"),
+        "history": _progress_history_rows(latest),
+        "stages": stage_snapshots,
+    }
 
 
 def find_running_task(task_type: str, config_path_raw: str, context: TaskQueryContext) -> Any | None:
