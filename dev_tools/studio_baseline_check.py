@@ -40,6 +40,7 @@ JAVASCRIPT_FILES = (
     GUI_ROOT / "web" / "app.js",
     GUI_ROOT / "web" / "js" / "eventMode.js",
     GUI_ROOT / "web" / "js" / "forecastView.js",
+    GUI_ROOT / "web" / "js" / "geoPreview.js",
     GUI_ROOT / "web" / "js" / "parameterLibrary.js",
     GUI_ROOT / "web" / "js" / "stationPrecip.js",
 )

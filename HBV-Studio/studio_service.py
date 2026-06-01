@@ -303,6 +303,7 @@ def source_files_latest_mtime() -> tuple[float, str]:
         GUI_ROOT / "web" / "styles.css",
         GUI_ROOT / "web" / "js" / "forecastView.js",
         GUI_ROOT / "web" / "js" / "eventMode.js",
+        GUI_ROOT / "web" / "js" / "geoPreview.js",
         GUI_ROOT / "web" / "js" / "parameterLibrary.js",
         GUI_ROOT / "web" / "js" / "stationPrecip.js",
     ]
