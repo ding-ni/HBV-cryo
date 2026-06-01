@@ -79,5 +79,13 @@ def route_handlers(method: HttpMethod) -> dict[str, str]:
     return {spec.path: spec.handler for spec in API_ROUTE_SPECS if spec.method == method}
 
 
+def route_specs_by_group() -> dict[str, tuple[ApiRouteSpec, ...]]:
+    groups: dict[str, list[ApiRouteSpec]] = {}
+    for spec in API_ROUTE_SPECS:
+        groups.setdefault(spec.group, []).append(spec)
+    return {group: tuple(specs) for group, specs in sorted(groups.items())}
+
+
 GET_ROUTE_HANDLERS = route_handlers("GET")
 POST_ROUTE_HANDLERS = route_handlers("POST")
+ROUTE_SPECS_BY_GROUP = route_specs_by_group()

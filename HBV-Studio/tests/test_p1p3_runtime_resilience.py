@@ -155,6 +155,37 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(svc.StudioHandler.GET_ROUTE_HANDLERS, api_routes.route_handlers("GET"))
         self.assertEqual(svc.StudioHandler.POST_ROUTE_HANDLERS, api_routes.route_handlers("POST"))
 
+    def test_api_route_group_index_covers_all_specs(self) -> None:
+        expected_groups = {
+            "boundary",
+            "calibration",
+            "dashboard",
+            "data_prep",
+            "filesystem",
+            "forecast",
+            "geo",
+            "manual_calibration",
+            "manual_presets",
+            "meteo",
+            "observed",
+            "runs",
+            "simulation",
+            "system",
+            "tasks",
+            "wizard",
+            "workspace",
+            "workspace_validation",
+        }
+        grouped = api_routes.route_specs_by_group()
+        self.assertEqual(set(grouped), expected_groups)
+        flattened = [spec for specs in grouped.values() for spec in specs]
+        sort_key = lambda item: (item.method, item.path)
+        self.assertEqual(
+            sorted(flattened, key=sort_key),
+            sorted(api_routes.API_ROUTE_SPECS, key=sort_key),
+        )
+        self.assertEqual(api_routes.ROUTE_SPECS_BY_GROUP, grouped)
+
     def test_api_route_dispatcher_maps_handlers_and_errors(self) -> None:
         handler = object.__new__(svc.StudioHandler)
         calls: list[tuple[str, object, int | None]] = []
