@@ -1,0 +1,49 @@
+{
+  "/api/cdsapi/status": {
+    "data": {
+      "exists": "bool",
+      "home_dir": "str",
+      "looks_valid": "bool",
+      "path": "str",
+      "readable": "bool"
+    },
+    "ok": "bool"
+  },
+  "/api/data-prep/steps": {
+    "data": "list",
+    "ok": "bool"
+  },
+  "/api/fs/list?kind=directory": {
+    "data": {
+      "current_path": "str",
+      "directories": "list",
+      "file_count": "number",
+      "files": "list",
+      "files_truncated": "bool",
+      "kind": "str",
+      "parent_path": "null",
+      "roots": "list",
+      "shown_file_count": "number"
+    },
+    "ok": "bool"
+  },
+  "/api/health": {
+    "ok": "bool",
+    "server_started_at": "number",
+    "server_started_at_text": "str",
+    "server_time": "str",
+    "source_latest_file": "str",
+    "source_latest_mtime": "number",
+    "source_stale": "bool",
+    "time": "number",
+    "version": "str"
+  },
+  "/api/tasks": {
+    "data": "list",
+    "ok": "bool"
+  },
+  "/api/templates": {
+    "data": "list",
+    "ok": "bool"
+  }
+}
