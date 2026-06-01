@@ -37,9 +37,12 @@ from services.runs import (  # noqa: E402
     normalize_result_title,
     pick_latest_run_path,
     read_sampled_csv_rows,
+    read_run_metrics_snapshot,
     restore_forward_boundary_series,
     restore_forward_observation_state,
     restore_forward_observed_series,
+    run_csv_date_bounds,
+    run_csv_preview,
     run_parameter_context,
     run_kind_from_metadata,
     run_kind_label,
@@ -449,6 +452,77 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(sampled[0]["date"], "2026-06-01")
         self.assertEqual(sampled[-1]["date"], "2026-06-11")
         self.assertLess(len(sampled), total_rows)
+
+    def test_run_csv_preview_reads_columns_and_limited_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_path = Path(temp_dir)
+            (run_path / "simulation.csv").write_text(
+                "\n".join(
+                    [
+                        "date,q_sim,q_obs",
+                        "2026-06-01,1.0,1.5",
+                        "2026-06-02,2.0,2.5",
+                        "2026-06-03,3.0,3.5",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            preview = run_csv_preview(run_path, limit=2)
+            empty_preview = run_csv_preview(run_path / "missing", limit=2)
+            zero_preview = run_csv_preview(run_path, limit=0)
+
+        self.assertEqual(preview["columns"], ["date", "q_sim", "q_obs"])
+        self.assertEqual([row["date"] for row in preview["rows"]], ["2026-06-01", "2026-06-02"])
+        self.assertEqual(empty_preview, {"columns": [], "rows": []})
+        self.assertEqual(zero_preview["rows"], [])
+
+    def test_run_csv_date_bounds_reads_first_last_and_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_path = Path(temp_dir)
+            (run_path / "simulation.csv").write_text(
+                "\n".join(
+                    [
+                        "date,q_sim",
+                        "2026-06-01,1.0",
+                        "2026-06-02,2.0",
+                        ",3.0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            bounds = run_csv_date_bounds(run_path)
+            missing_bounds = run_csv_date_bounds(run_path / "missing")
+
+        self.assertEqual(bounds, {"first_date": "2026-06-01", "last_date": None, "row_count": 3})
+        self.assertEqual(missing_bounds, {"first_date": None, "last_date": None, "row_count": 0})
+
+    def test_read_run_metrics_snapshot_converts_metric_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_path = Path(temp_dir)
+            metadata_path = run_path / "metadata.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "metrics": {
+                            "calibration": {"nse": "0.81"},
+                            "validation": {"nse": "0.73", "kge": "bad", "pbias": "-3.5"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = read_run_metrics_snapshot(
+                run_path,
+                lambda path: json.loads(path.read_text(encoding="utf-8")),
+            )
+
+        self.assertEqual(snapshot["nse_cal"], 0.81)
+        self.assertEqual(snapshot["nse_val"], 0.73)
+        self.assertIsNone(snapshot["kge_val"])
+        self.assertEqual(snapshot["pbias_val"], -3.5)
 
     def test_load_run_series_map_reads_requested_field_by_date(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

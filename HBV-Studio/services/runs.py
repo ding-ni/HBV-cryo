@@ -704,6 +704,54 @@ def load_run_series_map(run_path: Path, field: str) -> dict[str, float | None]:
     return values
 
 
+def run_csv_preview(run_path: Path, *, limit: int = 3) -> dict[str, Any]:
+    csv_path = run_path / "simulation.csv"
+    if not csv_path.exists():
+        return {"columns": [], "rows": []}
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        rows: list[dict[str, Any]] = []
+        for idx, row in enumerate(reader):
+            if idx >= max(int(limit), 0):
+                break
+            rows.append(dict(row))
+        return {"columns": list(reader.fieldnames or []), "rows": rows}
+
+
+def run_csv_date_bounds(run_path: Path) -> dict[str, Any]:
+    csv_path = run_path / "simulation.csv"
+    if not csv_path.exists():
+        return {"first_date": None, "last_date": None, "row_count": 0}
+    first_date = None
+    last_date = None
+    row_count = 0
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            row_count += 1
+            current = str(row.get("date", "") or "").strip() or None
+            if first_date is None:
+                first_date = current
+            last_date = current
+    return {"first_date": first_date, "last_date": last_date, "row_count": row_count}
+
+
+def read_run_metrics_snapshot(
+    run_path: Path,
+    read_json_file: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    metadata = read_json_file(run_path / "metadata.json")
+    metrics = dict(metadata.get("metrics", {}) or {})
+    calibration = dict(metrics.get("calibration", {}) or {})
+    validation = dict(metrics.get("validation", {}) or {})
+    return {
+        "nse_cal": safe_float(calibration.get("nse")),
+        "nse_val": safe_float(validation.get("nse")),
+        "kge_val": safe_float(validation.get("kge")),
+        "pbias_val": safe_float(validation.get("pbias")),
+    }
+
+
 def metadata_initial_state_override(
     metadata: dict[str, Any],
     default_initial_state: dict[str, Any],

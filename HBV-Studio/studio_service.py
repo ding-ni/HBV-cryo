@@ -126,10 +126,13 @@ from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
+from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
+from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
+from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
@@ -7720,48 +7723,15 @@ def replay_saved_run(run_path_raw: str, *, save_run: bool = True) -> dict[str, A
 
 
 def _run_csv_preview(run_path: Path, *, limit: int = 3) -> dict[str, Any]:
-    csv_path = run_path / "simulation.csv"
-    if not csv_path.exists():
-        return {"columns": [], "rows": []}
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        rows: list[dict[str, Any]] = []
-        for idx, row in enumerate(reader):
-            if idx >= max(int(limit), 0):
-                break
-            rows.append(dict(row))
-        return {"columns": list(reader.fieldnames or []), "rows": rows}
+    return build_run_csv_preview(run_path, limit=limit)
 
 
 def _run_csv_date_bounds(run_path: Path) -> dict[str, Any]:
-    csv_path = run_path / "simulation.csv"
-    if not csv_path.exists():
-        return {"first_date": None, "last_date": None, "row_count": 0}
-    first_date = None
-    last_date = None
-    row_count = 0
-    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            row_count += 1
-            current = str(row.get("date", "") or "").strip() or None
-            if first_date is None:
-                first_date = current
-            last_date = current
-    return {"first_date": first_date, "last_date": last_date, "row_count": row_count}
+    return build_run_csv_date_bounds(run_path)
 
 
 def _read_run_metrics_snapshot(run_path: Path) -> dict[str, Any]:
-    metadata = read_json_file(run_path / "metadata.json")
-    metrics = dict(metadata.get("metrics", {}) or {})
-    calibration = dict(metrics.get("calibration", {}) or {})
-    validation = dict(metrics.get("validation", {}) or {})
-    return {
-        "nse_cal": safe_float(calibration.get("nse")),
-        "nse_val": safe_float(validation.get("nse")),
-        "kge_val": safe_float(validation.get("kge")),
-        "pbias_val": safe_float(validation.get("pbias")),
-    }
+    return build_read_run_metrics_snapshot(run_path, read_json_file)
 
 
 def _prepare_saved_run_runtime(module: Any, tag: str, *, started_at: float | None = None) -> None:
