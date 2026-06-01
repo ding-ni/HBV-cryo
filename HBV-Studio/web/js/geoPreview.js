@@ -48,6 +48,51 @@
     return { west, south, east, north };
   }
 
+  function formatCoordinate(value, axis) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "";
+    const suffix = axis === "lon" ? (numeric >= 0 ? "E" : "W") : (numeric >= 0 ? "N" : "S");
+    return `${Math.abs(numeric).toFixed(3)}°${suffix}`;
+  }
+
+  function haversineKm(lon1, lat1, lon2, lat2) {
+    const toRad = value => (Number(value) * Math.PI) / 180;
+    const radiusKm = 6371.0088;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * radiusKm * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+  }
+
+  function scaleLabel(bounds) {
+    const centerLat = (bounds.south + bounds.north) / 2;
+    const widthKm = haversineKm(bounds.west, centerLat, bounds.east, centerLat);
+    if (!Number.isFinite(widthKm) || widthKm <= 0) return "";
+    const scaleKm = Math.max(1, widthKm / 5);
+    return scaleKm >= 100 ? `${Math.round(scaleKm)} km` : `${scaleKm.toFixed(scaleKm >= 10 ? 0 : 1)} km`;
+  }
+
+  function renderCoordinateFrame(bounds, escapeHtml) {
+    const label = scaleLabel(bounds);
+    return `
+      <g class="geo-coordinate-frame" aria-hidden="true">
+        <text class="geo-coordinate-label geo-coordinate-label-west" x="28" y="292">${escapeHtml(formatCoordinate(bounds.west, "lon"))}</text>
+        <text class="geo-coordinate-label geo-coordinate-label-east" x="612" y="292" text-anchor="end">${escapeHtml(formatCoordinate(bounds.east, "lon"))}</text>
+        <text class="geo-coordinate-label geo-coordinate-label-north" x="28" y="38">${escapeHtml(formatCoordinate(bounds.north, "lat"))}</text>
+        <text class="geo-coordinate-label geo-coordinate-label-south" x="28" y="270">${escapeHtml(formatCoordinate(bounds.south, "lat"))}</text>
+        ${label ? `
+          <g class="geo-scale-bar">
+            <line x1="484" y1="270" x2="604" y2="270"></line>
+            <line x1="484" y1="265" x2="484" y2="274"></line>
+            <line x1="604" y1="265" x2="604" y2="274"></line>
+            <text x="544" y="263" text-anchor="middle">${escapeHtml(label)}</text>
+          </g>
+        ` : ""}
+      </g>
+    `;
+  }
+
   function projectPoint(point, bounds, width = 640, height = 300, pad = 26) {
     const lon = Number(point?.[0]);
     const lat = Number(point?.[1]);
@@ -249,6 +294,7 @@
               ${hasDem ? '<rect class="geo-layer geo-layer-dem" x="26" y="26" width="588" height="248" rx="3"></rect>' : ""}
               ${renderLayerPaths(overview, bounds)}
               ${renderLayerPoints(overview, bounds, escapeHtml)}
+              ${renderCoordinateFrame(bounds, escapeHtml)}
             </svg>
           </div>
           <div class="geo-preview-side">

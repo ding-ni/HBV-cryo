@@ -1045,6 +1045,29 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   stroke: rgba(51,65,85,0.18);
   stroke-width: 1;
 }
+.geo-coordinate-label {
+  fill: rgba(51,65,85,0.76);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: rgba(248,250,252,0.92);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.geo-scale-bar line {
+  stroke: rgba(30,41,59,0.74);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+.geo-scale-bar text {
+  fill: rgba(30,41,59,0.82);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: rgba(248,250,252,0.94);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 .geo-layer {
   vector-effect: non-scaling-stroke;
 }

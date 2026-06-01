@@ -50,6 +50,11 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!html.includes("geo-layer-stations")) throw new Error("station CSS class missing");
             if (!html.includes("geo-layer-control geo-layer-stations")) throw new Error("station layer toggle missing");
             if (!html.includes('data-geo-layer-toggle="stations"')) throw new Error("station layer toggle key missing");
+            if (!html.includes("geo-coordinate-frame")) throw new Error("coordinate frame missing");
+            for (const coord of ["99.800°E", "100.500°E", "31.400°N", "30.800°N"]) {
+              if (!html.includes(coord)) throw new Error(`coordinate label missing: ${coord}`);
+            }
+            if (!html.includes("geo-scale-bar")) throw new Error("scale bar missing");
             for (const cls of ["geo-station-type-rain", "geo-station-type-hydrology", "geo-station-type-outlet", "geo-station-type-station"]) {
               if (!html.includes(cls)) throw new Error(`station type class missing: ${cls}`);
             }
@@ -62,6 +67,9 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             for (const key of ["dem", "basin", "elevation_zone", "glacier", "stations"]) {
               const selector = `.geo-preview-map:has(.geo-layer-toggle-${key}:not(:checked))`;
               if (!css.includes(selector)) throw new Error(`layer visibility selector missing: ${selector}`);
+            }
+            for (const selector of [".geo-coordinate-label", ".geo-scale-bar line", ".geo-scale-bar text"]) {
+              if (!css.includes(selector)) throw new Error(`coordinate style missing: ${selector}`);
             }
             if (!html.includes('data-geo-layer-count="1"')) throw new Error("layer count attribute mismatch");
             """
