@@ -19,13 +19,18 @@ VIEWPORTS = {
     "mobile": {"width": 390, "height": 844},
 }
 
+VIEWS = ("dashboard", "wizard", "calibration", "forecast", "results")
+
 
 def overflow_report(page: Page) -> list[dict[str, Any]]:
     return page.evaluate(
         """
         () => Array.from(document.querySelectorAll(
           '.nav-item, .ghost-button, .primary-button, .service-pill, .panel-head h3, .brand-title'
-        )).map((el) => {
+        )).filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }).map((el) => {
           const rect = el.getBoundingClientRect();
           return {
             tag: el.tagName,
@@ -57,27 +62,42 @@ def visible_summary(page: Page) -> dict[str, Any]:
     )
 
 
-def check_view(page: Page, url: str, name: str, viewport: dict[str, int], output_dir: Path) -> dict[str, Any]:
+def check_view(page: Page, name: str, viewport_name: str, output_dir: Path) -> dict[str, Any]:
+    page.click(f'[data-view-target="{name}"]')
+    page.wait_for_function(
+        """(name) => document.querySelector('.view.active')?.getAttribute('data-view') === name""",
+        arg=name,
+    )
+    page.wait_for_timeout(300)
+    screenshot_path = output_dir / f"hbvstudio_{viewport_name}_{name}.png"
+    page.screenshot(path=str(screenshot_path), full_page=True)
+    summary = visible_summary(page)
+    overflows = overflow_report(page)
+    if summary["activeView"] != name:
+        raise RuntimeError(f"{viewport_name}/{name}: active view mismatch: {summary['activeView']!r}")
+    if summary["horizontalOverflow"]:
+        raise RuntimeError(f"{viewport_name}/{name}: body has horizontal overflow: {summary}")
+    if overflows:
+        raise RuntimeError(f"{viewport_name}/{name}: text overflow detected: {overflows[:5]}")
+    return {
+        "screenshot": str(screenshot_path),
+        "summary": summary,
+    }
+
+
+def check_viewport(page: Page, url: str, name: str, viewport: dict[str, int], output_dir: Path) -> dict[str, Any]:
     page.set_viewport_size(viewport)
     page.goto(url, wait_until="networkidle")
     page.wait_for_selector("#service-pill", timeout=10000)
     page.wait_for_timeout(800)
-    screenshot_path = output_dir / f"hbvstudio_{name}.png"
-    page.screenshot(path=str(screenshot_path), full_page=True)
     summary = visible_summary(page)
-    overflows = overflow_report(page)
     if summary["navCount"] < 5:
         raise RuntimeError(f"{name}: expected at least 5 nav items, got {summary['navCount']}")
-    if summary["activeView"] != "dashboard":
-        raise RuntimeError(f"{name}: expected dashboard active view, got {summary['activeView']!r}")
     if not summary["service"]:
         raise RuntimeError(f"{name}: service pill did not render text")
-    if overflows:
-        raise RuntimeError(f"{name}: text overflow detected: {overflows[:5]}")
     return {
         "viewport": viewport,
-        "screenshot": str(screenshot_path),
-        "summary": summary,
+        "views": {view: check_view(page, view, name, output_dir) for view in VIEWS},
     }
 
 
@@ -98,7 +118,7 @@ def main() -> int:
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         try:
             for name, viewport in VIEWPORTS.items():
-                results[name] = check_view(page, args.url, name, viewport, output_dir)
+                results[name] = check_viewport(page, args.url, name, viewport, output_dir)
         finally:
             browser.close()
 
