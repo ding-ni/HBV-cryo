@@ -117,6 +117,7 @@ from services.runs import discover_run_entries as build_discover_run_entries
 from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
+from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
 from services.runs import iter_run_dirs as build_iter_run_dirs
@@ -2601,19 +2602,7 @@ def resolve_workspace_config_reference(raw_path: str, *, run_path: Path | None =
 
 
 def _first_existing_path(candidates: list[Path]) -> Path | None:
-    seen: set[str] = set()
-    fallback: Path | None = None
-    for candidate in candidates:
-        resolved = Path(candidate).resolve(strict=False)
-        key = str(resolved).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        if fallback is None:
-            fallback = resolved
-        if resolved.exists():
-            return resolved
-    return fallback
+    return build_first_existing_path(candidates)
 
 
 def _run_metadata_compatibility_context() -> RunMetadataCompatibilityContext:

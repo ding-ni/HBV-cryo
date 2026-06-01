@@ -446,6 +446,22 @@ def resolve_source_run_reference(
     return str(base_path.resolve(strict=False))
 
 
+def first_existing_path(candidates: list[Path]) -> Path | None:
+    seen: set[str] = set()
+    fallback: Path | None = None
+    for candidate in candidates:
+        resolved = Path(candidate).resolve(strict=False)
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if fallback is None:
+            fallback = resolved
+        if resolved.exists():
+            return resolved
+    return fallback
+
+
 def has_parameter_bounds(metadata: dict[str, Any]) -> bool:
     profile = metadata.get("parameter_profile")
     if not isinstance(profile, dict):

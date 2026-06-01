@@ -29,6 +29,7 @@ from services.runs import (  # noqa: E402
     discover_run_entries,
     discover_runtime_roots,
     display_run_title,
+    first_existing_path,
     has_parameter_bounds,
     has_custom_result_title,
     is_studio_editable_metadata,
@@ -260,6 +261,28 @@ class RunIdentityServiceTests(unittest.TestCase):
         resolved = resolve_source_run_reference("bad/raw/path", "run_name", self._source_reference_context(resolve=fail_resolve))
 
         self.assertEqual(resolved, "bad/raw/path")
+
+    def test_first_existing_path_prefers_existing_unique_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            missing = root / "missing"
+            existing = root / "existing"
+            existing.mkdir()
+
+            resolved = first_existing_path([missing, missing, existing])
+
+        self.assertEqual(resolved, existing.resolve(strict=False))
+
+    def test_first_existing_path_falls_back_to_first_unique_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first = root / "first_missing"
+            second = root / "second_missing"
+
+            resolved = first_existing_path([first, first, second])
+
+        self.assertEqual(resolved, first.resolve(strict=False))
+        self.assertIsNone(first_existing_path([]))
 
     def test_run_parameter_context_summarizes_source_result_for_forecast(self) -> None:
         run_dir = Path("C:/runs/source_run")
