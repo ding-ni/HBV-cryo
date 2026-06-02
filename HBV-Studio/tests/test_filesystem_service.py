@@ -24,6 +24,7 @@ from services.filesystem import (  # noqa: E402
     remap_legacy_project_path,
     replace_placeholders,
     resolve_any_path,
+    same_path,
     to_display_path,
 )
 
@@ -177,6 +178,15 @@ class FilesystemServiceTests(unittest.TestCase):
         self.assertFalse(has_csv)
         self.assertEqual(missing_count, 0)
         self.assertFalse(missing_has)
+
+    def test_same_path_compares_resolved_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "nested"
+            nested.mkdir()
+
+            self.assertTrue(same_path(nested, root / "nested" / ".." / "nested"))
+            self.assertFalse(same_path(nested, root / "other"))
 
 
 if __name__ == "__main__":

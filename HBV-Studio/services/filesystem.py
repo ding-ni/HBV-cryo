@@ -90,6 +90,13 @@ def has_matching(path: Path, pattern: str = "*.tif") -> bool:
     return next(path.glob(pattern), None) is not None
 
 
+def same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve(strict=False) == b.resolve(strict=False)
+    except Exception:
+        return str(a) == str(b)
+
+
 def placeholder_roots_for_config_path(
     config_path: Path | str | None,
     context: FilesystemPlaceholderContext,

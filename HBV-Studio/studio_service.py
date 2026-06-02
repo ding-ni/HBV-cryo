@@ -100,6 +100,7 @@ from services.filesystem import (
     replace_placeholders as build_replace_placeholders,
     resolve_any_path as build_resolve_any_path,
     safe_iterdir as build_safe_iterdir,
+    same_path,
     to_display_path as build_to_display_path,
 )
 from services.forecast_input import ForecastInputCheckContext
@@ -178,6 +179,9 @@ from services.meteo_import import MeteoImportStartContext
 from services.meteo_import import MeteoImportWorkerContext
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
+from services.meteo_import import ordered_tif_files_by_timestamp
+from services.meteo_import import replace_directory_from_stage
+from services.meteo_import import should_report_file_progress
 from services.meteo_config import (
     METEO_CUSTOM_PET_DIR_KEY,
     METEO_CUSTOM_PREC_DIR_KEY,
@@ -3122,48 +3126,6 @@ def import_gis_files(payload: dict[str, Any]) -> dict[str, Any]:
     return {"copied": copied, "message": f"已导入 {len(copied)} 个 GIS 文件到 {gis_dir}。"}
 
 
-def ordered_tif_files_by_timestamp(directory: Path) -> list[tuple[pd.Timestamp, Path]]:
-    ordered: list[tuple[pd.Timestamp, Path]] = []
-    for tif_path in directory.glob("*.tif"):
-        timestamp = parse_time_from_name(tif_path.name)
-        if timestamp is not None:
-            ordered.append((timestamp, tif_path))
-    ordered.sort(key=lambda item: (item[0], item[1].name))
-    return ordered
-
-
-def same_path(a: Path, b: Path) -> bool:
-    try:
-        return a.resolve(strict=False) == b.resolve(strict=False)
-    except Exception:
-        return str(a) == str(b)
-
-
-def replace_directory_from_stage(target_dir: Path, stage_dir: Path) -> None:
-    import shutil
-    backup_dir = target_dir.parent / f".{target_dir.name}__backup_{uuid.uuid4().hex[:8]}"
-    had_target = target_dir.exists()
-    try:
-        if had_target:
-            target_dir.replace(backup_dir)
-        stage_dir.replace(target_dir)
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
-    except Exception:
-        if target_dir.exists() and not had_target:
-            shutil.rmtree(target_dir)
-        if backup_dir.exists() and not target_dir.exists():
-            backup_dir.replace(target_dir)
-        raise
-
-
-def _should_report_file_progress(index: int, total: int) -> bool:
-    if total <= 20:
-        return True
-    step = max(1, total // 10)
-    return index == 1 or index == total or index % step == 0
-
-
 def _mark_task_finished(task_id: str, *, ok: bool, return_code: int, result: dict[str, Any] | None = None) -> None:
     build_mark_task_finished(task_id, _task_mutation_context(), ok=ok, return_code=return_code, result=result)
 
@@ -3341,7 +3303,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                         action = "裁剪对齐"
                 count += 1
                 processed_all += 1
-                if _should_report_file_progress(idx, total_item):
+                if should_report_file_progress(idx, total_item):
                     ts_label = format_timestamp_for_display(timestamp, config.get("时间步长_小时", 24.0))
                     log(f"[进度] {item['label']} {idx}/{total_item} | 总计 {processed_all}/{total_files} | {ts_label} | {action}")
                 set_progress(

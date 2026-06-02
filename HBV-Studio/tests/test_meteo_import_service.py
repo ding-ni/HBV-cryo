@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+import pandas as pd
 
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
@@ -14,6 +17,9 @@ from services.meteo_import import (  # noqa: E402
     MeteoImportWorkerContext,
     meteo_import_start_plan,
     meteo_import_worker_run,
+    ordered_tif_files_by_timestamp,
+    replace_directory_from_stage,
+    should_report_file_progress,
 )
 
 
@@ -93,6 +99,45 @@ class MeteoImportServiceTests(unittest.TestCase):
 
         self.assertIn(("exception", "task-1", "import failed"), events)
         self.assertIn(("finished", "task-1", {"ok": False, "return_code": -1}), events)
+
+    def test_ordered_tif_files_by_timestamp_skips_invalid_names_and_sorts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name in [
+                "prec_2026-01-02.tif",
+                "prec_2026-01-01.tif",
+                "not-a-time.tif",
+                "ignore.txt",
+            ]:
+                (root / name).write_text("", encoding="utf-8")
+
+            ordered = ordered_tif_files_by_timestamp(root)
+
+        self.assertEqual([item[0] for item in ordered], [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")])
+        self.assertEqual([item[1].name for item in ordered], ["prec_2026-01-01.tif", "prec_2026-01-02.tif"])
+
+    def test_replace_directory_from_stage_replaces_existing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target"
+            stage = root / "stage"
+            target.mkdir()
+            stage.mkdir()
+            (target / "old.txt").write_text("old", encoding="utf-8")
+            (stage / "new.txt").write_text("new", encoding="utf-8")
+
+            replace_directory_from_stage(target, stage)
+
+            self.assertFalse(stage.exists())
+            self.assertFalse((target / "old.txt").exists())
+            self.assertEqual((target / "new.txt").read_text(encoding="utf-8"), "new")
+
+    def test_should_report_file_progress_uses_small_batch_and_decile_rules(self) -> None:
+        self.assertTrue(should_report_file_progress(7, 20))
+        self.assertTrue(should_report_file_progress(1, 100))
+        self.assertTrue(should_report_file_progress(10, 100))
+        self.assertTrue(should_report_file_progress(100, 100))
+        self.assertFalse(should_report_file_progress(11, 100))
 
 
 if __name__ == "__main__":
