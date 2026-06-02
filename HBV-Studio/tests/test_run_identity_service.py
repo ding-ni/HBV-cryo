@@ -25,10 +25,12 @@ from services.runs import (  # noqa: E402
     RunMetadataCompatibilityContext,
     RunMetadataNormalizationContext,
     RunMetadataObjectTypeContext,
+    RunPortablePathContext,
     RunMetadataSections,
     RunReplayConfigContext,
     RunSourceReferenceContext,
     RunSummaryContext,
+    RunWorkspaceConfigReferenceContext,
     RunWorkspaceNameContext,
     apply_run_replay_config_overrides,
     build_run_summary,
@@ -44,6 +46,7 @@ from services.runs import (  # noqa: E402
     has_parameter_bounds,
     has_custom_result_title,
     apply_effective_objective_mode,
+    infer_project_roots_from_run_path,
     infer_effective_objective_mode,
     is_studio_editable_metadata,
     iter_run_parent_dirs,
@@ -57,6 +60,7 @@ from services.runs import (  # noqa: E402
     optimization_stage_counter,
     infer_selected_result_stage,
     pick_latest_run_path,
+    portableize_value_paths,
     prepare_run_metadata_sections,
     read_sampled_csv_rows,
     read_run_metrics_snapshot,
@@ -69,6 +73,7 @@ from services.runs import (  # noqa: E402
     resolve_run_objective_metadata,
     resolve_run_workspace_config,
     resolve_source_run_reference,
+    resolve_workspace_config_reference,
     rebase_run_data_cache_paths,
     run_config_workspace_label,
     run_precip_source_key,
@@ -92,7 +97,10 @@ from services.runs import (  # noqa: E402
     sync_run_data_source_paths,
     sync_resolved_run_config_metadata,
     sync_source_run_reference,
+    to_portable_path,
+    workspace_config_candidates,
     workspace_name_for_summary,
+    workspace_roots_hint_from_metadata,
 )
 
 
@@ -126,6 +134,44 @@ class RunIdentityServiceTests(unittest.TestCase):
             workspace_roots_hint_from_metadata=hints or (lambda metadata: (None, None)),
             resolve_workspace_config_reference=resolve or (lambda raw, **kwargs: None),
             read_runtime_config=read_config or (lambda path: {}),
+        )
+
+    def _portable_path_context(self, project_root: Path, gui_root: Path) -> RunPortablePathContext:
+        return RunPortablePathContext(project_root=project_root, gui_root=gui_root)
+
+    def _workspace_config_reference_context(
+        self,
+        project_root: Path,
+        gui_root: Path,
+        workspace_dir: Path,
+        *,
+        is_within_current=None,
+    ) -> RunWorkspaceConfigReferenceContext:
+        def replace(value, *, project_root=None, gui_root=None):
+            if not isinstance(value, str):
+                return value
+            return (
+                value
+                .replace("__PROJECT_ROOT__", str(project_root or project_root_default))
+                .replace("__GUI_ROOT__", str(gui_root or gui_root_default))
+            )
+
+        def resolve_any(raw, **kwargs):
+            path = Path(str(raw)).expanduser()
+            if not path.is_absolute():
+                path = gui_root / path
+            return path.resolve(strict=False)
+
+        project_root_default = project_root
+        gui_root_default = gui_root
+        return RunWorkspaceConfigReferenceContext(
+            project_root=project_root,
+            gui_root=gui_root,
+            workspace_dir=workspace_dir,
+            replace_placeholders=replace,
+            remap_legacy_project_path=lambda raw, **kwargs: raw,
+            resolve_any_path=resolve_any,
+            is_within_current_project=is_within_current or (lambda path: False),
         )
 
     def test_run_kind_and_labels_follow_result_metadata(self) -> None:
@@ -326,6 +372,101 @@ class RunIdentityServiceTests(unittest.TestCase):
 
         self.assertEqual(resolved, first.resolve(strict=False))
         self.assertIsNone(first_existing_path([]))
+
+    def test_to_portable_path_prefers_gui_root_before_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            context = self._portable_path_context(project_root, gui_root)
+
+            gui_value = to_portable_path(str(gui_root / "workspaces" / "demo.json"), context)
+            project_value = to_portable_path(str(project_root / "运行目录" / "demo"), context)
+            external_value = to_portable_path("D:/external/demo.json", context)
+
+        self.assertEqual(gui_value, "__GUI_ROOT__/workspaces/demo.json")
+        self.assertEqual(project_value, "__PROJECT_ROOT__/运行目录/demo")
+        self.assertEqual(external_value, "D:/external/demo.json")
+
+    def test_portableize_value_paths_recurses_nested_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            context = self._portable_path_context(project_root, gui_root)
+
+            payload = portableize_value_paths(
+                {
+                    "workspace_config": str(gui_root / "workspaces" / "demo.json"),
+                    "items": [str(project_root / "运行目录" / "run_a"), 5],
+                },
+                context,
+            )
+
+        self.assertEqual(payload["workspace_config"], "__GUI_ROOT__/workspaces/demo.json")
+        self.assertEqual(payload["items"], ["__PROJECT_ROOT__/运行目录/run_a", 5])
+
+    def test_workspace_roots_hint_from_metadata_derives_missing_partner_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            gui_root.mkdir()
+
+            derived_project, derived_gui = workspace_roots_hint_from_metadata({
+                "workspace_root_hint": str(project_root),
+            })
+            reverse_project, reverse_gui = workspace_roots_hint_from_metadata({
+                "workspace_gui_root_hint": str(gui_root),
+            })
+
+        self.assertEqual(derived_project, project_root.resolve(strict=False))
+        self.assertEqual(derived_gui, gui_root.resolve(strict=False))
+        self.assertEqual(reverse_project, project_root.resolve(strict=False))
+        self.assertEqual(reverse_gui, gui_root.resolve(strict=False))
+
+    def test_infer_project_roots_from_run_path_scans_run_parents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            (gui_root / "workspaces").mkdir(parents=True)
+            run_path = project_root / "运行目录" / "workspace_a" / "results" / "runs" / "run_a"
+            run_path.mkdir(parents=True)
+
+            inferred_project, inferred_gui = infer_project_roots_from_run_path(run_path)
+
+        self.assertEqual(inferred_project, project_root.resolve(strict=False))
+        self.assertEqual(inferred_gui, gui_root.resolve(strict=False))
+
+    def test_workspace_config_candidates_rebases_external_workspace_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            workspace_dir = gui_root / "workspaces"
+            workspace_dir.mkdir(parents=True)
+            context = self._workspace_config_reference_context(project_root, gui_root, workspace_dir)
+
+            candidates = workspace_config_candidates("D:/old/workspaces/demo.json", context)
+
+        self.assertIn((workspace_dir / "demo.json").resolve(strict=False), candidates)
+        self.assertEqual(len({str(path).lower() for path in candidates}), len(candidates))
+
+    def test_resolve_workspace_config_reference_uses_inferred_project_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            workspace_dir = gui_root / "workspaces"
+            workspace_dir.mkdir(parents=True)
+            config_path = workspace_dir / "demo.json"
+            config_path.write_text("{}", encoding="utf-8")
+            run_path = project_root / "运行目录" / "workspace_a" / "results" / "runs" / "run_a"
+            run_path.mkdir(parents=True)
+            context = self._workspace_config_reference_context(project_root, gui_root, workspace_dir)
+
+            resolved = resolve_workspace_config_reference(
+                "D:/old/workspaces/demo.json",
+                context,
+                run_path=run_path,
+            )
+
+        self.assertEqual(resolved, config_path.resolve(strict=False))
 
     def test_metadata_object_type_rules_normalize_explicit_values(self) -> None:
         self.assertEqual(normalize_metadata_object_type("regression_test"), "regression_validation")

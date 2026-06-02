@@ -91,6 +91,23 @@ class RunSourceReferenceContext:
 
 
 @dataclass(frozen=True)
+class RunPortablePathContext:
+    project_root: Path
+    gui_root: Path
+
+
+@dataclass(frozen=True)
+class RunWorkspaceConfigReferenceContext:
+    project_root: Path
+    gui_root: Path
+    workspace_dir: Path
+    replace_placeholders: Callable[..., Any]
+    remap_legacy_project_path: Callable[..., Any]
+    resolve_any_path: Callable[..., Path]
+    is_within_current_project: Callable[[Path], bool]
+
+
+@dataclass(frozen=True)
 class RunMetadataObjectTypeContext:
     detect_object_type: Callable[[dict[str, Any]], str]
 
@@ -507,6 +524,238 @@ def resolve_source_run_reference(
                     return str(candidate)
 
     return str(base_path.resolve(strict=False))
+
+
+def to_portable_path(value: str, context: RunPortablePathContext) -> str:
+    if not value:
+        return value
+    try:
+        resolved = Path(value).resolve()
+    except (OSError, ValueError):
+        resolved = Path(value)
+    gui_resolved = context.gui_root.resolve()
+    proj_resolved = context.project_root.resolve()
+    try:
+        rel = resolved.relative_to(gui_resolved)
+        return "__GUI_ROOT__/" + str(rel).replace("\\", "/")
+    except ValueError:
+        pass
+    try:
+        rel = resolved.relative_to(proj_resolved)
+        return "__PROJECT_ROOT__/" + str(rel).replace("\\", "/")
+    except ValueError:
+        pass
+    return value
+
+
+def portableize_value_paths(value: Any, context: RunPortablePathContext) -> Any:
+    if isinstance(value, dict):
+        return {key: portableize_value_paths(item, context) for key, item in value.items()}
+    if isinstance(value, list):
+        return [portableize_value_paths(item, context) for item in value]
+    if isinstance(value, str):
+        return to_portable_path(value, context)
+    return value
+
+
+def append_workspace_config_candidate(
+    candidates: list[Path],
+    seen: set[str],
+    value: Any,
+    *,
+    context: RunWorkspaceConfigReferenceContext,
+    project_root: Path | None = None,
+    gui_root: Path | None = None,
+) -> None:
+    if value in (None, ""):
+        return
+    try:
+        if isinstance(value, Path):
+            path = value.expanduser().resolve(strict=False)
+        else:
+            raw = str(value)
+            if project_root is not None or gui_root is not None:
+                raw = str(context.replace_placeholders(raw, project_root=project_root, gui_root=gui_root))
+                raw = str(context.remap_legacy_project_path(raw))
+                path = Path(raw).expanduser()
+                if not path.is_absolute():
+                    path = ((gui_root or context.gui_root) / path).resolve(strict=False)
+                else:
+                    path = path.resolve(strict=False)
+            else:
+                path = context.resolve_any_path(raw, must_exist=False)
+    except Exception:
+        try:
+            path = Path(str(value)).expanduser().resolve(strict=False)
+        except Exception:
+            return
+    key = str(path).lower()
+    if key in seen:
+        return
+    seen.add(key)
+    candidates.append(path)
+
+
+def infer_project_roots_from_run_path(run_path: Path | None) -> tuple[Path | None, Path | None]:
+    if run_path is None:
+        return None, None
+    try:
+        current = Path(run_path).resolve(strict=False)
+    except Exception:
+        return None, None
+    for candidate in [current] + list(current.parents):
+        if (candidate / "HBV-Studio" / "workspaces").exists() and (candidate / "\u8fd0\u884c\u76ee\u5f55").exists():
+            return candidate.resolve(strict=False), (candidate / "HBV-Studio").resolve(strict=False)
+    return None, None
+
+
+def workspace_roots_hint_from_metadata(metadata: dict[str, Any] | None) -> tuple[Path | None, Path | None]:
+    meta = dict(metadata or {})
+    hint_root_raw = str(meta.get("workspace_root_hint", "") or "").strip()
+    gui_hint_raw = str(meta.get("workspace_gui_root_hint", "") or "").strip()
+    try:
+        project_root = Path(hint_root_raw).expanduser().resolve(strict=False) if hint_root_raw else None
+    except Exception:
+        project_root = None
+    try:
+        gui_root = Path(gui_hint_raw).expanduser().resolve(strict=False) if gui_hint_raw else None
+    except Exception:
+        gui_root = None
+    if gui_root is None and project_root is not None:
+        candidate = (project_root / "HBV-Studio").resolve(strict=False)
+        if candidate.exists():
+            gui_root = candidate
+    if project_root is None and gui_root is not None:
+        project_root = gui_root.parent.resolve(strict=False)
+    return project_root, gui_root
+
+
+def workspace_config_candidates(
+    raw_path: str,
+    context: RunWorkspaceConfigReferenceContext,
+    *,
+    project_root: Path | None = None,
+    gui_root: Path | None = None,
+) -> list[Path]:
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return []
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    expanded = context.replace_placeholders(raw, project_root=project_root, gui_root=gui_root)
+    name_source = str(expanded) if isinstance(expanded, str) and expanded else raw
+    name = Path(name_source).name
+    raw_candidate: Path | None = None
+    try:
+        if project_root is not None or gui_root is not None:
+            raw_candidate = Path(str(name_source)).expanduser()
+            if not raw_candidate.is_absolute():
+                raw_candidate = ((gui_root or context.gui_root) / raw_candidate).resolve(strict=False)
+            else:
+                raw_candidate = raw_candidate.resolve(strict=False)
+        else:
+            raw_candidate = context.resolve_any_path(name_source, must_exist=False)
+    except Exception:
+        try:
+            raw_candidate = Path(name_source).expanduser().resolve(strict=False)
+        except Exception:
+            raw_candidate = None
+    if raw_candidate is not None and raw_candidate.is_absolute() and raw_candidate.exists():
+        append_workspace_config_candidate(
+            candidates,
+            seen,
+            raw_candidate,
+            context=context,
+            project_root=project_root,
+            gui_root=gui_root,
+        )
+    prefer_local_workspace = bool(name and raw_candidate is not None and not context.is_within_current_project(raw_candidate))
+    if name and gui_root is not None:
+        append_workspace_config_candidate(
+            candidates,
+            seen,
+            gui_root / "workspaces" / name,
+            context=context,
+            project_root=project_root,
+            gui_root=gui_root,
+        )
+    if prefer_local_workspace and name:
+        append_workspace_config_candidate(
+            candidates,
+            seen,
+            context.workspace_dir / name,
+            context=context,
+            project_root=project_root,
+            gui_root=gui_root,
+        )
+        default_workspace_dir = context.gui_root / "workspaces"
+        if default_workspace_dir.resolve(strict=False) != context.workspace_dir.resolve(strict=False):
+            append_workspace_config_candidate(
+                candidates,
+                seen,
+                default_workspace_dir / name,
+                context=context,
+                project_root=project_root,
+                gui_root=gui_root,
+            )
+    append_workspace_config_candidate(
+        candidates,
+        seen,
+        raw,
+        context=context,
+        project_root=project_root,
+        gui_root=gui_root,
+    )
+    if isinstance(expanded, str) and expanded != raw:
+        append_workspace_config_candidate(
+            candidates,
+            seen,
+            expanded,
+            context=context,
+            project_root=project_root,
+            gui_root=gui_root,
+        )
+    if name and not prefer_local_workspace:
+        append_workspace_config_candidate(
+            candidates,
+            seen,
+            context.workspace_dir / name,
+            context=context,
+            project_root=project_root,
+            gui_root=gui_root,
+        )
+        default_workspace_dir = context.gui_root / "workspaces"
+        if default_workspace_dir.resolve(strict=False) != context.workspace_dir.resolve(strict=False):
+            append_workspace_config_candidate(
+                candidates,
+                seen,
+                default_workspace_dir / name,
+                context=context,
+                project_root=project_root,
+                gui_root=gui_root,
+            )
+    return candidates
+
+
+def resolve_workspace_config_reference(
+    raw_path: str,
+    context: RunWorkspaceConfigReferenceContext,
+    *,
+    run_path: Path | None = None,
+    project_root: Path | None = None,
+    gui_root: Path | None = None,
+) -> Path | None:
+    if project_root is None and gui_root is None:
+        project_root, gui_root = infer_project_roots_from_run_path(run_path)
+    for candidate in workspace_config_candidates(
+        raw_path,
+        context,
+        project_root=project_root,
+        gui_root=gui_root,
+    ):
+        if candidate.exists():
+            return candidate.resolve(strict=False)
+    return None
 
 
 def first_existing_path(candidates: list[Path]) -> Path | None:

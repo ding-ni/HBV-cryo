@@ -109,6 +109,7 @@ from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
+from services.runs import RunPortablePathContext, RunWorkspaceConfigReferenceContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
@@ -120,6 +121,7 @@ from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
+from services.runs import infer_project_roots_from_run_path as build_infer_project_roots_from_run_path
 from services.runs import infer_selected_result_stage as build_infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
 from services.runs import iter_run_dirs as build_iter_run_dirs
@@ -136,6 +138,7 @@ from services.runs import normalized_selected_result_label as build_normalized_s
 from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
 from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
+from services.runs import portableize_value_paths as build_portableize_value_paths
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
@@ -143,6 +146,7 @@ from services.runs import restore_forward_observation_state as build_restore_for
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
+from services.runs import resolve_workspace_config_reference as build_resolve_workspace_config_reference
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
@@ -153,6 +157,9 @@ from services.runs import workspace_name_for_summary as build_workspace_name_for
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
 from services.runs import snapshot_run_paths as build_snapshot_run_paths
+from services.runs import to_portable_path as build_to_portable_path
+from services.runs import workspace_config_candidates as build_workspace_config_candidates
+from services.runs import workspace_roots_hint_from_metadata as build_workspace_roots_hint_from_metadata
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
 from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
@@ -2458,157 +2465,55 @@ def detect_object_type(data: dict[str, Any]) -> str:
     return OBJECT_FULL_UPSTREAM
 
 
+def _run_portable_path_context() -> RunPortablePathContext:
+    return RunPortablePathContext(project_root=PROJECT_ROOT, gui_root=GUI_ROOT)
+
+
 def to_portable_path(value: str) -> str:
-    """Convert an absolute path to a portable form using __PROJECT_ROOT__ / __GUI_ROOT__ placeholders."""
-    if not value:
-        return value
-    try:
-        resolved = Path(value).resolve()
-    except (OSError, ValueError):
-        resolved = Path(value)
-    gui_resolved = GUI_ROOT.resolve()
-    proj_resolved = PROJECT_ROOT.resolve()
-    # Try GUI_ROOT first (it's deeper, more specific)
-    try:
-        rel = resolved.relative_to(gui_resolved)
-        return "__GUI_ROOT__/" + str(rel).replace("\\", "/")
-    except ValueError:
-        pass
-    try:
-        rel = resolved.relative_to(proj_resolved)
-        return "__PROJECT_ROOT__/" + str(rel).replace("\\", "/")
-    except ValueError:
-        pass
-    return value
+    return build_to_portable_path(value, _run_portable_path_context())
 
 
 def portableize_value_paths(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: portableize_value_paths(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [portableize_value_paths(item) for item in value]
-    if isinstance(value, str):
-        return to_portable_path(value)
-    return value
-
-
-def _append_candidate_path(candidates: list[Path], seen: set[str], value: Any, *, project_root: Path | None = None, gui_root: Path | None = None) -> None:
-    if value in (None, ""):
-        return
-    try:
-        if isinstance(value, Path):
-            path = value.expanduser().resolve(strict=False)
-        else:
-            raw = str(value)
-            if project_root is not None or gui_root is not None:
-                raw = str(replace_placeholders(raw, project_root=project_root, gui_root=gui_root))
-                raw = str(remap_legacy_project_path(raw))
-                path = Path(raw).expanduser()
-                if not path.is_absolute():
-                    path = ((gui_root or GUI_ROOT) / path).resolve(strict=False)
-                else:
-                    path = path.resolve(strict=False)
-            else:
-                path = resolve_any_path(raw, must_exist=False)
-    except Exception:
-        try:
-            path = Path(str(value)).expanduser().resolve(strict=False)
-        except Exception:
-            return
-    key = str(path).lower()
-    if key in seen:
-        return
-    seen.add(key)
-    candidates.append(path)
+    return build_portableize_value_paths(value, _run_portable_path_context())
 
 
 def _infer_project_roots_from_run_path(run_path: Path | None) -> tuple[Path | None, Path | None]:
-    if run_path is None:
-        return None, None
-    try:
-        current = Path(run_path).resolve(strict=False)
-    except Exception:
-        return None, None
-    for candidate in [current] + list(current.parents):
-        if (candidate / "HBV-Studio" / "workspaces").exists() and (candidate / "运行目录").exists():
-            return candidate.resolve(strict=False), (candidate / "HBV-Studio").resolve(strict=False)
-    return None, None
+    return build_infer_project_roots_from_run_path(run_path)
 
 
 def _workspace_roots_hint_from_metadata(metadata: dict[str, Any] | None) -> tuple[Path | None, Path | None]:
-    meta = dict(metadata or {})
-    hint_root_raw = str(meta.get("workspace_root_hint", "") or "").strip()
-    gui_hint_raw = str(meta.get("workspace_gui_root_hint", "") or "").strip()
-    try:
-        project_root = Path(hint_root_raw).expanduser().resolve(strict=False) if hint_root_raw else None
-    except Exception:
-        project_root = None
-    try:
-        gui_root = Path(gui_hint_raw).expanduser().resolve(strict=False) if gui_hint_raw else None
-    except Exception:
-        gui_root = None
-    if gui_root is None and project_root is not None:
-        candidate = (project_root / "HBV-Studio").resolve(strict=False)
-        if candidate.exists():
-            gui_root = candidate
-    if project_root is None and gui_root is not None:
-        project_root = gui_root.parent.resolve(strict=False)
-    return project_root, gui_root
+    return build_workspace_roots_hint_from_metadata(metadata)
+
+
+def _workspace_config_reference_context() -> RunWorkspaceConfigReferenceContext:
+    return RunWorkspaceConfigReferenceContext(
+        project_root=PROJECT_ROOT,
+        gui_root=GUI_ROOT,
+        workspace_dir=WORKSPACE_DIR,
+        replace_placeholders=replace_placeholders,
+        remap_legacy_project_path=remap_legacy_project_path,
+        resolve_any_path=resolve_any_path,
+        is_within_current_project=is_within_current_project,
+    )
 
 
 def workspace_config_candidates(raw_path: str, *, project_root: Path | None = None, gui_root: Path | None = None) -> list[Path]:
-    raw = str(raw_path or "").strip()
-    if not raw:
-        return []
-    candidates: list[Path] = []
-    seen: set[str] = set()
-    expanded = replace_placeholders(raw, project_root=project_root, gui_root=gui_root)
-    name_source = str(expanded) if isinstance(expanded, str) and expanded else raw
-    name = Path(name_source).name
-    raw_candidate: Path | None = None
-    try:
-        if project_root is not None or gui_root is not None:
-            raw_candidate = Path(str(name_source)).expanduser()
-            if not raw_candidate.is_absolute():
-                raw_candidate = ((gui_root or GUI_ROOT) / raw_candidate).resolve(strict=False)
-            else:
-                raw_candidate = raw_candidate.resolve(strict=False)
-        else:
-            raw_candidate = resolve_any_path(name_source, must_exist=False)
-    except Exception:
-        try:
-            raw_candidate = Path(name_source).expanduser().resolve(strict=False)
-        except Exception:
-            raw_candidate = None
-    if raw_candidate is not None and raw_candidate.is_absolute() and raw_candidate.exists():
-        _append_candidate_path(candidates, seen, raw_candidate, project_root=project_root, gui_root=gui_root)
-    prefer_local_workspace = bool(name and raw_candidate is not None and not is_within_current_project(raw_candidate))
-    if name and gui_root is not None:
-        _append_candidate_path(candidates, seen, gui_root / "workspaces" / name, project_root=project_root, gui_root=gui_root)
-    if prefer_local_workspace and name:
-        _append_candidate_path(candidates, seen, WORKSPACE_DIR / name, project_root=project_root, gui_root=gui_root)
-        default_workspace_dir = GUI_ROOT / "workspaces"
-        if default_workspace_dir.resolve(strict=False) != WORKSPACE_DIR.resolve(strict=False):
-            _append_candidate_path(candidates, seen, default_workspace_dir / name, project_root=project_root, gui_root=gui_root)
-    _append_candidate_path(candidates, seen, raw, project_root=project_root, gui_root=gui_root)
-    if isinstance(expanded, str) and expanded != raw:
-        _append_candidate_path(candidates, seen, expanded, project_root=project_root, gui_root=gui_root)
-    if name:
-        if not prefer_local_workspace:
-            _append_candidate_path(candidates, seen, WORKSPACE_DIR / name, project_root=project_root, gui_root=gui_root)
-            default_workspace_dir = GUI_ROOT / "workspaces"
-            if default_workspace_dir.resolve(strict=False) != WORKSPACE_DIR.resolve(strict=False):
-                _append_candidate_path(candidates, seen, default_workspace_dir / name, project_root=project_root, gui_root=gui_root)
-    return candidates
+    return build_workspace_config_candidates(
+        raw_path,
+        _workspace_config_reference_context(),
+        project_root=project_root,
+        gui_root=gui_root,
+    )
 
 
 def resolve_workspace_config_reference(raw_path: str, *, run_path: Path | None = None, project_root: Path | None = None, gui_root: Path | None = None) -> Path | None:
-    if project_root is None and gui_root is None:
-        project_root, gui_root = _infer_project_roots_from_run_path(run_path)
-    for candidate in workspace_config_candidates(raw_path, project_root=project_root, gui_root=gui_root):
-        if candidate.exists():
-            return candidate.resolve(strict=False)
-    return None
+    return build_resolve_workspace_config_reference(
+        raw_path,
+        _workspace_config_reference_context(),
+        run_path=run_path,
+        project_root=project_root,
+        gui_root=gui_root,
+    )
 
 
 def _first_existing_path(candidates: list[Path]) -> Path | None:
