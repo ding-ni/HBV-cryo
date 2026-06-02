@@ -4782,11 +4782,7 @@ function renderRunList() {
     hasCurrentRun: Boolean(state.currentRun),
   }, { escapeHtml });
   if (listState.updateHint) {
-    const hint = $("#results-entry-hint");
-    if (hint) {
-      hint.textContent = listState.hintText;
-      hint.className = listState.hintClassName;
-    }
+    applyDomUpdates(listState.domUpdates);
   }
   if (listState.status !== "ready") {
     host.innerHTML = listState.listHtml;

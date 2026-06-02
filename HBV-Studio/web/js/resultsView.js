@@ -611,45 +611,48 @@
     const workspaceFilterLabel = String(model.workspaceFilterLabel || "").trim();
     const manualStarterWorkspaceLabel = String(model.manualStarterWorkspaceLabel || "").trim();
     const hasCurrentRun = Boolean(model.hasCurrentRun);
+    const hintUpdate = (text = "", className = "hint-box") => ({
+      hintText: text,
+      hintClassName: className,
+      updateHint: true,
+      domUpdates: [{ selector: "#results-entry-hint", text, className }],
+    });
     if (!totalRuns) {
+      const text = manualStarterWorkspaceLabel
+        ? `工作区“${manualStarterWorkspaceLabel}”当前还没有结果。可直接生成“手调起点”，不必先做正式率定。`
+        : "还没有结果。选择工作区后，可直接生成“手调起点”进入手动调参。";
       return {
         status: "empty-all",
         listHtml: '<div class="hint-box">暂无结果。</div>',
-        hintText: manualStarterWorkspaceLabel
-          ? `工作区“${manualStarterWorkspaceLabel}”当前还没有结果。可直接生成“手调起点”，不必先做正式率定。`
-          : "还没有结果。选择工作区后，可直接生成“手调起点”进入手动调参。",
-        hintClassName: "hint-box status-warn",
-        updateHint: true,
+        ...hintUpdate(text, "hint-box status-warn"),
       };
     }
     if (!visibleCount) {
       const workspaceEmpty = Boolean(workspaceFilterPath) && workspaceRunCount === 0;
+      const text = workspaceEmpty
+        ? `工作区“${workspaceFilterLabel}”当前还没有结果。可直接生成“手调起点”继续。`
+        : workspaceFilterPath
+          ? `工作区“${workspaceFilterLabel}”有结果，但当前筛选条件下没有匹配项。可放宽筛选后再查看。`
+          : "当前筛选下没有结果。可切换筛选条件后再查看。";
       return {
         status: workspaceEmpty ? "empty-workspace" : "empty-filter",
         listHtml: workspaceEmpty
           ? `<div class="hint-box status-warn">工作区“${escapeHtml(workspaceFilterLabel)}”当前还没有结果。可直接生成“手调起点”，或启动正式率定。</div>`
           : '<div class="hint-box status-warn">当前筛选下没有结果。可切换筛选条件，或先回到“全部结果”查看。</div>',
-        hintText: workspaceEmpty
-          ? `工作区“${workspaceFilterLabel}”当前还没有结果。可直接生成“手调起点”继续。`
-          : workspaceFilterPath
-            ? `工作区“${workspaceFilterLabel}”有结果，但当前筛选条件下没有匹配项。可放宽筛选后再查看。`
-            : "当前筛选下没有结果。可切换筛选条件后再查看。",
-        hintClassName: "hint-box status-warn",
-        updateHint: true,
+        ...hintUpdate(text, "hint-box status-warn"),
       };
     }
     if (!hasCurrentRun) {
+      const text = workspaceFilterPath
+        ? `先从左侧选择“${workspaceFilterLabel}”的一个结果。选中后即可在下方继续手动调参并重算结果。`
+        : "先从左侧选择一个结果，或点击“打开最新结果”。选中后即可在下方手动调参并重算结果。";
       return {
         status: "ready",
         listHtml: "",
-        hintText: workspaceFilterPath
-          ? `先从左侧选择“${workspaceFilterLabel}”的一个结果。选中后即可在下方继续手动调参并重算结果。`
-          : "先从左侧选择一个结果，或点击“打开最新结果”。选中后即可在下方手动调参并重算结果。",
-        hintClassName: "hint-box",
-        updateHint: true,
+        ...hintUpdate(text, "hint-box"),
       };
     }
-    return { status: "ready", listHtml: "", hintText: "", hintClassName: "", updateHint: false };
+    return { status: "ready", listHtml: "", hintText: "", hintClassName: "", updateHint: false, domUpdates: [] };
   }
 
   function manualStarterControlState(model = {}) {

@@ -626,6 +626,11 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (emptyAllState.status !== "empty-all" || !emptyAllState.listHtml.includes("暂无结果") || !emptyAllState.hintText.includes("工作区<A>") || emptyAllState.hintClassName !== "hint-box status-warn") {
               throw new Error(`unexpected no-results list state: ${JSON.stringify(emptyAllState)}`);
             }
+            const emptyAllDom = Object.fromEntries(emptyAllState.domUpdates.map(update => [update.selector, update]));
+            if (emptyAllDom["#results-entry-hint"].text !== emptyAllState.hintText ||
+                emptyAllDom["#results-entry-hint"].className !== emptyAllState.hintClassName) {
+              throw new Error(`empty-all run list DOM updates wrong: ${JSON.stringify(emptyAllDom)}`);
+            }
             const workspaceEmptyState = results.runListState({
               totalRuns: 2,
               visibleCount: 0,
@@ -635,6 +640,11 @@ class FrontendResultsViewTests(unittest.TestCase):
             }, helpers);
             if (workspaceEmptyState.status !== "empty-workspace" || !workspaceEmptyState.listHtml.includes("工作区&lt;A&gt;") || !workspaceEmptyState.hintText.includes("生成“手调起点”继续")) {
               throw new Error(`unexpected workspace-empty list state: ${JSON.stringify(workspaceEmptyState)}`);
+            }
+            const workspaceEmptyDom = Object.fromEntries(workspaceEmptyState.domUpdates.map(update => [update.selector, update]));
+            if (workspaceEmptyDom["#results-entry-hint"].text !== workspaceEmptyState.hintText ||
+                workspaceEmptyDom["#results-entry-hint"].className !== "hint-box status-warn") {
+              throw new Error(`workspace-empty run list DOM updates wrong: ${JSON.stringify(workspaceEmptyDom)}`);
             }
             const filterEmptyState = results.runListState({
               totalRuns: 2,
@@ -656,8 +666,13 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (readyState.status !== "ready" || !readyState.updateHint || readyState.hintClassName !== "hint-box" || !readyState.hintText.includes("先从左侧选择“工作区A”")) {
               throw new Error(`unexpected ready list state: ${JSON.stringify(readyState)}`);
             }
+            const readyDom = Object.fromEntries(readyState.domUpdates.map(update => [update.selector, update]));
+            if (readyDom["#results-entry-hint"].text !== readyState.hintText ||
+                readyDom["#results-entry-hint"].className !== "hint-box") {
+              throw new Error(`ready run list DOM updates wrong: ${JSON.stringify(readyDom)}`);
+            }
             const selectedReadyState = results.runListState({ totalRuns: 2, visibleCount: 1, hasCurrentRun: true }, helpers);
-            if (selectedReadyState.status !== "ready" || selectedReadyState.updateHint) {
+            if (selectedReadyState.status !== "ready" || selectedReadyState.updateHint || selectedReadyState.domUpdates.length !== 0) {
               throw new Error(`selected run should not overwrite entry hint: ${JSON.stringify(selectedReadyState)}`);
             }
             const starterNoWorkspace = results.manualStarterControlState({});
