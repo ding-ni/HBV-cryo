@@ -20,6 +20,13 @@ class WorkspaceStagingContext:
     vector_bundle_suffixes: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class WorkspaceRuntimeDirsContext:
+    current_profile: Callable[[dict[str, Any]], str]
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
+    effective_precip_paths: Callable[..., tuple[Path, Path, str]]
+
+
 def _resolved_staging_config(
     config: dict[str, Any],
     context: WorkspaceStagingContext,
@@ -100,3 +107,33 @@ def stage_observed_runoff_file(
     if src.resolve(strict=False) != dst:
         shutil.copy2(src, dst)
     return dst
+
+
+def seed_workspace_runtime_dirs(config: dict[str, Any], context: WorkspaceRuntimeDirsContext) -> None:
+    runtime_root = str(config.get("运行目录", "")).strip()
+    if not runtime_root:
+        return
+    profile = context.current_profile(config)
+    paths = context.build_profile_paths(config, profile)
+    precip_base_dir, precip_effective_dir, _ = context.effective_precip_paths(config, profile)
+    required_dirs = [
+        Path(paths["workspace_root"]),
+        Path(paths["data_root"]),
+        Path(paths["gis_dir"]),
+        Path(paths["observed_dir"]),
+        Path(paths["raw_root"]),
+        Path(paths["aligned_dir"]),
+        Path(precip_base_dir),
+        Path(precip_effective_dir),
+        Path(paths["aligned_temp_dir"]),
+        Path(paths["aligned_evap_dir"]),
+        Path(paths["results_root"]),
+    ]
+
+    created: set[Path] = set()
+    for dir_path in required_dirs:
+        resolved = dir_path.resolve(strict=False)
+        if resolved in created:
+            continue
+        dir_path.mkdir(parents=True, exist_ok=True)
+        created.add(resolved)

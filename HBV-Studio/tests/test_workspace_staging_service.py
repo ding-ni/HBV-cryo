@@ -12,7 +12,9 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.workspace_staging import (  # noqa: E402
+    WorkspaceRuntimeDirsContext,
     WorkspaceStagingContext,
+    seed_workspace_runtime_dirs,
     stage_observed_runoff_file,
     stage_vector_shapefile,
 )
@@ -102,6 +104,52 @@ class WorkspaceStagingServiceTests(unittest.TestCase):
                 stage_observed_runoff_file({"运行目录": str(root / "runtime")}, source, context)
             with self.assertRaisesRegex(ValueError, "缺少运行目录"):
                 stage_observed_runoff_file({}, csv_source, context)
+
+    def test_seed_workspace_runtime_dirs_creates_expected_directories_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            created_paths = {
+                "workspace_root": root / "workspace",
+                "data_root": root / "workspace" / "data",
+                "gis_dir": root / "workspace" / "data" / "gis",
+                "observed_dir": root / "workspace" / "data" / "observed",
+                "raw_root": root / "workspace" / "data" / "raw",
+                "aligned_dir": root / "workspace" / "data" / "aligned",
+                "aligned_temp_dir": root / "workspace" / "data" / "aligned" / "temp",
+                "aligned_evap_dir": root / "workspace" / "data" / "aligned" / "evap",
+                "results_root": root / "workspace" / "results",
+            }
+
+            context = WorkspaceRuntimeDirsContext(
+                current_profile=lambda config: str(config.get("profile", "daily")),
+                build_profile_paths=lambda config, profile: created_paths,
+                effective_precip_paths=lambda config, profile: (
+                    root / "workspace" / "data" / "aligned" / "prec_base",
+                    root / "workspace" / "data" / "aligned" / "prec_run",
+                    "era5",
+                ),
+            )
+
+            seed_workspace_runtime_dirs({"运行目录": str(root / "workspace"), "profile": "daily"}, context)
+
+            for path in list(created_paths.values()) + [
+                root / "workspace" / "data" / "aligned" / "prec_base",
+                root / "workspace" / "data" / "aligned" / "prec_run",
+            ]:
+                self.assertTrue(path.is_dir(), str(path))
+
+    def test_seed_workspace_runtime_dirs_skips_empty_runtime_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = WorkspaceRuntimeDirsContext(
+                current_profile=lambda config: "daily",
+                build_profile_paths=lambda config, profile: {"workspace_root": root / "should-not-exist"},
+                effective_precip_paths=lambda config, profile: (root / "base", root / "run", "era5"),
+            )
+
+            seed_workspace_runtime_dirs({}, context)
+
+            self.assertFalse((root / "should-not-exist").exists())
 
 
 if __name__ == "__main__":

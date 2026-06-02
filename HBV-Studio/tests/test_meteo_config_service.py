@@ -10,12 +10,14 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.meteo_config import (  # noqa: E402
+    EffectivePrecipPathContext,
     METEO_KEY,
     METEO_PRECIP_SOURCE_KEY,
     METEO_PRECIP_SOURCE_LEGACY_KEY,
     configured_precip_source,
     display_precip_source_label,
     display_runtime_precip_label,
+    effective_precip_paths,
     effective_precip_source,
     resolve_precip_source,
 )
@@ -70,6 +72,39 @@ class MeteoConfigServiceTests(unittest.TestCase):
             "\u5de5\u7a0b\u72ec\u7acb\u964d\u6c34\u76ee\u5f55\uff08\u672c\u5730\u5bfc\u5165\uff09",
         )
         self.assertEqual(display_runtime_precip_label(cmfd_config), "CMFD \u672c\u5730\u539f\u59cb\u6587\u4ef6")
+
+    def test_effective_precip_paths_selects_source_specific_directories(self) -> None:
+        root = Path("workspace")
+        context = EffectivePrecipPathContext(
+            current_profile=lambda config: str(config.get("profile", "daily")),
+            build_profile_paths=lambda config, profile: {
+                "aligned_prec_era5_base_dir": root / profile / "era5_base",
+                "aligned_prec_era5_dir": root / profile / "era5_run",
+                "aligned_prec_custom_base_dir": root / profile / "custom_base",
+                "aligned_prec_custom_dir": root / profile / "custom_run",
+                "aligned_prec_cmfd_base_dir": root / profile / "cmfd_base",
+                "aligned_prec_cmfd_dir": root / profile / "cmfd_run",
+                "aligned_prec_base_dir": root / profile / "mswep_base",
+                "aligned_prec_dir": root / profile / "mswep_run",
+            },
+        )
+
+        self.assertEqual(
+            effective_precip_paths({"profile": "hourly"}, context, precip_source="era5"),
+            (root / "hourly" / "era5_base", root / "hourly" / "era5_run", "era5"),
+        )
+        self.assertEqual(
+            effective_precip_paths({"profile": "daily"}, context, precip_source="custom_tif"),
+            (root / "daily" / "custom_base", root / "daily" / "custom_run", "custom_tif"),
+        )
+        self.assertEqual(
+            effective_precip_paths({"profile": "daily"}, context, precip_source="cmfd"),
+            (root / "daily" / "cmfd_base", root / "daily" / "cmfd_run", "cmfd"),
+        )
+        self.assertEqual(
+            effective_precip_paths({"profile": "daily"}, context, precip_source="mswep"),
+            (root / "daily" / "mswep_base", root / "daily" / "mswep_run", "mswep"),
+        )
 
 
 if __name__ == "__main__":

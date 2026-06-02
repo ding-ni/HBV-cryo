@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
 
 
 METEO_KEY = "\u6c14\u8c61\u7b56\u7565"
@@ -25,6 +27,12 @@ PRECIP_SOURCE_LABELS = {
     "cmfd": "CMFD \u672c\u5730\u539f\u59cb\u6587\u4ef6",
     "custom_tif": "\u672c\u5730\u964d\u6c34\u6805\u683c\u76ee\u5f55",
 }
+
+
+@dataclass(frozen=True)
+class EffectivePrecipPathContext:
+    current_profile: Callable[[dict[str, Any]], str]
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
 
 
 def configured_precip_source(config: dict[str, Any]) -> str:
@@ -66,3 +74,21 @@ def display_runtime_precip_label(config: dict[str, Any]) -> str:
     if configured == "custom_tif":
         return "\u5de5\u7a0b\u72ec\u7acb\u964d\u6c34\u76ee\u5f55\uff08\u672c\u5730\u5bfc\u5165\uff09"
     return display_precip_source_label(effective_precip_source(configured))
+
+
+def effective_precip_paths(
+    config: dict[str, Any],
+    context: EffectivePrecipPathContext,
+    profile: str | None = None,
+    precip_source: Any = None,
+) -> tuple[Path, Path, str]:
+    active_profile = profile or context.current_profile(config)
+    paths = context.build_profile_paths(config, active_profile)
+    selected_source = resolve_precip_source(config, precip_source)
+    if selected_source == "era5":
+        return Path(paths["aligned_prec_era5_base_dir"]), Path(paths["aligned_prec_era5_dir"]), selected_source
+    if selected_source == "custom_tif":
+        return Path(paths["aligned_prec_custom_base_dir"]), Path(paths["aligned_prec_custom_dir"]), selected_source
+    if selected_source == "cmfd":
+        return Path(paths["aligned_prec_cmfd_base_dir"]), Path(paths["aligned_prec_cmfd_dir"]), selected_source
+    return Path(paths["aligned_prec_base_dir"]), Path(paths["aligned_prec_dir"]), selected_source

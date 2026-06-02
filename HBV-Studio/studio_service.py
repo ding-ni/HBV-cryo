@@ -185,6 +185,7 @@ from services.meteo_import import ordered_tif_files_by_timestamp
 from services.meteo_import import replace_directory_from_stage
 from services.meteo_import import should_report_file_progress
 from services.meteo_config import (
+    EffectivePrecipPathContext,
     METEO_CUSTOM_PET_DIR_KEY,
     METEO_CUSTOM_PREC_DIR_KEY,
     METEO_CUSTOM_TEMP_DIR_KEY,
@@ -200,6 +201,7 @@ from services.meteo_config import (
     configured_precip_source as build_configured_precip_source,
     display_precip_source_label as build_display_precip_source_label,
     display_runtime_precip_label as build_display_runtime_precip_label,
+    effective_precip_paths as build_effective_precip_paths,
     effective_precip_source as build_effective_precip_source,
     resolve_precip_source as build_resolve_precip_source,
 )
@@ -366,6 +368,8 @@ from services.workspace_layout import (
     workspace_layout_summary as build_workspace_layout_summary,
 )
 from services.workspace_staging import WorkspaceStagingContext
+from services.workspace_staging import WorkspaceRuntimeDirsContext
+from services.workspace_staging import seed_workspace_runtime_dirs as build_seed_workspace_runtime_dirs
 from services.workspace_staging import stage_observed_runoff_file as build_stage_observed_runoff_file
 from services.workspace_staging import stage_vector_shapefile as build_stage_vector_shapefile
 from services.workspace_validation import WorkspaceValidationContext
@@ -671,46 +675,26 @@ def effective_precip_paths(
     profile: str | None = None,
     precip_source: Any = None,
 ) -> tuple[Path, Path, str]:
-    active_profile = profile or current_profile(config)
-    paths = build_profile_paths(config, active_profile)
-    selected_source = resolve_precip_source(config, precip_source)
-    if selected_source == "era5":
-        return Path(paths["aligned_prec_era5_base_dir"]), Path(paths["aligned_prec_era5_dir"]), selected_source
-    if selected_source == "custom_tif":
-        return Path(paths["aligned_prec_custom_base_dir"]), Path(paths["aligned_prec_custom_dir"]), selected_source
-    if selected_source == "cmfd":
-        return Path(paths["aligned_prec_cmfd_base_dir"]), Path(paths["aligned_prec_cmfd_dir"]), selected_source
-    return Path(paths["aligned_prec_base_dir"]), Path(paths["aligned_prec_dir"]), selected_source
+    return build_effective_precip_paths(
+        config,
+        EffectivePrecipPathContext(
+            current_profile=current_profile,
+            build_profile_paths=build_profile_paths,
+        ),
+        profile=profile,
+        precip_source=precip_source,
+    )
 
 
 def seed_workspace_runtime_dirs(config: dict[str, Any]) -> None:
-    runtime_root = str(config.get("运行目录", "")).strip()
-    if not runtime_root:
-        return
-    profile = current_profile(config)
-    paths = build_profile_paths(config, profile)
-    precip_base_dir, precip_effective_dir, _ = effective_precip_paths(config, profile)
-    required_dirs = [
-        Path(paths["workspace_root"]),
-        Path(paths["data_root"]),
-        Path(paths["gis_dir"]),
-        Path(paths["observed_dir"]),
-        Path(paths["raw_root"]),
-        Path(paths["aligned_dir"]),
-        Path(precip_base_dir),
-        Path(precip_effective_dir),
-        Path(paths["aligned_temp_dir"]),
-        Path(paths["aligned_evap_dir"]),
-        Path(paths["results_root"]),
-    ]
-
-    created: set[Path] = set()
-    for dir_path in required_dirs:
-        resolved = dir_path.resolve(strict=False)
-        if resolved in created:
-            continue
-        dir_path.mkdir(parents=True, exist_ok=True)
-        created.add(resolved)
+    build_seed_workspace_runtime_dirs(
+        config,
+        WorkspaceRuntimeDirsContext(
+            current_profile=current_profile,
+            build_profile_paths=build_profile_paths,
+            effective_precip_paths=effective_precip_paths,
+        ),
+    )
 
 
 def _workspace_staging_context() -> WorkspaceStagingContext:
