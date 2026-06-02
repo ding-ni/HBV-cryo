@@ -789,6 +789,8 @@ function applyDomUpdates(updates = []) {
     if (Object.prototype.hasOwnProperty.call(update, "html")) el.innerHTML = update.html;
     if (Object.prototype.hasOwnProperty.call(update, "text")) el.textContent = update.text;
     if (Object.prototype.hasOwnProperty.call(update, "className")) el.className = update.className;
+    if (Object.prototype.hasOwnProperty.call(update, "type")) el.type = update.type;
+    if (Object.prototype.hasOwnProperty.call(update, "step")) el.step = update.step;
     if (Object.prototype.hasOwnProperty.call(update, "value")) el.value = update.value;
     if (Object.prototype.hasOwnProperty.call(update, "disabled")) el.disabled = update.disabled;
     if (Object.prototype.hasOwnProperty.call(update, "visible")) el.style.display = update.visible ? "" : "none";
@@ -4881,32 +4883,12 @@ function currentRunStepHours(data = state.currentRun) {
 
 function configureRunExportPanel(data) {
   renderRunExportFields();
-  const exportBtn = $("#btn-run-export");
-  const openBtn = $("#btn-open-export-file");
-  const hint = $("#run-export-hint");
-  const startInput = $("#run-export-start");
-  const endInput = $("#run-export-end");
   const panel = window.HBVStudioResultsView.runExportPanelState(data, {
     lastExportPath: state.lastRunExportPath,
   }, {
     formatInputTime: toWizardInputTimeValue,
   });
-  if (startInput) {
-    startInput.type = panel.start.type;
-    startInput.step = panel.start.step;
-    startInput.value = panel.start.value;
-  }
-  if (endInput) {
-    endInput.type = panel.end.type;
-    endInput.step = panel.end.step;
-    endInput.value = panel.end.value;
-  }
-  if (exportBtn) exportBtn.disabled = panel.exportDisabled;
-  if (openBtn) openBtn.disabled = panel.openDisabled;
-  if (hint) {
-    hint.textContent = panel.hintText;
-    hint.className = panel.hintClassName;
-  }
+  applyDomUpdates(panel.domUpdates);
 }
 
 function selectedRunExportFields() {

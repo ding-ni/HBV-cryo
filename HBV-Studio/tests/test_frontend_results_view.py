@@ -768,6 +768,17 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (dailyExport.exportDisabled || !dailyExport.openDisabled || dailyExport.hintClassName !== "hint-box" || !dailyExport.hintText.includes("日尺度结果")) {
               throw new Error(`unexpected daily export panel state: ${JSON.stringify(dailyExport)}`);
             }
+            const dailyExportDom = Object.fromEntries(dailyExport.domUpdates.map(update => [update.selector, update]));
+            if (dailyExportDom["#run-export-start"].type !== "date" ||
+                dailyExportDom["#run-export-start"].step !== "" ||
+                dailyExportDom["#run-export-start"].value !== "D:2019-10-01" ||
+                dailyExportDom["#run-export-end"].value !== "D:2021-12-31" ||
+                dailyExportDom["#btn-run-export"].disabled !== false ||
+                dailyExportDom["#btn-open-export-file"].disabled !== true ||
+                dailyExportDom["#run-export-hint"].className !== "hint-box" ||
+                !dailyExportDom["#run-export-hint"].text.includes("日尺度结果")) {
+              throw new Error(`unexpected daily export DOM updates: ${JSON.stringify(dailyExportDom)}`);
+            }
 
             const hourlyExport = results.runExportPanelState({
               run: { path: "C:/runs/hourly" },
@@ -797,10 +808,28 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (hourlyExport.exportDisabled || hourlyExport.openDisabled || !hourlyExport.hintText.includes("小时结果") || !hourlyExport.hintText.includes("分钟精度")) {
               throw new Error(`unexpected hourly export panel state: ${JSON.stringify(hourlyExport)}`);
             }
+            const hourlyExportDom = Object.fromEntries(hourlyExport.domUpdates.map(update => [update.selector, update]));
+            if (hourlyExportDom["#run-export-start"].type !== "datetime-local" ||
+                hourlyExportDom["#run-export-start"].step !== "60" ||
+                hourlyExportDom["#run-export-start"].value !== "H:2020-01-01 00:00" ||
+                hourlyExportDom["#run-export-end"].type !== "datetime-local" ||
+                hourlyExportDom["#run-export-end"].step !== "60" ||
+                hourlyExportDom["#btn-run-export"].disabled !== false ||
+                hourlyExportDom["#btn-open-export-file"].disabled !== false) {
+              throw new Error(`unexpected hourly export DOM updates: ${JSON.stringify(hourlyExportDom)}`);
+            }
 
             const emptyExport = results.runExportPanelState(null);
             if (!emptyExport.exportDisabled || !emptyExport.openDisabled || emptyExport.start.value !== "" || emptyExport.hintText !== "选择一个结果后，可按时间范围导出 Excel。") {
               throw new Error(`unexpected empty export panel state: ${JSON.stringify(emptyExport)}`);
+            }
+            const emptyExportDom = Object.fromEntries(emptyExport.domUpdates.map(update => [update.selector, update]));
+            if (emptyExportDom["#run-export-start"].value !== "" ||
+                emptyExportDom["#run-export-end"].value !== "" ||
+                emptyExportDom["#btn-run-export"].disabled !== true ||
+                emptyExportDom["#btn-open-export-file"].disabled !== true ||
+                emptyExportDom["#run-export-hint"].text !== "选择一个结果后，可按时间范围导出 Excel。") {
+              throw new Error(`unexpected empty export DOM updates: ${JSON.stringify(emptyExportDom)}`);
             }
 
             const selectedFields = results.selectedRunExportFields([

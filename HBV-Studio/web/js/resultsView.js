@@ -1080,27 +1080,40 @@
     const endValue = timeCfg.valid_end || dates[dates.length - 1] || "";
     const hasRunPath = Boolean(data?.run?.path);
     const hasExportPath = Boolean(options.lastExportPath);
+    const start = {
+      type: hourly ? "datetime-local" : "date",
+      step: hourly ? "60" : "",
+      value: formatInputTime(startValue, hourly),
+    };
+    const end = {
+      type: hourly ? "datetime-local" : "date",
+      step: hourly ? "60" : "",
+      value: formatInputTime(endValue, hourly),
+    };
+    const exportDisabled = !hasRunPath;
+    const openDisabled = !hasExportPath;
+    const hintText = hasRunPath
+      ? hourly
+        ? "当前结果已保存预热至验证全时段。默认已带入全时段，小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
+        : "当前结果已保存预热至验证全时段。默认已带入全时段，日尺度结果会导出到当前结果目录下的“导出”子目录。"
+      : "选择一个结果后，可按时间范围导出 Excel。";
+    const hintClassName = "hint-box";
     return {
       stepHours,
       hourly,
-      start: {
-        type: hourly ? "datetime-local" : "date",
-        step: hourly ? "60" : "",
-        value: formatInputTime(startValue, hourly),
-      },
-      end: {
-        type: hourly ? "datetime-local" : "date",
-        step: hourly ? "60" : "",
-        value: formatInputTime(endValue, hourly),
-      },
-      exportDisabled: !hasRunPath,
-      openDisabled: !hasExportPath,
-      hintText: hasRunPath
-        ? hourly
-          ? "当前结果已保存预热至验证全时段。默认已带入全时段，小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
-          : "当前结果已保存预热至验证全时段。默认已带入全时段，日尺度结果会导出到当前结果目录下的“导出”子目录。"
-        : "选择一个结果后，可按时间范围导出 Excel。",
-      hintClassName: "hint-box",
+      start,
+      end,
+      exportDisabled,
+      openDisabled,
+      hintText,
+      hintClassName,
+      domUpdates: [
+        { selector: "#run-export-start", type: start.type, step: start.step, value: start.value },
+        { selector: "#run-export-end", type: end.type, step: end.step, value: end.value },
+        { selector: "#btn-run-export", disabled: exportDisabled },
+        { selector: "#btn-open-export-file", disabled: openDisabled },
+        { selector: "#run-export-hint", text: hintText, className: hintClassName },
+      ],
     };
   }
 
