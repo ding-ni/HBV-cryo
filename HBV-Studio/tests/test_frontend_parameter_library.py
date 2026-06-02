@@ -403,7 +403,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["manualPresetAppliedParams", "manualPresetApplyState", "manualParamUpdateState", "manualParamResetState"]) {
+            for (const name of ["manualPresetAppliedParams", "manualPresetApplyState", "manualParamUpdateState", "manualParamResetState", "manualParamResetViewState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const result = library.manualPresetAppliedParams(
@@ -490,6 +490,35 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const missingReset = library.manualParamResetState(null);
             if (missingReset.reset || missingReset.paramUpdates.length || missingReset.hint.visible) {
               throw new Error(`missing manual param reset should not reset: ${JSON.stringify(missingReset)}`);
+            }
+            const resetView = library.manualParamResetViewState(
+              { TT: 0.1, FC: 120 },
+              {
+                run: { path: "C:/runs/A" },
+                metadata: {
+                  metrics: {
+                    calibration: { nse: 0.82 },
+                    validation: { nse: 0.71 },
+                  },
+                },
+              },
+            );
+            if (!resetView.reset || !resetView.shouldRestoreRun || resetView.chartData.run.path !== "C:/runs/A" ||
+                !resetView.shouldUpdateMetrics || resetView.calibrationMetrics.nse !== 0.82 ||
+                resetView.validationMetrics.nse !== 0.71 || resetView.metricMetadata.metrics.calibration.nse !== 0.82) {
+              throw new Error(`manual param reset view state wrong: ${JSON.stringify(resetView)}`);
+            }
+            const resetViewWithoutRun = library.manualParamResetViewState({ TT: 0.1 }, null);
+            if (!resetViewWithoutRun.reset || resetViewWithoutRun.shouldRestoreRun ||
+                resetViewWithoutRun.chartData !== null || !resetViewWithoutRun.shouldUpdateMetrics ||
+                Object.keys(resetViewWithoutRun.calibrationMetrics).length ||
+                Object.keys(resetViewWithoutRun.validationMetrics).length) {
+              throw new Error(`manual param reset view without run wrong: ${JSON.stringify(resetViewWithoutRun)}`);
+            }
+            const missingResetView = library.manualParamResetViewState(null, { metadata: { metrics: { calibration: { nse: 1 } } } });
+            if (missingResetView.reset || missingResetView.shouldRestoreRun || missingResetView.chartData !== null ||
+                missingResetView.shouldUpdateMetrics) {
+              throw new Error(`missing manual param reset view should not reset: ${JSON.stringify(missingResetView)}`);
             }
             """
         )

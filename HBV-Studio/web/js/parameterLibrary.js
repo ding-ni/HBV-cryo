@@ -490,6 +490,21 @@
     };
   }
 
+  function manualParamResetViewState(originalParams = null, runData = null) {
+    const reset = manualParamResetState(originalParams);
+    const meta = runData?.metadata || {};
+    const metrics = meta.metrics || {};
+    return {
+      ...reset,
+      shouldRestoreRun: Boolean(reset.reset && runData),
+      chartData: reset.reset ? (runData || null) : null,
+      shouldUpdateMetrics: Boolean(reset.reset),
+      calibrationMetrics: metrics.calibration || {},
+      validationMetrics: metrics.validation || {},
+      metricMetadata: meta,
+    };
+  }
+
   function manualGroupParamNames(group = "all", names = [], groupParams = {}) {
     const paramNames = Array.isArray(names) ? names : [];
     if (normalizeKey(group) === "all") return paramNames.slice();
@@ -846,6 +861,7 @@
     manualPresetApplyState,
     manualParamUpdateState,
     manualParamResetState,
+    manualParamResetViewState,
     manualGroupParamNames,
     manualPhaseGuide,
     manualChangeSummary,

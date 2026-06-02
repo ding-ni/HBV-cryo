@@ -155,6 +155,7 @@ const frontendModuleContracts = [
       "manualPresetApplyState",
       "manualParamUpdateState",
       "manualParamResetState",
+      "manualParamResetViewState",
       "manualGroupParamNames",
       "manualPhaseGuide",
       "manualChangeSummary",
@@ -5040,7 +5041,7 @@ function renderParamSliders(data) {
 }
 
 function resetParamsToOriginal() {
-  const reset = window.HBVStudioParameterLibrary.manualParamResetState(state._runOrigParams);
+  const reset = window.HBVStudioParameterLibrary.manualParamResetViewState(state._runOrigParams, state._runData);
   if (!reset.reset) return;
   state._runParams = reset.params;
   reset.paramUpdates.forEach(({ name, value, changed }) => {
@@ -5051,12 +5052,8 @@ function resetParamsToOriginal() {
     const item = slider?.closest(".param-slider-item");
     if (item) item.classList.toggle("changed", changed);
   });
-  // Restore original charts
-  if (state._runData) renderCharts(state._runData);
-  const meta = state._runData?.metadata || {};
-  const cal = meta.metrics?.calibration || {};
-  const val = meta.metrics?.validation || {};
-  updateMetricsStrip(cal, val, meta);
+  if (reset.shouldRestoreRun) renderCharts(reset.chartData);
+  if (reset.shouldUpdateMetrics) updateMetricsStrip(reset.calibrationMetrics, reset.validationMetrics, reset.metricMetadata);
   const hint = $("#resim-hint");
   if (hint) {
     hint.style.display = reset.hint.visible ? "" : "none";
