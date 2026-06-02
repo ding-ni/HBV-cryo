@@ -169,6 +169,25 @@
     return { changed, filters: next };
   }
 
+  function runsForWorkspace(runs = [], path = "", helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    return (Array.isArray(runs) ? runs : []).filter(run => samePath(run?.workspace_config, path));
+  }
+
+  function selectedRunPath(model = {}) {
+    return String(model.selectedRunPath || model.currentRun?.run?.path || model.currentRun?.path || "").trim();
+  }
+
+  function workspaceHasEditableRun(runs = [], path = "", helpers = {}) {
+    return runsForWorkspace(runs, path, helpers).some(run => run?.studio_compatible);
+  }
+
+  function latestEditableRunPath(runs = []) {
+    const items = Array.isArray(runs) ? runs : [];
+    const editable = items.find(run => run?.studio_compatible);
+    return editable?.path || items[0]?.path || "";
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -579,6 +598,7 @@
   window.HBVStudioResultsView = {
     alignedRunFiltersForSelection,
     filterRuns,
+    latestEditableRunPath,
     resultMetricItems,
     renderFilterToolbar,
     renderMetricStrip,
@@ -592,6 +612,9 @@
     resultsFilterHint,
     runExportPanelState,
     runProfileValue,
+    runsForWorkspace,
+    selectedRunPath,
     runStepHours,
+    workspaceHasEditableRun,
   };
 })();

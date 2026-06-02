@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runStepHours"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -622,11 +622,14 @@ function visibleRuns() {
 }
 
 function runsForWorkspace(path) {
-  return state.runs.filter(run => samePath(run.workspace_config, path));
+  return window.HBVStudioResultsView.runsForWorkspace(state.runs, path, { samePath });
 }
 
 function currentSelectedRunPath() {
-  return String(state.selectedRunPath || state.currentRun?.run?.path || state.currentRun?.path || "").trim();
+  return window.HBVStudioResultsView.selectedRunPath({
+    selectedRunPath: state.selectedRunPath,
+    currentRun: state.currentRun,
+  });
 }
 
 function normalizeCalibrationProfile(value, fallback = "") {
@@ -635,7 +638,7 @@ function normalizeCalibrationProfile(value, fallback = "") {
 }
 
 function workspaceHasEditableRun(path) {
-  return runsForWorkspace(path).some(run => run.studio_compatible);
+  return window.HBVStudioResultsView.workspaceHasEditableRun(state.runs, path, { samePath });
 }
 
 function visibleTasks() {
@@ -652,8 +655,7 @@ function visibleTasks() {
 }
 
 function latestEditableRunPath(runs = visibleRuns()) {
-  const editable = runs.find(run => run.studio_compatible);
-  return editable?.path || runs[0]?.path || "";
+  return window.HBVStudioResultsView.latestEditableRunPath(runs);
 }
 
 function renderTaskFilterToolbar() {

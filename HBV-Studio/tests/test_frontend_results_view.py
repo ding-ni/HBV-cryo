@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runStepHours) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -152,6 +152,21 @@ class FrontendResultsViewTests(unittest.TestCase):
             });
             if (!alignedHiddenSelection.changed || alignedHiddenSelection.filters.workspacePath !== "C:/ws/A" || alignedHiddenSelection.filters.type !== "") {
               throw new Error(`hidden selected run should activate its workspace and clear stage: ${JSON.stringify(alignedHiddenSelection)}`);
+            }
+            if (results.runsForWorkspace(runItems, "C:\\ws\\A", helpers).map(run => run.path).join("|") !== "r1|r2|r4") {
+              throw new Error("runsForWorkspace should match normalized workspace paths");
+            }
+            if (!results.workspaceHasEditableRun(runItems, "C:/ws/A", helpers) || results.workspaceHasEditableRun(runItems, "C:/ws/B", helpers)) {
+              throw new Error("workspaceHasEditableRun should only be true when the workspace has editable runs");
+            }
+            if (results.selectedRunPath({ selectedRunPath: " explicit ", currentRun: { run: { path: "nested" } } }) !== "explicit") {
+              throw new Error("selectedRunPath should prefer explicit selection");
+            }
+            if (results.selectedRunPath({ currentRun: { run: { path: "nested-run" }, path: "fallback-run" } }) !== "nested-run") {
+              throw new Error("selectedRunPath should use current run detail path before fallback path");
+            }
+            if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
+              throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);
