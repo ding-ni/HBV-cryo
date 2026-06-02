@@ -414,9 +414,19 @@ class FrontendForecastViewTests(unittest.TestCase):
             if ((rendered.html.match(/2026-06-04 至 2026-06-05/g) || []).length !== 1) {
               throw new Error(`range should not be duplicated when friendly name already contains it: ${rendered.html}`);
             }
+            const renderedDom = Object.fromEntries(rendered.domUpdates.map(update => [update.selector, update]));
+            if (renderedDom["#forecast-result-run"].disabled !== false ||
+                renderedDom["#forecast-result-run"].html !== rendered.html) {
+              throw new Error(`result options DOM updates wrong: ${JSON.stringify(renderedDom)}`);
+            }
             const emptyRendered = view.renderForecastResultOptions([], "", { samePath });
-            if (emptyRendered.selected !== null || !emptyRendered.html.includes("暂无连续状态预报结果")) {
+            if (emptyRendered.selected !== null || !emptyRendered.disabled || !emptyRendered.html.includes("暂无连续状态预报结果")) {
               throw new Error(`empty result options wrong: ${JSON.stringify(emptyRendered)}`);
+            }
+            const emptyRenderedDom = Object.fromEntries(emptyRendered.domUpdates.map(update => [update.selector, update]));
+            if (emptyRenderedDom["#forecast-result-run"].disabled !== true ||
+                emptyRenderedDom["#forecast-result-run"].html !== emptyRendered.html) {
+              throw new Error(`empty result options DOM updates wrong: ${JSON.stringify(emptyRenderedDom)}`);
             }
             """
         )

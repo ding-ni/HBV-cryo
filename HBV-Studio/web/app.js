@@ -5321,26 +5321,24 @@ function renderForecastResultPanel() {
     { currentData: state.forecastResultData, loadingPath: state.forecastResultLoadingPath },
     { samePath },
   );
+  const rendered = window.HBVStudioForecastView.renderForecastResultOptions(
+    runs,
+    panel.selectedPath,
+    { escapeHtml, forecastFriendlyRunName, samePath, timeRangeText },
+  );
   if (!panel.hasRuns) {
     forecastResultRequestGuard.cancel();
     Object.assign(state, panel.statePatch);
-    select.disabled = panel.selectDisabled;
-    select.innerHTML = '<option value="">暂无连续状态预报结果</option>';
+    applyDomUpdates(rendered.domUpdates);
     setForecastResultButtons(null);
     if (window.HBVStudioForecastView) {
       window.HBVStudioForecastView.renderForecastResultEmpty("完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。");
     }
     return;
   }
-  const rendered = window.HBVStudioForecastView.renderForecastResultOptions(
-    runs,
-    panel.selectedPath,
-    { escapeHtml, forecastFriendlyRunName, samePath, timeRangeText },
-  );
   const selected = panel.selected || rendered.selected || runs[0];
   Object.assign(state, panel.statePatch);
-  select.disabled = panel.selectDisabled;
-  select.innerHTML = rendered.html;
+  applyDomUpdates(rendered.domUpdates);
   setForecastResultButtons(selected);
   if (panel.renderMode === "detail") {
     renderForecastResultDetail(state.forecastResultData);
