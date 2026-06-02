@@ -16,8 +16,9 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             const fs = require("fs");
             const vm = require("vm");
 
-            const context = { window: {}, console };
+            const context = { window: {}, console, URLSearchParams };
             vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/mapLayerPlan.js", "utf8"), context);
             vm.runInContext(fs.readFileSync("web/js/geoPreview.js", "utf8"), context);
 
             const geo = context.window.HBVStudioGeoPreview;
@@ -82,6 +83,10 @@ class FrontendGeoPreviewTests(unittest.TestCase):
               if (!css.includes(selector)) throw new Error(`coordinate style missing: ${selector}`);
             }
             if (!html.includes('data-geo-layer-count="1"')) throw new Error("layer count attribute mismatch");
+            if (!html.includes("geo-map-plan")) throw new Error("offline map plan summary missing");
+            if (!html.includes('data-map-plan-sources="1"')) throw new Error("offline map source count missing");
+            if (!html.includes('data-map-plan-layers="1"')) throw new Error("offline map layer count missing");
+            if (!html.includes("/api/geo/*")) throw new Error("offline map plan should mention local geo endpoints");
             """
         )
         result = subprocess.run(

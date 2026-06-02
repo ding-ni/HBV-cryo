@@ -276,6 +276,36 @@
     `).join("");
   }
 
+  function renderOfflineMapPlan(overview, escapeHtml) {
+    const planner = window.HBVStudioMapLayerPlan;
+    if (!planner?.buildMapLibreLayerPlan) return "";
+    let plan = null;
+    try {
+      plan = planner.buildMapLibreLayerPlan(overview, overview?.config_path || "");
+    } catch (error) {
+      return "";
+    }
+    if (!plan || plan.offline !== true) return "";
+    const sourceCount = Object.keys(plan.sources || {}).length;
+    const layerCount = Array.isArray(plan.layers) ? plan.layers.length : 0;
+    const controlCount = Array.isArray(plan.layerControls) ? plan.layerControls.length : 0;
+    if (!sourceCount || !layerCount) return "";
+    return `
+      <div class="geo-map-plan" data-map-plan-sources="${escapeHtml(String(sourceCount))}" data-map-plan-layers="${escapeHtml(String(layerCount))}">
+        <div class="geo-map-plan-head">
+          <strong>离线地图计划</strong>
+          <span>MapLibre · 本地图层</span>
+        </div>
+        <div class="geo-map-plan-grid">
+          <div><span>source</span><strong>${escapeHtml(String(sourceCount))}</strong></div>
+          <div><span>layer</span><strong>${escapeHtml(String(layerCount))}</strong></div>
+          <div><span>control</span><strong>${escapeHtml(String(controlCount))}</strong></div>
+        </div>
+        <div class="geo-map-plan-note">零外网底图，DEM、边界、高程带、冰川和站点均走本地 <code>/api/geo/*</code> 接口。</div>
+      </div>
+    `;
+  }
+
   function renderOverview(overview, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     if (!overview) return "";
@@ -313,6 +343,7 @@
           </div>
           <div class="geo-preview-side">
             <div class="geo-preview-metrics">${renderMetricTiles(overview, escapeHtml)}</div>
+            ${renderOfflineMapPlan(overview, escapeHtml)}
             <div class="geo-preview-legend">${renderLegend(overview, escapeHtml)}</div>
           </div>
         </div>
