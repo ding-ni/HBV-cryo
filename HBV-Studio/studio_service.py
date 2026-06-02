@@ -338,8 +338,8 @@ from services.workspace_catalog import (
     build_empty_workspace as build_empty_workspace_config,
     create_workspace_from_import as build_create_workspace_from_import,
     delete_workspace as build_delete_workspace,
-    detect_object_type as build_detect_object_type,
-    detect_profile_from_payload as build_detect_profile_from_payload,
+    detect_object_type,
+    detect_profile_from_payload,
     find_template as build_find_template,
     instantiate_template as build_instantiate_template,
     list_templates as build_list_templates,
@@ -1276,23 +1276,6 @@ def slugify_workspace_name(name: str) -> str:
 
 def runtime_root_for_workspace(name: str) -> Path:
     return build_runtime_root_for_workspace(name, PROJECT_RUNTIME_DIR)
-
-
-def detect_profile_from_payload(data: dict[str, Any]) -> str:
-    return build_detect_profile_from_payload(
-        data,
-        profile_daily=PROFILE_DAILY,
-        profile_hourly=PROFILE_HOURLY,
-    )
-
-
-def detect_object_type(data: dict[str, Any]) -> str:
-    return build_detect_object_type(
-        data,
-        object_regression=OBJECT_REGRESSION,
-        object_interbasin=OBJECT_INTERBASIN,
-        object_full_upstream=OBJECT_FULL_UPSTREAM,
-    )
 
 
 def _run_portable_path_context() -> RunPortablePathContext:
