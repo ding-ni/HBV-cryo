@@ -4907,7 +4907,7 @@ function renderParamSliders(data) {
     groupParams: MANUAL_GROUP_PARAMS,
     labels: PARAM_LABELS,
   }, { escapeHtml });
-  $("#param-sliders").innerHTML = rendered.html;
+  applyDomUpdates(rendered.domUpdates);
   updateManualPhaseGuide(rendered.paramNames || []);
   if (rendered.status !== "ready") {
     updateManualChangeSummary();

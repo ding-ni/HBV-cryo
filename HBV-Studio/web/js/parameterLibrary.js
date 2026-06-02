@@ -702,31 +702,35 @@
     const labels = options.labels && typeof options.labels === "object" ? options.labels : {};
     const group = options.group || "all";
     const groupParams = options.groupParams || {};
+    const withDomUpdates = state => ({
+      ...state,
+      domUpdates: [{ selector: "#param-sliders", html: state.html }],
+    });
     if (!editable) {
-      return {
+      return withDomUpdates({
         status: "readonly",
         html: '<div class="hint-box status-warn">该结果缺少继续手调所需的参数边界信息，暂时只能查看，不能手动调参。</div>',
         paramNames: [],
         shownParamNames: [],
-      };
+      });
     }
     const paramNames = Object.keys(params);
     if (!paramNames.length) {
-      return {
+      return withDomUpdates({
         status: "empty",
         html: '<div class="hint-box">无参数信息。</div>',
         paramNames,
         shownParamNames: [],
-      };
+      });
     }
     const shownParamNames = manualGroupParamNames(group, paramNames, groupParams);
     if (!shownParamNames.length) {
-      return {
+      return withDomUpdates({
         status: "group-empty",
         html: '<div class="hint-box status-warn">当前分组没有可调参数，请切换到其他参数组。</div>',
         paramNames,
         shownParamNames,
-      };
+      });
     }
     const html = shownParamNames.map(name => {
       const val = params[name];
@@ -744,12 +748,12 @@
           <div class="param-slider-bounds"><span>${lo}</span><span>${hi}</span></div>
         </div>`;
     }).join("");
-    return {
+    return withDomUpdates({
       status: "ready",
       html,
       paramNames,
       shownParamNames,
-    };
+    });
   }
 
   function manualContextFromRunData(data = {}, helpers = {}) {

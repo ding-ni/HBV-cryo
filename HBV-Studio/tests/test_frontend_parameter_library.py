@@ -1145,6 +1145,10 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (readonly.status !== "readonly" || !readonly.html.includes("不能手动调参")) {
               throw new Error(`unexpected readonly sliders: ${JSON.stringify(readonly)}`);
             }
+            const readonlyDom = Object.fromEntries(readonly.domUpdates.map(update => [update.selector, update]));
+            if (readonlyDom["#param-sliders"].html !== readonly.html) {
+              throw new Error(`unexpected readonly slider DOM updates: ${JSON.stringify(readonlyDom)}`);
+            }
             const groupEmpty = library.renderParamSliders({
               editable: true,
               params: { TT: 0.5 },
@@ -1156,6 +1160,10 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (groupEmpty.status !== "group-empty" || !groupEmpty.html.includes("当前分组没有可调参数")) {
               throw new Error(`unexpected group-empty sliders: ${JSON.stringify(groupEmpty)}`);
             }
+            const groupEmptyDom = Object.fromEntries(groupEmpty.domUpdates.map(update => [update.selector, update]));
+            if (groupEmptyDom["#param-sliders"].html !== groupEmpty.html) {
+              throw new Error(`unexpected group-empty slider DOM updates: ${JSON.stringify(groupEmptyDom)}`);
+            }
             const rendered = library.renderParamSliders({
               editable: true,
               params: { "TT<bad>": 0.5, FC: 130 },
@@ -1166,6 +1174,10 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             }, helpers);
             if (rendered.status !== "ready" || rendered.paramNames.length !== 2 || rendered.shownParamNames.length !== 2) {
               throw new Error(`unexpected rendered status: ${JSON.stringify(rendered)}`);
+            }
+            const renderedDom = Object.fromEntries(rendered.domUpdates.map(update => [update.selector, update]));
+            if (renderedDom["#param-sliders"].html !== rendered.html) {
+              throw new Error(`unexpected slider DOM updates: ${JSON.stringify(renderedDom)}`);
             }
             if (!rendered.html.includes('data-param="TT&lt;bad&gt;"') || !rendered.html.includes("温度&lt;阈值&gt;")) {
               throw new Error(`slider html should escape names and labels: ${rendered.html}`);
