@@ -97,6 +97,7 @@ class FrontendForecastViewTests(unittest.TestCase):
               "pickForecastSourceRun",
               "forecastSelectedSourceRun",
               "forecastSourceOptionsState",
+              "forecastSourceButtonState",
               "forecastSourceSelectionState",
             ]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing source readiness export: ${name}`);
@@ -150,6 +151,18 @@ class FrontendForecastViewTests(unittest.TestCase):
             const fallbackOptions = view.forecastSourceOptionsState(candidates, "C:/runs/missing", { samePath, forecastRunReady: view.forecastRunReady });
             if (fallbackOptions.selected?.id !== "cal-ready" || fallbackOptions.selectedPath !== "C:/runs/cal") {
               throw new Error(`source options ready fallback wrong: ${JSON.stringify(fallbackOptions)}`);
+            }
+            const emptyButtons = view.forecastSourceButtonState(null);
+            if (!emptyButtons.openSourceDisabled || !emptyButtons.startDisabled) {
+              throw new Error(`empty source buttons wrong: ${JSON.stringify(emptyButtons)}`);
+            }
+            const readyButtons = view.forecastSourceButtonState(runs[1]);
+            if (readyButtons.openSourceDisabled || readyButtons.startDisabled) {
+              throw new Error(`ready source buttons wrong: ${JSON.stringify(readyButtons)}`);
+            }
+            const blockedButtons = view.forecastSourceButtonState(runs[3]);
+            if (blockedButtons.openSourceDisabled || !blockedButtons.startDisabled) {
+              throw new Error(`blocked source buttons wrong: ${JSON.stringify(blockedButtons)}`);
             }
             const preferred = view.pickForecastSourceRun(candidates, "c:/RUNS/manual", { samePath });
             if (preferred?.id !== "manual-ready") throw new Error(`preferred source mismatch: ${preferred?.id}`);

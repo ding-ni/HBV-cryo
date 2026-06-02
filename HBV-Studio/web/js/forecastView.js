@@ -129,6 +129,15 @@
     };
   }
 
+  function forecastSourceButtonState(run = null, helpers = {}) {
+    const isReady = helpers.forecastRunReady || forecastRunReady;
+    const hasRun = Boolean(run?.path);
+    return {
+      openSourceDisabled: !hasRun,
+      startDisabled: !hasRun || !isReady(run),
+    };
+  }
+
   function forecastResultRuns(runs = [], helpers = {}) {
     const runTypeValue = helpers.runTypeValue || (run => run?.run_type || run?.kind || "");
     const items = Array.isArray(runs) ? runs : [];
@@ -1191,6 +1200,7 @@
     forecastSelectedSourceRun,
     forecastSelectedResultRun,
     forecastSourceOptionsState,
+    forecastSourceButtonState,
     forecastSourceSelectionState,
     forecastSuggestedStart,
     forecastTimeComparable,

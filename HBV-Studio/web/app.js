@@ -179,6 +179,7 @@ const frontendModuleContracts = [
       "forecastSelectedSourceRun",
       "forecastSelectedResultRun",
       "forecastSourceOptionsState",
+      "forecastSourceButtonState",
       "forecastSourceSelectionState",
       "forecastSuggestedStart",
       "forecastTimeComparable",
@@ -5546,8 +5547,9 @@ function renderForecastSourceSummary() {
   const hint = $("#forecast-hint");
   if (!host) return;
   const run = selectedForecastRun();
-  if (openBtn) openBtn.disabled = !run?.path;
-  if (startBtn) startBtn.disabled = !run?.path || !forecastRunReady(run);
+  const buttons = window.HBVStudioForecastView.forecastSourceButtonState(run, { forecastRunReady });
+  if (openBtn) openBtn.disabled = buttons.openSourceDisabled;
+  if (startBtn) startBtn.disabled = buttons.startDisabled;
   const rendered = window.HBVStudioForecastView.renderForecastSourceSummary(run, {
     escapeHtml,
     forecastArchiveDetailText,
