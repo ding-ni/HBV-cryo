@@ -67,6 +67,9 @@ from services.event_config import (
     truthy_config as build_truthy_config,
 )
 from services.event_windows import EventWindowContext
+from services.event_windows import build_expected_forcing_index as build_event_expected_forcing_index
+from services.event_windows import build_expected_observation_index as build_event_expected_observation_index
+from services.event_windows import build_expected_time_index as build_event_expected_time_index
 from services.event_windows import normalized_flood_events as build_normalized_flood_events
 from services.filesystem import (
     FilesystemContext,
@@ -1124,49 +1127,15 @@ def _event_window_index(events: list[dict[str, Any]], start_key: str, end_key: s
 
 
 def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:
-    time_cfg = dict(config.get("时间", {}))
-    start_raw = time_cfg.get("预热开始") or time_cfg.get("率定开始")
-    end_raw = time_cfg.get("验证结束") or time_cfg.get("率定结束")
-    if not start_raw or not end_raw:
-        return None
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    step = pd.Timedelta(hours=step_hours)
-    start_ts = pd.to_datetime(start_raw)
-    end_ts = pd.to_datetime(end_raw)
-    if step_hours < 24.0 and is_date_only_string(end_raw):
-        end_ts = end_ts + pd.Timedelta(days=1) - step
-    return pd.date_range(start_ts, end_ts, freq=step)
+    return build_event_expected_time_index(config)
 
 
 def build_expected_forcing_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    if task_time_basis(config, context=context) == TIME_BASIS_EVENT_WINDOWS:
-        event_info = normalized_flood_events(config, step_hours=step_hours)
-        index = _event_window_index(event_info.get("valid_events", []), "run_start", "run_end", step_hours)
-        if len(index) > 0:
-            return index
-    return build_expected_time_index(config)
+    return build_event_expected_forcing_index(config, _event_window_context(), runtime_context=context)
 
 
 def build_expected_observation_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    if task_time_basis(config, context=context) == TIME_BASIS_EVENT_WINDOWS:
-        event_info = normalized_flood_events(config, step_hours=step_hours)
-        index = _event_window_index(event_info.get("valid_events", []), "score_start", "score_end", step_hours)
-        if len(index) > 0:
-            return index
-    time_cfg = dict(config.get("时间", {}))
-    start_raw = time_cfg.get("率定开始")
-    end_raw = time_cfg.get("验证结束") or time_cfg.get("率定结束")
-    if not start_raw or not end_raw:
-        return None
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    step = pd.Timedelta(hours=step_hours)
-    start_ts = pd.to_datetime(start_raw)
-    end_ts = pd.to_datetime(end_raw)
-    if step_hours < 24.0 and is_date_only_string(end_raw):
-        end_ts = end_ts + pd.Timedelta(days=1) - step
-    return pd.date_range(start_ts, end_ts, freq=step)
+    return build_event_expected_observation_index(config, _event_window_context(), runtime_context=context)
 
 
 def _directory_scan_signature(directory: Path) -> tuple[str, int, int]:

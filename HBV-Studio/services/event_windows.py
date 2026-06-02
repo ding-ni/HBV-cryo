@@ -14,17 +14,90 @@ from services.event_config import (
     event_date_range,
     event_field,
     event_initial_state_policy_summary,
+    event_window_index,
     flood_event_raw_config,
     parse_event_timestamp,
+    task_time_basis,
     truthy_config,
 )
 from services.event_io import read_event_table_file
+from services.time_utils import is_date_only_string
 from services.time_utils import normalize_time_step_hours
 
 
 @dataclass(frozen=True)
 class EventWindowContext:
     resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
+
+
+def _time_config_value(time_cfg: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = time_cfg.get(key)
+        if value:
+            return value
+    return None
+
+
+def _continuous_time_index(
+    config: dict[str, Any],
+    *,
+    start_keys: tuple[str, ...],
+    end_keys: tuple[str, ...],
+) -> pd.DatetimeIndex | None:
+    time_cfg = dict(config.get("\u65f6\u95f4", {}))
+    start_raw = _time_config_value(time_cfg, *start_keys)
+    end_raw = _time_config_value(time_cfg, *end_keys)
+    if not start_raw or not end_raw:
+        return None
+    step_hours = normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0))
+    step = pd.Timedelta(hours=step_hours)
+    start_ts = pd.to_datetime(start_raw)
+    end_ts = pd.to_datetime(end_raw)
+    if step_hours < 24.0 and is_date_only_string(end_raw):
+        end_ts = end_ts + pd.Timedelta(days=1) - step
+    return pd.date_range(start_ts, end_ts, freq=step)
+
+
+def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:
+    return _continuous_time_index(
+        config,
+        start_keys=("\u9884\u70ed\u5f00\u59cb", "\u7387\u5b9a\u5f00\u59cb"),
+        end_keys=("\u9a8c\u8bc1\u7ed3\u675f", "\u7387\u5b9a\u7ed3\u675f"),
+    )
+
+
+def build_expected_forcing_index(
+    config: dict[str, Any],
+    context: EventWindowContext,
+    *,
+    runtime_context: str = "calibration",
+) -> pd.DatetimeIndex | None:
+    step_hours = normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0))
+    if task_time_basis(config, context=runtime_context) == TIME_BASIS_EVENT_WINDOWS:
+        event_info = normalized_flood_events(config, context, step_hours=step_hours)
+        index = event_window_index(event_info.get("valid_events", []), "run_start", "run_end", step_hours)
+        if len(index) > 0:
+            return index
+    return build_expected_time_index(config)
+
+
+def build_expected_observation_index(
+    config: dict[str, Any],
+    context: EventWindowContext,
+    *,
+    runtime_context: str = "calibration",
+) -> pd.DatetimeIndex | None:
+    step_hours = normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0))
+    if task_time_basis(config, context=runtime_context) == TIME_BASIS_EVENT_WINDOWS:
+        event_info = normalized_flood_events(config, context, step_hours=step_hours)
+        index = event_window_index(event_info.get("valid_events", []), "score_start", "score_end", step_hours)
+        if len(index) > 0:
+            return index
+    return _continuous_time_index(
+        config,
+        start_keys=("\u7387\u5b9a\u5f00\u59cb",),
+        end_keys=("\u9a8c\u8bc1\u7ed3\u675f", "\u7387\u5b9a\u7ed3\u675f"),
+    )
 
 
 def normalized_flood_events(

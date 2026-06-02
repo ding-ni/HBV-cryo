@@ -13,7 +13,13 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.event_windows import EventWindowContext, normalized_flood_events  # noqa: E402
+from services.event_windows import (  # noqa: E402
+    EventWindowContext,
+    build_expected_forcing_index,
+    build_expected_observation_index,
+    build_expected_time_index,
+    normalized_flood_events,
+)
 
 
 class EventWindowsServiceTests(unittest.TestCase):
@@ -27,6 +33,117 @@ class EventWindowsServiceTests(unittest.TestCase):
             return root / path
 
         return EventWindowContext(resolve_config_related_path=resolve_config_related_path)
+
+    def test_build_expected_time_index_uses_continuous_period(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u65f6\u95f4": {
+                "\u9884\u70ed\u5f00\u59cb": "2026-01-01",
+                "\u7387\u5b9a\u5f00\u59cb": "2026-01-03",
+                "\u7387\u5b9a\u7ed3\u675f": "2026-01-05",
+                "\u9a8c\u8bc1\u7ed3\u675f": "2026-01-07",
+            },
+        }
+
+        index = build_expected_time_index(config)
+        observation_index = build_expected_observation_index(config, self._context())
+
+        self.assertIsNotNone(index)
+        self.assertEqual(len(index), 7)
+        self.assertEqual(index[0], pd.Timestamp("2026-01-01"))
+        self.assertEqual(index[-1], pd.Timestamp("2026-01-07"))
+        self.assertIsNotNone(observation_index)
+        self.assertEqual(len(observation_index), 5)
+        self.assertEqual(observation_index[0], pd.Timestamp("2026-01-03"))
+
+    def test_build_expected_time_index_expands_hourly_date_only_end(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 1,
+            "\u65f6\u95f4": {
+                "\u9884\u70ed\u5f00\u59cb": "2026-01-01",
+                "\u7387\u5b9a\u7ed3\u675f": "2026-01-02",
+            },
+        }
+
+        index = build_expected_time_index(config)
+
+        self.assertIsNotNone(index)
+        self.assertEqual(len(index), 48)
+        self.assertEqual(index[-1], pd.Timestamp("2026-01-02 23:00"))
+
+    def test_expected_indexes_use_valid_event_windows(self) -> None:
+        config = {
+            "\u4efb\u52a1\u65f6\u6bb5\u6a21\u5f0f": "event_windows",
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u65f6\u95f4": {
+                "\u9884\u70ed\u5f00\u59cb": "2026-01-01",
+                "\u7387\u5b9a\u5f00\u59cb": "2026-01-02",
+                "\u7387\u5b9a\u7ed3\u675f": "2026-12-31",
+            },
+            "\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a": {
+                "\u542f\u7528": True,
+                "\u4e8b\u4ef6\u8868": [
+                    {
+                        "event_id": "E1",
+                        "run_start": "2026-06-01",
+                        "score_start": "2026-06-02",
+                        "score_end": "2026-06-04",
+                        "run_end": "2026-06-05",
+                    },
+                    {
+                        "event_id": "E2",
+                        "run_start": "2026-07-10",
+                        "score_start": "2026-07-11",
+                        "score_end": "2026-07-13",
+                        "run_end": "2026-07-14",
+                    },
+                ],
+            },
+        }
+
+        forcing_index = build_expected_forcing_index(config, self._context())
+        observation_index = build_expected_observation_index(config, self._context())
+
+        self.assertIsNotNone(forcing_index)
+        self.assertIsNotNone(observation_index)
+        self.assertEqual(len(forcing_index), 10)
+        self.assertEqual(len(observation_index), 6)
+        self.assertIn(pd.Timestamp("2026-06-01"), set(forcing_index))
+        self.assertIn(pd.Timestamp("2026-06-02"), set(observation_index))
+        self.assertNotIn(pd.Timestamp("2026-06-15"), set(forcing_index))
+
+    def test_expected_indexes_fall_back_when_event_mode_has_no_valid_index(self) -> None:
+        config = {
+            "\u4efb\u52a1\u65f6\u6bb5\u6a21\u5f0f": "event_windows",
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u65f6\u95f4": {
+                "\u9884\u70ed\u5f00\u59cb": "2026-01-01",
+                "\u7387\u5b9a\u5f00\u59cb": "2026-01-02",
+                "\u7387\u5b9a\u7ed3\u675f": "2026-01-05",
+            },
+            "\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a": {
+                "\u542f\u7528": True,
+                "\u4e8b\u4ef6\u8868": [
+                    {
+                        "event_id": "SHORT",
+                        "run_start": "2026-06-01",
+                        "score_start": "2026-06-02",
+                        "score_end": "2026-06-02",
+                        "run_end": "2026-06-03",
+                    }
+                ],
+            },
+        }
+
+        forcing_index = build_expected_forcing_index(config, self._context())
+        observation_index = build_expected_observation_index(config, self._context())
+
+        self.assertIsNotNone(forcing_index)
+        self.assertIsNotNone(observation_index)
+        self.assertEqual(len(forcing_index), 5)
+        self.assertEqual(forcing_index[0], pd.Timestamp("2026-01-01"))
+        self.assertEqual(len(observation_index), 4)
+        self.assertEqual(observation_index[0], pd.Timestamp("2026-01-02"))
 
     def test_normalized_flood_events_counts_valid_purposes_and_sorts_by_run_start(self) -> None:
         config = {
