@@ -342,6 +342,80 @@ def station_precip_quality_summary(
     }
 
 
+def station_precip_analysis_status(missing: list[Any], warnings: list[Any]) -> dict[str, str]:
+    if missing:
+        return {
+            "status": "fail",
+            "summary": "\u7ad9\u70b9\u964d\u6c34\u65b9\u6848\u4ecd\u6709\u5173\u952e\u95ee\u9898\uff0c\u65e0\u6cd5\u4f5c\u4e3a\u7387\u5b9a\u8f93\u5165\u3002",
+        }
+    if warnings:
+        return {
+            "status": "warn",
+            "summary": "\u7ad9\u70b9\u964d\u6c34\u8d44\u6599\u53ef\u4ee5\u7ee7\u7eed\u5904\u7406\uff0c\u4f46\u5b58\u5728\u7f3a\u6d4b\u3001\u5f02\u5e38\u503c\u6216\u7ad9\u53f7\u5339\u914d\u98ce\u9669\u3002",
+        }
+    return {
+        "status": "ok",
+        "summary": "\u7ad9\u70b9\u964d\u6c34\u8d44\u6599\u5339\u914d\u548c\u65f6\u95f4\u8986\u76d6\u57fa\u672c\u5408\u7406\uff0c\u53ef\u7528\u4e8e\u964d\u6c34\u8ba2\u6b63\u6216\u6cf0\u68ee\u5206\u914d\u3002",
+    }
+
+
+def station_precip_analysis_items(
+    *,
+    mode: str,
+    task_context: dict[str, Any],
+    time_basis_label: str,
+    matched_station_count: int,
+    station_count: int,
+    missing_in_precip: list[Any],
+    missing_in_meta: list[Any],
+    station_format: str,
+    station_start: Any,
+    station_end: Any,
+    step_hours: float,
+    coverage_ratio: float | None,
+    covered_count: int,
+    zero_available_steps: int,
+    max_consecutive_zero_steps: int,
+    min_available_station_count: int | None,
+    mean_available_station_count: float | None,
+    max_missing_rate: float,
+    negative_count: int,
+    extreme_count: int,
+    event_coverage: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    items = [
+        {"label": "\u964d\u6c34\u65b9\u6848", "value": "\u683c\u70b9+\u7ad9\u70b9\u504f\u5dee\u8ba2\u6b63" if mode == "grid_plus_station_bias" else "\u7ad9\u70b9\u6cf0\u68ee\u5206\u914d", "status": "ok"},
+        {"label": "\u68c0\u67e5\u53e3\u5f84", "value": task_context["headline"], "status": str(task_context.get("status", "warn"))},
+        {"label": "\u8d44\u6599\u53e3\u5f84", "value": time_basis_label, "status": "ok"},
+        {"label": "\u7ad9\u53f7\u5339\u914d", "value": f"{matched_station_count}/{station_count}", "status": "ok" if matched_station_count and not missing_in_precip else "warn" if matched_station_count else "fail"},
+        {"label": "\u964d\u6c34\u8868\u989d\u5916\u7ad9\u53f7", "value": str(len(missing_in_meta)), "status": "ok" if not missing_in_meta else "warn"},
+        {"label": "\u8d44\u6599\u683c\u5f0f", "value": station_format, "status": "ok"},
+        {"label": "\u65f6\u95f4\u8303\u56f4", "value": f"{format_time_for_check(station_start, step_hours)} \u81f3 {format_time_for_check(station_end, step_hours)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+        {"label": f"{time_basis_label}\u8986\u76d6", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "\u672a\u914d\u7f6e\u5b8c\u6574\u65f6\u6bb5", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+        {"label": "\u65e0\u53ef\u7528\u7ad9\u70b9\u65f6\u95f4\u6b65", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+        {"label": "\u6700\u5927\u8fde\u7eed\u65e0\u7ad9\u70b9", "value": f"{max_consecutive_zero_steps} \u6b65", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+        {"label": "\u53ef\u7528\u7ad9\u70b9\u6570", "value": station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+        {"label": "\u5355\u7ad9\u6700\u5927\u7f3a\u6d4b\u7387", "value": f"{max_missing_rate * 100:.1f}%", "status": "warn" if max_missing_rate > 0.20 else "ok"},
+        {"label": "\u8d1f\u964d\u6c34\u8bb0\u5f55", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
+        {"label": "\u5f02\u5e38\u5927\u503c\u8bb0\u5f55", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
+    ]
+    for event_item in event_coverage[:5]:
+        ratio = event_item.get("coverage_ratio")
+        station_text = station_count_text(
+            event_item.get("available_station_min"),
+            event_item.get("available_station_mean"),
+        )
+        value = f"{float(ratio) * 100:.1f}% / {station_text} / \u8fde\u7eed\u65e0\u7ad9\u70b9 {int(event_item.get('max_consecutive_zero_steps', 0) or 0)} \u6b65" if ratio is not None else "\u672a\u8986\u76d6"
+        items.append(
+            {
+                "label": f"\u4e8b\u4ef6 {event_item.get('event_id')}",
+                "value": value,
+                "status": str(event_item.get("status", "warn")),
+            }
+        )
+    return items
+
+
 def station_precip_task_context_summary(
     *,
     mode: str,

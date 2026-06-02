@@ -169,6 +169,8 @@ from services.station_precip import load_station_precip_table as build_load_stat
 from services.station_precip import max_consecutive_true as build_max_consecutive_true
 from services.station_precip import read_station_csv as build_read_station_csv
 from services.station_precip import station_count_text as build_station_count_text
+from services.station_precip import station_precip_analysis_items as build_station_precip_analysis_items
+from services.station_precip import station_precip_analysis_status as build_station_precip_analysis_status
 from services.station_precip import station_precip_event_coverage_summary as build_station_precip_event_coverage_summary
 from services.station_precip import station_precip_expected_coverage as build_station_precip_expected_coverage
 from services.station_precip import station_precip_id_match_summary as build_station_precip_id_match_summary
@@ -2656,6 +2658,14 @@ def _station_precip_quality_summary(
     )
 
 
+def _station_precip_analysis_status(missing: list[Any], warnings: list[Any]) -> dict[str, str]:
+    return build_station_precip_analysis_status(missing, warnings)
+
+
+def _station_precip_analysis_items(**kwargs: Any) -> list[dict[str, Any]]:
+    return build_station_precip_analysis_items(**kwargs)
+
+
 def _station_precip_task_context_summary(
     *,
     mode: str,
@@ -2847,15 +2857,9 @@ def analyze_station_precip_inputs(
     station_missing_rates = list(quality_info["station_missing_rates"])
     warnings.extend(quality_info["warnings"])
 
-    if missing:
-        status = "fail"
-        summary = "站点降水方案仍有关键问题，无法作为率定输入。"
-    elif warnings:
-        status = "warn"
-        summary = "站点降水资料可以继续处理，但存在缺测、异常值或站号匹配风险。"
-    else:
-        status = "ok"
-        summary = "站点降水资料匹配和时间覆盖基本合理，可用于降水订正或泰森分配。"
+    status_info = _station_precip_analysis_status(missing, warnings)
+    status = status_info["status"]
+    summary = status_info["summary"]
 
     station_start = station_series.index.min() if len(station_series.index) else None
     station_end = station_series.index.max() if len(station_series.index) else None
@@ -2878,38 +2882,29 @@ def analyze_station_precip_inputs(
         event_info=event_info,
         event_coverage=event_coverage,
     )
-    items.extend(
-        [
-            {"label": "降水方案", "value": "格点+站点偏差订正" if mode == "grid_plus_station_bias" else "站点泰森分配", "status": "ok"},
-            {"label": "检查口径", "value": task_context["headline"], "status": str(task_context.get("status", "warn"))},
-            {"label": "资料口径", "value": time_basis_label, "status": "ok"},
-            {"label": "站号匹配", "value": f"{len(matched_ids)}/{station_count}", "status": "ok" if matched_ids and not missing_in_precip else "warn" if matched_ids else "fail"},
-            {"label": "降水表额外站号", "value": str(len(missing_in_meta)), "status": "ok" if not missing_in_meta else "warn"},
-            {"label": "资料格式", "value": station_format, "status": "ok"},
-            {"label": "时间范围", "value": f"{_format_time_for_check(station_start, step)} 至 {_format_time_for_check(station_end, step)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": f"{time_basis_label}覆盖", "value": f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未配置完整时段", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": "无可用站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "可用站点数", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "单站最大缺测率", "value": f"{max_missing_rate * 100:.1f}%", "status": "warn" if max_missing_rate > 0.20 else "ok"},
-            {"label": "负降水记录", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
-            {"label": "异常大值记录", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
-        ]
+    items = _station_precip_analysis_items(
+        mode=mode,
+        task_context=task_context,
+        time_basis_label=time_basis_label,
+        matched_station_count=len(matched_ids),
+        station_count=station_count,
+        missing_in_precip=missing_in_precip,
+        missing_in_meta=missing_in_meta,
+        station_format=station_format,
+        station_start=station_start,
+        station_end=station_end,
+        step_hours=step,
+        coverage_ratio=coverage_ratio,
+        covered_count=covered_count,
+        zero_available_steps=zero_available_steps,
+        max_consecutive_zero_steps=max_consecutive_zero_steps,
+        min_available_station_count=min_available_station_count,
+        mean_available_station_count=mean_available_station_count,
+        max_missing_rate=max_missing_rate,
+        negative_count=negative_count,
+        extreme_count=extreme_count,
+        event_coverage=event_coverage,
     )
-    for event_item in event_coverage[:5]:
-        ratio = event_item.get("coverage_ratio")
-        station_text = _station_count_text(
-            event_item.get("available_station_min"),
-            event_item.get("available_station_mean"),
-        )
-        value = f"{float(ratio) * 100:.1f}% / {station_text} / 连续无站点 {int(event_item.get('max_consecutive_zero_steps', 0) or 0)} 步" if ratio is not None else "未覆盖"
-        items.append(
-            {
-                "label": f"事件 {event_item.get('event_id')}",
-                "value": value,
-                "status": str(event_item.get("status", "warn")),
-            }
-        )
     return {
         "enabled": True,
         "mode": mode,

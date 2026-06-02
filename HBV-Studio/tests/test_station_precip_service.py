@@ -19,6 +19,8 @@ from services.station_precip import (  # noqa: E402
     load_station_precip_table,
     max_consecutive_true,
     station_count_text,
+    station_precip_analysis_items,
+    station_precip_analysis_status,
     station_precip_event_coverage_summary,
     station_precip_expected_coverage,
     station_precip_id_match_summary,
@@ -281,6 +283,65 @@ class StationPrecipServiceTests(unittest.TestCase):
         self.assertEqual(summary["extreme_threshold"], 80.0)
         self.assertEqual(summary["extreme_count"], 1)
         self.assertIn("80 mm/\u5c0f\u65f6", summary["warnings"][0])
+
+    def test_station_precip_analysis_status_prefers_missing_then_warnings(self) -> None:
+        self.assertEqual(
+            station_precip_analysis_status(["missing"], ["warning"]),
+            {
+                "status": "fail",
+                "summary": "\u7ad9\u70b9\u964d\u6c34\u65b9\u6848\u4ecd\u6709\u5173\u952e\u95ee\u9898\uff0c\u65e0\u6cd5\u4f5c\u4e3a\u7387\u5b9a\u8f93\u5165\u3002",
+            },
+        )
+        self.assertEqual(
+            station_precip_analysis_status([], ["warning"])["status"],
+            "warn",
+        )
+        self.assertEqual(station_precip_analysis_status([], [])["status"], "ok")
+
+    def test_station_precip_analysis_items_include_core_and_event_checks(self) -> None:
+        items = station_precip_analysis_items(
+            mode="thiessen_station_only",
+            task_context={"headline": "\u6309\u4e8b\u4ef6\u7a97\u53e3\u6838\u5bf9", "status": "fail"},
+            time_basis_label="\u6d2a\u6c34\u4e8b\u4ef6\u7a97\u53e3",
+            matched_station_count=1,
+            station_count=2,
+            missing_in_precip=["S2"],
+            missing_in_meta=["S3"],
+            station_format="\u5bbd\u8868",
+            station_start="2026-06-01",
+            station_end="2026-06-03",
+            step_hours=24,
+            coverage_ratio=2 / 3,
+            covered_count=2,
+            zero_available_steps=1,
+            max_consecutive_zero_steps=1,
+            min_available_station_count=0,
+            mean_available_station_count=0.7,
+            max_missing_rate=0.5,
+            negative_count=1,
+            extreme_count=1,
+            event_coverage=[
+                {
+                    "event_id": "E01",
+                    "coverage_ratio": 2 / 3,
+                    "available_station_min": 0,
+                    "available_station_mean": 0.7,
+                    "max_consecutive_zero_steps": 1,
+                    "status": "fail",
+                }
+            ],
+        )
+
+        self.assertEqual(items[0], {"label": "\u964d\u6c34\u65b9\u6848", "value": "\u7ad9\u70b9\u6cf0\u68ee\u5206\u914d", "status": "ok"})
+        self.assertEqual(items[1], {"label": "\u68c0\u67e5\u53e3\u5f84", "value": "\u6309\u4e8b\u4ef6\u7a97\u53e3\u6838\u5bf9", "status": "fail"})
+        self.assertEqual(items[3], {"label": "\u7ad9\u53f7\u5339\u914d", "value": "1/2", "status": "warn"})
+        self.assertEqual(items[6]["value"], "2026-06-01 \u81f3 2026-06-03")
+        self.assertEqual(items[7]["value"], "66.7%")
+        self.assertEqual(items[10]["status"], "fail")
+        self.assertEqual(items[11], {"label": "\u5355\u7ad9\u6700\u5927\u7f3a\u6d4b\u7387", "value": "50.0%", "status": "warn"})
+        self.assertEqual(items[-1]["label"], "\u4e8b\u4ef6 E01")
+        self.assertIn("66.7%", items[-1]["value"])
+        self.assertEqual(items[-1]["status"], "fail")
 
     def test_continuous_station_only_summary_fails_when_no_station_steps_exist(self) -> None:
         summary = station_precip_task_context_summary(
