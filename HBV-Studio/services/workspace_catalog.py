@@ -45,7 +45,6 @@ class WorkspaceCatalogContext:
     ensure_within: Callable[[Path, Path], Path]
     inspect_observed_csv: Callable[..., dict[str, Any]]
     fill_bbox_from_shp: Callable[[str], dict[str, float] | None]
-    suggest_time_windows: Callable[[pd.Timestamp, pd.Timestamp, str], dict[str, str]]
     suggest_cfmax_threshold: Callable[[str, str], dict[str, Any]]
     stage_vector_shapefile: Callable[..., Path]
     stage_observed_runoff_file: Callable[..., Path]
@@ -141,6 +140,82 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
         "FAO56平均海拔_m": 4500.0,
         "默认降水源": "era5",
         "CFMAX分区阈值_m": 5000.0,
+    }
+
+
+def suggest_time_windows(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    profile: str,
+    *,
+    profile_daily: str = "daily",
+    profile_hourly: str = "hourly",
+) -> dict[str, str]:
+    start_ts = pd.to_datetime(start_date)
+    end_ts = pd.to_datetime(end_date)
+    date_format = "%Y-%m-%d %H:%M" if profile == profile_hourly else "%Y-%m-%d"
+    if end_ts <= start_ts:
+        return {
+            "预热开始": start_ts.strftime(date_format),
+            "预热结束": start_ts.strftime(date_format),
+            "率定开始": start_ts.strftime(date_format),
+            "率定结束": end_ts.strftime(date_format),
+            "验证开始": end_ts.strftime(date_format),
+            "验证结束": end_ts.strftime(date_format),
+        }
+
+    if profile == profile_daily:
+        start_is_year_start = (start_ts.month, start_ts.day) == (1, 1)
+        end_is_year_end = (end_ts.month, end_ts.day) == (12, 31)
+        first_full_year = start_ts.year if start_is_year_start else (start_ts.year + 1)
+        last_full_year = end_ts.year if end_is_year_end else (end_ts.year - 1)
+        full_year_count = last_full_year - first_full_year + 1
+        if full_year_count >= 3:
+            warmup_years = 2 if full_year_count >= 12 else 1
+            valid_years = 3 if full_year_count >= 8 else (2 if full_year_count >= 5 else 1)
+            while (full_year_count - warmup_years - valid_years) < 1:
+                if valid_years > 1:
+                    valid_years -= 1
+                elif warmup_years > 1:
+                    warmup_years -= 1
+                else:
+                    break
+            if (full_year_count - warmup_years - valid_years) >= 1:
+                warmup_end = pd.Timestamp(year=first_full_year + warmup_years - 1, month=12, day=31)
+                calib_start = warmup_end + pd.Timedelta(days=1)
+                valid_start = pd.Timestamp(year=last_full_year - valid_years + 1, month=1, day=1)
+                calib_end = valid_start - pd.Timedelta(days=1)
+                if calib_start <= calib_end:
+                    return {
+                        "预热开始": start_ts.strftime(date_format),
+                        "预热结束": warmup_end.strftime(date_format),
+                        "率定开始": calib_start.strftime(date_format),
+                        "率定结束": calib_end.strftime(date_format),
+                        "验证开始": valid_start.strftime(date_format),
+                        "验证结束": end_ts.strftime(date_format),
+                    }
+
+    total_days = max((end_ts - start_ts).days, 1)
+    if total_days < 365:
+        warmup_end = start_ts
+    elif total_days < 1095:
+        warmup_end = start_ts + pd.DateOffset(years=1) - pd.Timedelta(days=1)
+    else:
+        warmup_end = start_ts + pd.DateOffset(years=2) - pd.Timedelta(days=1)
+    remaining_start = warmup_end + pd.Timedelta(days=1)
+    remaining_days = max((end_ts - remaining_start).days, 1)
+    calib_end = remaining_start + pd.Timedelta(days=int(remaining_days * 0.7))
+    valid_start = calib_end + pd.Timedelta(days=1)
+    if valid_start > end_ts:
+        valid_start = end_ts
+        calib_end = max(remaining_start, valid_start - pd.Timedelta(days=1))
+    return {
+        "预热开始": start_ts.strftime(date_format),
+        "预热结束": warmup_end.strftime(date_format),
+        "率定开始": remaining_start.strftime(date_format),
+        "率定结束": calib_end.strftime(date_format),
+        "验证开始": valid_start.strftime(date_format),
+        "验证结束": end_ts.strftime(date_format),
     }
 
 
@@ -298,7 +373,13 @@ def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCata
     if not workspace_name:
         workspace_name = shp_path.stem
 
-    windows = context.suggest_time_windows(start_date, end_date, profile)
+    windows = suggest_time_windows(
+        start_date,
+        end_date,
+        profile,
+        profile_daily=context.profile_daily,
+        profile_hourly=context.profile_hourly,
+    )
 
     cfmax_threshold = 5000.0
     if context.builtin_dem.exists():

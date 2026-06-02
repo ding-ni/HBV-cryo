@@ -16,6 +16,7 @@ from services.workspace_catalog import (  # noqa: E402
     build_empty_workspace,
     runtime_root_for_workspace,
     slugify_workspace_name,
+    suggest_time_windows,
 )
 
 
@@ -60,7 +61,6 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
             ensure_within=lambda root, candidate: candidate,
             inspect_observed_csv=lambda *args, **kwargs: {},
             fill_bbox_from_shp=lambda path: {"北": 1, "西": 2, "南": 0, "东": 3},
-            suggest_time_windows=lambda start, end, profile: {},
             suggest_cfmax_threshold=lambda basin, dem: {"suggested_threshold_m": 5000.0},
             stage_vector_shapefile=lambda config, source, **kwargs: Path(source),
             stage_observed_runoff_file=lambda config, source, **kwargs: Path(source),
@@ -96,6 +96,37 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
         self.assertEqual(config["时间步长_小时"], 1.0)
         self.assertEqual(config["初始状态"], {"SP": 0.0, "SM": 10.0})
         self.assertEqual(config["气象策略"]["降水来源"], "era5")
+
+    def test_suggest_time_windows_splits_full_daily_years(self) -> None:
+        windows = suggest_time_windows("2001-01-01", "2012-12-31", "daily")
+
+        self.assertEqual(
+            windows,
+            {
+                "预热开始": "2001-01-01",
+                "预热结束": "2002-12-31",
+                "率定开始": "2003-01-01",
+                "率定结束": "2009-12-31",
+                "验证开始": "2010-01-01",
+                "验证结束": "2012-12-31",
+            },
+        )
+
+    def test_suggest_time_windows_uses_hourly_format_and_short_period_fallback(self) -> None:
+        windows = suggest_time_windows("2026-06-01 08:00", "2026-06-03 20:00", "hourly")
+
+        self.assertEqual(windows["预热开始"], "2026-06-01 08:00")
+        self.assertEqual(windows["预热结束"], "2026-06-01 08:00")
+        self.assertEqual(windows["率定开始"], "2026-06-02 08:00")
+        self.assertEqual(windows["验证结束"], "2026-06-03 20:00")
+
+    def test_suggest_time_windows_handles_reversed_period_without_invalid_split(self) -> None:
+        windows = suggest_time_windows("2026-06-03", "2026-06-01", "daily")
+
+        self.assertEqual(windows["预热开始"], "2026-06-03")
+        self.assertEqual(windows["预热结束"], "2026-06-03")
+        self.assertEqual(windows["率定结束"], "2026-06-01")
+        self.assertEqual(windows["验证结束"], "2026-06-01")
 
 
 if __name__ == "__main__":

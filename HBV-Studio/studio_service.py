@@ -213,6 +213,7 @@ from services.workspace_catalog import (
     load_workspace_config as build_load_workspace_config,
     runtime_root_for_workspace as build_runtime_root_for_workspace,
     slugify_workspace_name as build_slugify_workspace_name,
+    suggest_time_windows as build_suggest_time_windows,
     template_files as build_template_files,
 )
 from services.workspace_completeness import (
@@ -2790,72 +2791,13 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFI
 
 
 def suggest_time_windows(start_date: pd.Timestamp, end_date: pd.Timestamp, profile: str) -> dict[str, str]:
-    start_ts = pd.to_datetime(start_date)
-    end_ts = pd.to_datetime(end_date)
-    date_format = "%Y-%m-%d %H:%M" if profile == PROFILE_HOURLY else "%Y-%m-%d"
-    if end_ts <= start_ts:
-        return {
-            "预热开始": start_ts.strftime(date_format),
-            "预热结束": start_ts.strftime(date_format),
-            "率定开始": start_ts.strftime(date_format),
-            "率定结束": end_ts.strftime(date_format),
-            "验证开始": end_ts.strftime(date_format),
-            "验证结束": end_ts.strftime(date_format),
-        }
-
-    if profile == PROFILE_DAILY:
-        start_is_year_start = (start_ts.month, start_ts.day) == (1, 1)
-        end_is_year_end = (end_ts.month, end_ts.day) == (12, 31)
-        first_full_year = start_ts.year if start_is_year_start else (start_ts.year + 1)
-        last_full_year = end_ts.year if end_is_year_end else (end_ts.year - 1)
-        full_year_count = last_full_year - first_full_year + 1
-        if full_year_count >= 3:
-            warmup_years = 2 if full_year_count >= 12 else 1
-            valid_years = 3 if full_year_count >= 8 else (2 if full_year_count >= 5 else 1)
-            while (full_year_count - warmup_years - valid_years) < 1:
-                if valid_years > 1:
-                    valid_years -= 1
-                elif warmup_years > 1:
-                    warmup_years -= 1
-                else:
-                    break
-            if (full_year_count - warmup_years - valid_years) >= 1:
-                warmup_end = pd.Timestamp(year=first_full_year + warmup_years - 1, month=12, day=31)
-                calib_start = warmup_end + pd.Timedelta(days=1)
-                valid_start = pd.Timestamp(year=last_full_year - valid_years + 1, month=1, day=1)
-                calib_end = valid_start - pd.Timedelta(days=1)
-                if calib_start <= calib_end:
-                    return {
-                        "预热开始": start_ts.strftime(date_format),
-                        "预热结束": warmup_end.strftime(date_format),
-                        "率定开始": calib_start.strftime(date_format),
-                        "率定结束": calib_end.strftime(date_format),
-                        "验证开始": valid_start.strftime(date_format),
-                        "验证结束": end_ts.strftime(date_format),
-                    }
-
-    total_days = max((end_ts - start_ts).days, 1)
-    if total_days < 365:
-        warmup_end = start_ts
-    elif total_days < 1095:
-        warmup_end = start_ts + pd.DateOffset(years=1) - pd.Timedelta(days=1)
-    else:
-        warmup_end = start_ts + pd.DateOffset(years=2) - pd.Timedelta(days=1)
-    remaining_start = warmup_end + pd.Timedelta(days=1)
-    remaining_days = max((end_ts - remaining_start).days, 1)
-    calib_end = remaining_start + pd.Timedelta(days=int(remaining_days * 0.7))
-    valid_start = calib_end + pd.Timedelta(days=1)
-    if valid_start > end_ts:
-        valid_start = end_ts
-        calib_end = max(remaining_start, valid_start - pd.Timedelta(days=1))
-    return {
-        "预热开始": start_ts.strftime(date_format),
-        "预热结束": warmup_end.strftime(date_format),
-        "率定开始": remaining_start.strftime(date_format),
-        "率定结束": calib_end.strftime(date_format),
-        "验证开始": valid_start.strftime(date_format),
-        "验证结束": end_ts.strftime(date_format),
-    }
+    return build_suggest_time_windows(
+        start_date,
+        end_date,
+        profile,
+        profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
+    )
 
 
 def _workspace_catalog_context() -> WorkspaceCatalogContext:
@@ -2891,7 +2833,6 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         ensure_within=ensure_within,
         inspect_observed_csv=inspect_observed_csv,
         fill_bbox_from_shp=fill_bbox_from_shp,
-        suggest_time_windows=suggest_time_windows,
         suggest_cfmax_threshold=suggest_cfmax_threshold,
         stage_vector_shapefile=stage_vector_shapefile,
         stage_observed_runoff_file=stage_observed_runoff_file,
