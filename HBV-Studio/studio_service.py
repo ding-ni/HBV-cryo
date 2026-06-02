@@ -61,9 +61,13 @@ from services.event_config import (
     TIME_BASIS_EVENT_WINDOWS,
     TIME_BASIS_FORECAST_WINDOW,
     TIME_BASIS_LABELS,
+    event_date_range as build_event_date_range,
+    event_field as build_event_field,
     event_initial_state_policy_summary as build_event_initial_state_policy_summary,
+    event_window_index as build_event_window_index,
     flood_event_raw_config as build_flood_event_raw_config,
     normalize_event_initial_state_policy as build_normalize_event_initial_state_policy,
+    parse_event_timestamp as build_parse_event_timestamp,
     task_time_basis as build_task_time_basis,
     truthy_config as build_truthy_config,
 )
@@ -1134,30 +1138,15 @@ def event_initial_state_policy_summary(value: Any) -> dict[str, Any]:
 
 
 def _event_field(event: dict[str, Any], *names: str) -> Any:
-    for name in names:
-        if name in event and event.get(name) not in (None, ""):
-            return event.get(name)
-    lower_map = {str(key).strip().lower(): value for key, value in event.items()}
-    for name in names:
-        value = lower_map.get(str(name).strip().lower())
-        if value not in (None, ""):
-            return value
-    return None
+    return build_event_field(event, *names)
 
 
 def _parse_event_timestamp(value: Any, *, end: bool, step_hours: float) -> pd.Timestamp | None:
-    if value in (None, ""):
-        return None
-    ts = pd.to_datetime(value)
-    if end and step_hours < 24.0 and is_date_only_string(value):
-        ts = ts + pd.Timedelta(days=1) - pd.Timedelta(hours=step_hours)
-    return pd.Timestamp(ts)
+    return build_parse_event_timestamp(value, end=end, step_hours=step_hours)
 
 
 def _event_date_range(start: pd.Timestamp, end: pd.Timestamp, step_hours: float) -> pd.DatetimeIndex:
-    if end < start:
-        return pd.DatetimeIndex([])
-    return pd.date_range(start, end, freq=pd.Timedelta(hours=step_hours))
+    return build_event_date_range(start, end, step_hours)
 
 
 def task_time_basis(config: dict[str, Any], *, context: str = "calibration") -> str:
@@ -1297,16 +1286,7 @@ def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None 
 
 
 def _event_window_index(events: list[dict[str, Any]], start_key: str, end_key: str, step_hours: float) -> pd.DatetimeIndex:
-    values: list[pd.Timestamp] = []
-    for event in events:
-        start = event.get(start_key)
-        end = event.get(end_key)
-        if start is None or end is None or end < start:
-            continue
-        values.extend(list(_event_date_range(pd.Timestamp(start), pd.Timestamp(end), step_hours)))
-    if not values:
-        return pd.DatetimeIndex([])
-    return pd.DatetimeIndex(sorted(set(pd.Timestamp(item) for item in values)))
+    return build_event_window_index(events, start_key, end_key, step_hours)
 
 
 def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:

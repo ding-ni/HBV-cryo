@@ -4,6 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
@@ -15,9 +17,13 @@ from services.event_config import (  # noqa: E402
     TIME_BASIS_EVENT_WINDOWS,
     TIME_BASIS_FORECAST_WINDOW,
     TIME_BASIS_LABELS,
+    event_date_range,
+    event_field,
     event_initial_state_policy_summary,
+    event_window_index,
     flood_event_raw_config,
     normalize_event_initial_state_policy,
+    parse_event_timestamp,
     task_time_basis,
     truthy_config,
 )
@@ -84,6 +90,44 @@ class EventConfigServiceTests(unittest.TestCase):
         self.assertEqual(TIME_BASIS_LABELS[TIME_BASIS_EVENT_WINDOWS], "\u6d2a\u6c34\u4e8b\u4ef6\u7a97\u53e3")
         self.assertEqual(EVENT_PURPOSE_ALIASES["\u7387\u5b9a"], "calibration")
         self.assertEqual(EVENT_PURPOSE_ALIASES["\u590d\u6838"], "diagnostic")
+
+    def test_event_field_matches_exact_then_case_insensitive_aliases(self) -> None:
+        event = {"Score_Start": "2026-01-01", "\u540d\u79f0": "event-a", "empty": ""}
+
+        self.assertEqual(event_field(event, "score_start"), "2026-01-01")
+        self.assertEqual(event_field(event, "\u540d\u79f0", "name"), "event-a")
+        self.assertIsNone(event_field(event, "empty", "missing"))
+
+    def test_parse_event_timestamp_expands_date_only_hourly_end(self) -> None:
+        self.assertEqual(
+            parse_event_timestamp("2026-01-01", end=True, step_hours=6),
+            pd.Timestamp("2026-01-01 18:00"),
+        )
+        self.assertEqual(
+            parse_event_timestamp("2026-01-01 06:00", end=True, step_hours=6),
+            pd.Timestamp("2026-01-01 06:00"),
+        )
+        self.assertIsNone(parse_event_timestamp("", end=False, step_hours=24))
+
+    def test_event_date_range_and_window_index_are_inclusive_unique_and_sorted(self) -> None:
+        self.assertEqual(
+            list(event_date_range(pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-03"), 24)),
+            list(pd.date_range("2026-01-01", "2026-01-03", freq="D")),
+        )
+        self.assertEqual(len(event_date_range(pd.Timestamp("2026-01-03"), pd.Timestamp("2026-01-01"), 24)), 0)
+
+        index = event_window_index(
+            [
+                {"run_start": pd.Timestamp("2026-01-03"), "run_end": pd.Timestamp("2026-01-04")},
+                {"run_start": pd.Timestamp("2026-01-02"), "run_end": pd.Timestamp("2026-01-03")},
+                {"run_start": None, "run_end": pd.Timestamp("2026-01-10")},
+            ],
+            "run_start",
+            "run_end",
+            24,
+        )
+
+        self.assertEqual(list(index), list(pd.date_range("2026-01-02", "2026-01-04", freq="D")))
 
 
 if __name__ == "__main__":
