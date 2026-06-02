@@ -46,6 +46,7 @@ from services.data_prep import (
     data_prep_workflow_worker_run as build_data_prep_workflow_worker_run,
     data_prep_status as build_data_prep_status,
     data_prep_steps_payload as build_data_prep_steps_payload,
+    resolve_data_prep_step as build_resolve_data_prep_step,
     verify_data_prep_step_output as build_verify_data_prep_step_output,
     verify_data_prep_task_output as build_verify_data_prep_task_output,
 )
@@ -2974,27 +2975,11 @@ def data_prep_steps(profile: str) -> list[dict[str, Any]]:
 
 
 def resolve_data_prep_step(step: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
-    resolved = dict(step)
-    if config is None:
-        return resolved
-
-    glacier_enabled = bool(str(config.get("冰川边界_shp", "")).strip())
-    if resolved.get("id") == "glacier_mask" and glacier_enabled:
-        resolved["title"] = str(resolved.get("title", "")).replace("（可选）", "")
-        resolved["description"] = (
-            "当前工作区已配置冰川边界 shp，此步为必做。"
-            "按 DEM 分辨率生成冰川表达结果：1km 生成二值掩膜，0.1° 生成分数栅格并附带兼容掩膜。"
-        )
-        resolved["optional"] = False
-    elif resolved.get("id") == "glacier_elev" and glacier_elev_required(config):
-        resolved["title"] = str(resolved.get("title", "")).replace("（0.1° 专用，可选）", "（0.1° 专用）")
-        resolved["description"] = (
-            "从高分辨率 1km DEM 提取每个 0.1° 像元内冰川区的面积加权平均高程，"
-            "用于率定时的冰川子格温度递减修正。当前工作区为 0.1° 且已启用冰川，此步为必做；"
-            "未做此步将在率定结果标记 reliability_flag=degraded。"
-        )
-        resolved["optional"] = False
-    return resolved
+    return build_resolve_data_prep_step(
+        step,
+        config,
+        glacier_elev_required=glacier_elev_required,
+    )
 
 
 def build_engineering_focus_checks(

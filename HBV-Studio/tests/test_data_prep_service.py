@@ -19,6 +19,7 @@ from services.data_prep import (  # noqa: E402
     data_prep_step_command,
     data_prep_workflow_worker_run,
     data_prep_workflow_decision,
+    resolve_data_prep_step,
     verify_data_prep_step_output,
     verify_data_prep_task_output,
 )
@@ -102,6 +103,40 @@ class DataPrepServiceTests(unittest.TestCase):
             current_profile=lambda cfg: str(cfg.get("profile", "daily")),
             glacier_elev_required=lambda cfg: glacier_elev,
         )
+
+    def test_resolve_data_prep_step_requires_glacier_mask_when_glacier_shp_is_configured(self) -> None:
+        step = {
+            "id": "glacier_mask",
+            "title": "11. 生成冰川掩膜（可选）",
+            "description": "原始描述",
+            "optional": True,
+        }
+
+        resolved = resolve_data_prep_step(step, {"冰川边界_shp": "glacier.shp"})
+
+        self.assertEqual(resolved["title"], "11. 生成冰川掩膜")
+        self.assertFalse(resolved["optional"])
+        self.assertIn("此步为必做", str(resolved["description"]))
+        self.assertTrue(step["optional"])
+
+    def test_resolve_data_prep_step_requires_glacier_elevation_when_needed(self) -> None:
+        step = {
+            "id": "glacier_elev",
+            "title": "11.5 生成冰川高程栅格（0.1° 专用，可选）",
+            "description": "原始描述",
+            "optional": True,
+        }
+
+        resolved = resolve_data_prep_step(
+            step,
+            {"冰川边界_shp": "glacier.shp"},
+            glacier_elev_required=lambda config: True,
+        )
+
+        self.assertEqual(resolved["title"], "11.5 生成冰川高程栅格（0.1° 专用）")
+        self.assertFalse(resolved["optional"])
+        self.assertIn("未做此步将在率定结果标记", str(resolved["description"]))
+        self.assertTrue(step["optional"])
 
     def test_verify_data_prep_step_output_handles_missing_check_success_and_exception(self) -> None:
         self.assertEqual(verify_data_prep_step_output({}, {}), (True, "该步骤没有产物检查函数。"))
