@@ -58,6 +58,35 @@
       || null;
   }
 
+  function renderPrecipStrategyStatusCards(options = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const shortPath = helpers.shortPath || (value => value || "");
+    const mode = options.mode || "grid_only";
+    const stationPrec = options.stationPrec || "";
+    const stationMeta = options.stationMeta || "";
+    const needsStation = mode !== "grid_only";
+    const stationReady = Boolean(stationPrec && stationMeta);
+    const statusClass = !needsStation ? "status-ok" : stationReady ? "status-ok" : "status-warn";
+    const statusText = !needsStation ? "未启用站点资料" : stationReady ? "站点资料已登记" : "待登记站点资料";
+    return `
+      <div class="workflow-signal-card ${statusClass}">
+        <strong>${escapeHtml(stationPrecipModeLabel(mode))}</strong>
+        <span>${escapeHtml(statusText)}</span>
+        <small>${escapeHtml(stationPrecipModeDescription(mode))}</small>
+      </div>
+      <div class="workflow-signal-card ${needsStation ? (stationPrec ? "status-ok" : "status-warn") : ""}">
+        <strong>站点降水表</strong>
+        <span>${escapeHtml(needsStation ? (stationPrec ? shortPath(stationPrec) : "未选择") : "不需要")}</span>
+        <small>提供逐时或逐日站点降水。</small>
+      </div>
+      <div class="workflow-signal-card ${needsStation ? (stationMeta ? "status-ok" : "status-warn") : ""}">
+        <strong>站点空间信息</strong>
+        <span>${escapeHtml(needsStation ? (stationMeta ? shortPath(stationMeta) : "未选择") : "不需要")}</span>
+        <small>提供站号、经度、纬度。</small>
+      </div>
+    `;
+  }
+
   function renderTaskScopeSummary(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -151,6 +180,7 @@
     stationPrecipCheckFromValidation,
     stationPrecipModeDescription,
     stationPrecipModeLabel,
+    renderPrecipStrategyStatusCards,
     renderTaskScopeSummary,
     renderEventCoverageMatrix,
   };

@@ -67,6 +67,53 @@ class FrontendStationPrecipTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_strategy_status_cards_render_selected_mode_and_station_files(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/stationPrecip.js", "utf8"), context);
+
+            const station = context.window.HBVStudioStationPrecip;
+            const gridHtml = station.renderPrecipStrategyStatusCards({ mode: "grid_only" });
+            if (!gridHtml.includes("格点直接使用")) throw new Error("grid mode label missing");
+            if (!gridHtml.includes("未启用站点资料")) throw new Error("grid mode status missing");
+            if ((gridHtml.match(/不需要/g) || []).length !== 2) {
+              throw new Error(`grid mode should mark both station files as unnecessary: ${gridHtml}`);
+            }
+
+            const stationHtml = station.renderPrecipStrategyStatusCards(
+              {
+                mode: "grid_plus_station_bias",
+                stationPrec: "C:/input/prec.csv",
+                stationMeta: "C:/input/meta.csv",
+              },
+              {
+                shortPath: value => String(value).split("/").pop(),
+              },
+            );
+            if (!stationHtml.includes("格点 + 站点偏差订正")) throw new Error("station mode label missing");
+            if (!stationHtml.includes("站点资料已登记")) throw new Error("station ready status missing");
+            if (!stationHtml.includes(">prec.csv<")) throw new Error("station precipitation short path missing");
+            if (!stationHtml.includes(">meta.csv<")) throw new Error("station metadata short path missing");
+            if ((stationHtml.match(/status-ok/g) || []).length < 3) {
+              throw new Error(`station-ready mode should render all cards as ok: ${stationHtml}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
