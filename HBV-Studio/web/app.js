@@ -265,6 +265,11 @@ const frontendModuleContracts = [
     exports: ["aliasForPath", "render", "workspaceLayoutHtml"],
   },
   {
+    script: "./js/dataPrepView.js",
+    global: "HBVStudioDataPrepView",
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderPrepStepList"],
+  },
+  {
     script: "./js/taskView.js",
     global: "HBVStudioTaskView",
     exports: [
@@ -3899,8 +3904,7 @@ function describeEra5Need() {
 }
 
 function formatPrepDisplayTitle(index, title) {
-  const clean = String(title || "").replace(/^\d+\.\s*/, "").trim();
-  return `${index}. ${clean}`;
+  return window.HBVStudioDataPrepView?.formatPrepDisplayTitle(index, title) || `${index}. ${String(title || "").replace(/^\d+\.\s*/, "").trim()}`;
 }
 
 function buildVisiblePrepSteps() {
@@ -4103,17 +4107,6 @@ async function refreshEra5ApiStatus({ force = false } = {}) {
   renderEra5ApiPanel();
 }
 
-function formatPrepBlockedMessage(status, visibleSteps) {
-  const blockedBy = Array.isArray(status.blocked_by) ? status.blocked_by : [];
-  if (!blockedBy.length) return String(status.message || "尚未检测。");
-  const labels = blockedBy.map(depId => {
-    if (GIS_STEP_IDS.has(depId)) return "第 5 步地理数据";
-    const step = visibleSteps.find(item => item.id === depId) || state.prepSteps.find(item => item.id === depId);
-    return String(step?.displayTitle || step?.title || depId).replace(/^\d+\.\s*/, "").trim();
-  });
-  return `依赖未满足：请先完成 ${labels.join("、")}。`;
-}
-
 async function loadPrepSteps() {
   if (!state.wizardWorkspacePath) return;
   try {
@@ -4145,41 +4138,28 @@ function renderPrepSteps() {
   const host = $("#prep-step-list");
   renderEra5ApiPanel();
   refreshEra5ApiStatus().catch(() => {});
+  if (!host) return;
   if (!state.wizardWorkspacePath) {
-    host.innerHTML = '<div class="hint-box">先选择或创建工作区。</div>';
+    host.innerHTML = window.HBVStudioDataPrepView?.renderPrepStepList(
+      { workspaceSelected: false },
+      { escapeHtml },
+    ) || '<div class="hint-box">先选择或创建工作区。</div>';
     return;
   }
   const steps = buildVisiblePrepSteps();
   updatePrepPanelSummary(steps);
-  if (!steps.length) {
-    host.innerHTML = '<div class="hint-box">当前工作区无需额外气象准备步骤。</div>';
-    return;
-  }
-  host.innerHTML = steps.map(step => {
-    const status = state.prepStatus[step.id] || {};
-    const running = Boolean(status.running);
-    const blocked = (status.blocked_by || []).length > 0;
-    const txt = running ? "执行中" : status.done ? "已完成" : blocked ? "依赖未满足" : status.manual ? "需补充资料" : "待执行";
-    const canOverwrite = Boolean(step.supports_overwrite && status.done && !blocked && !step.manual && !running);
-    const message = running
-      ? String(status.message || "正在执行，请看下方日志。")
-      : blocked ? formatPrepBlockedMessage(status, steps) : String(status.message || "尚未检测。");
-    return `
-      <div class="prep-step">
-        <div class="prep-step-head">
-          <div>
-            <strong>${escapeHtml(step.displayTitle || step.title)}</strong>
-            <div class="panel-note">${escapeHtml(step.displayDescription || step.description || "")}</div>
-          </div>
-          <span class="status-badge ${status.done ? "status-ok" : blocked ? "status-fail" : "status-warn"}">${escapeHtml(txt)}</span>
-        </div>
-        <div class="hint-box">${escapeHtml(message)}</div>
-        <div class="prep-step-actions">
-          ${!step.manual ? `<button class="ghost-button" data-run-step="${escapeHtml(step.id)}" ${(blocked || running) ? "disabled" : ""}>${running ? "执行中..." : status.done ? "重新运行" : "运行此步"}</button>` : ""}
-          ${canOverwrite ? `<button class="ghost-button" data-run-step-overwrite="${escapeHtml(step.id)}">覆盖重跑</button>` : ""}
-        </div>
-      </div>`;
-  }).join("");
+  host.innerHTML = window.HBVStudioDataPrepView?.renderPrepStepList(
+    {
+      workspaceSelected: true,
+      steps,
+      prepStatus: state.prepStatus,
+      allSteps: state.prepSteps,
+    },
+    {
+      escapeHtml,
+      isGisStepId: id => GIS_STEP_IDS.has(id),
+    },
+  ) || "";
 }
 
 function stopPrepTaskPolling() {
