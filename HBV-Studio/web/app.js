@@ -671,8 +671,7 @@ function latestEditableRunPath(runs = visibleRuns()) {
 
 function renderTaskFilterToolbar() {
   const host = $("#task-filter-toolbar");
-  const hint = $("#task-filter-hint");
-  if (!host || !hint) return;
+  if (!host) return;
   const rendered = window.HBVStudioTaskView.renderTaskFilterToolbar({
     tasks: state.tasks,
     workspaceMode: state.taskWorkspaceFilterMode,
@@ -681,8 +680,7 @@ function renderTaskFilterToolbar() {
     type: state.taskTypeFilter,
   }, { escapeHtml, samePath, workspaceLabelByPath });
   host.innerHTML = rendered.toolbarHtml;
-  hint.textContent = rendered.hintText;
-  hint.className = rendered.hintClassName;
+  applyDomUpdates(rendered.domUpdates);
 }
 
 function setTaskWorkspaceFilterMode(value = "current") {

@@ -123,6 +123,11 @@ class FrontendTaskViewTests(unittest.TestCase):
             if (toolbar.hintText !== "当前显示 1/4 个任务 · 运行中 0 · 失败 1 · 范围：全部工作区" || toolbar.hintClassName !== "hint-box status-warn") {
               throw new Error(`unexpected toolbar hint: ${toolbar.hintClassName} ${toolbar.hintText}`);
             }
+            const toolbarDom = Object.fromEntries(toolbar.domUpdates.map(update => [update.selector, update]));
+            if (toolbarDom["#task-filter-hint"].text !== "当前显示 1/4 个任务 · 运行中 0 · 失败 1 · 范围：全部工作区" ||
+                toolbarDom["#task-filter-hint"].className !== "hint-box status-warn") {
+              throw new Error(`unexpected toolbar DOM updates: ${JSON.stringify(toolbarDom)}`);
+            }
 
             const html = taskView.renderTaskList(currentActive, helpers);
             if (!html.includes("task-card task-running")) throw new Error(html);

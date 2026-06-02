@@ -157,14 +157,17 @@
     const scopeText = filters.workspaceMode === "current" && workspacePath
       ? `当前工作区“${workspaceLabelByPath(workspacePath)}”`
       : "全部工作区";
+    const hintText = `当前显示 ${shown.length}/${total} 个任务 · 运行中 ${running} · 失败 ${failed} · 范围：${scopeText}`;
+    const hintClassName = `hint-box ${failed > 0 && filters.status !== "active" ? "status-warn" : ""}`.trim();
     return {
       toolbarHtml,
-      hintText: `当前显示 ${shown.length}/${total} 个任务 · 运行中 ${running} · 失败 ${failed} · 范围：${scopeText}`,
-      hintClassName: `hint-box ${failed > 0 && filters.status !== "active" ? "status-warn" : ""}`.trim(),
+      hintText,
+      hintClassName,
       shownCount: shown.length,
       total,
       running,
       failed,
+      domUpdates: [{ selector: "#task-filter-hint", text: hintText, className: hintClassName }],
     };
   }
 
