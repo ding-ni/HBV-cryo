@@ -156,6 +156,7 @@ const frontendModuleContracts = [
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetSaveSuccessState",
+      "manualPresetSaveSelectionState",
       "manualPresetLoadSuccessState",
       "manualPresetDeleteViewState",
       "manualPresetDeleteSuccessState",
@@ -4732,8 +4733,9 @@ async function saveCurrentManualPreset() {
     });
   }
   const saveState = window.HBVStudioParameterLibrary.manualPresetSaveSuccessState(payload.data || {}, name);
-  if ($("#manual-preset-select")) $("#manual-preset-select").value = saveState.savedId;
-  if (taskSync.shouldSync && $("#task-init-preset")) $("#task-init-preset").value = saveState.savedId;
+  const saveSelection = window.HBVStudioParameterLibrary.manualPresetSaveSelectionState(saveState.savedId, taskSync);
+  if ($("#manual-preset-select")) $("#manual-preset-select").value = saveSelection.runPresetSelectValue;
+  if (saveSelection.shouldSelectTaskPreset && $("#task-init-preset")) $("#task-init-preset").value = saveSelection.taskPresetSelectValue;
   updateManualPresetControls();
   refreshCalibrationControls();
   renderManualPresetDiff();

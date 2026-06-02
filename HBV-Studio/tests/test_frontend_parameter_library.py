@@ -281,6 +281,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
               "manualPresetLoadPreflight",
               "manualPresetDeletePreflight",
               "manualPresetSaveSuccessState",
+              "manualPresetSaveSelectionState",
               "manualPresetLoadSuccessState",
               "manualPresetDeleteViewState",
               "manualPresetDeleteSuccessState",
@@ -401,6 +402,24 @@ class FrontendParameterLibraryTests(unittest.TestCase):
                 saveFallback.presetName !== "Fallback" ||
                 saveFallback.toastText !== "已保存到当前工作区：Fallback") {
               throw new Error(`save fallback state wrong: ${JSON.stringify(saveFallback)}`);
+            }
+            const syncedSelection = library.manualPresetSaveSelectionState(" p1 ", { shouldSync: true });
+            if (syncedSelection.runPresetSelectValue !== "p1" ||
+                !syncedSelection.shouldSelectTaskPreset ||
+                syncedSelection.taskPresetSelectValue !== "p1") {
+              throw new Error(`synced save selection state wrong: ${JSON.stringify(syncedSelection)}`);
+            }
+            const localOnlySelection = library.manualPresetSaveSelectionState("p2", { shouldSync: false });
+            if (localOnlySelection.runPresetSelectValue !== "p2" ||
+                localOnlySelection.shouldSelectTaskPreset ||
+                localOnlySelection.taskPresetSelectValue !== "") {
+              throw new Error(`local-only save selection state wrong: ${JSON.stringify(localOnlySelection)}`);
+            }
+            const emptySelection = library.manualPresetSaveSelectionState(null, { shouldSync: true });
+            if (emptySelection.runPresetSelectValue !== "" ||
+                !emptySelection.shouldSelectTaskPreset ||
+                emptySelection.taskPresetSelectValue !== "") {
+              throw new Error(`empty save selection state wrong: ${JSON.stringify(emptySelection)}`);
             }
             const loadSuccess = library.manualPresetLoadSuccessState({ name: "Trial A", params_adjusted: true }, "");
             if (loadSuccess.inputName !== "Trial A" || loadSuccess.toastText !== "已载入参数集：Trial A（已按约束自动修正）") {

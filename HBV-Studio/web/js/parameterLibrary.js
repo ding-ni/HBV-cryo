@@ -479,6 +479,16 @@
     };
   }
 
+  function manualPresetSaveSelectionState(savedId = "", taskSync = {}) {
+    const selectValue = String(savedId || "").trim();
+    const shouldSelectTaskPreset = Boolean(taskSync?.shouldSync);
+    return {
+      runPresetSelectValue: selectValue,
+      shouldSelectTaskPreset,
+      taskPresetSelectValue: shouldSelectTaskPreset ? selectValue : "",
+    };
+  }
+
   function manualPresetLoadSuccessState(preset = {}, presetName = "") {
     const resolvedName = String(presetName || preset?.name || "参数集").trim() || "参数集";
     return {
@@ -972,6 +982,7 @@
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetSaveSuccessState,
+    manualPresetSaveSelectionState,
     manualPresetLoadSuccessState,
     manualPresetDeleteViewState,
     manualPresetDeleteSuccessState,
