@@ -143,6 +143,7 @@ const frontendModuleContracts = [
       "taskManualPresetLoadErrorState",
       "taskManualPresetLoadStartState",
       "taskManualPresetLoadSuccessState",
+      "manualPresetTaskSyncState",
       "shouldClearManualPresetComparison",
       "manualPresetControlState",
       "manualPresetControlViewState",
@@ -4725,15 +4726,19 @@ async function saveCurrentManualPreset() {
     params: state._runParams,
   }));
   await loadRunManualPresets(configPath, { silent: true });
-  if (samePath(configPath, getTaskManualPresetConfigPath())) {
-    await loadTaskManualPresets(configPath, {
+  const taskSync = window.HBVStudioParameterLibrary.manualPresetTaskSyncState(configPath, getTaskManualPresetConfigPath(), {
+    workspaceProfile: state.currentWorkspace?.率定模式,
+    runCalibrationProfile: state._runData?.metadata?.calibration_profile,
+  }, { samePath });
+  if (taskSync.shouldSync) {
+    await loadTaskManualPresets(taskSync.sourceConfigPath, {
       silent: true,
-      calibrationProfile: state.currentWorkspace?.率定模式 || state._runData?.metadata?.calibration_profile || "daily",
+      calibrationProfile: taskSync.calibrationProfile,
     });
   }
   const saveState = window.HBVStudioParameterLibrary.manualPresetSaveSuccessState(payload.data || {}, name);
   if ($("#manual-preset-select")) $("#manual-preset-select").value = saveState.savedId;
-  if (samePath(configPath, getTaskManualPresetConfigPath()) && $("#task-init-preset")) $("#task-init-preset").value = saveState.savedId;
+  if (taskSync.shouldSync && $("#task-init-preset")) $("#task-init-preset").value = saveState.savedId;
   updateManualPresetControls();
   refreshCalibrationControls();
   renderManualPresetDiff();
@@ -4766,10 +4771,14 @@ async function deleteSelectedManualPreset() {
   if (!window.confirm(deleteView.confirmText)) return;
   await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(preflight.configPath, preflight.preset));
   await loadRunManualPresets(preflight.configPath, { silent: true });
-  if (samePath(preflight.configPath, getTaskManualPresetConfigPath())) {
-    await loadTaskManualPresets(preflight.configPath, {
+  const taskSync = window.HBVStudioParameterLibrary.manualPresetTaskSyncState(preflight.configPath, getTaskManualPresetConfigPath(), {
+    workspaceProfile: state.currentWorkspace?.率定模式,
+    runCalibrationProfile: state._runData?.metadata?.calibration_profile,
+  }, { samePath });
+  if (taskSync.shouldSync) {
+    await loadTaskManualPresets(taskSync.sourceConfigPath, {
       silent: true,
-      calibrationProfile: state.currentWorkspace?.率定模式 || state._runData?.metadata?.calibration_profile || "daily",
+      calibrationProfile: taskSync.calibrationProfile,
     });
   }
   if (preflight.presetId && preflight.presetId === String(state.comparePresetId || "").trim()) {

@@ -247,6 +247,23 @@
     };
   }
 
+  function manualPresetTaskSyncState(configPath = "", taskConfigPath = "", context = {}, helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const sourceConfigPath = String(configPath || "").trim();
+    const targetConfigPath = String(taskConfigPath || "").trim();
+    const calibrationProfile = String(
+      context.workspaceProfile
+      || context.runCalibrationProfile
+      || "daily",
+    ).trim() || "daily";
+    return {
+      sourceConfigPath,
+      targetConfigPath,
+      shouldSync: Boolean(sourceConfigPath && targetConfigPath && samePath(sourceConfigPath, targetConfigPath)),
+      calibrationProfile,
+    };
+  }
+
   function shouldClearManualPresetComparison(currentPreset = null, comparePresetId = "") {
     const compareId = String(comparePresetId || "").trim();
     if (!compareId) return false;
@@ -879,6 +896,7 @@
     taskManualPresetLoadErrorState,
     taskManualPresetLoadStartState,
     taskManualPresetLoadSuccessState,
+    manualPresetTaskSyncState,
     shouldClearManualPresetComparison,
     manualPresetControlState,
     manualPresetControlViewState,

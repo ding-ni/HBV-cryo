@@ -574,7 +574,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState"]) {
+            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
@@ -612,6 +612,34 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const loadError = library.taskManualPresetLoadErrorState();
             if (loadError.presets.length !== 0 || loadError.statePatch.taskManualPresets.length !== 0) {
               throw new Error(`task preset load error wrong: ${JSON.stringify(loadError)}`);
+            }
+            const syncState = library.manualPresetTaskSyncState(
+              " C:/ws/A/workspace.json ",
+              "C:\\ws\\A\\workspace.json",
+              { workspaceProfile: "hourly", runCalibrationProfile: "daily" },
+              { samePath },
+            );
+            if (!syncState.shouldSync || syncState.sourceConfigPath !== "C:/ws/A/workspace.json" ||
+                syncState.targetConfigPath !== "C:\\ws\\A\\workspace.json" ||
+                syncState.calibrationProfile !== "hourly") {
+              throw new Error(`manual preset task sync state wrong: ${JSON.stringify(syncState)}`);
+            }
+            const runProfileSync = library.manualPresetTaskSyncState(
+              "C:/ws/A/workspace.json",
+              "C:/ws/A/workspace.json",
+              { workspaceProfile: "", runCalibrationProfile: "daily" },
+              { samePath },
+            );
+            if (!runProfileSync.shouldSync || runProfileSync.calibrationProfile !== "daily") {
+              throw new Error(`manual preset task sync run profile wrong: ${JSON.stringify(runProfileSync)}`);
+            }
+            const mismatchSync = library.manualPresetTaskSyncState("C:/ws/A/workspace.json", "C:/ws/B/workspace.json", {}, { samePath });
+            if (mismatchSync.shouldSync || mismatchSync.calibrationProfile !== "daily") {
+              throw new Error(`manual preset task sync mismatch wrong: ${JSON.stringify(mismatchSync)}`);
+            }
+            const emptySync = library.manualPresetTaskSyncState("", "", { workspaceProfile: "hourly" }, { samePath });
+            if (emptySync.shouldSync || emptySync.sourceConfigPath || emptySync.targetConfigPath || emptySync.calibrationProfile !== "hourly") {
+              throw new Error(`manual preset task sync empty path wrong: ${JSON.stringify(emptySync)}`);
             }
             if (library.shouldClearManualPresetComparison({ id: "same" }, "same")) {
               throw new Error("same id should keep comparison");
