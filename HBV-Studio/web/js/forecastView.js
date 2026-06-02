@@ -492,6 +492,57 @@
     `;
   }
 
+  function forecastRestartTasks(tasks = [], options = {}) {
+    const limit = Number(options.limit || 8);
+    const items = Array.isArray(tasks) ? tasks : [];
+    const sorted = items
+      .filter(task => task?.task_type === "forecast_restart")
+      .sort((a, b) => Number(b?.updated_at || 0) - Number(a?.updated_at || 0));
+    return Number.isFinite(limit) && limit > 0 ? sorted.slice(0, limit) : sorted;
+  }
+
+  function renderForecastTaskCard(task, helpers = {}) {
+    const taskView = helpers.taskView || window.HBVStudioTaskView || {};
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const formatDateTime = helpers.formatDateTime || textOrDash;
+    const taskTypeLabel = helpers.taskTypeLabel || taskView.taskTypeLabel || (() => "任务");
+    const taskStatusClass = helpers.taskStatusClass || taskView.taskStatusClass || (() => "status-warn");
+    const taskStatusLabel = helpers.taskStatusLabel || taskView.taskStatusLabel || (status => String(status || "未知"));
+    const taskPrimaryTitle = helpers.taskPrimaryTitle || taskView.taskPrimaryTitle || (item => item?.label || taskTypeLabel(item?.task_type));
+    const taskSummaryLine = helpers.taskSummaryLine || ((item) => taskView.taskSummaryLine?.(item, helpers) || "");
+    const renderTaskMilestones = helpers.renderTaskMilestones || ((item) => taskView.renderTaskMilestones?.(item, helpers) || "");
+    const renderTaskActions = helpers.renderTaskActions || ((item) => taskView.renderTaskActions?.(item, helpers) || "");
+    const taskDebugDetails = helpers.taskDebugDetails || ((item, options) => taskView.taskDebugDetails?.(item, options, helpers) || "");
+    const isRunning = task?.status === "running";
+    const summaryLine = taskSummaryLine(task);
+    const summaryClass = task?.status === "completed" ? "status-ok" : task?.status === "failed" ? "status-fail" : "";
+    const inputCheckHtml = renderForecastTaskInputCheckSummary(task?.forecast_input_check, helpers);
+    return `
+      <div class="list-item task-card ${isRunning ? "task-running" : ""}">
+        <div class="task-card-topline">
+          <span class="task-kicker">${escapeHtml(taskTypeLabel(task?.task_type))}</span>
+          <span class="task-updated">最近更新 ${escapeHtml(formatDateTime(task?.updated_at))}</span>
+          <span class="status-badge ${taskStatusClass(task?.status)}">${escapeHtml(taskStatusLabel(task?.status))}${isRunning ? "..." : ""}</span>
+        </div>
+        <div class="task-card-title">
+          <strong>${escapeHtml(taskPrimaryTitle(task))}</strong>
+          ${task?.forecast_end ? `<small class="task-meta-line">预报至 ${escapeHtml(task.forecast_end)}</small>` : ""}
+        </div>
+        ${renderTaskMilestones(task)}
+        <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
+        ${inputCheckHtml}
+        ${renderTaskActions(task)}
+        ${taskDebugDetails(task, { lines: isRunning ? 80 : 40 })}
+      </div>
+    `;
+  }
+
+  function renderForecastTaskList(tasks = [], helpers = {}) {
+    const items = forecastRestartTasks(tasks, { limit: helpers.limit || 8 });
+    if (!items.length) return '<div class="hint-box">暂无连续状态预报任务。</div>';
+    return items.map(task => renderForecastTaskCard(task, helpers)).join("");
+  }
+
   function renderForecastSummary(data = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const runDisplayName = helpers.runDisplayName || (run => run?.name || run?.title || "连续状态预报结果");
@@ -595,9 +646,12 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastParameterSourceSummary,
+    forecastRestartTasks,
+    renderForecastTaskCard,
     renderForecastResultEmpty,
     renderForecastResultLoading,
     renderForecastInputSummary,
+    renderForecastTaskList,
     renderForecastTaskInputCheckSummary,
     renderForecastResultDetail,
     restartStateRows,

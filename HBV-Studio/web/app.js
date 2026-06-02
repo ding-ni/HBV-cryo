@@ -147,9 +147,12 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastParameterSourceSummary",
+      "forecastRestartTasks",
+      "renderForecastTaskCard",
       "renderForecastResultEmpty",
       "renderForecastResultLoading",
       "renderForecastInputSummary",
+      "renderForecastTaskList",
       "renderForecastTaskInputCheckSummary",
       "renderForecastResultDetail",
       "restartStateRows",
@@ -5878,42 +5881,21 @@ function scheduleForecastInputCheck(delay = 350) {
 function renderForecastTaskList() {
   const host = $("#forecast-task-list");
   if (!host) return;
-  const tasks = state.tasks
-    .filter(task => task.task_type === "forecast_restart")
-    .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
-  if (!tasks.length) {
-    host.innerHTML = '<div class="hint-box">暂无连续状态预报任务。</div>';
-    return;
-  }
-  host.innerHTML = tasks.slice(0, 8).map(task => {
-    const isRunning = task.status === "running";
-    const summaryLine = taskSummaryLine(task);
-    const summaryClass = task.status === "completed" ? "status-ok" : task.status === "failed" ? "status-fail" : "";
-    const inputCheckHtml = window.HBVStudioForecastView?.renderForecastTaskInputCheckSummary?.(task.forecast_input_check, {
-      escapeHtml,
-      focusStatusClass,
-      focusStatusLabel,
-      shortPath,
-    }) || "";
-    return `
-      <div class="list-item task-card ${isRunning ? "task-running" : ""}">
-        <div class="task-card-topline">
-          <span class="task-kicker">${escapeHtml(taskTypeLabel(task.task_type))}</span>
-          <span class="task-updated">最近更新 ${escapeHtml(formatDateTime(task.updated_at))}</span>
-          <span class="status-badge ${taskStatusClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}${isRunning ? "..." : ""}</span>
-        </div>
-        <div class="task-card-title">
-          <strong>${escapeHtml(taskPrimaryTitle(task))}</strong>
-          ${task.forecast_end ? `<small class="task-meta-line">预报至 ${escapeHtml(task.forecast_end)}</small>` : ""}
-        </div>
-        ${renderTaskMilestones(task)}
-        <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
-        ${inputCheckHtml}
-        ${renderTaskActions(task)}
-        ${taskDebugDetails(task, { lines: isRunning ? 80 : 40 })}
-      </div>
-    `;
-  }).join("");
+  host.innerHTML = window.HBVStudioForecastView.renderForecastTaskList(state.tasks, {
+    escapeHtml,
+    focusStatusClass,
+    focusStatusLabel,
+    formatDateTime,
+    renderTaskActions,
+    renderTaskMilestones,
+    shortPath,
+    taskDebugDetails,
+    taskPrimaryTitle,
+    taskStatusClass,
+    taskStatusLabel,
+    taskSummaryLine,
+    taskTypeLabel,
+  });
   restoreVisibleLogViewports("#forecast-task-list [data-log-key]");
 }
 

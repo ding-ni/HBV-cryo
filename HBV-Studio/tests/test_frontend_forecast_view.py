@@ -125,6 +125,128 @@ class FrontendForecastViewTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_task_list_filters_sorts_and_renders_cards(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            for (const name of ["forecastRestartTasks", "renderForecastTaskCard", "renderForecastTaskList"]) {
+              if (typeof view?.[name] !== "function") {
+                throw new Error(`missing forecast task export: ${name}`);
+              }
+            }
+
+            const helpers = {
+              escapeHtml(value) {
+                return String(value ?? "").replace(/[&<>"']/g, ch => ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  "\"": "&quot;",
+                  "'": "&#39;",
+                }[ch]));
+              },
+              focusStatusClass(status) {
+                return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
+              },
+              focusStatusLabel(status) {
+                return status === "ok" ? "通过" : status === "fail" ? "未通过" : "需复核";
+              },
+              formatDateTime(value) { return `时间:${value || ""}`; },
+              renderTaskActions(task) { return `<button data-task-open-result="${task.id}">查看结果</button>`; },
+              renderTaskMilestones(task) { return `<div class="milestones">${task.id}</div>`; },
+              shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
+              taskDebugDetails(task, options) { return `<pre data-lines="${options.lines}">${task.id}</pre>`; },
+              taskPrimaryTitle(task) { return task.label || "预报任务"; },
+              taskStatusClass(status) { return status === "failed" ? "status-fail" : status === "running" ? "status-warn" : "status-ok"; },
+              taskStatusLabel(status) { return status === "failed" ? "失败" : status === "running" ? "运行中" : "已完成"; },
+              taskSummaryLine(task) { return task.summary || "预报任务摘要"; },
+              taskTypeLabel() { return "连续状态预报"; },
+            };
+
+            const tasks = [
+              {
+                id: "forecast-old",
+                task_type: "forecast_restart",
+                status: "running",
+                label: "旧预报",
+                summary: "正在预报",
+                updated_at: 10,
+              },
+              {
+                id: "calibration-task",
+                task_type: "calibration",
+                status: "running",
+                label: "率定任务",
+                updated_at: 999,
+              },
+              {
+                id: "forecast-new",
+                task_type: "forecast_restart",
+                status: "failed",
+                label: "预报<新>",
+                summary: "缺少未来气象",
+                updated_at: 30,
+                forecast_end: "2026-02-03",
+                forecast_input_check: {
+                  status: "fail",
+                  headline: "预报输入检查",
+                  source: { state_available: true, source_state_time: "2026-02-01" },
+                  window: { forecast_start: "2026-02-02", forecast_end: "2026-02-03", expected_steps: 2 },
+                  output: { result_label: "预报结果 A" },
+                  variables: [{ key: "prec", label: "降水", status: "fail", summary: "缺少 1 个时间步", path: "C:/meteo/prec" }],
+                  errors: ["未来降水缺失"],
+                },
+              },
+              {
+                id: "forecast-last",
+                task_type: "forecast_restart",
+                status: "completed",
+                label: "完成预报",
+                summary: "已完成",
+                updated_at: 20,
+              },
+            ];
+
+            const picked = view.forecastRestartTasks(tasks, { limit: 2 });
+            if (picked.map(task => task.id).join(",") !== "forecast-new,forecast-last") {
+              throw new Error(`unexpected forecast order: ${picked.map(task => task.id).join(",")}`);
+            }
+
+            const html = view.renderForecastTaskList(tasks, helpers);
+            if (html.includes("calibration-task")) throw new Error("non-forecast task should not render");
+            if (html.indexOf("forecast-new") > html.indexOf("forecast-last")) {
+              throw new Error("forecast tasks should render newest first");
+            }
+            if (!html.includes("预报&lt;新&gt;")) throw new Error("forecast title should be escaped");
+            if (!html.includes("预报至 2026-02-03")) throw new Error("forecast end label missing");
+            if (!html.includes("forecast-task-input-check") || !html.includes("源状态")) {
+              throw new Error("forecast input check summary missing");
+            }
+            if (!html.includes('data-lines="40"') || !html.includes('data-lines="80"')) {
+              throw new Error("forecast log line limits missing");
+            }
+            if (!view.renderForecastTaskList([], helpers).includes("暂无连续状态预报任务")) {
+              throw new Error("empty forecast task hint missing");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
