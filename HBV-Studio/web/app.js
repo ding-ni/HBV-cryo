@@ -156,6 +156,7 @@ const frontendModuleContracts = [
       "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastRestartPreflight",
       "forecastRestartPayload",
       "forecastResultRuns",
       "forecastRunReady",
@@ -5820,14 +5821,15 @@ async function startForecastRestart() {
   const precDir = $("#forecast-prec-dir")?.value.trim() || "";
   const tempDir = $("#forecast-temp-dir")?.value.trim() || "";
   const evapDir = $("#forecast-evap-dir")?.value.trim() || "";
-  if (!forecastEnd) { showToast("请填写预报结束时间。", true); return; }
-  const expectedStart = forecastSuggestedStart(run);
-  if (forecastStart && expectedStart && forecastTimeComparable(forecastStart, run) !== forecastTimeComparable(expectedStart, run)) {
-    showToast(`预报开始时间必须紧接源结果保存状态，当前应从 ${expectedStart.replace("T", " ")} 起报。`, true);
-    return;
-  }
-  if (!precDir || !tempDir || !evapDir) {
-    showToast("请完整选择预报降水、气温和潜在蒸散发栅格目录。", true);
+  const preflight = window.HBVStudioForecastView.forecastRestartPreflight(run, {
+    forecast_start: forecastStart,
+    forecast_end: forecastEnd,
+    forecast_prec_dir: precDir,
+    forecast_temp_dir: tempDir,
+    forecast_evap_dir: evapDir,
+  }, { forecastRunReady, forecastSuggestedStart, forecastTimeComparable });
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
   const startButton = $("#forecast-start-button");

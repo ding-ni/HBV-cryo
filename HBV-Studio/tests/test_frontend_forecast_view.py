@@ -301,6 +301,67 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_restart_preflight_reports_blocking_inputs(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastRestartPreflight !== "function") {
+              throw new Error("missing forecast restart preflight export");
+            }
+
+            const readyRun = {
+              path: "C:/runs/source",
+              studio_compatible: true,
+              time_step_hours: 24,
+              state_snapshot_time: "2026-01-10",
+            };
+            const validFields = {
+              forecast_start: "2026-01-11",
+              forecast_end: "2026-01-20",
+              forecast_prec_dir: "C:/forecast/prec",
+              forecast_temp_dir: "C:/forecast/temp",
+              forecast_evap_dir: "C:/forecast/evap",
+            };
+
+            const cases = [
+              [null, validFields, "请先选择源结果。"],
+              [{ path: "C:/runs/source", forecast_source_ready: false }, validFields, "源结果缺少率定参数或起报状态"],
+              [readyRun, { ...validFields, forecast_end: "" }, "请填写预报结束时间。"],
+              [readyRun, { ...validFields, forecast_start: "2026-01-12" }, "当前应从 2026-01-11 起报"],
+              [readyRun, { ...validFields, forecast_temp_dir: " " }, "请完整选择预报降水"],
+            ];
+            for (const [run, fields, message] of cases) {
+              const result = view.forecastRestartPreflight(run, fields);
+              if (result.ok || !result.message.includes(message)) {
+                throw new Error(`unexpected preflight result for ${message}: ${JSON.stringify(result)}`);
+              }
+            }
+
+            const ok = view.forecastRestartPreflight(readyRun, validFields);
+            if (!ok.ok || ok.message !== "" || ok.expectedStart !== "2026-01-11") {
+              throw new Error(`valid preflight wrong: ${JSON.stringify(ok)}`);
+            }
+            const autoStartOk = view.forecastRestartPreflight(readyRun, { ...validFields, forecast_start: "" });
+            if (!autoStartOk.ok) throw new Error(`empty start should be allowed: ${JSON.stringify(autoStartOk)}`);
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""

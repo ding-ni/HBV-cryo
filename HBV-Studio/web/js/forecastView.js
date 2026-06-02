@@ -154,6 +154,39 @@
     };
   }
 
+  function forecastRestartPreflight(run = null, fields = {}, helpers = {}) {
+    const text = value => String(value || "").trim();
+    const isReady = helpers.forecastRunReady || forecastRunReady;
+    const suggestedStart = helpers.forecastSuggestedStart || forecastSuggestedStart;
+    const timeComparable = helpers.forecastTimeComparable || forecastTimeComparable;
+    if (!run) {
+      return { ok: false, message: "请先选择源结果。" };
+    }
+    if (!isReady(run)) {
+      return { ok: false, message: "源结果缺少率定参数或起报状态，不能启动连续状态预报。" };
+    }
+    const forecastStart = text(fields.forecast_start);
+    const forecastEnd = text(fields.forecast_end);
+    const precDir = text(fields.forecast_prec_dir);
+    const tempDir = text(fields.forecast_temp_dir);
+    const evapDir = text(fields.forecast_evap_dir);
+    if (!forecastEnd) {
+      return { ok: false, message: "请填写预报结束时间。" };
+    }
+    const expectedStart = suggestedStart(run);
+    if (forecastStart && expectedStart && timeComparable(forecastStart, run) !== timeComparable(expectedStart, run)) {
+      return {
+        ok: false,
+        message: `预报开始时间必须紧接源结果保存状态，当前应从 ${expectedStart.replace("T", " ")} 起报。`,
+        expectedStart,
+      };
+    }
+    if (!precDir || !tempDir || !evapDir) {
+      return { ok: false, message: "请完整选择预报降水、气温和潜在蒸散发栅格目录。" };
+    }
+    return { ok: true, message: "", expectedStart };
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -864,6 +897,7 @@
     forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastRestartPreflight,
     forecastRestartPayload,
     forecastResultRuns,
     forecastRunReady,
