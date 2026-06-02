@@ -254,6 +254,21 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (editableDetail.statePatch._runOrigParams.TT !== 0.2) {
               throw new Error("run detail params and original params should be independent copies");
             }
+            const editableDom = Object.fromEntries(editableDetail.domUpdates.map(update => [update.selector, update]));
+            if (editableDom["#btn-resimulate"].disabled !== false ||
+                editableDom["#btn-reset-params"].disabled !== false ||
+                editableDom["#resim-hint"].visible !== false ||
+                editableDom["#resim-hint"].text !== "" ||
+                editableDom["#resim-hint"].className !== "hint-box" ||
+                editableDom["#resim-log"].visible !== false ||
+                editableDom["#resim-log"].text !== "" ||
+                editableDom["#manual-preset-name"].value !== "" ||
+                !editableDetail.shouldUpdateManualPresetControls ||
+                !editableDetail.shouldRenderManualPresetDiff ||
+                !editableDetail.shouldUpdateCompareSummary ||
+                !editableDetail.shouldUpdateManualStarterButtons) {
+              throw new Error(`editable run detail DOM state wrong: ${JSON.stringify(editableDom)}`);
+            }
             const readonlyDetail = results.runDetailState({
               path: "C:/runs/readonly",
               metadata: { optimized_params: { TT: 0.2 } },
@@ -265,6 +280,15 @@ class FrontendResultsViewTests(unittest.TestCase):
                 readonlyDetail.statePatch._runParams !== null || readonlyDetail.statePatch._runOrigParams !== null ||
                 readonlyDetail.statePatch.currentRun?.path !== "C:/runs/readonly") {
               throw new Error(`readonly run detail state wrong: ${JSON.stringify(readonlyDetail)}`);
+            }
+            const readonlyDom = Object.fromEntries(readonlyDetail.domUpdates.map(update => [update.selector, update]));
+            if (readonlyDom["#btn-resimulate"].disabled !== true ||
+                readonlyDom["#btn-reset-params"].disabled !== true ||
+                readonlyDom["#resim-hint"].visible !== true ||
+                readonlyDom["#resim-hint"].text !== "该结果不是可调结果，只支持查看，不支持滑块重算。" ||
+                readonlyDom["#resim-hint"].className !== "hint-box status-warn" ||
+                readonlyDom["#manual-preset-name"].value !== "") {
+              throw new Error(`readonly run detail DOM state wrong: ${JSON.stringify(readonlyDom)}`);
             }
             const clearedComparison = results.clearRunComparisonState().statePatch;
             if (clearedComparison.compareSeries !== null || clearedComparison.compareMetrics !== null ||

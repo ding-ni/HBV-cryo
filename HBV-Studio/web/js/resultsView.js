@@ -285,6 +285,22 @@
       metadata: meta,
       calibrationMetrics: metrics.calibration || {},
       validationMetrics: metrics.validation || {},
+      domUpdates: [
+        { selector: "#btn-resimulate", disabled: !editable },
+        { selector: "#btn-reset-params", disabled: !editable },
+        {
+          selector: "#resim-hint",
+          visible: !editable,
+          text: editable ? "" : "该结果不是可调结果，只支持查看，不支持滑块重算。",
+          className: editable ? "hint-box" : "hint-box status-warn",
+        },
+        { selector: "#resim-log", visible: false, text: "" },
+        { selector: "#manual-preset-name", value: "" },
+      ],
+      shouldUpdateManualPresetControls: true,
+      shouldRenderManualPresetDiff: true,
+      shouldUpdateCompareSummary: true,
+      shouldUpdateManualStarterButtons: true,
       statePatch: {
         _runData: detailData,
         _runParams: editable ? { ...params } : null,

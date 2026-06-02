@@ -765,16 +765,7 @@ function clearRunDetail(message = "请先从左侧选择一个结果。") {
   compareRequestGuard.cancel();
   const viewState = window.HBVStudioResultsView.clearRunDetailViewState(message);
   Object.assign(state, viewState.statePatch);
-  viewState.domUpdates.forEach(update => {
-    const el = $(update.selector);
-    if (!el) return;
-    if (Object.prototype.hasOwnProperty.call(update, "html")) el.innerHTML = update.html;
-    if (Object.prototype.hasOwnProperty.call(update, "text")) el.textContent = update.text;
-    if (Object.prototype.hasOwnProperty.call(update, "className")) el.className = update.className;
-    if (Object.prototype.hasOwnProperty.call(update, "value")) el.value = update.value;
-    if (Object.prototype.hasOwnProperty.call(update, "disabled")) el.disabled = update.disabled;
-    if (Object.prototype.hasOwnProperty.call(update, "visible")) el.style.display = update.visible ? "" : "none";
-  });
+  applyDomUpdates(viewState.domUpdates);
   if (viewState.shouldRenderRunExportFields && $("#run-export-fields")) renderRunExportFields();
   if (viewState.shouldRenderManualPresetOptions) renderManualPresetOptions();
   if (viewState.shouldUpdateManualPresetControls) updateManualPresetControls();
@@ -789,6 +780,19 @@ function clearRunDetail(message = "请先从左侧选择一个结果。") {
   });
   if (viewState.shouldUpdateManualStarterButtons) updateManualStarterButtons();
   if (viewState.shouldUpdateSidebar) updateSidebar();
+}
+
+function applyDomUpdates(updates = []) {
+  updates.forEach(update => {
+    const el = $(update.selector);
+    if (!el) return;
+    if (Object.prototype.hasOwnProperty.call(update, "html")) el.innerHTML = update.html;
+    if (Object.prototype.hasOwnProperty.call(update, "text")) el.textContent = update.text;
+    if (Object.prototype.hasOwnProperty.call(update, "className")) el.className = update.className;
+    if (Object.prototype.hasOwnProperty.call(update, "value")) el.value = update.value;
+    if (Object.prototype.hasOwnProperty.call(update, "disabled")) el.disabled = update.disabled;
+    if (Object.prototype.hasOwnProperty.call(update, "visible")) el.style.display = update.visible ? "" : "none";
+  });
 }
 
 function manualStarterWorkspacePath() {
@@ -4811,7 +4815,7 @@ function renderRunDetail(data) {
   const detailState = window.HBVStudioResultsView.runDetailState(data, {
     selectedRunPath: state.selectedRunPath,
   }, { isStudioEditableRun });
-  const { editable, metadata: meta, calibrationMetrics: cal, validationMetrics: val } = detailState;
+  const { metadata: meta, calibrationMetrics: cal, validationMetrics: val } = detailState;
   compareRequestGuard.cancel();
   Object.assign(state, detailState.statePatch);
 
@@ -4821,20 +4825,11 @@ function renderRunDetail(data) {
   renderCharts(data);
   updateManualGroupToolbar();
   renderParamSliders(data);
-  $("#btn-resimulate").disabled = !editable;
-  $("#btn-reset-params").disabled = !editable;
-  $("#resim-hint").style.display = editable ? "none" : "";
-  $("#resim-hint").textContent = editable ? "" : "该结果不是可调结果，只支持查看，不支持滑块重算。";
-  $("#resim-hint").className = editable ? "hint-box" : "hint-box status-warn";
-  if ($("#resim-log")) {
-    $("#resim-log").textContent = "";
-    $("#resim-log").style.display = "none";
-  }
-  updateManualPresetControls();
-  if ($("#manual-preset-name")) $("#manual-preset-name").value = "";
-  renderManualPresetDiff();
-  updateCompareSummary();
-  updateManualStarterButtons();
+  applyDomUpdates(detailState.domUpdates);
+  if (detailState.shouldUpdateManualPresetControls) updateManualPresetControls();
+  if (detailState.shouldRenderManualPresetDiff) renderManualPresetDiff();
+  if (detailState.shouldUpdateCompareSummary) updateCompareSummary();
+  if (detailState.shouldUpdateManualStarterButtons) updateManualStarterButtons();
 
   const detailMetadata = window.HBVStudioResultsView.renderRunDetailMetadata(data, {
     compactTimeText,
