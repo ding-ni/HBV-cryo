@@ -108,6 +108,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetCompareView !== "function") {
               throw new Error("manualPresetCompareView was not exported");
             }
+            for (const name of ["manualPresetComparePendingView", "manualPresetCompareErrorView"]) {
+              if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
+            }
 
             const summary = library.manualPresetCompareSummary(
               {
@@ -162,6 +165,18 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const hiddenView = library.manualPresetCompareView({ label: "", compareMetrics: { nse_cal: 0.8 } });
             if (hiddenView.visible || hiddenView.className || hiddenView.text) {
               throw new Error(`unexpected hidden compare view: ${JSON.stringify(hiddenView)}`);
+            }
+            const pendingView = library.manualPresetComparePendingView({ name: "Trial A" });
+            if (!pendingView.visible || pendingView.className !== "hint-box" || pendingView.text !== "正在计算参数集“Trial A”的对比结果...") {
+              throw new Error(`unexpected pending compare view: ${JSON.stringify(pendingView)}`);
+            }
+            const fallbackPendingView = library.manualPresetComparePendingView({});
+            if (!fallbackPendingView.text.includes("参数集")) {
+              throw new Error(`pending view should have fallback name: ${JSON.stringify(fallbackPendingView)}`);
+            }
+            const errorView = library.manualPresetCompareErrorView(new Error("接口超时"));
+            if (!errorView.visible || errorView.className !== "hint-box status-fail" || errorView.text !== "参数集对比失败：接口超时") {
+              throw new Error(`unexpected error compare view: ${JSON.stringify(errorView)}`);
             }
             """
         )

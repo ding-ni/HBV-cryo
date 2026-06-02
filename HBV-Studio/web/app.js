@@ -133,6 +133,8 @@ const frontendModuleContracts = [
       "manualPresetDiffView",
       "manualPresetCompareSummary",
       "manualPresetCompareView",
+      "manualPresetComparePendingView",
+      "manualPresetCompareErrorView",
       "findPresetById",
       "manualPresetListPath",
       "shouldClearManualPresetComparison",
@@ -5270,9 +5272,10 @@ async function compareSelectedManualPresetSimulation() {
   }
   const host = $("#manual-compare-summary");
   if (host) {
+    const view = window.HBVStudioParameterLibrary.manualPresetComparePendingView(preset);
     host.style.display = "";
-    host.className = "hint-box";
-    host.textContent = `正在计算参数集“${preset.name}”的对比结果...`;
+    host.className = view.className;
+    host.textContent = view.text;
   }
   const requestToken = compareRequestGuard.next();
   const runPath = String(state._runData?.run?.path || "").trim();
@@ -5315,9 +5318,10 @@ async function compareSelectedManualPresetSimulation() {
       updateMetricsStrip(cal, val, meta);
     }
     if (host) {
+      const view = window.HBVStudioParameterLibrary.manualPresetCompareErrorView(err);
       host.style.display = "";
-      host.className = "hint-box status-fail";
-      host.textContent = `参数集对比失败：${err.message}`;
+      host.className = view.className;
+      host.textContent = view.text;
     }
     updateManualPresetControls();
     showToast(err.message, true);

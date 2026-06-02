@@ -130,6 +130,23 @@
     };
   }
 
+  function manualPresetComparePendingView(preset = {}) {
+    return {
+      visible: true,
+      className: "hint-box",
+      text: `正在计算参数集“${preset?.name || "参数集"}”的对比结果...`,
+    };
+  }
+
+  function manualPresetCompareErrorView(error = {}) {
+    const message = error?.message || String(error || "未知错误");
+    return {
+      visible: true,
+      className: "hint-box status-fail",
+      text: `参数集对比失败：${message}`,
+    };
+  }
+
   function findPresetById(presets = [], presetId = "") {
     const target = String(presetId || "").trim();
     if (!target || !Array.isArray(presets)) return null;
@@ -537,6 +554,8 @@
     manualPresetDiffView,
     manualPresetCompareSummary,
     manualPresetCompareView,
+    manualPresetComparePendingView,
+    manualPresetCompareErrorView,
     findPresetById,
     manualPresetListPath,
     shouldClearManualPresetComparison,
