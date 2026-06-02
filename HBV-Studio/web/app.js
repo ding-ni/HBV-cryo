@@ -702,8 +702,7 @@ function setTaskTypeFilter(value = "all") {
 
 function renderResultsFilterToolbar() {
   const host = $("#results-filter-toolbar");
-  const hint = $("#results-filter-hint");
-  if (!host || !hint) return;
+  if (!host) return;
   const workspaceOptions = [{ label: "全部结果", path: "" }];
   if (state.wizardWorkspacePath) {
     workspaceOptions.push({ label: `当前工作区：${workspaceLabelByPath(state.wizardWorkspacePath)}`, path: state.wizardWorkspacePath });
@@ -755,8 +754,7 @@ function renderResultsFilterToolbar() {
     abilityText,
     breakdown,
   });
-  hint.textContent = filterHint.text;
-  hint.className = filterHint.className;
+  applyDomUpdates(filterHint.domUpdates);
 }
 
 function clearRunDetail(message = "请先从左侧选择一个结果。") {

@@ -66,20 +66,24 @@
     const totalRuns = Number(model.totalRuns || 0);
     const shownCount = Number(model.shownCount || 0);
     const suffix = breakdown ? ` 其中 ${breakdown}。` : "";
+    const withDomUpdates = state => ({
+      ...state,
+      domUpdates: [{ selector: "#results-filter-hint", text: state.text, className: state.className }],
+    });
     if (!model.filtersActive) {
-      return {
+      return withDomUpdates({
         text: `当前显示全部结果，共 ${totalRuns} 组。${suffix}`,
         className: "hint-box",
-      };
+      });
     }
     const workspaceText = model.workspaceText || "全部工作区";
     const profileText = model.profileText || "全部尺度";
     const stageText = model.stageText || "全部阶段";
     const abilityText = model.abilityText || "全部手调能力";
-    return {
+    return withDomUpdates({
       text: `当前筛选：${workspaceText} / ${profileText} / ${stageText} / ${abilityText}，共 ${shownCount} 组。${suffix}`,
       className: shownCount ? "hint-box status-ok" : "hint-box status-warn",
-    };
+    });
   }
 
   function runProfileValue(run = {}) {

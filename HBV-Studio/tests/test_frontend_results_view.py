@@ -80,9 +80,19 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (allHint.text !== "当前显示全部结果，共 3 组。 其中 正式率定 2。" || allHint.className !== "hint-box") {
               throw new Error(`unexpected all-results hint: ${JSON.stringify(allHint)}`);
             }
+            const allHintDom = Object.fromEntries(allHint.domUpdates.map(update => [update.selector, update]));
+            if (allHintDom["#results-filter-hint"].text !== "当前显示全部结果，共 3 组。 其中 正式率定 2。" ||
+                allHintDom["#results-filter-hint"].className !== "hint-box") {
+              throw new Error(`unexpected all-results hint DOM updates: ${JSON.stringify(allHintDom)}`);
+            }
             const emptyHint = results.resultsFilterHint({ filtersActive: true, shownCount: 0, workspaceText: "工作区A" });
             if (!emptyHint.text.includes("当前筛选：工作区A") || emptyHint.className !== "hint-box status-warn") {
               throw new Error(`unexpected filtered hint: ${JSON.stringify(emptyHint)}`);
+            }
+            const emptyHintDom = Object.fromEntries(emptyHint.domUpdates.map(update => [update.selector, update]));
+            if (!emptyHintDom["#results-filter-hint"].text.includes("当前筛选：工作区A") ||
+                emptyHintDom["#results-filter-hint"].className !== "hint-box status-warn") {
+              throw new Error(`unexpected filtered hint DOM updates: ${JSON.stringify(emptyHintDom)}`);
             }
 
             const runItems = [
