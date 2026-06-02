@@ -64,18 +64,18 @@ from services.event_config import (
     TIME_BASIS_EVENT_WINDOWS,
     TIME_BASIS_FORECAST_WINDOW,
     TIME_BASIS_LABELS,
-    event_date_range as build_event_date_range,
-    event_initial_state_policy_summary as build_event_initial_state_policy_summary,
-    event_window_index as build_event_window_index,
-    flood_event_raw_config as build_flood_event_raw_config,
-    normalize_event_initial_state_policy as build_normalize_event_initial_state_policy,
-    task_time_basis as build_task_time_basis,
-    truthy_config as build_truthy_config,
+    event_date_range as _event_date_range,
+    event_initial_state_policy_summary,
+    event_window_index as _event_window_index,
+    flood_event_raw_config as _flood_event_raw_config,
+    normalize_event_initial_state_policy,
+    task_time_basis,
+    truthy_config as _truthy_config,
 )
 from services.event_windows import EventWindowContext
 from services.event_windows import build_expected_forcing_index as build_event_expected_forcing_index
 from services.event_windows import build_expected_observation_index as build_event_expected_observation_index
-from services.event_windows import build_expected_time_index as build_event_expected_time_index
+from services.event_windows import build_expected_time_index
 from services.event_windows import event_forcing_coverage_summary
 from services.event_windows import event_observation_coverage_messages
 from services.event_windows import event_observation_coverage_summary
@@ -948,44 +948,12 @@ def detect_observed_flow_column(frame: pd.DataFrame, *, excluded: list[str] | No
     return shared_detect_observed_flow_column(frame, excluded=excluded)
 
 
-def _truthy_config(value: Any, default: bool = False) -> bool:
-    return build_truthy_config(value, default)
-
-
-def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
-    return build_flood_event_raw_config(config)
-
-
-def normalize_event_initial_state_policy(value: Any) -> str:
-    return build_normalize_event_initial_state_policy(value)
-
-
-def event_initial_state_policy_summary(value: Any) -> dict[str, Any]:
-    return build_event_initial_state_policy_summary(value)
-
-
-def _event_date_range(start: pd.Timestamp, end: pd.Timestamp, step_hours: float) -> pd.DatetimeIndex:
-    return build_event_date_range(start, end, step_hours)
-
-
-def task_time_basis(config: dict[str, Any], *, context: str = "calibration") -> str:
-    return build_task_time_basis(config, context=context)
-
-
 def _event_window_context() -> EventWindowContext:
     return EventWindowContext(resolve_config_related_path=_resolve_config_related_path)
 
 
 def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None = None) -> dict[str, Any]:
     return build_normalized_flood_events(config, _event_window_context(), step_hours=step_hours)
-
-
-def _event_window_index(events: list[dict[str, Any]], start_key: str, end_key: str, step_hours: float) -> pd.DatetimeIndex:
-    return build_event_window_index(events, start_key, end_key, step_hours)
-
-
-def build_expected_time_index(config: dict[str, Any]) -> pd.DatetimeIndex | None:
-    return build_event_expected_time_index(config)
 
 
 def build_expected_forcing_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
