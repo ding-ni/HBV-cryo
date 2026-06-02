@@ -462,6 +462,47 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_result_button_state_tracks_run_and_export_availability(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastResultButtonState !== "function") {
+              throw new Error("missing forecast result button state helper");
+            }
+
+            const empty = view.forecastResultButtonState(null, "");
+            if (!empty.openResultDisabled || !empty.openResultDirDisabled || !empty.exportExcelDisabled || !empty.openExportFileDisabled) {
+              throw new Error(`empty state should disable every button: ${JSON.stringify(empty)}`);
+            }
+
+            const withRun = view.forecastResultButtonState({ path: "C:/runs/forecast" }, "");
+            if (withRun.openResultDisabled || withRun.openResultDirDisabled || withRun.exportExcelDisabled || !withRun.openExportFileDisabled) {
+              throw new Error(`run state should enable result buttons only: ${JSON.stringify(withRun)}`);
+            }
+
+            const withExport = view.forecastResultButtonState({ path: "C:/runs/forecast" }, "C:/exports/forecast.xlsx");
+            if (withExport.openResultDisabled || withExport.openResultDirDisabled || withExport.exportExcelDisabled || withExport.openExportFileDisabled) {
+              throw new Error(`export state should enable every button: ${JSON.stringify(withExport)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""

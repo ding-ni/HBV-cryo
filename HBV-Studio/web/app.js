@@ -156,6 +156,7 @@ const frontendModuleContracts = [
       "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastResultButtonState",
       "forecastResultExportPayload",
       "forecastRestartPreflight",
       "forecastRestartPayload",
@@ -5656,11 +5657,11 @@ function selectedForecastResultRun() {
 }
 
 function setForecastResultButtons(run) {
-  const hasRun = Boolean(run?.path);
-  if ($("#forecast-open-result")) $("#forecast-open-result").disabled = !hasRun;
-  if ($("#forecast-open-result-dir")) $("#forecast-open-result-dir").disabled = !hasRun;
-  if ($("#forecast-export-excel")) $("#forecast-export-excel").disabled = !hasRun;
-  if ($("#forecast-open-export-file")) $("#forecast-open-export-file").disabled = !state.lastForecastExportPath;
+  const buttons = window.HBVStudioForecastView.forecastResultButtonState(run, state.lastForecastExportPath);
+  if ($("#forecast-open-result")) $("#forecast-open-result").disabled = buttons.openResultDisabled;
+  if ($("#forecast-open-result-dir")) $("#forecast-open-result-dir").disabled = buttons.openResultDirDisabled;
+  if ($("#forecast-export-excel")) $("#forecast-export-excel").disabled = buttons.exportExcelDisabled;
+  if ($("#forecast-open-export-file")) $("#forecast-open-export-file").disabled = buttons.openExportFileDisabled;
 }
 
 function renderForecastResultDetail(data = state.forecastResultData) {

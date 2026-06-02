@@ -206,6 +206,17 @@
     };
   }
 
+  function forecastResultButtonState(run = null, lastExportPath = "") {
+    const hasRun = Boolean(run?.path);
+    const hasExportPath = Boolean(lastExportPath);
+    return {
+      openResultDisabled: !hasRun,
+      openResultDirDisabled: !hasRun,
+      exportExcelDisabled: !hasRun,
+      openExportFileDisabled: !hasExportPath,
+    };
+  }
+
   function renderForecastResultOptions(runs = [], selectedPath = "", helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
@@ -944,6 +955,7 @@
     forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastResultButtonState,
     forecastResultExportPayload,
     forecastRestartPreflight,
     forecastRestartPayload,
