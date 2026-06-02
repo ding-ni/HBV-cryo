@@ -885,8 +885,19 @@ class FrontendResultsViewTests(unittest.TestCase):
                 exportSuccess.hintClassName !== "hint-box status-ok") {
               throw new Error(`unexpected export success state: ${JSON.stringify(exportSuccess)}`);
             }
+            const exportSuccessDom = Object.fromEntries(exportSuccess.domUpdates.map(update => [update.selector, update]));
+            if (exportSuccessDom["#btn-open-export-file"].disabled !== false ||
+                exportSuccessDom["#run-export-hint"].className !== "hint-box status-ok" ||
+                !exportSuccessDom["#run-export-hint"].text.includes("42") ||
+                !exportSuccessDom["#run-export-hint"].text.includes("result.xlsx")) {
+              throw new Error(`unexpected export success DOM updates: ${JSON.stringify(exportSuccessDom)}`);
+            }
             const emptyExportSuccess = results.runExportSuccess({});
-            if (!emptyExportSuccess.openExportDisabled || emptyExportSuccess.statePatch.lastRunExportPath !== "") {
+            const emptyExportSuccessDom = Object.fromEntries(emptyExportSuccess.domUpdates.map(update => [update.selector, update]));
+            if (!emptyExportSuccess.openExportDisabled ||
+                emptyExportSuccess.statePatch.lastRunExportPath !== "" ||
+                emptyExportSuccessDom["#btn-open-export-file"].disabled !== true ||
+                emptyExportSuccessDom["#run-export-hint"].text !== "已导出 0 行到 。") {
               throw new Error(`empty export success should disable open file: ${JSON.stringify(emptyExportSuccess)}`);
             }
 

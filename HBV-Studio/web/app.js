@@ -4912,11 +4912,7 @@ async function exportCurrentRunExcel() {
   const payload = await apiPost("/api/run/export-excel", exportRequest.payload);
   const exportSuccess = window.HBVStudioResultsView.runExportSuccess(payload.data || {}, { shortPath });
   Object.assign(state, exportSuccess.statePatch);
-  if ($("#btn-open-export-file")) $("#btn-open-export-file").disabled = exportSuccess.openExportDisabled;
-  if ($("#run-export-hint")) {
-    $("#run-export-hint").textContent = exportSuccess.hintText;
-    $("#run-export-hint").className = exportSuccess.hintClassName;
-  }
+  applyDomUpdates(exportSuccess.domUpdates);
   showToast(exportSuccess.toastText);
 }
 

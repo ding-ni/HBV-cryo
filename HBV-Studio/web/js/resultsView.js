@@ -1159,14 +1159,21 @@
     const exportPath = String(responseData?.path || "");
     const rowCount = Number(responseData?.row_count || 0);
     const displayPath = responseData?.display_path || shortPath(exportPath);
+    const openExportDisabled = !exportPath;
+    const hintText = `已导出 ${rowCount} 行到 ${displayPath}。`;
+    const hintClassName = "hint-box status-ok";
     return {
       exportPath,
       rowCount,
       displayPath,
-      openExportDisabled: !exportPath,
-      hintText: `已导出 ${rowCount} 行到 ${displayPath}。`,
-      hintClassName: "hint-box status-ok",
+      openExportDisabled,
+      hintText,
+      hintClassName,
       toastText: `Excel 已导出：${rowCount} 行`,
+      domUpdates: [
+        { selector: "#btn-open-export-file", disabled: openExportDisabled },
+        { selector: "#run-export-hint", text: hintText, className: hintClassName },
+      ],
       statePatch: {
         lastRunExportPath: exportPath,
       },
