@@ -1071,6 +1071,13 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!engineering.noteText.includes("观测序列已从源结果回放恢复") || !engineering.noteText.includes("当前结果可靠性降级：缺少完整观测回放")) {
               throw new Error(`engineering note text missing replay/degraded context: ${engineering.noteText}`);
             }
+            const engineeringDom = Object.fromEntries(engineering.domUpdates.map(update => [update.selector, update]));
+            if (engineeringDom["#run-engineering-summary"].html !== engineering.summaryHtml ||
+                engineeringDom["#run-engineering-actions"].html !== engineering.actionsHtml ||
+                engineeringDom["#run-engineering-note"].text !== engineering.noteText ||
+                engineeringDom["#run-engineering-note"].className !== engineering.noteClassName) {
+              throw new Error(`engineering DOM updates should mirror rendered content: ${JSON.stringify(engineeringDom)}`);
+            }
 
             const detail = results.renderRunDetailMetadata({
               run: {

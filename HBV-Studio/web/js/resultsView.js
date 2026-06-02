@@ -892,11 +892,20 @@
     if (meta?.project_object_type === "regression_validation" || String(data?.run?.path || "").includes("HBVStudio_Demo")) {
       noteParts.push("当前结果仅代表本次工程配置下的一次率定结果，请结合输入数据、参数设置和本地过程复核报告综合判断。");
     }
+    const summaryHtml = renderEngineeringCards(cards, helpers);
+    const actionsHtml = actionButtons.join("");
+    const noteText = noteParts.join("");
+    const noteClassName = `hint-box ${(!editable || replayInfo.boundaryReplay || isDegraded) ? "status-warn" : "status-ok"}`.trim();
     return {
-      summaryHtml: renderEngineeringCards(cards, helpers),
-      actionsHtml: actionButtons.join(""),
-      noteText: noteParts.join(""),
-      noteClassName: `hint-box ${(!editable || replayInfo.boundaryReplay || isDegraded) ? "status-warn" : "status-ok"}`.trim(),
+      summaryHtml,
+      actionsHtml,
+      noteText,
+      noteClassName,
+      domUpdates: [
+        { selector: "#run-engineering-summary", html: summaryHtml },
+        { selector: "#run-engineering-actions", html: actionsHtml },
+        { selector: "#run-engineering-note", text: noteText, className: noteClassName },
+      ],
     };
   }
 

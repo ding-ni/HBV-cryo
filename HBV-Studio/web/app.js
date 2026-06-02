@@ -2309,10 +2309,7 @@ function renderRunEngineeringSummary(data) {
     samePath,
     shortPath,
   });
-  host.innerHTML = content.summaryHtml;
-  actions.innerHTML = content.actionsHtml;
-  note.textContent = content.noteText;
-  note.className = content.noteClassName;
+  applyDomUpdates(content.domUpdates);
 }
 
 // --------------- API helpers ---------------
