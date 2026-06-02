@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -271,6 +271,14 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const failedPrepState = view.prepTaskUiState({ status: "failed" });
             if (failedPrepState.hint.text !== "执行失败：数据处理" || failedPrepState.hint.className !== "hint-box status-fail") {
               throw new Error(`failed prep task fallback mismatch: ${JSON.stringify(failedPrepState)}`);
+            }
+            const prepErrorState = view.prepTaskErrorUiState(new Error("轮询失败"));
+            if (prepErrorState.hint.text !== "轮询失败" || prepErrorState.hint.className !== "hint-box status-fail" || prepErrorState.log !== null) {
+              throw new Error(`prep task error state mismatch: ${JSON.stringify(prepErrorState)}`);
+            }
+            const prepStepRunning = view.prepStepRunningStatus({ done: true, message: "旧消息" });
+            if (!prepStepRunning.done || !prepStepRunning.running || prepStepRunning.message !== "正在执行，请看下方日志。") {
+              throw new Error(`prep step running status mismatch: ${JSON.stringify(prepStepRunning)}`);
             }
 
             const importBlock = view.renderInputCheckImportBlock({

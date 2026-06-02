@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3965,14 +3965,24 @@ function updatePrepTaskUi(task) {
   const logBox = $("#wz-pipeline-task-log");
   if (!hint || !logBox || !task) return;
   const uiState = window.HBVStudioDataPrepView.prepTaskUiState(task);
-  hint.style.display = uiState.hint.visible ? "" : "none";
-  hint.textContent = uiState.hint.text;
-  hint.className = uiState.hint.className;
-  if (uiState.log.visible) {
-    logBox.style.display = "";
-    setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
-  } else {
-    logBox.style.display = "none";
+  applyPrepTaskUiState(uiState);
+}
+
+function applyPrepTaskUiState(uiState = {}) {
+  const hint = $("#wz-pipeline-task-hint");
+  const logBox = $("#wz-pipeline-task-log");
+  if (uiState.hint && hint) {
+    hint.style.display = uiState.hint.visible ? "" : "none";
+    hint.textContent = uiState.hint.text;
+    hint.className = uiState.hint.className;
+  }
+  if (uiState.log && logBox) {
+    if (uiState.log.visible) {
+      logBox.style.display = "";
+      setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
+    } else {
+      logBox.style.display = "none";
+    }
   }
 }
 
@@ -4000,12 +4010,7 @@ async function pollPrepTask(taskId) {
     } catch (err) {
       stopPrepTaskPolling();
       state.activePrepTaskId = "";
-      const hint = $("#wz-pipeline-task-hint");
-      if (hint) {
-        hint.style.display = "";
-        hint.textContent = err.message;
-        hint.className = "hint-box status-fail";
-      }
+      applyPrepTaskUiState(window.HBVStudioDataPrepView.prepTaskErrorUiState(err));
     }
   };
   await tick();
@@ -4027,11 +4032,7 @@ async function runPrepStep(stepId, { overwrite = false } = {}) {
     showToast(`已启动：${payload.task.label}`);
     await loadTasks();
     if (payload.task) {
-      state.prepStatus[stepId] = {
-        ...(state.prepStatus[stepId] || {}),
-        running: true,
-        message: "正在执行，请看下方日志。",
-      };
+      state.prepStatus[stepId] = window.HBVStudioDataPrepView.prepStepRunningStatus(state.prepStatus[stepId]);
       renderPrepSteps();
       updatePrepTaskUi(payload.task);
       await pollPrepTask(payload.task.id);

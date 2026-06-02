@@ -438,6 +438,26 @@
     };
   }
 
+  function prepTaskErrorUiState(error = {}) {
+    const message = String(error?.message || error || "按步骤处理执行失败");
+    return {
+      hint: {
+        visible: true,
+        text: message,
+        className: "hint-box status-fail",
+      },
+      log: null,
+    };
+  }
+
+  function prepStepRunningStatus(existing = {}) {
+    return {
+      ...(existing || {}),
+      running: true,
+      message: "正在执行，请看下方日志。",
+    };
+  }
+
   function inputCheckReadyHeadline(stage = "calibration") {
     if (stage === "calibration") return "所有率定所需数据已就位，可以进入率定！";
     if (stage === "quick_test") return "输入预核算所需数据已就位，可以进行限定时段前向计算。";
@@ -590,6 +610,8 @@
     meteoImportErrorUiState,
     meteoImportUiState,
     prepPanelSummary,
+    prepStepRunningStatus,
+    prepTaskErrorUiState,
     prepTaskUiState,
     renderBootstrapStatus,
     renderInputCheckError,
