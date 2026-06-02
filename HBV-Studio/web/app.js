@@ -107,6 +107,7 @@ const frontendModuleContracts = [
     global: "HBVStudioEventMode",
     exports: [
       "floodEventEvaluation",
+      "floodEventMetricItems",
       "floodEventObjectiveText",
       "floodEventRows",
       "floodEventStatusText",
@@ -2286,18 +2287,6 @@ function iceContributionDetailText(analysis) {
 function formatMetricValue(value, digits = 4, suffix = "") {
   const num = Number(value);
   return Number.isFinite(num) ? `${formatNumber(num, digits)}${suffix}` : "—";
-}
-
-function floodEventEvaluation(meta = {}) {
-  return window.HBVStudioEventMode.floodEventEvaluation(meta);
-}
-
-function floodEventStatusText(evaluation = {}) {
-  return window.HBVStudioEventMode.floodEventStatusText(evaluation);
-}
-
-function floodEventObjectiveText(evaluation = {}) {
-  return window.HBVStudioEventMode.floodEventObjectiveText(evaluation, { formatNumber });
 }
 
 function floodEventRows(meta = {}) {
@@ -5038,7 +5027,6 @@ function renderRunDetail(data) {
 }
 
 function updateMetricsStrip(cal, val, meta) {
-  const floodEval = floodEventEvaluation(meta);
   const items = [
     { l: "模式", v: profileLabel(meta.calibration_profile) },
     { l: "步长", v: `${formatNumber(meta.time_config?.time_step_hours, 0)} 小时` },
@@ -5047,10 +5035,7 @@ function updateMetricsStrip(cal, val, meta) {
     { l: "率定 KGE 综合效率", v: formatNumber(cal.kge, 4) },
     { l: "率定水量偏差", v: `${formatNumber(cal.pbias, 2)}%` },
   ];
-  if (floodEval?.enabled) {
-    items.push({ l: "洪水事件", v: floodEventStatusText(floodEval) });
-    items.push({ l: "事件目标值", v: floodEventObjectiveText(floodEval) });
-  }
+  items.push(...window.HBVStudioEventMode.floodEventMetricItems(meta, { formatNumber }));
   $("#results-metric-strip").innerHTML = window.HBVStudioResultsView.renderMetricStrip(items, { escapeHtml });
 }
 

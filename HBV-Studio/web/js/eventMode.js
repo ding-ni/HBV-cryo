@@ -99,6 +99,15 @@
     return rows;
   }
 
+  function floodEventMetricItems(meta = {}, helpers = {}) {
+    const evaluation = floodEventEvaluation(meta);
+    if (!evaluation?.enabled) return [];
+    return [
+      { l: "洪水事件", v: floodEventStatusText(evaluation) },
+      { l: "事件目标值", v: floodEventObjectiveText(evaluation, helpers) },
+    ];
+  }
+
   function eventChartName(event = {}, index = 0) {
     const name = String(event?.name || "").trim();
     if (name) return name;
@@ -405,6 +414,7 @@
 
   window.HBVStudioEventMode = {
     floodEventEvaluation,
+    floodEventMetricItems,
     floodEventObjectiveText,
     floodEventRows,
     floodEventStatusText,

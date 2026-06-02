@@ -80,6 +80,18 @@ class FrontendEventModeTests(unittest.TestCase):
               throw new Error(`unexpected overflow row: ${JSON.stringify(more)}`);
             }
 
+            const metricItems = eventMode.floodEventMetricItems(meta);
+            if (metricItems.length !== 2) throw new Error(`unexpected metric item count: ${metricItems.length}`);
+            if (metricItems[0].l !== "洪水事件" || metricItems[0].v !== "事件目标函数：2/3 场有效") {
+              throw new Error(`unexpected flood event metric item: ${JSON.stringify(metricItems[0])}`);
+            }
+            if (metricItems[1].l !== "事件目标值" || metricItems[1].v !== "0.1235") {
+              throw new Error(`unexpected flood event objective metric item: ${JSON.stringify(metricItems[1])}`);
+            }
+            if (eventMode.floodEventMetricItems({}).length !== 0) {
+              throw new Error("disabled event evaluation should not add metric strip items");
+            }
+
             if (eventMode.floodEventStatusText({ enabled: false }) !== "未启用") {
               throw new Error("disabled status mismatch");
             }
