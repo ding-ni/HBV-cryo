@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportFields || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -278,6 +278,14 @@ class FrontendResultsViewTests(unittest.TestCase):
             const fields = results.renderRunExportFields([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
             if (!fields.includes('data-run-export-field="q&lt;sim&gt;"') || !fields.includes("checked")) {
               throw new Error("export fields should keep keys and checked state");
+            }
+            const defaultExportFields = results.runExportFields();
+            if (defaultExportFields.map(field => field.key).join("|") !== "q_sim|q_obs|q_rain|q_snow|q_ice" || defaultExportFields.some(field => !field.checked)) {
+              throw new Error(`unexpected default export fields: ${JSON.stringify(defaultExportFields)}`);
+            }
+            const boundaryExportFields = results.runExportFields({ boundaryEnabled: true });
+            if (boundaryExportFields.map(field => `${field.key}:${field.checked ? "Y" : "N"}`).join("|") !== "q_sim:Y|q_obs:Y|q_rain:Y|q_snow:Y|q_ice:Y|q_boundary_inflow:N") {
+              throw new Error(`unexpected boundary export fields: ${JSON.stringify(boundaryExportFields)}`);
             }
 
             const dailyExport = results.runExportPanelState({

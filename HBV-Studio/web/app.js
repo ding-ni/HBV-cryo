@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportFields", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -337,15 +337,6 @@ const MANUAL_GROUP_META = {
     guide: "第三阶段才释放 ICE_FACTOR 和冰川温度修正相关项，只允许其解释晚融季、暖季、雪耗尽后的额外径流。",
   },
 };
-
-const RUN_EXPORT_FIELDS = [
-  { key: "q_sim", label: "模拟总流量", checked: true },
-  { key: "q_obs", label: "观测流量", checked: true },
-  { key: "q_rain", label: "降雨产流", checked: true },
-  { key: "q_snow", label: "融雪流量", checked: true },
-  { key: "q_ice", label: "裸冰融化流量", checked: true },
-  { key: "q_boundary_inflow", label: "边界入流", checked: false },
-];
 
 const CURRENT_OBJECTIVE_FAMILY = "daily_unified_professional_v1";
 const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
@@ -4967,7 +4958,9 @@ function updateMetricsStrip(cal, val, meta) {
 function renderRunExportFields() {
   const host = $("#run-export-fields");
   if (!host) return;
-  const fields = RUN_EXPORT_FIELDS.filter(field => field.key !== "q_boundary_inflow" || boundaryEnabledFromMeta(state.currentRun?.metadata || {}));
+  const fields = window.HBVStudioResultsView.runExportFields({
+    boundaryEnabled: boundaryEnabledFromMeta(state.currentRun?.metadata || {}),
+  });
   host.innerHTML = window.HBVStudioResultsView.renderRunExportFields(fields, { escapeHtml });
 }
 

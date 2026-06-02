@@ -305,6 +305,15 @@
     residual: "#b91c1c",
   });
 
+  const RUN_EXPORT_FIELDS = Object.freeze([
+    { key: "q_sim", label: "模拟总流量", checked: true },
+    { key: "q_obs", label: "观测流量", checked: true },
+    { key: "q_rain", label: "降雨产流", checked: true },
+    { key: "q_snow", label: "融雪流量", checked: true },
+    { key: "q_ice", label: "裸冰融化流量", checked: true },
+    { key: "q_boundary_inflow", label: "边界入流", checked: false },
+  ]);
+
   function defaultHydrologySummaryValue(summary = {}, key, fallback = "—") {
     const value = summary?.[key];
     return value === undefined || value === null || value === "" ? fallback : value;
@@ -570,6 +579,13 @@
     `).join("");
   }
 
+  function runExportFields(options = {}) {
+    const boundaryEnabled = Boolean(options.boundaryEnabled);
+    return RUN_EXPORT_FIELDS
+      .filter(field => field.key !== "q_boundary_inflow" || boundaryEnabled)
+      .map(field => ({ ...field }));
+  }
+
   function resultChartPayloads(data = {}, options = {}, helpers = {}) {
     const palette = helpers.colors || DEFAULT_RESULT_CHART_COLORS;
     const series = data?.series || {};
@@ -683,6 +699,7 @@
     resultChartPayloads,
     resultsFilterBreakdown,
     resultsFilterHint,
+    runExportFields,
     runExportPanelState,
     runListState,
     runProfileValue,
