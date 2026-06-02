@@ -161,22 +161,9 @@ from services.meteo_config import (
 )
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.station_precip import detect_table_column as build_station_detect_table_column
-from services.station_precip import detect_table_time_column as build_station_detect_table_time_column
-from services.station_precip import index_display_range as build_station_index_display_range
-from services.station_precip import load_station_metadata_table as build_load_station_metadata_table
-from services.station_precip import load_station_precip_table as build_load_station_precip_table
-from services.station_precip import max_consecutive_true as build_max_consecutive_true
-from services.station_precip import read_station_csv as build_read_station_csv
-from services.station_precip import station_count_text as build_station_count_text
-from services.station_precip import station_precip_analysis_items as build_station_precip_analysis_items
-from services.station_precip import station_precip_analysis_status as build_station_precip_analysis_status
-from services.station_precip import station_precip_event_coverage_summary as build_station_precip_event_coverage_summary
-from services.station_precip import station_precip_expected_coverage as build_station_precip_expected_coverage
-from services.station_precip import station_precip_id_match_summary as build_station_precip_id_match_summary
+from services.station_precip import StationPrecipAnalysisContext
+from services.station_precip import analyze_station_precip_inputs as build_analyze_station_precip_inputs
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
-from services.station_precip import station_precip_quality_summary as build_station_precip_quality_summary
-from services.station_precip import station_precip_task_context_summary as build_station_precip_task_context_summary
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
 from services.runs import RunPortablePathContext, RunWorkspaceConfigReferenceContext
@@ -2520,18 +2507,6 @@ def check_precip_strategy_outputs(config: dict[str, Any], precip_source: Any = N
     return count > 0, f"{label}文件数：{count}", count
 
 
-def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
-    return build_station_detect_table_column(columns, candidates)
-
-
-def _detect_table_time_column(frame: pd.DataFrame) -> str | None:
-    return build_station_detect_table_time_column(frame)
-
-
-def _read_station_csv(path: Path) -> pd.DataFrame:
-    return build_read_station_csv(path)
-
-
 def _time_range_from_config(config: dict[str, Any]) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
     time_cfg = dict(config.get("时间", {}) or {})
     start_raw = str(time_cfg.get("预热开始") or time_cfg.get("率定开始") or "").strip()
@@ -2583,354 +2558,25 @@ def input_time_basis_ui_summary(
     )
 
 
-def _load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:
-    return build_load_station_precip_table(path)
-
-
-def _load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, str | None]]:
-    return build_load_station_metadata_table(path)
-
-
-def _station_precip_mode_label(mode: str) -> str:
-    return build_station_precip_mode_label(mode)
-
-
-def _index_display_range(index: pd.DatetimeIndex | None, step_hours: float) -> tuple[str, str, int]:
-    return build_station_index_display_range(index, step_hours)
-
-
-def _max_consecutive_true(values: Any) -> int:
-    return build_max_consecutive_true(values)
-
-
-def _station_count_text(min_count: int | None, mean_count: float | None) -> str:
-    return build_station_count_text(min_count, mean_count)
-
-
-def _station_precip_id_match_summary(
-    station_series: pd.DataFrame,
-    station_meta: pd.DataFrame,
-    meta_columns: dict[str, str | None],
-) -> dict[str, Any]:
-    return build_station_precip_id_match_summary(station_series, station_meta, meta_columns)
-
-
-def _station_precip_expected_coverage(
-    matched_series: pd.DataFrame,
-    expected_index: pd.DatetimeIndex | None,
-    *,
-    mode: str,
-    time_basis_label: str,
-) -> dict[str, Any]:
-    return build_station_precip_expected_coverage(
-        matched_series,
-        expected_index,
-        mode=mode,
-        time_basis_label=time_basis_label,
-    )
-
-
-def _station_precip_event_coverage_summary(
-    matched_series: pd.DataFrame,
-    event_info: dict[str, Any] | None,
-    *,
-    step_hours: float,
-    mode: str,
-) -> dict[str, Any]:
-    return build_station_precip_event_coverage_summary(
-        matched_series,
-        event_info,
-        step_hours=step_hours,
-        mode=mode,
-    )
-
-
-def _station_precip_quality_summary(
-    quality_series: pd.DataFrame,
-    matched_ids: list[str],
-    *,
-    step_hours: float,
-) -> dict[str, Any]:
-    return build_station_precip_quality_summary(
-        quality_series,
-        matched_ids,
-        step_hours=step_hours,
-    )
-
-
-def _station_precip_analysis_status(missing: list[Any], warnings: list[Any]) -> dict[str, str]:
-    return build_station_precip_analysis_status(missing, warnings)
-
-
-def _station_precip_analysis_items(**kwargs: Any) -> list[dict[str, Any]]:
-    return build_station_precip_analysis_items(**kwargs)
-
-
-def _station_precip_task_context_summary(
-    *,
-    mode: str,
-    context: str,
-    time_basis: str,
-    time_basis_label: str,
-    step_hours: float,
-    expected_index: pd.DatetimeIndex | None,
-    expected_count: int,
-    covered_count: int,
-    coverage_ratio: float | None,
-    zero_available_steps: int,
-    max_consecutive_zero_steps: int = 0,
-    min_available_station_count: int | None = None,
-    mean_available_station_count: float | None = None,
-    station_start: Any = None,
-    station_end: Any = None,
-    event_info: dict[str, Any] | None = None,
-    event_coverage: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    return build_station_precip_task_context_summary(
-        mode=mode,
-        context=context,
-        time_basis=time_basis,
-        time_basis_label=time_basis_label,
-        step_hours=step_hours,
-        expected_index=expected_index,
-        expected_count=expected_count,
-        covered_count=covered_count,
-        coverage_ratio=coverage_ratio,
-        zero_available_steps=zero_available_steps,
-        max_consecutive_zero_steps=max_consecutive_zero_steps,
-        min_available_station_count=min_available_station_count,
-        mean_available_station_count=mean_available_station_count,
-        station_start=station_start,
-        station_end=station_end,
-        event_info=event_info,
-        event_coverage=event_coverage,
-    )
-
-
 def analyze_station_precip_inputs(
     config: dict[str, Any],
     *,
     step_hours: float | None = None,
     context: str = "calibration",
 ) -> dict[str, Any]:
-    meteo = dict(config.get(METEO_KEY, {}) or {})
-    mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip() or "grid_only"
-    if mode == "grid_only":
-        return {
-            "enabled": False,
-            "mode": mode,
-            "status": "ok",
-            "summary": "当前为格点基线模式，未启用站点降水订正或泰森分配。",
-            "items": [],
-            "warnings": [],
-            "missing": [],
-            "matched_station_count": 0,
-        }
-
-    step = float(step_hours if step_hours is not None else normalize_time_step_hours(config.get("时间步长_小时", 24.0)))
-    runtime_context = str(context or "calibration").strip().lower() or "calibration"
-    time_basis = task_time_basis(config, context=runtime_context)
-    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
-    event_info = normalized_flood_events(config, step_hours=step) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
-    expected_index = build_expected_forcing_index(config, context=runtime_context)
-    station_prec_raw = str(meteo.get(METEO_STATION_PREC_KEY, "") or "").strip()
-    station_meta_raw = str(meteo.get(METEO_STATION_META_KEY, "") or "").strip()
-    station_prec_path = _resolve_config_related_path(config, station_prec_raw)
-    station_meta_path = _resolve_config_related_path(config, station_meta_raw)
-    missing: list[str] = []
-    warnings: list[str] = []
-    items: list[dict[str, Any]] = []
-
-    if not station_prec_raw:
-        missing.append("降水方案需要 站点降水_csv。")
-    elif station_prec_path is None or not station_prec_path.exists():
-        missing.append(f"站点降水文件不存在：{station_prec_raw}")
-    if not station_meta_raw:
-        missing.append("降水方案需要 站点信息_csv。")
-    elif station_meta_path is None or not station_meta_path.exists():
-        missing.append(f"站点信息文件不存在：{station_meta_raw}")
-    if missing:
-        return {
-            "enabled": True,
-            "mode": mode,
-            "status": "fail",
-            "summary": "站点降水方案缺少必要输入文件。",
-            "items": [
-                {"label": "站点降水文件", "value": "已提供" if station_prec_path is not None and station_prec_path.exists() else "缺失", "status": "ok" if station_prec_path is not None and station_prec_path.exists() else "fail"},
-                {"label": "站点信息文件", "value": "已提供" if station_meta_path is not None and station_meta_path.exists() else "缺失", "status": "ok" if station_meta_path is not None and station_meta_path.exists() else "fail"},
-            ],
-            "warnings": warnings,
-            "missing": missing,
-            "matched_station_count": 0,
-            "time_basis": time_basis,
-            "time_basis_label": time_basis_label,
-            "task_context": _station_precip_task_context_summary(
-                mode=mode,
-                context=runtime_context,
-                time_basis=time_basis,
-                time_basis_label=time_basis_label,
-                step_hours=step,
-                expected_index=expected_index,
-                expected_count=int(len(expected_index)) if expected_index is not None else 0,
-                covered_count=0,
-                coverage_ratio=None,
-                zero_available_steps=0,
-                event_info=event_info,
-                event_coverage=[],
-            ),
-        }
-
-    assert station_prec_path is not None and station_meta_path is not None
-    try:
-        station_series, station_format, _ = _load_station_precip_table(station_prec_path)
-        station_meta, meta_columns = _load_station_metadata_table(station_meta_path)
-    except Exception as exc:
-        return {
-            "enabled": True,
-            "mode": mode,
-            "status": "fail",
-            "summary": f"站点降水资料读取失败：{exc}",
-            "items": [{"label": "读取状态", "value": str(exc), "status": "fail"}],
-            "warnings": warnings,
-            "missing": [f"站点降水资料读取失败：{exc}"],
-            "matched_station_count": 0,
-            "time_basis": time_basis,
-            "time_basis_label": time_basis_label,
-            "task_context": _station_precip_task_context_summary(
-                mode=mode,
-                context=runtime_context,
-                time_basis=time_basis,
-                time_basis_label=time_basis_label,
-                step_hours=step,
-                expected_index=expected_index,
-                expected_count=int(len(expected_index)) if expected_index is not None else 0,
-                covered_count=0,
-                coverage_ratio=None,
-                zero_available_steps=0,
-                event_info=event_info,
-                event_coverage=[],
-            ),
-        }
-
-    station_series = station_series.loc[station_series.index.notna()].copy()
-    station_series = station_series[~station_series.index.duplicated(keep="first")].sort_index()
-    match_info = _station_precip_id_match_summary(station_series, station_meta, meta_columns)
-    matched_ids = list(match_info["matched_ids"])
-    missing_in_precip = list(match_info["missing_in_precip"])
-    missing_in_meta = list(match_info["missing_in_meta"])
-    station_count = int(match_info["station_count"])
-    precip_station_count = int(match_info["precip_station_count"])
-    missing.extend(match_info["missing"])
-    warnings.extend(match_info["warnings"])
-
-    matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
-    coverage_info = _station_precip_expected_coverage(
-        matched_series,
-        expected_index,
-        mode=mode,
-        time_basis_label=time_basis_label,
+    analysis_context = StationPrecipAnalysisContext(
+        resolve_config_related_path=_resolve_config_related_path,
+        normalize_time_step_hours=normalize_time_step_hours,
+        task_time_basis=task_time_basis,
+        normalized_flood_events=normalized_flood_events,
+        build_expected_forcing_index=build_expected_forcing_index,
     )
-    expected_count = int(coverage_info["expected_count"])
-    covered_count = int(coverage_info["covered_count"])
-    coverage_ratio = coverage_info["coverage_ratio"]
-    zero_available_steps = int(coverage_info["zero_available_steps"])
-    max_consecutive_zero_steps = int(coverage_info["max_consecutive_zero_steps"])
-    min_available_station_count = coverage_info["min_available_station_count"]
-    mean_available_station_count = coverage_info["mean_available_station_count"]
-    quality_series = coverage_info["quality_series"]
-    missing.extend(coverage_info["missing"])
-    warnings.extend(coverage_info["warnings"])
-    event_info_summary = _station_precip_event_coverage_summary(
-        matched_series,
-        event_info,
-        step_hours=step,
-        mode=mode,
+    return build_analyze_station_precip_inputs(
+        config,
+        analysis_context,
+        step_hours=step_hours,
+        context=context,
     )
-    event_coverage = list(event_info_summary["event_coverage"])
-    missing.extend(event_info_summary["missing"])
-    warnings.extend(event_info_summary["warnings"])
-
-    quality_info = _station_precip_quality_summary(quality_series, matched_ids, step_hours=step)
-    negative_count = int(quality_info["negative_count"])
-    extreme_count = int(quality_info["extreme_count"])
-    max_missing_rate = float(quality_info["max_missing_rate"])
-    station_missing_rates = list(quality_info["station_missing_rates"])
-    warnings.extend(quality_info["warnings"])
-
-    status_info = _station_precip_analysis_status(missing, warnings)
-    status = status_info["status"]
-    summary = status_info["summary"]
-
-    station_start = station_series.index.min() if len(station_series.index) else None
-    station_end = station_series.index.max() if len(station_series.index) else None
-    task_context = _station_precip_task_context_summary(
-        mode=mode,
-        context=runtime_context,
-        time_basis=time_basis,
-        time_basis_label=time_basis_label,
-        step_hours=step,
-        expected_index=expected_index,
-        expected_count=expected_count,
-        covered_count=covered_count,
-        coverage_ratio=coverage_ratio,
-        zero_available_steps=zero_available_steps,
-        max_consecutive_zero_steps=max_consecutive_zero_steps,
-        min_available_station_count=min_available_station_count,
-        mean_available_station_count=mean_available_station_count,
-        station_start=station_start,
-        station_end=station_end,
-        event_info=event_info,
-        event_coverage=event_coverage,
-    )
-    items = _station_precip_analysis_items(
-        mode=mode,
-        task_context=task_context,
-        time_basis_label=time_basis_label,
-        matched_station_count=len(matched_ids),
-        station_count=station_count,
-        missing_in_precip=missing_in_precip,
-        missing_in_meta=missing_in_meta,
-        station_format=station_format,
-        station_start=station_start,
-        station_end=station_end,
-        step_hours=step,
-        coverage_ratio=coverage_ratio,
-        covered_count=covered_count,
-        zero_available_steps=zero_available_steps,
-        max_consecutive_zero_steps=max_consecutive_zero_steps,
-        min_available_station_count=min_available_station_count,
-        mean_available_station_count=mean_available_station_count,
-        max_missing_rate=max_missing_rate,
-        negative_count=negative_count,
-        extreme_count=extreme_count,
-        event_coverage=event_coverage,
-    )
-    return {
-        "enabled": True,
-        "mode": mode,
-        "status": status,
-        "summary": summary,
-        "items": items,
-        "warnings": warnings,
-        "missing": missing,
-        "matched_station_count": len(matched_ids),
-        "station_count": station_count,
-        "precip_station_count": precip_station_count,
-        "missing_in_precip": missing_in_precip[:20],
-        "missing_in_meta": missing_in_meta[:20],
-        "expected_time_steps": expected_count,
-        "covered_time_steps": covered_count,
-        "coverage_ratio": coverage_ratio,
-        "zero_available_steps": zero_available_steps,
-        "max_consecutive_zero_steps": max_consecutive_zero_steps,
-        "min_available_station_count": min_available_station_count,
-        "mean_available_station_count": mean_available_station_count,
-        "station_missing_rates": station_missing_rates,
-        "time_basis": time_basis,
-        "time_basis_label": time_basis_label,
-        "task_context": task_context,
-        "event_coverage": event_coverage,
-    }
 
 
 def check_station_precip_strategy(config: dict[str, Any]) -> tuple[bool, str, int]:
@@ -6403,7 +6049,7 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         profile_labels=PROFILE_LABELS,
         objective_label=_objective_label_zh,
         precip_source_label=display_precip_source_label,
-        station_precip_mode_label=_station_precip_mode_label,
+        station_precip_mode_label=build_station_precip_mode_label,
         normalize_time_step_hours=normalize_time_step_hours,
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,

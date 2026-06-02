@@ -13,6 +13,8 @@ if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
 from services.station_precip import (  # noqa: E402
+    StationPrecipAnalysisContext,
+    analyze_station_precip_inputs,
     format_time_for_check,
     index_display_range,
     load_station_metadata_table,
@@ -97,6 +99,53 @@ class StationPrecipServiceTests(unittest.TestCase):
 
         self.assertEqual(columns, {"id": "station_id", "lon": "lon", "lat": "lat"})
         self.assertEqual(table["_station_id"].tolist(), ["S1", "S2"])
+
+    def test_analyze_station_precip_inputs_service_builds_complete_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            precip_path = root / "station_precip.csv"
+            meta_path = root / "station_meta.csv"
+            pd.DataFrame(
+                [
+                    {"time": "2026-01-01", "S1": 1.0, "S2": 2.0},
+                    {"time": "2026-01-02", "S1": 1.5, "S2": 2.5},
+                ]
+            ).to_csv(precip_path, index=False, encoding="utf-8-sig")
+            pd.DataFrame(
+                [
+                    {"station_id": "S1", "lon": 92.1, "lat": 34.1},
+                    {"station_id": "S2", "lon": 92.2, "lat": 34.2},
+                ]
+            ).to_csv(meta_path, index=False, encoding="utf-8-sig")
+
+            analysis_context = StationPrecipAnalysisContext(
+                resolve_config_related_path=lambda _config, raw: root / str(raw) if raw else None,
+                normalize_time_step_hours=lambda value: float(value),
+                task_time_basis=lambda _config, context="calibration": "continuous",
+                normalized_flood_events=lambda _config, step_hours=None: {},
+                build_expected_forcing_index=lambda _config, context="calibration": pd.date_range("2026-01-01", periods=2, freq="1D"),
+            )
+            result = analyze_station_precip_inputs(
+                {
+                    "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+                    "\u6c14\u8c61\u7b56\u7565": {
+                        "\u964d\u6c34\u65b9\u6848": "thiessen_station_only",
+                        "\u7ad9\u70b9\u964d\u6c34_csv": "station_precip.csv",
+                        "\u7ad9\u70b9\u4fe1\u606f_csv": "station_meta.csv",
+                    },
+                },
+                analysis_context,
+            )
+
+        self.assertTrue(result["enabled"])
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["matched_station_count"], 2)
+        self.assertEqual(result["station_count"], 2)
+        self.assertEqual(result["coverage_ratio"], 1.0)
+        self.assertEqual(result["zero_available_steps"], 0)
+        self.assertEqual(result["station_missing_rates"], [{"station_id": "S1", "missing_rate": 0.0}, {"station_id": "S2", "missing_rate": 0.0}])
+        self.assertEqual(result["task_context"]["status"], "ok")
+        self.assertEqual(result["items"][0]["value"], "\u7ad9\u70b9\u6cf0\u68ee\u5206\u914d")
 
     def test_station_precip_id_match_summary_reports_mismatch_and_coordinate_risk(self) -> None:
         station_series = pd.DataFrame(

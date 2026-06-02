@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
 
-from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, event_date_range
+from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, TIME_BASIS_LABELS, event_date_range
+from services.meteo_config import METEO_KEY, METEO_PRECIP_MODE_KEY, METEO_STATION_META_KEY, METEO_STATION_PREC_KEY
+
+
+@dataclass(frozen=True)
+class StationPrecipAnalysisContext:
+    resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
+    normalize_time_step_hours: Callable[[Any], float]
+    task_time_basis: Callable[..., str]
+    normalized_flood_events: Callable[..., dict[str, Any]]
+    build_expected_forcing_index: Callable[..., pd.DatetimeIndex | None]
 
 
 def detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -414,6 +425,233 @@ def station_precip_analysis_items(
             }
         )
     return items
+
+
+def analyze_station_precip_inputs(
+    config: dict[str, Any],
+    analysis_context: StationPrecipAnalysisContext,
+    *,
+    step_hours: float | None = None,
+    context: str = "calibration",
+) -> dict[str, Any]:
+    meteo = dict(config.get(METEO_KEY, {}) or {})
+    mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip() or "grid_only"
+    if mode == "grid_only":
+        return {
+            "enabled": False,
+            "mode": mode,
+            "status": "ok",
+            "summary": "\u5f53\u524d\u4e3a\u683c\u70b9\u57fa\u7ebf\u6a21\u5f0f\uff0c\u672a\u542f\u7528\u7ad9\u70b9\u964d\u6c34\u8ba2\u6b63\u6216\u6cf0\u68ee\u5206\u914d\u3002",
+            "items": [],
+            "warnings": [],
+            "missing": [],
+            "matched_station_count": 0,
+        }
+
+    step = float(step_hours if step_hours is not None else analysis_context.normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0)))
+    runtime_context = str(context or "calibration").strip().lower() or "calibration"
+    time_basis = analysis_context.task_time_basis(config, context=runtime_context)
+    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "\u5f53\u524d\u4efb\u52a1\u65f6\u6bb5")
+    event_info = analysis_context.normalized_flood_events(config, step_hours=step) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
+    expected_index = analysis_context.build_expected_forcing_index(config, context=runtime_context)
+    station_prec_raw = str(meteo.get(METEO_STATION_PREC_KEY, "") or "").strip()
+    station_meta_raw = str(meteo.get(METEO_STATION_META_KEY, "") or "").strip()
+    station_prec_path = analysis_context.resolve_config_related_path(config, station_prec_raw)
+    station_meta_path = analysis_context.resolve_config_related_path(config, station_meta_raw)
+    missing: list[str] = []
+    warnings: list[str] = []
+
+    if not station_prec_raw:
+        missing.append("\u964d\u6c34\u65b9\u6848\u9700\u8981 \u7ad9\u70b9\u964d\u6c34_csv\u3002")
+    elif station_prec_path is None or not station_prec_path.exists():
+        missing.append(f"\u7ad9\u70b9\u964d\u6c34\u6587\u4ef6\u4e0d\u5b58\u5728\uff1a{station_prec_raw}")
+    if not station_meta_raw:
+        missing.append("\u964d\u6c34\u65b9\u6848\u9700\u8981 \u7ad9\u70b9\u4fe1\u606f_csv\u3002")
+    elif station_meta_path is None or not station_meta_path.exists():
+        missing.append(f"\u7ad9\u70b9\u4fe1\u606f\u6587\u4ef6\u4e0d\u5b58\u5728\uff1a{station_meta_raw}")
+    if missing:
+        return {
+            "enabled": True,
+            "mode": mode,
+            "status": "fail",
+            "summary": "\u7ad9\u70b9\u964d\u6c34\u65b9\u6848\u7f3a\u5c11\u5fc5\u8981\u8f93\u5165\u6587\u4ef6\u3002",
+            "items": [
+                {"label": "\u7ad9\u70b9\u964d\u6c34\u6587\u4ef6", "value": "\u5df2\u63d0\u4f9b" if station_prec_path is not None and station_prec_path.exists() else "\u7f3a\u5931", "status": "ok" if station_prec_path is not None and station_prec_path.exists() else "fail"},
+                {"label": "\u7ad9\u70b9\u4fe1\u606f\u6587\u4ef6", "value": "\u5df2\u63d0\u4f9b" if station_meta_path is not None and station_meta_path.exists() else "\u7f3a\u5931", "status": "ok" if station_meta_path is not None and station_meta_path.exists() else "fail"},
+            ],
+            "warnings": warnings,
+            "missing": missing,
+            "matched_station_count": 0,
+            "time_basis": time_basis,
+            "time_basis_label": time_basis_label,
+            "task_context": station_precip_task_context_summary(
+                mode=mode,
+                context=runtime_context,
+                time_basis=time_basis,
+                time_basis_label=time_basis_label,
+                step_hours=step,
+                expected_index=expected_index,
+                expected_count=int(len(expected_index)) if expected_index is not None else 0,
+                covered_count=0,
+                coverage_ratio=None,
+                zero_available_steps=0,
+                event_info=event_info,
+                event_coverage=[],
+            ),
+        }
+
+    assert station_prec_path is not None and station_meta_path is not None
+    try:
+        station_series, station_format, _ = load_station_precip_table(station_prec_path)
+        station_meta, meta_columns = load_station_metadata_table(station_meta_path)
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "mode": mode,
+            "status": "fail",
+            "summary": f"\u7ad9\u70b9\u964d\u6c34\u8d44\u6599\u8bfb\u53d6\u5931\u8d25\uff1a{exc}",
+            "items": [{"label": "\u8bfb\u53d6\u72b6\u6001", "value": str(exc), "status": "fail"}],
+            "warnings": warnings,
+            "missing": [f"\u7ad9\u70b9\u964d\u6c34\u8d44\u6599\u8bfb\u53d6\u5931\u8d25\uff1a{exc}"],
+            "matched_station_count": 0,
+            "time_basis": time_basis,
+            "time_basis_label": time_basis_label,
+            "task_context": station_precip_task_context_summary(
+                mode=mode,
+                context=runtime_context,
+                time_basis=time_basis,
+                time_basis_label=time_basis_label,
+                step_hours=step,
+                expected_index=expected_index,
+                expected_count=int(len(expected_index)) if expected_index is not None else 0,
+                covered_count=0,
+                coverage_ratio=None,
+                zero_available_steps=0,
+                event_info=event_info,
+                event_coverage=[],
+            ),
+        }
+
+    station_series = station_series.loc[station_series.index.notna()].copy()
+    station_series = station_series[~station_series.index.duplicated(keep="first")].sort_index()
+    match_info = station_precip_id_match_summary(station_series, station_meta, meta_columns)
+    matched_ids = list(match_info["matched_ids"])
+    missing_in_precip = list(match_info["missing_in_precip"])
+    missing_in_meta = list(match_info["missing_in_meta"])
+    station_count = int(match_info["station_count"])
+    precip_station_count = int(match_info["precip_station_count"])
+    missing.extend(match_info["missing"])
+    warnings.extend(match_info["warnings"])
+
+    matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
+    coverage_info = station_precip_expected_coverage(
+        matched_series,
+        expected_index,
+        mode=mode,
+        time_basis_label=time_basis_label,
+    )
+    expected_count = int(coverage_info["expected_count"])
+    covered_count = int(coverage_info["covered_count"])
+    coverage_ratio = coverage_info["coverage_ratio"]
+    zero_available_steps = int(coverage_info["zero_available_steps"])
+    max_consecutive_zero_steps = int(coverage_info["max_consecutive_zero_steps"])
+    min_available_station_count = coverage_info["min_available_station_count"]
+    mean_available_station_count = coverage_info["mean_available_station_count"]
+    quality_series = coverage_info["quality_series"]
+    missing.extend(coverage_info["missing"])
+    warnings.extend(coverage_info["warnings"])
+
+    event_info_summary = station_precip_event_coverage_summary(
+        matched_series,
+        event_info,
+        step_hours=step,
+        mode=mode,
+    )
+    event_coverage = list(event_info_summary["event_coverage"])
+    missing.extend(event_info_summary["missing"])
+    warnings.extend(event_info_summary["warnings"])
+
+    quality_info = station_precip_quality_summary(quality_series, matched_ids, step_hours=step)
+    negative_count = int(quality_info["negative_count"])
+    extreme_count = int(quality_info["extreme_count"])
+    max_missing_rate = float(quality_info["max_missing_rate"])
+    station_missing_rates = list(quality_info["station_missing_rates"])
+    warnings.extend(quality_info["warnings"])
+
+    status_info = station_precip_analysis_status(missing, warnings)
+    status = status_info["status"]
+    summary = status_info["summary"]
+
+    station_start = station_series.index.min() if len(station_series.index) else None
+    station_end = station_series.index.max() if len(station_series.index) else None
+    task_context = station_precip_task_context_summary(
+        mode=mode,
+        context=runtime_context,
+        time_basis=time_basis,
+        time_basis_label=time_basis_label,
+        step_hours=step,
+        expected_index=expected_index,
+        expected_count=expected_count,
+        covered_count=covered_count,
+        coverage_ratio=coverage_ratio,
+        zero_available_steps=zero_available_steps,
+        max_consecutive_zero_steps=max_consecutive_zero_steps,
+        min_available_station_count=min_available_station_count,
+        mean_available_station_count=mean_available_station_count,
+        station_start=station_start,
+        station_end=station_end,
+        event_info=event_info,
+        event_coverage=event_coverage,
+    )
+    items = station_precip_analysis_items(
+        mode=mode,
+        task_context=task_context,
+        time_basis_label=time_basis_label,
+        matched_station_count=len(matched_ids),
+        station_count=station_count,
+        missing_in_precip=missing_in_precip,
+        missing_in_meta=missing_in_meta,
+        station_format=station_format,
+        station_start=station_start,
+        station_end=station_end,
+        step_hours=step,
+        coverage_ratio=coverage_ratio,
+        covered_count=covered_count,
+        zero_available_steps=zero_available_steps,
+        max_consecutive_zero_steps=max_consecutive_zero_steps,
+        min_available_station_count=min_available_station_count,
+        mean_available_station_count=mean_available_station_count,
+        max_missing_rate=max_missing_rate,
+        negative_count=negative_count,
+        extreme_count=extreme_count,
+        event_coverage=event_coverage,
+    )
+    return {
+        "enabled": True,
+        "mode": mode,
+        "status": status,
+        "summary": summary,
+        "items": items,
+        "warnings": warnings,
+        "missing": missing,
+        "matched_station_count": len(matched_ids),
+        "station_count": station_count,
+        "precip_station_count": precip_station_count,
+        "missing_in_precip": missing_in_precip[:20],
+        "missing_in_meta": missing_in_meta[:20],
+        "expected_time_steps": expected_count,
+        "covered_time_steps": covered_count,
+        "coverage_ratio": coverage_ratio,
+        "zero_available_steps": zero_available_steps,
+        "max_consecutive_zero_steps": max_consecutive_zero_steps,
+        "min_available_station_count": min_available_station_count,
+        "mean_available_station_count": mean_available_station_count,
+        "station_missing_rates": station_missing_rates,
+        "time_basis": time_basis,
+        "time_basis_label": time_basis_label,
+        "task_context": task_context,
+        "event_coverage": event_coverage,
+    }
 
 
 def station_precip_task_context_summary(
