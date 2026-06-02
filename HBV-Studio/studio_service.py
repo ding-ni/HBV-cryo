@@ -161,6 +161,11 @@ from services.meteo_config import (
 )
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
+from services.station_precip import index_display_range as build_station_index_display_range
+from services.station_precip import max_consecutive_true as build_max_consecutive_true
+from services.station_precip import station_count_text as build_station_count_text
+from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
+from services.station_precip import station_precip_task_context_summary as build_station_precip_task_context_summary
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
 from services.runs import RunPortablePathContext, RunWorkspaceConfigReferenceContext
@@ -2630,40 +2635,19 @@ def _load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, st
 
 
 def _station_precip_mode_label(mode: str) -> str:
-    return {
-        "grid_plus_station_bias": "格点 + 站点偏差订正",
-        "thiessen_station_only": "纯站点泰森分配",
-    }.get(str(mode or "").strip(), "站点降水方案")
+    return build_station_precip_mode_label(mode)
 
 
 def _index_display_range(index: pd.DatetimeIndex | None, step_hours: float) -> tuple[str, str, int]:
-    if index is None or len(index) <= 0:
-        return "", "", 0
-    return (
-        _format_time_for_check(index[0], step_hours),
-        _format_time_for_check(index[-1], step_hours),
-        int(len(index)),
-    )
+    return build_station_index_display_range(index, step_hours)
 
 
 def _max_consecutive_true(values: Any) -> int:
-    longest = 0
-    current = 0
-    for value in list(values):
-        if bool(value):
-            current += 1
-            longest = max(longest, current)
-        else:
-            current = 0
-    return int(longest)
+    return build_max_consecutive_true(values)
 
 
 def _station_count_text(min_count: int | None, mean_count: float | None) -> str:
-    if min_count is None:
-        return "未形成"
-    if mean_count is None:
-        return str(int(min_count))
-    return f"最少 {int(min_count)}，平均 {mean_count:.1f}"
+    return build_station_count_text(min_count, mean_count)
 
 
 def _station_precip_task_context_summary(
@@ -2686,114 +2670,25 @@ def _station_precip_task_context_summary(
     event_info: dict[str, Any] | None = None,
     event_coverage: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    start, end, expected_steps = _index_display_range(expected_index, step_hours)
-    station_start_text = _format_time_for_check(station_start, step_hours)
-    station_end_text = _format_time_for_check(station_end, step_hours)
-    coverage_text = (
-        f"{covered_count}/{expected_count} 步（{coverage_ratio * 100:.1f}%）"
-        if coverage_ratio is not None and expected_count > 0
-        else "未形成可核对时段"
+    return build_station_precip_task_context_summary(
+        mode=mode,
+        context=context,
+        time_basis=time_basis,
+        time_basis_label=time_basis_label,
+        step_hours=step_hours,
+        expected_index=expected_index,
+        expected_count=expected_count,
+        covered_count=covered_count,
+        coverage_ratio=coverage_ratio,
+        zero_available_steps=zero_available_steps,
+        max_consecutive_zero_steps=max_consecutive_zero_steps,
+        min_available_station_count=min_available_station_count,
+        mean_available_station_count=mean_available_station_count,
+        station_start=station_start,
+        station_end=station_end,
+        event_info=event_info,
+        event_coverage=event_coverage,
     )
-    events = list(event_coverage or [])
-    event_ok_count = sum(1 for item in events if str(item.get("status", "") or "") == "ok")
-    event_count = int(len(events))
-    event_valid_count = int((event_info or {}).get("valid_event_count", event_count) or 0)
-    if time_basis == TIME_BASIS_EVENT_WINDOWS and event_valid_count <= 0:
-        status = "fail"
-    elif expected_count <= 0:
-        status = "warn"
-    elif coverage_ratio is None or covered_count <= 0:
-        status = "fail"
-    elif coverage_ratio >= 0.99 and zero_available_steps == 0 and all(str(item.get("status", "")) == "ok" for item in events):
-        status = "ok"
-    elif mode == "thiessen_station_only" and zero_available_steps > 0:
-        status = "fail"
-    else:
-        status = "warn"
-
-    if time_basis == TIME_BASIS_EVENT_WINDOWS:
-        headline = (
-            f"当前按 {event_valid_count} 场洪水事件运行窗口核对站点降水，事件之间允许资料间断。"
-            if event_valid_count > 0
-            else "当前选择洪水事件窗口，但尚未形成可核对的有效事件。"
-        )
-        detail = (
-            "站点降水完整性只在事件运行窗口内评价；事件内部若出现无可用站点时间步，"
-            "纯站点泰森分配不能直接运行，格点订正也应作为风险处理。"
-        )
-        scope_value = f"{start} 至 {end}" if start and end else "未形成事件运行窗口"
-        items = [
-            {"label": "检查口径", "value": time_basis_label, "status": "ok" if event_valid_count > 0 else "fail"},
-            {"label": "事件覆盖", "value": f"{event_ok_count}/{event_count} 场完整" if event_count else "未形成", "status": "ok" if event_count and event_ok_count == event_count else "fail" if event_valid_count <= 0 else "warn"},
-            {"label": "运行窗口并集", "value": scope_value, "status": "ok" if expected_steps else "warn"},
-            {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "无站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-        ]
-    elif time_basis == TIME_BASIS_FORECAST_WINDOW or context == "forecast":
-        headline = (
-            f"当前按连续状态预报窗口核对站点降水：{start} 至 {end}。"
-            if start and end
-            else "当前按连续状态预报窗口核对站点降水，但预报起止时间尚未完整配置。"
-        )
-        detail = (
-            "预报运行主线读取已经制备好的降水栅格；如果未来降水来自站点资料，应先在气象准备流程中完成订正或泰森制图，"
-            "再将生成的预报窗口栅格交给连续状态预报。"
-        )
-        items = [
-            {"label": "检查口径", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
-            {"label": "预报窗口", "value": f"{start} 至 {end}" if start and end else "未完整配置", "status": "ok" if expected_steps else "warn"},
-            {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "warn"},
-            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "warn"},
-            {"label": "降水处理", "value": "预报页使用目标栅格，站点雨量先在气象准备中制图", "status": "ok"},
-        ]
-    else:
-        headline = (
-            f"当前按连续时段核对站点降水：{start} 至 {end}。"
-            if start and end
-            else "当前按连续时段核对站点降水，但预热、率定或验证时间尚未完整配置。"
-        )
-        detail = (
-            "连续模拟要求目标时间轴内站点降水连续参与；中间缺口会影响土壤含水量、积雪、水库状态和汇流记忆。"
-        )
-        items = [
-            {"label": "检查口径", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
-            {"label": "连续时段", "value": f"{start} 至 {end}" if start and end else "未完整配置", "status": "ok" if expected_steps else "warn"},
-            {"label": "覆盖步数", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
-            {"label": "可用站点", "value": _station_count_text(min_available_station_count, mean_available_station_count), "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "无站点时间步", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "最大连续无站点", "value": f"{max_consecutive_zero_steps} 步", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-        ]
-
-    return {
-        "schema": "station_precip_task_context_v1",
-        "context": context,
-        "mode": mode,
-        "mode_label": _station_precip_mode_label(mode),
-        "time_basis": time_basis,
-        "time_basis_label": time_basis_label,
-        "headline": headline,
-        "detail": detail,
-        "status": status,
-        "start": start,
-        "end": end,
-        "expected_steps": int(expected_steps),
-        "covered_steps": int(covered_count),
-        "coverage_ratio": coverage_ratio,
-        "zero_available_steps": int(zero_available_steps),
-        "max_consecutive_zero_steps": int(max_consecutive_zero_steps),
-        "min_available_station_count": min_available_station_count,
-        "mean_available_station_count": mean_available_station_count,
-        "station_time_range": {
-            "start": station_start_text,
-            "end": station_end_text,
-        },
-        "event_count": event_count,
-        "event_ok_count": int(event_ok_count),
-        "items": items,
-    }
 
 
 def analyze_station_precip_inputs(
