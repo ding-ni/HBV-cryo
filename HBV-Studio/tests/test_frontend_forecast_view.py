@@ -73,7 +73,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText", "pickForecastSourceRun"]) {
+            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText", "pickForecastSourceRun", "forecastSelectedSourceRun"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing source readiness export: ${name}`);
             }
 
@@ -101,6 +101,14 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (view.forecastRunReadinessText(runs[5]) !== "缺少起报状态") throw new Error("missing state text wrong");
 
             const samePath = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+            const selected = view.forecastSelectedSourceRun(candidates, "c:/RUNS/manual", { samePath });
+            if (selected?.id !== "manual-ready") throw new Error(`selected source mismatch: ${selected?.id}`);
+            if (view.forecastSelectedSourceRun(candidates, "C:/runs/missing", { samePath }) !== null) {
+              throw new Error("missing source path should not fallback");
+            }
+            if (view.forecastSelectedSourceRun(candidates, "", { samePath }) !== null) {
+              throw new Error("empty source path should not fallback");
+            }
             const preferred = view.pickForecastSourceRun(candidates, "c:/RUNS/manual", { samePath });
             if (preferred?.id !== "manual-ready") throw new Error(`preferred source mismatch: ${preferred?.id}`);
             const fallbackReady = view.pickForecastSourceRun(candidates, "", { samePath });

@@ -103,6 +103,14 @@
     return items.find(isReady) || items[0] || null;
   }
 
+  function forecastSelectedSourceRun(candidates = [], selectedPath = "", helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const items = Array.isArray(candidates) ? candidates : [];
+    const targetPath = String(selectedPath || "").trim();
+    if (!targetPath) return null;
+    return items.find(run => samePath(run?.path, targetPath)) || null;
+  }
+
   function forecastResultRuns(runs = [], helpers = {}) {
     const runTypeValue = helpers.runTypeValue || (run => run?.run_type || run?.kind || "");
     const items = Array.isArray(runs) ? runs : [];
@@ -1012,6 +1020,7 @@
     forecastResultRuns,
     forecastRunReady,
     forecastRunReadinessText,
+    forecastSelectedSourceRun,
     forecastSelectedResultRun,
     forecastSuggestedStart,
     forecastTimeComparable,

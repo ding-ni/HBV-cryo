@@ -166,6 +166,7 @@ const frontendModuleContracts = [
       "forecastResultRuns",
       "forecastRunReady",
       "forecastRunReadinessText",
+      "forecastSelectedSourceRun",
       "forecastSelectedResultRun",
       "forecastSuggestedStart",
       "forecastTimeComparable",
@@ -5495,7 +5496,7 @@ function forecastRunReadinessText(run) {
 
 function selectedForecastRun() {
   const selectedPath = $("#forecast-source-run")?.value || state.forecastSourceRunPath || "";
-  return forecastCandidateRuns().find(run => samePath(run.path, selectedPath)) || null;
+  return window.HBVStudioForecastView.forecastSelectedSourceRun(forecastCandidateRuns(), selectedPath, { samePath });
 }
 
 function forecastInputType(run) {
