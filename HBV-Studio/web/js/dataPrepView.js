@@ -97,6 +97,29 @@
     }).join("");
   }
 
+  function prepTaskUiState(task = {}) {
+    const progress = task?.ui_progress || {};
+    const logs = Array.isArray(task?.output) ? task.output : [];
+    const label = progress.label || task?.step_title || task?.label || "数据处理";
+    const stage = progress.stage || (
+      task?.status === "running" ? "正在执行" : task?.status === "completed" ? "已完成" : "执行失败"
+    );
+    const current = Number(progress.current || 0);
+    const total = Number(progress.total || 0);
+    return {
+      hint: {
+        visible: Boolean(task),
+        text: total > 0 ? `${stage}：${label}（${current}/${total}）` : `${stage}：${label}`,
+        className: `hint-box ${task?.status === "completed" ? "status-ok" : task?.status === "failed" ? "status-fail" : "status-warn"}`,
+      },
+      log: {
+        visible: logs.length > 0,
+        lines: logs.slice(-120),
+        key: "wizard:pipeline-log",
+      },
+    };
+  }
+
   function inputCheckReadyHeadline(stage = "calibration") {
     if (stage === "calibration") return "所有率定所需数据已就位，可以进入率定！";
     if (stage === "quick_test") return "输入预核算所需数据已就位，可以进行限定时段前向计算。";
@@ -244,6 +267,7 @@
   window.HBVStudioDataPrepView = {
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    prepTaskUiState,
     renderBootstrapStatus,
     renderInputCheckError,
     renderInputCheckImportBlock,

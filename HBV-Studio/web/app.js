@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList"],
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList"],
   },
   {
     script: "./js/taskView.js",
@@ -4161,18 +4161,13 @@ function updatePrepTaskUi(task) {
   const hint = $("#wz-pipeline-task-hint");
   const logBox = $("#wz-pipeline-task-log");
   if (!hint || !logBox || !task) return;
-  const progress = task.ui_progress || {};
-  const logs = task.output || [];
-  const label = progress.label || task.step_title || task.label || "数据处理";
-  const stage = progress.stage || (task.status === "running" ? "正在执行" : task.status === "completed" ? "已完成" : "执行失败");
-  const current = Number(progress.current || 0);
-  const total = Number(progress.total || 0);
-  hint.style.display = "";
-  hint.textContent = total > 0 ? `${stage}：${label}（${current}/${total}）` : `${stage}：${label}`;
-  hint.className = `hint-box ${task.status === "completed" ? "status-ok" : task.status === "failed" ? "status-fail" : "status-warn"}`;
-  if (logs.length) {
+  const uiState = window.HBVStudioDataPrepView.prepTaskUiState(task);
+  hint.style.display = uiState.hint.visible ? "" : "none";
+  hint.textContent = uiState.hint.text;
+  hint.className = uiState.hint.className;
+  if (uiState.log.visible) {
     logBox.style.display = "";
-    setLogBoxContent(logBox, logs.slice(-120), "wizard:pipeline-log");
+    setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
   } else {
     logBox.style.display = "none";
   }

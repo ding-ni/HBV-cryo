@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -115,6 +115,27 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
+
+            const prepTaskState = view.prepTaskUiState({
+              status: "running",
+              label: "默认标签",
+              ui_progress: { stage: "裁剪栅格", label: "DEM <tile>", current: 3, total: 9 },
+              output: Array.from({ length: 122 }, (_, index) => `日志 ${index}`),
+            });
+            if (prepTaskState.hint.text !== "裁剪栅格：DEM <tile>（3/9）" || prepTaskState.hint.className !== "hint-box status-warn") {
+              throw new Error(`running prep task state mismatch: ${JSON.stringify(prepTaskState)}`);
+            }
+            if (!prepTaskState.log.visible || prepTaskState.log.lines.length !== 120 || prepTaskState.log.lines[0] !== "日志 2" || prepTaskState.log.key !== "wizard:pipeline-log") {
+              throw new Error(`prep task logs should be capped: ${JSON.stringify(prepTaskState.log)}`);
+            }
+            const completedPrepState = view.prepTaskUiState({ status: "completed", step_title: "写入工程目录" });
+            if (completedPrepState.hint.text !== "已完成：写入工程目录" || completedPrepState.hint.className !== "hint-box status-ok" || completedPrepState.log.visible) {
+              throw new Error(`completed prep task state mismatch: ${JSON.stringify(completedPrepState)}`);
+            }
+            const failedPrepState = view.prepTaskUiState({ status: "failed" });
+            if (failedPrepState.hint.text !== "执行失败：数据处理" || failedPrepState.hint.className !== "hint-box status-fail") {
+              throw new Error(`failed prep task fallback mismatch: ${JSON.stringify(failedPrepState)}`);
+            }
 
             const importBlock = view.renderInputCheckImportBlock({
               ui_progress: {
