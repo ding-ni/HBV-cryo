@@ -227,6 +227,17 @@
     };
   }
 
+  function gisModePanelState(mode = "") {
+    const normalized = String(mode || "");
+    return {
+      mode: normalized,
+      panels: {
+        autoVisible: normalized === "auto",
+        importVisible: normalized === "import",
+      },
+    };
+  }
+
   function describeEra5Need(sources = {}) {
     if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
       return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
@@ -790,6 +801,7 @@
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
     gisImportErrorUiState,
+    gisModePanelState,
     gisImportStartingUiState,
     gisImportSuccessUiState,
     emptyInputCheckCache,

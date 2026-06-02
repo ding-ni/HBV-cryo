@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -169,6 +169,18 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const gisError = view.gisImportErrorUiState(new Error("缺少 DEM"));
             if (gisError.hint.text !== "缺少 DEM" || gisError.hint.className !== "hint-box status-fail") {
               throw new Error(`GIS import error state mismatch: ${JSON.stringify(gisError)}`);
+            }
+            const gisAutoPanel = view.gisModePanelState("auto");
+            if (!gisAutoPanel.panels.autoVisible || gisAutoPanel.panels.importVisible) {
+              throw new Error(`GIS auto panel mismatch: ${JSON.stringify(gisAutoPanel)}`);
+            }
+            const gisImportPanel = view.gisModePanelState("import");
+            if (gisImportPanel.panels.autoVisible || !gisImportPanel.panels.importVisible) {
+              throw new Error(`GIS import panel mismatch: ${JSON.stringify(gisImportPanel)}`);
+            }
+            const gisEmptyPanel = view.gisModePanelState("");
+            if (gisEmptyPanel.panels.autoVisible || gisEmptyPanel.panels.importVisible) {
+              throw new Error(`GIS empty panel mismatch: ${JSON.stringify(gisEmptyPanel)}`);
             }
 
             const hiddenEra5 = view.era5ApiPanelState({ mode: "manual", needsDownload: true });
