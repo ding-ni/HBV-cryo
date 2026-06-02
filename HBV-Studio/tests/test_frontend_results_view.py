@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -237,7 +237,7 @@ class FrontendResultsViewTests(unittest.TestCase):
                 clearedComparison.compareAdjusted !== false) {
               throw new Error(`clear comparison state wrong: ${JSON.stringify(clearedComparison)}`);
             }
-            const comparisonSuccess = results.runComparisonSuccessState({
+            const comparisonSuccessState = results.runComparisonSuccessState({
               id: "preset-A",
               name: "参数集A",
             }, {
@@ -246,7 +246,8 @@ class FrontendResultsViewTests(unittest.TestCase):
               q_obs: [9, null, 13],
               metrics: { calibration: { nse: 0.86 } },
               runtime: { params_adjusted: true },
-            }).statePatch;
+            });
+            const comparisonSuccess = comparisonSuccessState.statePatch;
             if (comparisonSuccess.compareLabel !== "参数集A" ||
                 comparisonSuccess.comparePresetId !== "preset-A" ||
                 comparisonSuccess.compareAdjusted !== true ||
@@ -255,6 +256,16 @@ class FrontendResultsViewTests(unittest.TestCase):
                 comparisonSuccess.compareSeries.q_sim[1] !== 12 ||
                 comparisonSuccess.compareSeries.residuals.join("|") !== "1||") {
               throw new Error(`comparison success state wrong: ${JSON.stringify(comparisonSuccess)}`);
+            }
+            if (comparisonSuccessState.toastText !== "已生成参数集“参数集A”的对比曲线。") {
+              throw new Error(`comparison success toast wrong: ${comparisonSuccessState.toastText}`);
+            }
+            const globalComparisonSuccess = results.runComparisonSuccessState({
+              parameter_set_id: "global-A",
+              name: "公共参数",
+            }, {}).statePatch;
+            if (globalComparisonSuccess.comparePresetId !== "global-A") {
+              throw new Error(`global comparison should use parameter_set_id: ${JSON.stringify(globalComparisonSuccess)}`);
             }
             const fallbackComparison = results.runComparisonSuccessState({}, {
               q_sim: [1, 2],
@@ -290,9 +301,21 @@ class FrontendResultsViewTests(unittest.TestCase):
                 compareRequest.payload.run_path !== "C:/runs/A" || compareRequest.payload.params.TT !== 0.1) {
               throw new Error(`comparison request context wrong: ${JSON.stringify(compareRequest)}`);
             }
+            const globalCompareRequest = results.runComparisonRequestContext({
+              parameter_set_id: " global-A ",
+              params: { FC: 120 },
+            }, {
+              run: { path: "C:/runs/A" },
+            });
+            if (globalCompareRequest.presetId !== "global-A" || globalCompareRequest.payload.params.FC !== 120) {
+              throw new Error(`global comparison request context wrong: ${JSON.stringify(globalCompareRequest)}`);
+            }
             const samePath = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
             if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "c:/RUNS/a" } }, { id: "preset-A" }, { samePath })) {
               throw new Error("matching comparison request should remain current");
+            }
+            if (!results.runComparisonRequestStillCurrent(globalCompareRequest, { run: { path: "C:/runs/A" } }, { parameter_set_id: "global-A" }, { samePath })) {
+              throw new Error("matching global comparison request should remain current");
             }
             if (results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/B" } }, { id: "preset-A" }, { samePath })) {
               throw new Error("changed run should invalidate comparison request");
@@ -302,6 +325,25 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/A" } }, null, { samePath })) {
               throw new Error("missing current preset should keep original behavior and remain current");
+            }
+            const comparisonError = results.runComparisonErrorState(new Error("接口超时"), {
+              compareErrorView(err) {
+                return { visible: true, className: "custom-error", text: `custom:${err.message}` };
+              },
+            });
+            if (comparisonError.statePatch.compareSeries !== null ||
+                comparisonError.statePatch.compareMetrics !== null ||
+                comparisonError.summary.className !== "custom-error" ||
+                comparisonError.summary.text !== "custom:接口超时" ||
+                !comparisonError.shouldRestoreRun ||
+                comparisonError.toastText !== "接口超时") {
+              throw new Error(`comparison error state wrong: ${JSON.stringify(comparisonError)}`);
+            }
+            const defaultComparisonError = results.runComparisonErrorState("普通错误");
+            if (defaultComparisonError.summary.className !== "hint-box status-fail" ||
+                defaultComparisonError.summary.text !== "参数集对比失败：普通错误" ||
+                defaultComparisonError.toastText !== "普通错误") {
+              throw new Error(`default comparison error state wrong: ${JSON.stringify(defaultComparisonError)}`);
             }
             const unsupportedForward = results.forwardSimulationPreflight(
               { run: { path: "C:/runs/A" } },

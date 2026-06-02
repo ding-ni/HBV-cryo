@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5163,14 +5163,18 @@ async function compareSelectedManualPresetSimulation() {
     const payload = await apiPost("/api/simulate/forward", requestContext.payload);
     if (!compareRequestGuard.isActive(requestToken)) return;
     if (!window.HBVStudioResultsView.runComparisonRequestStillCurrent(requestContext, state._runData, selectedManualPreset(), { samePath })) return;
-    Object.assign(state, window.HBVStudioResultsView.runComparisonSuccessState(preset, payload.data || {}).statePatch);
+    const successState = window.HBVStudioResultsView.runComparisonSuccessState(preset, payload.data || {});
+    Object.assign(state, successState.statePatch);
     renderCharts(state._runData);
     updateCompareSummary();
     updateManualPresetControls();
-    showToast(`已生成参数集“${preset.name}”的对比曲线。`);
+    showToast(successState.toastText);
   } catch (err) {
     if (!compareRequestGuard.isActive(requestToken)) return;
-    Object.assign(state, window.HBVStudioResultsView.clearRunComparisonState().statePatch);
+    const errorState = window.HBVStudioResultsView.runComparisonErrorState(err, {
+      compareErrorView: window.HBVStudioParameterLibrary.manualPresetCompareErrorView,
+    });
+    Object.assign(state, errorState.statePatch);
     if (state._runData) {
       renderCharts(state._runData);
       const meta = state._runData?.metadata || {};
@@ -5178,14 +5182,14 @@ async function compareSelectedManualPresetSimulation() {
       const val = meta.metrics?.validation || {};
       updateMetricsStrip(cal, val, meta);
     }
-    if (host) {
-      const view = window.HBVStudioParameterLibrary.manualPresetCompareErrorView(err);
+    if (host && errorState.summary?.visible) {
+      const view = errorState.summary;
       host.style.display = "";
       host.className = view.className;
       host.textContent = view.text;
     }
     updateManualPresetControls();
-    showToast(err.message, true);
+    showToast(errorState.toastText, true);
   }
 }
 

@@ -240,13 +240,18 @@
     };
   }
 
+  function presetIdentity(preset = {}) {
+    return String(preset?.id || preset?.parameter_set_id || "").trim();
+  }
+
   function runComparisonSuccessState(preset = {}, resultData = {}) {
     const qSim = Array.isArray(resultData?.q_sim) ? resultData.q_sim : [];
     const qObs = Array.isArray(resultData?.q_obs) ? resultData.q_obs : [];
+    const label = String(preset?.name || "参数集").trim() || "参数集";
     return {
       statePatch: {
-        compareLabel: String(preset?.name || "参数集"),
-        comparePresetId: String(preset?.id || "").trim(),
+        compareLabel: label,
+        comparePresetId: presetIdentity(preset),
         compareMetrics: resultData?.metrics || {},
         compareAdjusted: Boolean(resultData?.runtime?.params_adjusted),
         compareSeries: {
@@ -255,6 +260,7 @@
           residuals: qSim.map((s, i) => (s != null && qObs[i] != null) ? s - qObs[i] : null),
         },
       },
+      toastText: `已生成参数集“${label}”的对比曲线。`,
     };
   }
 
@@ -283,7 +289,7 @@
 
   function runComparisonRequestContext(preset = {}, runData = {}) {
     const runPath = String(runData?.run?.path || "").trim();
-    const presetId = String(preset?.id || "").trim();
+    const presetId = presetIdentity(preset);
     return {
       runPath,
       presetId,
@@ -300,8 +306,23 @@
     const currentRunPath = String(runData?.run?.path || "").trim();
     if (!samePath(requestRunPath, currentRunPath)) return false;
     const requestPresetId = String(request?.presetId || "").trim();
-    const currentPresetId = String(preset?.id || "").trim();
+    const currentPresetId = presetIdentity(preset);
     return !(requestPresetId && currentPresetId && requestPresetId !== currentPresetId);
+  }
+
+  function runComparisonErrorState(error = {}, helpers = {}) {
+    const message = error?.message || String(error || "未知错误");
+    const compareErrorView = helpers.compareErrorView || (err => ({
+      visible: true,
+      className: "hint-box status-fail",
+      text: `参数集对比失败：${err?.message || String(err || "未知错误")}`,
+    }));
+    return {
+      statePatch: clearRunComparisonState().statePatch,
+      summary: compareErrorView(error),
+      shouldRestoreRun: true,
+      toastText: message,
+    };
   }
 
   function forwardSimulationPreflight(runData = null, params = null, helpers = {}) {
@@ -1094,6 +1115,7 @@
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
+    runComparisonErrorState,
     runComparisonPreflight,
     runComparisonRequestContext,
     runComparisonRequestStillCurrent,
