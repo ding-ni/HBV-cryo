@@ -178,6 +178,70 @@ class FrontendStationPrecipTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_station_event_coverage_combines_scope_and_problem_events(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/stationPrecip.js", "utf8"), context);
+
+            const station = context.window.HBVStudioStationPrecip;
+            const html = station.renderStationEventCoverage({
+              status: "warn",
+              task_context: {
+                status: "warn",
+                headline: "检查 2 场洪水事件的站点资料",
+                detail: "覆盖率不足的事件会单独列出。",
+                station_time_range: { start: "2000-01-01", end: "2001-01-01" },
+                items: [
+                  { label: "任务尺度", value: "小时", status: "ok" },
+                ],
+              },
+              event_coverage_summary: { ok_count: 1, event_count: 2 },
+              event_coverage: [
+                {
+                  event_id: "EVT-001",
+                  name: "一号洪水",
+                  status: "fail",
+                  coverage_ratio: 0.5,
+                  available_station_min: 0,
+                  available_station_mean: 1.25,
+                  zero_available_steps: 2,
+                  max_consecutive_zero_steps: 1,
+                },
+                {
+                  event_id: "EVT-002",
+                  name: "二号洪水",
+                  status: "ok",
+                  coverage_ratio: 1,
+                  available_station_min: 3,
+                  available_station_mean: 4,
+                },
+              ],
+            });
+            if (!html.includes("站点降水检查口径")) throw new Error("task scope block missing");
+            if (!html.includes("检查 2 场洪水事件的站点资料")) throw new Error("scope headline missing");
+            if (!html.includes("2000-01-01 至 2001-01-01")) throw new Error("station time range missing");
+            if (!html.includes("洪水事件站点覆盖")) throw new Error("event coverage block missing");
+            if (!html.includes("1/2 场可用")) throw new Error("event coverage summary missing");
+            if (!html.includes("一号洪水")) throw new Error("problem event row missing");
+            if (!html.includes("50.0%")) throw new Error("coverage percent missing");
+            if (html.includes("二号洪水")) throw new Error("ok event should not be listed as a problem row");
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

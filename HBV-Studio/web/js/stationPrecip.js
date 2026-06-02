@@ -208,6 +208,10 @@
     `;
   }
 
+  function renderStationEventCoverage(check = {}, helpers = {}) {
+    return `${renderTaskScopeSummary(check, helpers)}${renderEventCoverageMatrix(check, helpers)}`;
+  }
+
   window.HBVStudioStationPrecip = {
     stationPrecipCheckFromValidation,
     stationPrecipModeDescription,
@@ -216,5 +220,6 @@
     stationPrecipFallbackCheck,
     renderTaskScopeSummary,
     renderEventCoverageMatrix,
+    renderStationEventCoverage,
   };
 })();

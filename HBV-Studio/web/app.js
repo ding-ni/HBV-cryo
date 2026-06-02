@@ -99,6 +99,7 @@ const frontendModuleContracts = [
       "stationPrecipFallbackCheck",
       "renderTaskScopeSummary",
       "renderEventCoverageMatrix",
+      "renderStationEventCoverage",
     ],
   },
   {
@@ -1909,24 +1910,16 @@ function focusStatusClass(status) {
   return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
 }
 
-function renderStationEventCoverageMatrix(check = {}) {
-  const module = window.HBVStudioStationPrecip;
-  if (!module) return "";
-  const helpers = {
+function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emptyText = "暂无专项检查。" } = {}) {
+  if (!checks.length) {
+    return `<div class="hint-box">${escapeHtml(emptyText)}</div>`;
+  }
+  const stationPrecipHelpers = {
     escapeHtml,
     focusStatusClass,
     focusStatusLabel,
     formatNumber,
   };
-  const scope = module.renderTaskScopeSummary ? module.renderTaskScopeSummary(check, helpers) : "";
-  const matrix = module.renderEventCoverageMatrix ? module.renderEventCoverageMatrix(check, helpers) : "";
-  return `${scope}${matrix}`;
-}
-
-function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emptyText = "暂无专项检查。" } = {}) {
-  if (!checks.length) {
-    return `<div class="hint-box">${escapeHtml(emptyText)}</div>`;
-  }
   return `
     <div class="focus-check-grid">
       ${checks.map(check => `
@@ -1944,7 +1937,7 @@ function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emp
               </div>
             `).join("")}
           </div>
-          ${renderStationEventCoverageMatrix(check)}
+          ${window.HBVStudioStationPrecip.renderStationEventCoverage(check, stationPrecipHelpers)}
         </section>
       `).join("")}
     </div>
