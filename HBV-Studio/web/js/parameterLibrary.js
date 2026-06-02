@@ -304,6 +304,14 @@
     return currentId !== compareId;
   }
 
+  function manualPresetSelectionChangeState(preset = null, comparePresetId = "") {
+    return {
+      inputName: preset?.name || "",
+      shouldClearComparison: shouldClearManualPresetComparison(preset, comparePresetId),
+      clearComparisonOptions: { silent: true },
+    };
+  }
+
   function manualPresetControlState(options = {}) {
     const enabled = Boolean(options.editable && options.configPath);
     const hasPreset = Boolean(options.preset);
@@ -944,6 +952,7 @@
     taskManualPresetLoadSuccessState,
     manualPresetTaskSyncState,
     shouldClearManualPresetComparison,
+    manualPresetSelectionChangeState,
     manualPresetControlState,
     manualPresetControlViewState,
     manualPresetSavePreflight,

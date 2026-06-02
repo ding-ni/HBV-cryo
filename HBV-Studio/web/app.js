@@ -147,6 +147,7 @@ const frontendModuleContracts = [
       "taskManualPresetLoadSuccessState",
       "manualPresetTaskSyncState",
       "shouldClearManualPresetComparison",
+      "manualPresetSelectionChangeState",
       "manualPresetControlState",
       "manualPresetControlViewState",
       "manualPresetSavePreflight",
@@ -6709,8 +6710,9 @@ function bindEvents() {
   $("#btn-clear-manual-compare")?.addEventListener("click", () => clearManualPresetComparison());
   $("#manual-preset-select")?.addEventListener("change", () => {
     const preset = selectedManualPreset();
-    if ($("#manual-preset-name")) $("#manual-preset-name").value = preset?.name || "";
-    clearStaleManualPresetComparison({ silent: true });
+    const selectionState = window.HBVStudioParameterLibrary.manualPresetSelectionChangeState(preset, state.comparePresetId);
+    if ($("#manual-preset-name")) $("#manual-preset-name").value = selectionState.inputName;
+    if (selectionState.shouldClearComparison) clearManualPresetComparison(selectionState.clearComparisonOptions);
     renderManualPresetDiff();
     updateCompareSummary();
     updateManualPresetControls();

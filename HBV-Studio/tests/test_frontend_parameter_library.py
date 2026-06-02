@@ -574,7 +574,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState", "manualPresetConfigPathFromRunData", "manualPresetProfileState"]) {
+            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState", "manualPresetConfigPathFromRunData", "manualPresetProfileState", "manualPresetSelectionChangeState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
@@ -707,6 +707,23 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             }
             if (library.shouldClearManualPresetComparison({ id: "current" }, "")) {
               throw new Error("empty compare id should not clear");
+            }
+            const sameSelection = library.manualPresetSelectionChangeState({ id: "same", name: "Trial A" }, "same");
+            if (sameSelection.inputName !== "Trial A" || sameSelection.shouldClearComparison ||
+                sameSelection.clearComparisonOptions.silent !== true) {
+              throw new Error(`same selection state wrong: ${JSON.stringify(sameSelection)}`);
+            }
+            const changedSelection = library.manualPresetSelectionChangeState({ id: "new", name: "Trial B" }, "old");
+            if (changedSelection.inputName !== "Trial B" || !changedSelection.shouldClearComparison) {
+              throw new Error(`changed selection state wrong: ${JSON.stringify(changedSelection)}`);
+            }
+            const globalSelection = library.manualPresetSelectionChangeState({ parameter_set_id: "global-A", name: "Global A" }, "global-A");
+            if (globalSelection.inputName !== "Global A" || globalSelection.shouldClearComparison) {
+              throw new Error(`global selection state wrong: ${JSON.stringify(globalSelection)}`);
+            }
+            const emptySelection = library.manualPresetSelectionChangeState(null, "old");
+            if (emptySelection.inputName !== "" || !emptySelection.shouldClearComparison) {
+              throw new Error(`empty selection state wrong: ${JSON.stringify(emptySelection)}`);
             }
             """
         )
