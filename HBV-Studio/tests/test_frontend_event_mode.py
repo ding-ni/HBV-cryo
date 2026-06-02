@@ -210,6 +210,68 @@ class FrontendEventModeTests(unittest.TestCase):
             if (eventMode.renderWizardEventSummary(null, null, helpers) !== "") {
               throw new Error("empty wizard event summary should render empty string");
             }
+
+            const validationHtml = eventMode.renderValidationEventSections({
+              input_time_summary: {
+                status: "warn",
+                headline: "事件资料时段需复核",
+                detail: "事件窗口可以不连续",
+              },
+              event_windows: {
+                event_count: 1,
+                valid_event_count: 1,
+                source_file: "C:/events/flood.csv",
+                events: [
+                  { event_id: "E1", name: "一号洪水", valid: true, score_start: "2020-07-01", score_end: "2020-07-02" },
+                ],
+              },
+              event_forcing_coverage: {
+                enabled: true,
+                status: "warn",
+                event_count: 1,
+                complete_event_count: 0,
+                events: [
+                  {
+                    event_id: "E1",
+                    name: "一号洪水",
+                    status: "warn",
+                    run_start: "2020-07-01",
+                    run_end: "2020-07-02",
+                    variables: {
+                      prec: { label: "降水", covered_steps: 20, expected_steps: 24, missing_steps: 4 },
+                    },
+                  },
+                ],
+              },
+              event_observation_coverage: {
+                enabled: true,
+                status: "ok",
+                event_count: 1,
+                complete_event_count: 1,
+                events: [
+                  {
+                    event_id: "E1",
+                    name: "一号洪水",
+                    status: "ok",
+                    score_start: "2020-07-01",
+                    score_end: "2020-07-02",
+                    expected_steps: 24,
+                    covered_steps: 24,
+                  },
+                ],
+              },
+            }, helpers);
+            for (const text of ["事件资料时段需复核", "洪水事件表", "事件内气象覆盖", "事件流量覆盖"]) {
+              if (!validationHtml.includes(text)) {
+                throw new Error(`validation event section missing ${text}: ${validationHtml}`);
+              }
+            }
+            if (!validationHtml.includes("flood.csv") || !validationHtml.includes("降水 20/24，缺 4")) {
+              throw new Error(`validation event section details missing: ${validationHtml}`);
+            }
+            if (eventMode.renderValidationEventSections(null, helpers) !== "") {
+              throw new Error("empty validation event sections should render empty string");
+            }
             """
         )
         result = subprocess.run(

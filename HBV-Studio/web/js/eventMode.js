@@ -412,6 +412,16 @@
     `;
   }
 
+  function renderValidationEventSections(validation = {}, helpers = {}) {
+    if (!validation) return "";
+    return [
+      renderInputTimeSummary(validation.input_time_summary, helpers),
+      validation.event_windows ? renderEventWindowSummary(validation.event_windows, helpers) : "",
+      validation.event_forcing_coverage ? renderEventForcingCoverage(validation.event_forcing_coverage, helpers) : "",
+      validation.event_observation_coverage ? renderEventObservationCoverage(validation.event_observation_coverage, helpers) : "",
+    ].join("");
+  }
+
   window.HBVStudioEventMode = {
     floodEventEvaluation,
     floodEventMetricItems,
@@ -426,5 +436,6 @@
     renderEventObservationCoverage,
     renderWizardEventSummary,
     renderInputTimeSummary,
+    renderValidationEventSections,
   };
 })();

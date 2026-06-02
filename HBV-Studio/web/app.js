@@ -119,6 +119,7 @@ const frontendModuleContracts = [
       "renderEventObservationCoverage",
       "renderWizardEventSummary",
       "renderInputTimeSummary",
+      "renderValidationEventSections",
     ],
   },
   {
@@ -2143,10 +2144,6 @@ function renderWizardEventSummary(eventInfo = null, observationCoverage = null) 
     statusClass: focusStatusClass,
     shortPath,
   });
-}
-
-function renderInputTimeSummary(summary = {}) {
-  return window.HBVStudioEventMode?.renderInputTimeSummary(summary, { escapeHtml }) || "";
 }
 
 function clearBoundaryPreview() {
@@ -4541,7 +4538,11 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     }
 
     let html = "";
-    html += renderInputTimeSummary(validation.input_time_summary);
+    html += window.HBVStudioEventMode.renderValidationEventSections(validation, {
+      escapeHtml,
+      statusClass: focusStatusClass,
+      shortPath,
+    });
     const readyHeadline = stage === "calibration"
       ? "所有率定所需数据已就位，可以进入率定！"
       : stage === "quick_test"
@@ -4559,26 +4560,6 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     if (comp.warnings && comp.warnings.length > 0) {
       const warnItems = comp.warnings.map(w => `<li>${escapeHtml(w)}${renderIssueJumpButton(w, 7)}</li>`).join("");
       html += `<div class="hint-box status-warn" style="margin-bottom:12px"><strong>注意事项：</strong><ul>${warnItems}</ul></div>`;
-    }
-
-    if (validation.event_windows && window.HBVStudioEventMode?.renderEventWindowSummary) {
-      html += window.HBVStudioEventMode.renderEventWindowSummary(validation.event_windows, {
-        escapeHtml,
-        statusClass: focusStatusClass,
-        shortPath,
-      });
-    }
-    if (validation.event_forcing_coverage && window.HBVStudioEventMode?.renderEventForcingCoverage) {
-      html += window.HBVStudioEventMode.renderEventForcingCoverage(validation.event_forcing_coverage, {
-        escapeHtml,
-        statusClass: focusStatusClass,
-      });
-    }
-    if (validation.event_observation_coverage && window.HBVStudioEventMode?.renderEventObservationCoverage) {
-      html += window.HBVStudioEventMode.renderEventObservationCoverage(validation.event_observation_coverage, {
-        escapeHtml,
-        statusClass: focusStatusClass,
-      });
     }
 
     if (validation.focus_checks?.length) {
