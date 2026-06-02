@@ -33,7 +33,9 @@ def open_workspace_geo_preview(page: Page) -> None:
     buttons = page.locator("[data-preview-workspace]")
     count = buttons.count()
     if count <= 0:
-        raise RuntimeError("dashboard: no workspace preview buttons found")
+        if page.locator("#workspace-layout-panel .hint-box").count() <= 0:
+            raise RuntimeError("dashboard: no workspace preview buttons and no empty-state layout hint found")
+        return
     target_index = 0
     for index in range(count):
         value = buttons.nth(index).get_attribute("data-preview-workspace") or ""
