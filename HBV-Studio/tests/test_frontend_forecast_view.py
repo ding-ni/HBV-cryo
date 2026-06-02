@@ -21,7 +21,15 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastInputType", "forecastSuggestedStart", "forecastTimeComparable", "formatForecastInputTime", "parseForecastTime"]) {
+            for (const name of [
+              "forecastInputCheckDelay",
+              "forecastInputCheckTimerState",
+              "forecastInputType",
+              "forecastSuggestedStart",
+              "forecastTimeComparable",
+              "formatForecastInputTime",
+              "parseForecastTime",
+            ]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast time export: ${name}`);
             }
 
@@ -50,6 +58,15 @@ class FrontendForecastViewTests(unittest.TestCase):
 
             if (view.parseForecastTime("not-a-date") !== null) throw new Error("invalid dates should return null");
             if (view.formatForecastInputTime(null, 24) !== "") throw new Error("missing date should format as empty string");
+            if (view.forecastInputCheckDelay(0) !== 0) throw new Error("zero delay should stay immediate");
+            if (view.forecastInputCheckDelay(undefined) !== 350) throw new Error("missing delay should use default");
+            if (view.forecastInputCheckDelay("bad") !== 350) throw new Error("invalid delay should use default");
+            if (view.forecastInputCheckDelay(-1) !== 350) throw new Error("negative delay should use default");
+            const timer = { id: 12 };
+            const timerState = view.forecastInputCheckTimerState(timer);
+            if (timerState.statePatch.forecastInputCheckTimer !== timer) {
+              throw new Error(`timer state should keep timer reference: ${JSON.stringify(timerState)}`);
+            }
             """
         )
         result = subprocess.run(

@@ -265,6 +265,19 @@
     };
   }
 
+  function forecastInputCheckDelay(delay = 350) {
+    const value = Number(delay);
+    return Number.isFinite(value) && value >= 0 ? value : 350;
+  }
+
+  function forecastInputCheckTimerState(timer = null) {
+    return {
+      statePatch: {
+        forecastInputCheckTimer: timer,
+      },
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1154,8 +1167,10 @@
     forecastCandidateRuns,
     forecastCompletedResultState,
     forecastInputCheckDecision,
+    forecastInputCheckDelay,
     forecastInputCheckError,
     forecastInputPayload,
+    forecastInputCheckTimerState,
     forecastInputType,
     forecastParameterSourceSummary,
     forecastResultButtonState,

@@ -155,8 +155,10 @@ const frontendModuleContracts = [
       "forecastCandidateRuns",
       "forecastCompletedResultState",
       "forecastInputCheckDecision",
+      "forecastInputCheckDelay",
       "forecastInputCheckError",
       "forecastInputPayload",
+      "forecastInputCheckTimerState",
       "forecastInputType",
       "forecastParameterSourceSummary",
       "forecastResultButtonState",
@@ -5628,9 +5630,11 @@ async function refreshForecastInputCheck({ loading = false } = {}) {
 
 function scheduleForecastInputCheck(delay = 350) {
   clearTimeout(state.forecastInputCheckTimer);
-  state.forecastInputCheckTimer = setTimeout(() => {
+  const delayMs = window.HBVStudioForecastView.forecastInputCheckDelay(delay);
+  const timer = setTimeout(() => {
     refreshForecastInputCheck().catch(err => showToast(err.message, true));
-  }, delay);
+  }, delayMs);
+  Object.assign(state, window.HBVStudioForecastView.forecastInputCheckTimerState(timer).statePatch);
 }
 
 function renderForecastTaskList() {
