@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -233,6 +233,33 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const meteoStartError = view.meteoImportErrorUiState({ message: "目录错误" }, { hideLog: true });
             if (meteoStartError.hint.text !== "目录错误" || !meteoStartError.log || meteoStartError.log.visible || meteoStartError.log.key !== "wizard:import-log") {
               throw new Error(`meteo import start error state mismatch: ${JSON.stringify(meteoStartError)}`);
+            }
+            const meteoLocalLabels = view.meteoSourceLabels({ prec: "custom_tif", temp: "era5", pet: "custom_tif" }, "local");
+            const meteoPipelineLabels = view.meteoSourceLabels({ prec: "custom_tif", temp: "era5", pet: "custom_tif" }, "pipeline");
+            if (meteoLocalLabels.join(",") !== "降水,蒸散发" || meteoPipelineLabels.join(",") !== "气温") {
+              throw new Error(`meteo source labels mismatch: ${meteoLocalLabels} / ${meteoPipelineLabels}`);
+            }
+            const allLocalHint = view.meteoModeHintState({
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+              copiedLabels: ["降水", "气温"],
+            });
+            if (!allLocalHint.shouldApply || allLocalHint.hint.className !== "hint-box status-ok" || !allLocalHint.hint.text.includes("已自动带入第 4 步登记的本地栅格目录（降水、气温）") || !allLocalHint.hint.text.includes("直接导入本地栅格")) {
+              throw new Error(`all-local meteo mode hint mismatch: ${JSON.stringify(allLocalHint)}`);
+            }
+            const mixedHint = view.meteoModeHintState({
+              sources: { prec: "custom_tif", temp: "era5", pet: "era5_fao56" },
+              copiedLabels: ["降水"],
+            });
+            if (!mixedHint.shouldApply || !mixedHint.hint.text.includes("当前为混合来源方案") || !mixedHint.hint.text.includes("仍需按步骤处理 气温、蒸散发")) {
+              throw new Error(`mixed meteo mode hint mismatch: ${JSON.stringify(mixedHint)}`);
+            }
+            const noLocalPreserveFail = view.meteoModeHintState({
+              sources: { prec: "era5", temp: "era5", pet: "era5_fao56" },
+              currentText: "导入失败",
+              currentClassName: "hint-box status-fail",
+            });
+            if (noLocalPreserveFail.shouldApply || noLocalPreserveFail.hint.text !== "") {
+              throw new Error(`no-local meteo mode should preserve visible failure: ${JSON.stringify(noLocalPreserveFail)}`);
             }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });

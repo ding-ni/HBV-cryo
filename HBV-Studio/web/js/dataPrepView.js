@@ -214,6 +214,53 @@
     return "下面按顺序整理本项目需要的气象数据。";
   }
 
+  function meteoSourceLabels(sources = {}, mode = "local") {
+    const labels = [];
+    const wantLocal = mode === "local";
+    if ((sources.prec === "custom_tif") === wantLocal) labels.push("降水");
+    if ((sources.temp === "custom_tif") === wantLocal) labels.push("气温");
+    if ((sources.pet === "custom_tif") === wantLocal) labels.push("蒸散发");
+    return labels;
+  }
+
+  function meteoModeHintState(model = {}) {
+    const sources = model.sources || {};
+    const copiedLabels = Array.isArray(model.copiedLabels) ? model.copiedLabels : [];
+    const localLabels = meteoSourceLabels(sources, "local");
+    if (!localLabels.length) {
+      return {
+        shouldApply: !model.currentText || !String(model.currentClassName || "").includes("status-fail"),
+        hint: {
+          text: "",
+          className: "hint-box",
+        },
+      };
+    }
+    const copiedText = copiedLabels.length
+      ? `已自动带入第 4 步登记的本地栅格目录（${copiedLabels.join("、")}）。`
+      : "";
+    if (localLabels.length === 3) {
+      return {
+        shouldApply: true,
+        hint: {
+          text: `${copiedText}当前三类气象都来自本地栅格，第 6 步默认使用“直接导入本地栅格”。`,
+          className: "hint-box status-ok",
+        },
+      };
+    }
+    const pipelineLabels = meteoSourceLabels(sources, "pipeline");
+    const pipelineText = pipelineLabels.length
+      ? `仍需按步骤处理 ${pipelineLabels.join("、")}。`
+      : "请按当前配置继续。";
+    return {
+      shouldApply: true,
+      hint: {
+        text: `${copiedText}当前为混合来源方案，本地目录会在对齐步骤自动读取；${pipelineText}`,
+        className: "hint-box status-ok",
+      },
+    };
+  }
+
   function prepPanelSummary(sources = {}) {
     const precText = sources.prec === "custom_tif"
       ? "本地栅格"
@@ -655,9 +702,11 @@
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
     inputCheckCompletionState,
+    meteoModeHintState,
     meteoImportCreatingUiState,
     meteoImportErrorUiState,
     meteoImportUiState,
+    meteoSourceLabels,
     prepPanelSummary,
     prepStepRunningStatus,
     prepTaskErrorUiState,

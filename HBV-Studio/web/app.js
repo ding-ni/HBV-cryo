@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -2714,21 +2714,11 @@ function currentEra5NeedSignature() {
 }
 
 function getWizardLocalMeteoLabels() {
-  const sources = getWizardMeteoSources();
-  const labels = [];
-  if (sources.prec === "custom_tif") labels.push("降水");
-  if (sources.temp === "custom_tif") labels.push("气温");
-  if (sources.pet === "custom_tif") labels.push("蒸散发");
-  return labels;
+  return window.HBVStudioDataPrepView.meteoSourceLabels(getWizardMeteoSources(), "local");
 }
 
 function getWizardPipelineMeteoLabels() {
-  const sources = getWizardMeteoSources();
-  const labels = [];
-  if (sources.prec !== "custom_tif") labels.push("降水");
-  if (sources.temp !== "custom_tif") labels.push("气温");
-  if (sources.pet !== "custom_tif") labels.push("蒸散发");
-  return labels;
+  return window.HBVStudioDataPrepView.meteoSourceLabels(getWizardMeteoSources(), "pipeline");
 }
 
 function hasLocalMeteoSourceConfigured() {
@@ -2742,32 +2732,19 @@ function allMeteoSourcesUseLocalTif() {
 function updateMeteoModeHint() {
   const hint = $("#wz-import-meteo-hint");
   if (!hint) return;
-  const localLabels = getWizardLocalMeteoLabels();
-  if (!localLabels.length) {
-    if (!hint.textContent || !hint.className.includes("status-fail")) {
-      hint.textContent = "";
-      hint.className = "hint-box";
-    }
-    return;
-  }
   const copiedLabels = [];
   if ($("#wz-import-prec-dir")?.value.trim()) copiedLabels.push("降水");
   if ($("#wz-import-temp-dir")?.value.trim()) copiedLabels.push("气温");
   if ($("#wz-import-evap-dir")?.value.trim()) copiedLabels.push("蒸散发");
-  const copiedText = copiedLabels.length
-    ? `已自动带入第 4 步登记的本地栅格目录（${copiedLabels.join("、")}）。`
-    : "";
-  if (allMeteoSourcesUseLocalTif()) {
-    hint.textContent = `${copiedText}当前三类气象都来自本地栅格，第 6 步默认使用“直接导入本地栅格”。`;
-    hint.className = "hint-box status-ok";
-    return;
-  }
-  const pipelineLabels = getWizardPipelineMeteoLabels();
-  const pipelineText = pipelineLabels.length
-    ? `仍需按步骤处理 ${pipelineLabels.join("、")}。`
-    : "请按当前配置继续。";
-  hint.textContent = `${copiedText}当前为混合来源方案，本地目录会在对齐步骤自动读取；${pipelineText}`;
-  hint.className = "hint-box status-ok";
+  const hintState = window.HBVStudioDataPrepView.meteoModeHintState({
+    sources: getWizardMeteoSources(),
+    copiedLabels,
+    currentText: hint.textContent,
+    currentClassName: hint.className,
+  });
+  if (!hintState.shouldApply) return;
+  hint.textContent = hintState.hint.text;
+  hint.className = hintState.hint.className;
 }
 
 function applyStep6MeteoDefaults({ force = false, switchMode = false } = {}) {
