@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -498,6 +498,19 @@ class FrontendResultsViewTests(unittest.TestCase):
                 forwardErrorDom["#resim-hint"].className !== "hint-box status-fail" ||
                 forwardErrorDom["#resim-log"].visible !== false) {
               throw new Error(`forward error DOM updates wrong: ${JSON.stringify(forwardErrorDom)}`);
+            }
+            const forwardPollingError = results.forwardSimulationPollingErrorState(new Error("任务轮询失败"));
+            if (!forwardPollingError.hint.visible || forwardPollingError.hint.text !== "任务轮询失败" ||
+                forwardPollingError.hint.className !== "hint-box status-fail" ||
+                forwardPollingError.button.disabled) {
+              throw new Error(`forward polling error state wrong: ${JSON.stringify(forwardPollingError)}`);
+            }
+            const forwardPollingErrorDom = Object.fromEntries(forwardPollingError.domUpdates.map(update => [update.selector, update]));
+            if (forwardPollingErrorDom["#resim-hint"].visible !== true ||
+                forwardPollingErrorDom["#resim-hint"].text !== "任务轮询失败" ||
+                forwardPollingErrorDom["#resim-hint"].className !== "hint-box status-fail" ||
+                forwardPollingErrorDom["#btn-resimulate"].disabled !== false) {
+              throw new Error(`forward polling error DOM updates wrong: ${JSON.stringify(forwardPollingErrorDom)}`);
             }
             const forwardRequest = results.forwardSimulationRequestContext(
               { run: { path: " C:/runs/A " } },

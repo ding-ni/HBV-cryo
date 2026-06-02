@@ -461,6 +461,26 @@
     };
   }
 
+  function forwardSimulationPollingErrorState(error = {}) {
+    const message = error?.message || String(error || "未知错误");
+    const hint = {
+      visible: true,
+      text: message,
+      className: "hint-box status-fail",
+    };
+    const button = {
+      disabled: false,
+    };
+    return {
+      hint,
+      button,
+      domUpdates: [
+        { selector: "#resim-hint", visible: hint.visible, text: hint.text, className: hint.className },
+        { selector: "#btn-resimulate", disabled: button.disabled },
+      ],
+    };
+  }
+
   function forwardSimulationRequestContext(runData = {}, params = {}, options = {}) {
     const runPath = String(runData?.run?.path || "").trim();
     return {
@@ -1239,6 +1259,7 @@
     clearRunDetailViewState,
     filterRuns,
     forwardSimulationErrorState,
+    forwardSimulationPollingErrorState,
     forwardSimulationPreflight,
     forwardSimulationRequestContext,
     forwardSimulationResultState,
