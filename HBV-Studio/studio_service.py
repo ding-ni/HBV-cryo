@@ -173,6 +173,7 @@ from services.station_precip import station_precip_event_coverage_summary as bui
 from services.station_precip import station_precip_expected_coverage as build_station_precip_expected_coverage
 from services.station_precip import station_precip_id_match_summary as build_station_precip_id_match_summary
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
+from services.station_precip import station_precip_quality_summary as build_station_precip_quality_summary
 from services.station_precip import station_precip_task_context_summary as build_station_precip_task_context_summary
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
@@ -2642,6 +2643,19 @@ def _station_precip_event_coverage_summary(
     )
 
 
+def _station_precip_quality_summary(
+    quality_series: pd.DataFrame,
+    matched_ids: list[str],
+    *,
+    step_hours: float,
+) -> dict[str, Any]:
+    return build_station_precip_quality_summary(
+        quality_series,
+        matched_ids,
+        step_hours=step_hours,
+    )
+
+
 def _station_precip_task_context_summary(
     *,
     mode: str,
@@ -2826,33 +2840,12 @@ def analyze_station_precip_inputs(
     missing.extend(event_info_summary["missing"])
     warnings.extend(event_info_summary["warnings"])
 
-    numeric_values = quality_series.to_numpy(dtype="float64") if not quality_series.empty else np.empty((0, 0), dtype="float64")
-    negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0
-    extreme_threshold = 80.0 if abs(step - 1.0) < 1e-9 else 300.0
-    extreme_count = int(np.sum(numeric_values > extreme_threshold)) if numeric_values.size else 0
-    all_zero_count = 0
-    max_missing_rate = 0.0
-    station_missing_rates: list[dict[str, Any]] = []
-    if matched_ids:
-        for col in matched_ids:
-            values = quality_series[col].dropna().to_numpy(dtype="float64") if col in quality_series.columns else np.array([], dtype="float64")
-            if values.size and bool(np.nanmax(np.abs(values)) <= 1e-9):
-                all_zero_count += 1
-        missing_rates = quality_series[matched_ids].isna().mean(axis=0) if not quality_series.empty else pd.Series(dtype="float64")
-        max_missing_rate = float(missing_rates.max()) if not missing_rates.empty else 0.0
-        station_missing_rates = [
-            {"station_id": str(station_id), "missing_rate": float(rate)}
-            for station_id, rate in missing_rates.sort_values(ascending=False).head(20).items()
-        ]
-    if negative_count > 0:
-        warnings.append(f"站点降水存在 {negative_count} 条负值记录。")
-    if extreme_count > 0:
-        unit_label = "小时" if abs(step - 1.0) < 1e-9 else "日"
-        warnings.append(f"站点降水存在 {extreme_count} 条超过 {extreme_threshold:g} mm/{unit_label} 的异常大值。")
-    if all_zero_count > 0:
-        warnings.append(f"{all_zero_count} 个匹配站点在当前资料中为全零序列。")
-    if max_missing_rate > 0.20:
-        warnings.append(f"单站最大缺测率为 {max_missing_rate * 100:.1f}%，建议核对资料完整性。")
+    quality_info = _station_precip_quality_summary(quality_series, matched_ids, step_hours=step)
+    negative_count = int(quality_info["negative_count"])
+    extreme_count = int(quality_info["extreme_count"])
+    max_missing_rate = float(quality_info["max_missing_rate"])
+    station_missing_rates = list(quality_info["station_missing_rates"])
+    warnings.extend(quality_info["warnings"])
 
     if missing:
         status = "fail"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, event_date_range
@@ -292,6 +293,53 @@ def station_precip_event_coverage_summary(
             warnings.append(message)
 
     return {"event_coverage": event_coverage, "missing": missing, "warnings": warnings}
+
+
+def station_precip_quality_summary(
+    quality_series: pd.DataFrame,
+    matched_ids: list[str],
+    *,
+    step_hours: float,
+) -> dict[str, Any]:
+    numeric_values = quality_series.to_numpy(dtype="float64") if not quality_series.empty else np.empty((0, 0), dtype="float64")
+    negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0
+    extreme_threshold = 80.0 if abs(float(step_hours) - 1.0) < 1e-9 else 300.0
+    extreme_count = int(np.sum(numeric_values > extreme_threshold)) if numeric_values.size else 0
+    all_zero_count = 0
+    max_missing_rate = 0.0
+    station_missing_rates: list[dict[str, Any]] = []
+    if matched_ids:
+        for col in matched_ids:
+            values = quality_series[col].dropna().to_numpy(dtype="float64") if col in quality_series.columns else np.array([], dtype="float64")
+            if values.size and bool(np.nanmax(np.abs(values)) <= 1e-9):
+                all_zero_count += 1
+        missing_rates = quality_series[matched_ids].isna().mean(axis=0) if not quality_series.empty else pd.Series(dtype="float64")
+        max_missing_rate = float(missing_rates.max()) if not missing_rates.empty else 0.0
+        station_missing_rates = [
+            {"station_id": str(station_id), "missing_rate": float(rate)}
+            for station_id, rate in missing_rates.sort_values(ascending=False).head(20).items()
+        ]
+
+    warnings: list[str] = []
+    if negative_count > 0:
+        warnings.append(f"\u7ad9\u70b9\u964d\u6c34\u5b58\u5728 {negative_count} \u6761\u8d1f\u503c\u8bb0\u5f55\u3002")
+    if extreme_count > 0:
+        unit_label = "\u5c0f\u65f6" if abs(float(step_hours) - 1.0) < 1e-9 else "\u65e5"
+        warnings.append(f"\u7ad9\u70b9\u964d\u6c34\u5b58\u5728 {extreme_count} \u6761\u8d85\u8fc7 {extreme_threshold:g} mm/{unit_label} \u7684\u5f02\u5e38\u5927\u503c\u3002")
+    if all_zero_count > 0:
+        warnings.append(f"{all_zero_count} \u4e2a\u5339\u914d\u7ad9\u70b9\u5728\u5f53\u524d\u8d44\u6599\u4e2d\u4e3a\u5168\u96f6\u5e8f\u5217\u3002")
+    if max_missing_rate > 0.20:
+        warnings.append(f"\u5355\u7ad9\u6700\u5927\u7f3a\u6d4b\u7387\u4e3a {max_missing_rate * 100:.1f}%\uff0c\u5efa\u8bae\u6838\u5bf9\u8d44\u6599\u5b8c\u6574\u6027\u3002")
+
+    return {
+        "negative_count": negative_count,
+        "extreme_threshold": extreme_threshold,
+        "extreme_count": extreme_count,
+        "all_zero_count": all_zero_count,
+        "max_missing_rate": max_missing_rate,
+        "station_missing_rates": station_missing_rates,
+        "warnings": warnings,
+    }
 
 
 def station_precip_task_context_summary(

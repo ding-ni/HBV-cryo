@@ -23,6 +23,7 @@ from services.station_precip import (  # noqa: E402
     station_precip_expected_coverage,
     station_precip_id_match_summary,
     station_precip_mode_label,
+    station_precip_quality_summary,
     station_precip_task_context_summary,
 )
 
@@ -229,6 +230,57 @@ class StationPrecipServiceTests(unittest.TestCase):
         self.assertEqual(summary["warnings"], [])
         self.assertIn("E02", summary["missing"][0])
         self.assertEqual(summary["event_coverage"][0]["status"], "fail")
+
+    def test_station_precip_quality_summary_reports_quality_warnings(self) -> None:
+        quality_series = pd.DataFrame(
+            {
+                "S1": [-1.0, 301.0, None, 0.0],
+                "S2": [0.0, 0.0, 0.0, 0.0],
+                "S3": [None, None, 1.0, 2.0],
+            },
+            index=pd.date_range("2026-01-01", periods=4, freq="1D"),
+        )
+
+        summary = station_precip_quality_summary(
+            quality_series,
+            ["S1", "S2", "S3"],
+            step_hours=24,
+        )
+
+        self.assertEqual(summary["negative_count"], 1)
+        self.assertEqual(summary["extreme_threshold"], 300.0)
+        self.assertEqual(summary["extreme_count"], 1)
+        self.assertEqual(summary["all_zero_count"], 1)
+        self.assertEqual(summary["max_missing_rate"], 0.5)
+        self.assertEqual(
+            summary["station_missing_rates"],
+            [
+                {"station_id": "S3", "missing_rate": 0.5},
+                {"station_id": "S1", "missing_rate": 0.25},
+                {"station_id": "S2", "missing_rate": 0.0},
+            ],
+        )
+        self.assertEqual(len(summary["warnings"]), 4)
+        self.assertIn("\u8d1f\u503c\u8bb0\u5f55", summary["warnings"][0])
+        self.assertIn("300 mm/\u65e5", summary["warnings"][1])
+        self.assertIn("\u5168\u96f6\u5e8f\u5217", summary["warnings"][2])
+        self.assertIn("50.0%", summary["warnings"][3])
+
+    def test_station_precip_quality_summary_uses_hourly_extreme_threshold(self) -> None:
+        quality_series = pd.DataFrame(
+            {"S1": [81.0]},
+            index=pd.date_range("2026-01-01 00:00", periods=1, freq="1h"),
+        )
+
+        summary = station_precip_quality_summary(
+            quality_series,
+            ["S1"],
+            step_hours=1,
+        )
+
+        self.assertEqual(summary["extreme_threshold"], 80.0)
+        self.assertEqual(summary["extreme_count"], 1)
+        self.assertIn("80 mm/\u5c0f\u65f6", summary["warnings"][0])
 
     def test_continuous_station_only_summary_fails_when_no_station_steps_exist(self) -> None:
         summary = station_precip_task_context_summary(
