@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW
+from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, event_date_range
 
 
 def detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
@@ -221,6 +221,77 @@ def station_precip_expected_coverage(
         "missing": missing,
         "warnings": warnings,
     }
+
+
+def station_precip_event_coverage_summary(
+    matched_series: pd.DataFrame,
+    event_info: dict[str, Any] | None,
+    *,
+    step_hours: float,
+    mode: str,
+) -> dict[str, Any]:
+    event_coverage: list[dict[str, Any]] = []
+    missing: list[str] = []
+    warnings: list[str] = []
+    if not event_info:
+        return {"event_coverage": event_coverage, "missing": missing, "warnings": warnings}
+
+    for event in event_info.get("valid_events", []):
+        event_index = event_date_range(pd.Timestamp(event["run_start"]), pd.Timestamp(event["run_end"]), step_hours)
+        if len(event_index) <= 0 or matched_series.empty:
+            covered_event = 0
+            zero_event = int(len(event_index))
+            event_available_min = None if len(event_index) <= 0 else 0
+            event_available_mean = None if len(event_index) <= 0 else 0.0
+            event_max_zero = int(len(event_index))
+        else:
+            event_present = matched_series.reindex(event_index)
+            event_available_counts = event_present.notna().sum(axis=1)
+            event_zero_flags = event_available_counts == 0
+            covered_event = int((event_available_counts > 0).sum())
+            zero_event = int(event_zero_flags.sum())
+            event_available_min = int(event_available_counts.min()) if not event_available_counts.empty else None
+            event_available_mean = float(event_available_counts.mean()) if not event_available_counts.empty else None
+            event_max_zero = max_consecutive_true(event_zero_flags.tolist())
+        event_steps = int(len(event_index))
+        event_ratio = covered_event / event_steps if event_steps else None
+        if event_ratio is not None and event_ratio >= 0.99 and zero_event == 0:
+            event_status = "ok"
+        elif mode == "thiessen_station_only" and zero_event > 0:
+            event_status = "fail"
+        elif covered_event == 0:
+            event_status = "fail"
+        else:
+            event_status = "warn"
+        event_coverage.append(
+            {
+                "event_id": event.get("event_id"),
+                "name": event.get("name"),
+                "purpose": event.get("purpose"),
+                "run_start": format_time_for_check(event.get("run_start"), step_hours),
+                "run_end": format_time_for_check(event.get("run_end"), step_hours),
+                "expected_steps": event_steps,
+                "covered_steps": covered_event,
+                "coverage_ratio": event_ratio,
+                "missing_ratio": (1.0 - event_ratio) if event_ratio is not None else None,
+                "zero_available_steps": zero_event,
+                "max_consecutive_zero_steps": event_max_zero,
+                "available_station_min": event_available_min,
+                "available_station_mean": event_available_mean,
+                "status": event_status,
+            }
+        )
+
+    uncovered_events = [item for item in event_coverage if int(item.get("zero_available_steps", 0) or 0) > 0]
+    if uncovered_events:
+        sample = "\u3001".join(str(item.get("event_id") or item.get("name")) for item in uncovered_events[:3])
+        message = f"\u6709 {len(uncovered_events)} \u573a\u4e8b\u4ef6\u8fd0\u884c\u7a97\u53e3\u5185\u5b58\u5728\u65e0\u53ef\u7528\u7ad9\u70b9\u65f6\u95f4\u6b65\uff0c\u4f8b\u5982\uff1a{sample}\u3002"
+        if mode == "thiessen_station_only":
+            missing.append(message)
+        else:
+            warnings.append(message)
+
+    return {"event_coverage": event_coverage, "missing": missing, "warnings": warnings}
 
 
 def station_precip_task_context_summary(

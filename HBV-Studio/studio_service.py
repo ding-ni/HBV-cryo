@@ -169,6 +169,7 @@ from services.station_precip import load_station_precip_table as build_load_stat
 from services.station_precip import max_consecutive_true as build_max_consecutive_true
 from services.station_precip import read_station_csv as build_read_station_csv
 from services.station_precip import station_count_text as build_station_count_text
+from services.station_precip import station_precip_event_coverage_summary as build_station_precip_event_coverage_summary
 from services.station_precip import station_precip_expected_coverage as build_station_precip_expected_coverage
 from services.station_precip import station_precip_id_match_summary as build_station_precip_id_match_summary
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
@@ -2626,6 +2627,21 @@ def _station_precip_expected_coverage(
     )
 
 
+def _station_precip_event_coverage_summary(
+    matched_series: pd.DataFrame,
+    event_info: dict[str, Any] | None,
+    *,
+    step_hours: float,
+    mode: str,
+) -> dict[str, Any]:
+    return build_station_precip_event_coverage_summary(
+        matched_series,
+        event_info,
+        step_hours=step_hours,
+        mode=mode,
+    )
+
+
 def _station_precip_task_context_summary(
     *,
     mode: str,
@@ -2793,7 +2809,6 @@ def analyze_station_precip_inputs(
     expected_count = int(coverage_info["expected_count"])
     covered_count = int(coverage_info["covered_count"])
     coverage_ratio = coverage_info["coverage_ratio"]
-    event_coverage: list[dict[str, Any]] = []
     zero_available_steps = int(coverage_info["zero_available_steps"])
     max_consecutive_zero_steps = int(coverage_info["max_consecutive_zero_steps"])
     min_available_station_count = coverage_info["min_available_station_count"]
@@ -2801,61 +2816,15 @@ def analyze_station_precip_inputs(
     quality_series = coverage_info["quality_series"]
     missing.extend(coverage_info["missing"])
     warnings.extend(coverage_info["warnings"])
-    if event_info:
-        for event in event_info.get("valid_events", []):
-            event_index = _event_date_range(event["run_start"], event["run_end"], step)
-            if len(event_index) <= 0 or matched_series.empty:
-                covered_event = 0
-                zero_event = int(len(event_index))
-                event_available_min = None if len(event_index) <= 0 else 0
-                event_available_mean = None if len(event_index) <= 0 else 0.0
-                event_max_zero = int(len(event_index))
-            else:
-                event_present = matched_series.reindex(event_index)
-                event_available_counts = event_present.notna().sum(axis=1)
-                event_zero_flags = event_available_counts == 0
-                covered_event = int((event_available_counts > 0).sum())
-                zero_event = int(event_zero_flags.sum())
-                event_available_min = int(event_available_counts.min()) if not event_available_counts.empty else None
-                event_available_mean = float(event_available_counts.mean()) if not event_available_counts.empty else None
-                event_max_zero = _max_consecutive_true(event_zero_flags.tolist())
-            event_steps = int(len(event_index))
-            event_ratio = covered_event / event_steps if event_steps else None
-            if event_ratio is not None and event_ratio >= 0.99 and zero_event == 0:
-                event_status = "ok"
-            elif mode == "thiessen_station_only" and zero_event > 0:
-                event_status = "fail"
-            elif covered_event == 0:
-                event_status = "fail"
-            else:
-                event_status = "warn"
-            event_coverage.append(
-                {
-                    "event_id": event.get("event_id"),
-                    "name": event.get("name"),
-                    "purpose": event.get("purpose"),
-                    "run_start": _format_time_for_check(event.get("run_start"), step),
-                    "run_end": _format_time_for_check(event.get("run_end"), step),
-                    "expected_steps": event_steps,
-                    "covered_steps": covered_event,
-                    "coverage_ratio": event_ratio,
-                    "missing_ratio": (1.0 - event_ratio) if event_ratio is not None else None,
-                    "zero_available_steps": zero_event,
-                    "max_consecutive_zero_steps": event_max_zero,
-                    "available_station_min": event_available_min,
-                    "available_station_mean": event_available_mean,
-                    "status": event_status,
-                }
-            )
-        uncovered_events = [item for item in event_coverage if int(item.get("zero_available_steps", 0) or 0) > 0]
-        if uncovered_events:
-            sample = "、".join(str(item.get("event_id") or item.get("name")) for item in uncovered_events[:3])
-            message = f"有 {len(uncovered_events)} 场事件运行窗口内存在无可用站点时间步，例如：{sample}。"
-            if mode == "thiessen_station_only":
-                if message not in missing:
-                    missing.append(message)
-            elif message not in warnings:
-                warnings.append(message)
+    event_info_summary = _station_precip_event_coverage_summary(
+        matched_series,
+        event_info,
+        step_hours=step,
+        mode=mode,
+    )
+    event_coverage = list(event_info_summary["event_coverage"])
+    missing.extend(event_info_summary["missing"])
+    warnings.extend(event_info_summary["warnings"])
 
     numeric_values = quality_series.to_numpy(dtype="float64") if not quality_series.empty else np.empty((0, 0), dtype="float64")
     negative_count = int(np.sum(numeric_values < 0)) if numeric_values.size else 0

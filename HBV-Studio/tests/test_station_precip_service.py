@@ -19,6 +19,7 @@ from services.station_precip import (  # noqa: E402
     load_station_precip_table,
     max_consecutive_true,
     station_count_text,
+    station_precip_event_coverage_summary,
     station_precip_expected_coverage,
     station_precip_id_match_summary,
     station_precip_mode_label,
@@ -161,6 +162,73 @@ class StationPrecipServiceTests(unittest.TestCase):
 
         self.assertEqual(coverage["warnings"], [])
         self.assertIn("\u8986\u76d6\u4e0d\u8db3", coverage["missing"][0])
+
+    def test_station_precip_event_coverage_summary_warns_for_bias_mode_gaps(self) -> None:
+        matched_series = pd.DataFrame(
+            {"S1": [1.0, None, 3.0]},
+            index=pd.date_range("2026-06-01", periods=3, freq="1D"),
+        )
+        event_info = {
+            "valid_events": [
+                {
+                    "event_id": "E01",
+                    "name": "\u5165\u6c5b\u6d2a\u6c34",
+                    "purpose": "calibration",
+                    "run_start": pd.Timestamp("2026-06-01"),
+                    "run_end": pd.Timestamp("2026-06-03"),
+                }
+            ]
+        }
+
+        summary = station_precip_event_coverage_summary(
+            matched_series,
+            event_info,
+            step_hours=24,
+            mode="grid_plus_station_bias",
+        )
+
+        self.assertEqual(summary["missing"], [])
+        self.assertIn("E01", summary["warnings"][0])
+        event = summary["event_coverage"][0]
+        self.assertEqual(event["event_id"], "E01")
+        self.assertEqual(event["run_start"], "2026-06-01")
+        self.assertEqual(event["run_end"], "2026-06-03")
+        self.assertEqual(event["expected_steps"], 3)
+        self.assertEqual(event["covered_steps"], 2)
+        self.assertEqual(event["coverage_ratio"], 2 / 3)
+        self.assertEqual(event["zero_available_steps"], 1)
+        self.assertEqual(event["max_consecutive_zero_steps"], 1)
+        self.assertEqual(event["available_station_min"], 0)
+        self.assertEqual(event["available_station_mean"], 2 / 3)
+        self.assertEqual(event["status"], "warn")
+
+    def test_station_precip_event_coverage_summary_fails_station_only_gaps(self) -> None:
+        matched_series = pd.DataFrame(
+            {"S1": [1.0, None]},
+            index=pd.date_range("2026-06-01", periods=2, freq="1D"),
+        )
+        event_info = {
+            "valid_events": [
+                {
+                    "event_id": "E02",
+                    "name": "\u65e0\u96e8\u6d2a\u6c34",
+                    "purpose": "validation",
+                    "run_start": pd.Timestamp("2026-06-01"),
+                    "run_end": pd.Timestamp("2026-06-02"),
+                }
+            ]
+        }
+
+        summary = station_precip_event_coverage_summary(
+            matched_series,
+            event_info,
+            step_hours=24,
+            mode="thiessen_station_only",
+        )
+
+        self.assertEqual(summary["warnings"], [])
+        self.assertIn("E02", summary["missing"][0])
+        self.assertEqual(summary["event_coverage"][0]["status"], "fail")
 
     def test_continuous_station_only_summary_fails_when_no_station_steps_exist(self) -> None:
         summary = station_precip_task_context_summary(
