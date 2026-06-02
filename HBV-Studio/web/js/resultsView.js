@@ -82,6 +82,53 @@
     };
   }
 
+  function runProfileValue(run = {}) {
+    return String(run?.calibration_profile || (Number(run?.time_step_hours) === 1 ? "hourly" : "daily") || "").trim().toLowerCase();
+  }
+
+  function filterRuns(runs = [], filters = {}, helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const runTypeValue = helpers.runTypeValue || (run => String(run?.run_type || run?.type || "").trim().toLowerCase());
+    const workspacePath = String(filters.workspacePath || "").trim();
+    const profile = String(filters.profile || "").trim().toLowerCase();
+    const type = String(filters.type || "").trim().toLowerCase();
+    const editability = String(filters.editability || "all").trim().toLowerCase() || "all";
+    return (Array.isArray(runs) ? runs : []).filter(run => {
+      if (workspacePath && !samePath(run?.workspace_config, workspacePath)) return false;
+      if (profile && runProfileValue(run) !== profile) return false;
+      if (type && runTypeValue(run) !== type) return false;
+      if (editability === "editable" && !run?.studio_compatible) return false;
+      if (editability === "readonly" && run?.studio_compatible) return false;
+      return true;
+    });
+  }
+
+  function resultsFilterBreakdown(runs = [], helpers = {}) {
+    const runTypeValue = helpers.runTypeValue || (run => String(run?.run_type || run?.type || "").trim().toLowerCase());
+    const counts = (Array.isArray(runs) ? runs : []).reduce((acc, run) => {
+      const key = runTypeValue(run);
+      acc[key] = Number(acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const entries = [
+      ["calibration", "正式率定"],
+      ["manual_starter", "手调起点"],
+      ["manual_result", "手调结果"],
+      ["forecast_restart", "连续状态预报"],
+      ["legacy", "历史结果"],
+    ].filter(([key]) => counts[key]).map(([key, label]) => ({
+      key,
+      label,
+      count: counts[key],
+      text: `${label} ${counts[key]}`,
+    }));
+    return {
+      counts,
+      entries,
+      text: entries.map(item => item.text).join(" / "),
+    };
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -490,6 +537,7 @@
   }
 
   window.HBVStudioResultsView = {
+    filterRuns,
     resultMetricItems,
     renderFilterToolbar,
     renderMetricStrip,
@@ -499,8 +547,10 @@
     renderRunEngineeringSummary,
     renderRunExportFields,
     resultChartPayloads,
+    resultsFilterBreakdown,
     resultsFilterHint,
     runExportPanelState,
+    runProfileValue,
     runStepHours,
   };
 })();

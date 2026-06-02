@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterHint", "runExportPanelState", "runStepHours"],
+    exports: ["filterRuns", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runStepHours"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -609,25 +609,16 @@ function objectiveVersionBadge(run) {
 }
 
 function visibleRuns() {
-  return state.runs.filter(run => {
-    if (state.runWorkspaceFilterPath && !samePath(run.workspace_config, state.runWorkspaceFilterPath)) {
-      return false;
-    }
-    if (state.runProfileFilter) {
-      const profile = String(run.calibration_profile || (run.time_step_hours === 1 ? "hourly" : "daily") || "").trim().toLowerCase();
-      if (profile !== state.runProfileFilter) return false;
-    }
-    if (state.runTypeFilter) {
-      if (runTypeValue(run) !== state.runTypeFilter) return false;
-    }
-    if (state.runEditabilityFilter === "editable" && !run.studio_compatible) {
-      return false;
-    }
-    if (state.runEditabilityFilter === "readonly" && run.studio_compatible) {
-      return false;
-    }
-    return true;
-  });
+  return window.HBVStudioResultsView.filterRuns(
+    state.runs,
+    {
+      workspacePath: state.runWorkspaceFilterPath,
+      profile: state.runProfileFilter,
+      type: state.runTypeFilter,
+      editability: state.runEditabilityFilter,
+    },
+    { samePath, runTypeValue }
+  );
 }
 
 function runsForWorkspace(path) {
@@ -740,18 +731,7 @@ function renderResultsFilterToolbar() {
   const profileText = state.runProfileFilter ? profileLabel(state.runProfileFilter) : "全部尺度";
   const stageText = state.runTypeFilter ? runTypeLabel(state.runTypeFilter) : "全部阶段";
   const abilityText = state.runEditabilityFilter === "editable" ? "可继续手调" : state.runEditabilityFilter === "readonly" ? "仅查看" : "全部手调能力";
-  const counts = shown.reduce((acc, run) => {
-    const key = runTypeValue(run);
-    acc[key] = Number(acc[key] || 0) + 1;
-    return acc;
-  }, {});
-  const breakdown = [
-    counts.calibration ? `正式率定 ${counts.calibration}` : "",
-    counts.manual_starter ? `手调起点 ${counts.manual_starter}` : "",
-    counts.manual_result ? `手调结果 ${counts.manual_result}` : "",
-    counts.forecast_restart ? `连续状态预报 ${counts.forecast_restart}` : "",
-    counts.legacy ? `历史结果 ${counts.legacy}` : "",
-  ].filter(Boolean).join(" / ");
+  const breakdown = window.HBVStudioResultsView.resultsFilterBreakdown(shown, { runTypeValue }).text;
   const filterHint = window.HBVStudioResultsView.resultsFilterHint({
     filtersActive: Boolean(state.runWorkspaceFilterPath || state.runProfileFilter || state.runTypeFilter || state.runEditabilityFilter !== "all"),
     totalRuns: state.runs.length,
@@ -969,7 +949,7 @@ function setRunEditabilityFilter(value = "all") {
 }
 
 function runProfileValue(run) {
-  return String(run?.calibration_profile || (Number(run?.time_step_hours) === 1 ? "hourly" : "daily") || "").trim().toLowerCase();
+  return window.HBVStudioResultsView.runProfileValue(run);
 }
 
 function alignRunFiltersForSelection(run) {

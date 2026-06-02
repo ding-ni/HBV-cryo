@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runStepHours) {
+            if (!results?.filterRuns || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runStepHours) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -68,6 +68,44 @@ class FrontendResultsViewTests(unittest.TestCase):
             const emptyHint = results.resultsFilterHint({ filtersActive: true, shownCount: 0, workspaceText: "工作区A" });
             if (!emptyHint.text.includes("当前筛选：工作区A") || emptyHint.className !== "hint-box status-warn") {
               throw new Error(`unexpected filtered hint: ${JSON.stringify(emptyHint)}`);
+            }
+
+            const runItems = [
+              { path: "r1", workspace_config: "C:/ws/A", calibration_profile: "daily", run_type: "calibration", studio_compatible: true },
+              { path: "r2", workspace_config: "C:/ws/A", time_step_hours: 1, run_type: "manual_result", studio_compatible: true },
+              { path: "r3", workspace_config: "C:/ws/B", calibration_profile: "daily", run_type: "forecast_restart", studio_compatible: false },
+              { path: "r4", workspace_config: "C:/ws/A", calibration_profile: "daily", run_type: "legacy", studio_compatible: false },
+            ];
+            const filteredRuns = results.filterRuns(runItems, {
+              workspacePath: "C:\\ws\\A",
+              profile: "daily",
+              type: "calibration",
+              editability: "editable",
+            }, {
+              ...helpers,
+              runTypeValue(run) { return run.run_type; },
+            });
+            if (filteredRuns.map(run => run.path).join("|") !== "r1") {
+              throw new Error(`unexpected filtered runs: ${filteredRuns.map(run => run.path).join("|")}`);
+            }
+            if (results.runProfileValue(runItems[1]) !== "hourly" || results.runProfileValue({}) !== "daily") {
+              throw new Error("run profile value should infer hourly from 1-hour step and default to daily");
+            }
+            const readonlyRuns = results.filterRuns(runItems, { editability: "readonly" }, { runTypeValue(run) { return run.run_type; } });
+            if (readonlyRuns.map(run => run.path).join("|") !== "r3|r4") {
+              throw new Error(`unexpected readonly filtered runs: ${readonlyRuns.map(run => run.path).join("|")}`);
+            }
+            const breakdown = results.resultsFilterBreakdown([
+              runItems[2],
+              runItems[1],
+              runItems[3],
+              runItems[0],
+              { path: "r5", run_type: "manual_starter" },
+            ], {
+              runTypeValue(run) { return run.run_type; },
+            });
+            if (breakdown.text !== "正式率定 1 / 手调起点 1 / 手调结果 1 / 连续状态预报 1 / 历史结果 1") {
+              throw new Error(`unexpected results filter breakdown: ${JSON.stringify(breakdown)}`);
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);
