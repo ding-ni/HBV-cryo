@@ -116,9 +116,13 @@ from services.forcing_validation import ForcingInputsReadyContext
 from services.forcing_validation import ForcingPreprocessStatusContext
 from services.forcing_validation import ForcingValidationContext
 from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
+from services.forcing_validation import check_daily_era5_processed_status as build_check_daily_era5_processed_status
 from services.forcing_validation import check_daily_prec_status as build_check_daily_prec_status
+from services.forcing_validation import check_daily_temp_evap_status as build_check_daily_temp_evap_status
 from services.forcing_validation import check_forcing_inputs_ready as build_check_forcing_inputs_ready
 from services.forcing_validation import check_hourly_prec_status as build_check_hourly_prec_status
+from services.forcing_validation import check_hourly_temp_evap_status as build_check_hourly_temp_evap_status
+from services.forcing_validation import configured_daily_meteo_sources as build_configured_daily_meteo_sources
 from services.forcing_validation import prefer_raw_or_aligned_group_status as build_prefer_raw_or_aligned_group_status
 from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
@@ -1807,10 +1811,7 @@ def _prefer_raw_or_aligned_group_status(
 
 
 def _configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
-    meteo = dict(config.get("气象策略", {}))
-    temp_source = str(meteo.get("温度来源", "era5")).strip().lower() or "era5"
-    pet_source = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).strip().lower() or "era5_fao56"
-    return temp_source, pet_source
+    return build_configured_daily_meteo_sources(config)
 
 
 def _glob_count(path: Path, pattern: str) -> int:
@@ -1883,17 +1884,10 @@ def check_elevation_zone(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_daily_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_DAILY)
-    return _prefer_raw_or_aligned_group_status(
-        [
-            ("日尺度 ERA5 温度中间结果", Path(paths["raw_temp_daily_dir"])),
-            ("日尺度潜在蒸散发中间结果", Path(paths["raw_evap_daily_dir"])),
-        ],
-        [
-            ("工程气温输入", Path(paths["aligned_temp_dir"])),
-            ("工程潜在蒸散发输入", Path(paths["aligned_evap_dir"])),
-        ],
-        24.0,
+    return build_check_daily_temp_evap_status(
+        config,
+        _forcing_preprocess_status_context(),
+        profile=PROFILE_DAILY,
     )
 
 
@@ -1919,19 +1913,11 @@ def check_daily_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_daily_era5_processed(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_DAILY)
-    temp_source, pet_source = _configured_daily_meteo_sources(config)
-    raw_entries: list[tuple[str, Path]] = []
-    aligned_entries: list[tuple[str, Path]] = []
-    if temp_source != "custom_tif":
-        raw_entries.append(("日尺度气温结果", Path(paths["raw_temp_daily_dir"])))
-        aligned_entries.append(("工程气温输入", Path(paths["aligned_temp_dir"])))
-    if pet_source != "custom_tif":
-        raw_entries.append(("日尺度潜在蒸散发结果", Path(paths["raw_evap_daily_dir"])))
-        aligned_entries.append(("工程潜在蒸散发输入", Path(paths["aligned_evap_dir"])))
-    if not raw_entries:
-        return True, "当前方案不需要这一步。", 0
-    return _prefer_raw_or_aligned_group_status(raw_entries, aligned_entries, 24.0)
+    return build_check_daily_era5_processed_status(
+        config,
+        _forcing_preprocess_status_context(),
+        profile=PROFILE_DAILY,
+    )
 
 
 def check_daily_prec(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
@@ -2107,18 +2093,10 @@ def check_daily_inputs_ready(config: dict[str, Any], precip_source: Any = None) 
 
 
 def check_hourly_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_workspace_paths(config)
-    profile_paths = build_profile_paths(config, PROFILE_HOURLY)
-    return _prefer_raw_or_aligned_group_status(
-        [
-            ("小时尺度 ERA5 温度中间结果", Path(paths["raw_temp_hourly_dir"])),
-            ("小时尺度潜在蒸散发中间结果", Path(paths["raw_evap_hourly_dir"])),
-        ],
-        [
-            ("工程气温输入", Path(profile_paths["aligned_temp_dir"])),
-            ("工程潜在蒸散发输入", Path(profile_paths["aligned_evap_dir"])),
-        ],
-        1.0,
+    return build_check_hourly_temp_evap_status(
+        config,
+        _forcing_preprocess_status_context(),
+        profile=PROFILE_HOURLY,
     )
 
 

@@ -98,6 +98,55 @@ def prefer_raw_or_aligned_group_status(
     return False, raw_message, 0
 
 
+def configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
+    meteo = dict(config.get("气象策略", {}) or {})
+    temp_source = str(meteo.get("温度来源", "era5")).strip().lower() or "era5"
+    pet_source = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).strip().lower() or "era5_fao56"
+    return temp_source, pet_source
+
+
+def check_daily_temp_evap_status(
+    config: dict[str, Any],
+    context: ForcingPreprocessStatusContext,
+    *,
+    profile: str,
+) -> tuple[bool, str, int]:
+    paths = context.build_profile_paths(config, profile)
+    return prefer_raw_or_aligned_group_status(
+        [
+            ("日尺度 ERA5 温度中间结果", Path(paths["raw_temp_daily_dir"])),
+            ("日尺度潜在蒸散发中间结果", Path(paths["raw_evap_daily_dir"])),
+        ],
+        [
+            ("工程气温输入", Path(paths["aligned_temp_dir"])),
+            ("工程潜在蒸散发输入", Path(paths["aligned_evap_dir"])),
+        ],
+        24.0,
+        context,
+    )
+
+
+def check_daily_era5_processed_status(
+    config: dict[str, Any],
+    context: ForcingPreprocessStatusContext,
+    *,
+    profile: str,
+) -> tuple[bool, str, int]:
+    paths = context.build_profile_paths(config, profile)
+    temp_source, pet_source = configured_daily_meteo_sources(config)
+    raw_entries: list[tuple[str, Path]] = []
+    aligned_entries: list[tuple[str, Path]] = []
+    if temp_source != "custom_tif":
+        raw_entries.append(("日尺度气温结果", Path(paths["raw_temp_daily_dir"])))
+        aligned_entries.append(("工程气温输入", Path(paths["aligned_temp_dir"])))
+    if pet_source != "custom_tif":
+        raw_entries.append(("日尺度潜在蒸散发结果", Path(paths["raw_evap_daily_dir"])))
+        aligned_entries.append(("工程潜在蒸散发输入", Path(paths["aligned_evap_dir"])))
+    if not raw_entries:
+        return True, "当前方案不需要这一步。", 0
+    return prefer_raw_or_aligned_group_status(raw_entries, aligned_entries, 24.0, context)
+
+
 def check_daily_prec_status(
     config: dict[str, Any],
     context: ForcingPreprocessStatusContext,
@@ -127,6 +176,28 @@ def check_daily_prec_status(
         [("日尺度降水中间结果", Path(target))],
         [("工程降水输入", Path(aligned))],
         24.0,
+        context,
+    )
+
+
+def check_hourly_temp_evap_status(
+    config: dict[str, Any],
+    context: ForcingPreprocessStatusContext,
+    *,
+    profile: str,
+) -> tuple[bool, str, int]:
+    paths = context.build_workspace_paths(config)
+    profile_paths = context.build_profile_paths(config, profile)
+    return prefer_raw_or_aligned_group_status(
+        [
+            ("小时尺度 ERA5 温度中间结果", Path(paths["raw_temp_hourly_dir"])),
+            ("小时尺度潜在蒸散发中间结果", Path(paths["raw_evap_hourly_dir"])),
+        ],
+        [
+            ("工程气温输入", Path(profile_paths["aligned_temp_dir"])),
+            ("工程潜在蒸散发输入", Path(profile_paths["aligned_evap_dir"])),
+        ],
+        1.0,
         context,
     )
 

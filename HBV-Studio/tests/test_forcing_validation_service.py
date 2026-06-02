@@ -19,9 +19,13 @@ from services.forcing_validation import (  # noqa: E402
     ForcingPreprocessStatusContext,
     ForcingValidationContext,
     check_aligned_forcing_status,
+    check_daily_era5_processed_status,
     check_daily_prec_status,
+    check_daily_temp_evap_status,
     check_forcing_inputs_ready,
     check_hourly_prec_status,
+    check_hourly_temp_evap_status,
+    configured_daily_meteo_sources,
     prefer_raw_or_aligned_group_status,
     validate_forcing_bundle,
 )
@@ -167,6 +171,10 @@ class ForcingValidationServiceTests(unittest.TestCase):
         count_map = counts or {}
 
         profile_paths = {
+            "raw_temp_daily_dir": "raw_daily_temp",
+            "raw_evap_daily_dir": "raw_daily_evap",
+            "aligned_temp_dir": "aligned_daily_temp",
+            "aligned_evap_dir": "aligned_daily_evap",
             "raw_prec_era5_daily_dir": "raw_daily_era5",
             "raw_prec_cmfd_daily_dir": "raw_daily_cmfd",
             "raw_prec_daily_dir": "raw_daily_default",
@@ -176,12 +184,16 @@ class ForcingValidationServiceTests(unittest.TestCase):
             "aligned_prec_custom_base_dir": "aligned_custom",
         }
         hourly_profile_paths = {
+            "aligned_temp_dir": "aligned_hourly_temp",
+            "aligned_evap_dir": "aligned_hourly_evap",
             "aligned_prec_era5_base_dir": "aligned_hourly_era5",
             "aligned_prec_cmfd_base_dir": "aligned_hourly_cmfd",
             "aligned_prec_base_dir": "aligned_hourly_default",
             "aligned_prec_custom_base_dir": "aligned_hourly_custom",
         }
         workspace_paths = {
+            "raw_temp_hourly_dir": "raw_hourly_temp",
+            "raw_evap_hourly_dir": "raw_hourly_evap",
             "raw_prec_era5_hourly_dir": "raw_hourly_era5",
             "raw_prec_cmfd_hourly_dir": "raw_hourly_cmfd",
             "raw_prec_hourly_dir": "raw_hourly_default",
@@ -358,6 +370,97 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(message, "aligned: 3（已导入并完成网格对齐）")
         self.assertEqual(count, 3)
+
+    def test_configured_daily_meteo_sources_uses_defaults_and_legacy_pet_key(self) -> None:
+        self.assertEqual(configured_daily_meteo_sources({}), ("era5", "era5_fao56"))
+        self.assertEqual(
+            configured_daily_meteo_sources({"气象策略": {"温度来源": " CUSTOM_TIF ", "蒸散发来源": " custom_tif "}}),
+            ("custom_tif", "custom_tif"),
+        )
+
+    def test_check_daily_temp_evap_status_uses_daily_profile_paths(self) -> None:
+        context = self._preprocess_context(
+            scan_results={
+                "日尺度 ERA5 温度中间结果": {
+                    "label": "日尺度 ERA5 温度中间结果",
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 3,
+                    "total_files": 3,
+                },
+                "日尺度潜在蒸散发中间结果": {
+                    "label": "日尺度潜在蒸散发中间结果",
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 2,
+                    "total_files": 2,
+                },
+                "工程气温输入": {"label": "工程气温输入", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 1, "total_files": 1},
+                "工程潜在蒸散发输入": {"label": "工程潜在蒸散发输入", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 1, "total_files": 1},
+            }
+        )
+
+        ready, message, count = check_daily_temp_evap_status({}, context, profile="daily")
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "日尺度 ERA5 温度中间结果: 3；日尺度潜在蒸散发中间结果: 2")
+        self.assertEqual(count, 5)
+
+    def test_check_daily_era5_processed_status_skips_when_temp_and_pet_are_custom_tif(self) -> None:
+        context = self._preprocess_context()
+
+        ready, message, count = check_daily_era5_processed_status(
+            {"气象策略": {"温度来源": "custom_tif", "潜在蒸散发来源": "custom_tif"}},
+            context,
+            profile="daily",
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "当前方案不需要这一步。")
+        self.assertEqual(count, 0)
+
+    def test_check_hourly_temp_evap_status_falls_back_to_aligned_paths(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        context = self._preprocess_context(
+            scan_results={
+                "小时尺度 ERA5 温度中间结果": {
+                    "label": "小时尺度 ERA5 温度中间结果",
+                    "ok": False,
+                    "errors": ["小时气温时间步不连续"],
+                    "warnings": [],
+                    "valid_time_steps": 1,
+                    "total_files": 1,
+                },
+                "小时尺度潜在蒸散发中间结果": {
+                    "label": "小时尺度潜在蒸散发中间结果",
+                    "ok": False,
+                    "errors": ["小时蒸散发时间步不连续"],
+                    "warnings": [],
+                    "valid_time_steps": 1,
+                    "total_files": 1,
+                },
+                "工程气温输入": {"label": "工程气温输入", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 4, "total_files": 4},
+                "工程潜在蒸散发输入": {
+                    "label": "工程潜在蒸散发输入",
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 4,
+                    "total_files": 4,
+                },
+            },
+            calls=calls,
+        )
+
+        ready, message, count = check_hourly_temp_evap_status({}, context, profile="hourly")
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "工程气温输入: 4；工程潜在蒸散发输入: 4（已导入并完成网格对齐）")
+        self.assertEqual(count, 8)
+        self.assertIn(("scan", "小时尺度 ERA5 温度中间结果", Path("raw_hourly_temp"), 1.0), calls)
+        self.assertIn(("scan", "工程潜在蒸散发输入", Path("aligned_hourly_evap"), 1.0), calls)
 
     def test_check_daily_prec_status_handles_custom_tif_without_raw_processing(self) -> None:
         context = self._preprocess_context(
