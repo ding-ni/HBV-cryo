@@ -28,6 +28,36 @@ class ForcingValidationContext:
     event_forcing_coverage_summary: Callable[..., dict[str, Any] | None]
 
 
+@dataclass(frozen=True)
+class ForcingAlignedStatusContext:
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
+    effective_precip_paths: Callable[..., tuple[Path, Path, str]]
+    normalize_time_step_hours: Callable[[Any], float]
+    validate_tif_time_series: Callable[..., dict[str, Any]]
+
+
+def check_aligned_forcing_status(
+    config: dict[str, Any],
+    context: ForcingAlignedStatusContext,
+    *,
+    profile: str,
+    label: str,
+    precip_source: Any = None,
+) -> tuple[bool, str, int]:
+    paths = context.build_profile_paths(config, profile)
+    precip_dir, _, _ = context.effective_precip_paths(config, profile, precip_source=precip_source)
+    step_hours = context.normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    scans = [
+        context.validate_tif_time_series("降水", precip_dir, step_hours),
+        context.validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours),
+        context.validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours),
+    ]
+    count = sum(int(item["valid_time_steps"]) for item in scans)
+    ready = all(item["ok"] for item in scans)
+    message = "；".join(item["errors"][0] for item in scans if item["errors"]) or f"{label}气象驱动有效时间步：{count}"
+    return ready, message, count
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     context: ForcingValidationContext,

@@ -111,7 +111,9 @@ from services.forecast_restart import forecast_restart_run_with_progress as buil
 from services.forecast_restart import ForecastRestartWorkerContext
 from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
+from services.forcing_validation import ForcingAlignedStatusContext
 from services.forcing_validation import ForcingValidationContext
+from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
 from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import ForwardSimulationWorkerContext
@@ -1223,6 +1225,15 @@ def _forcing_validation_context() -> ForcingValidationContext:
     )
 
 
+def _forcing_aligned_status_context() -> ForcingAlignedStatusContext:
+    return ForcingAlignedStatusContext(
+        build_profile_paths=build_profile_paths,
+        effective_precip_paths=effective_precip_paths,
+        normalize_time_step_hours=normalize_time_step_hours,
+        validate_tif_time_series=validate_tif_time_series,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -1945,18 +1956,13 @@ def check_daily_prec(config: dict[str, Any], precip_source: Any = None) -> tuple
 
 
 def check_daily_aligned(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_DAILY)
-    precip_dir, _, _ = effective_precip_paths(config, PROFILE_DAILY, precip_source=precip_source)
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    scans = [
-        validate_tif_time_series("降水", precip_dir, step_hours),
-        validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours),
-        validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours),
-    ]
-    count = sum(int(item["valid_time_steps"]) for item in scans)
-    ready = all(item["ok"] for item in scans)
-    message = "；".join(item["errors"][0] for item in scans if item["errors"]) or f"日尺度气象驱动有效时间步：{count}"
-    return ready, message, count
+    return build_check_aligned_forcing_status(
+        config,
+        _forcing_aligned_status_context(),
+        profile=PROFILE_DAILY,
+        label="日尺度",
+        precip_source=precip_source,
+    )
 
 
 def _precip_strategy_status_context() -> PrecipStrategyStatusContext:
@@ -2183,18 +2189,13 @@ def check_hourly_prec(config: dict[str, Any], precip_source: Any = None) -> tupl
 
 
 def check_hourly_aligned(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_HOURLY)
-    precip_dir, _, _ = effective_precip_paths(config, PROFILE_HOURLY, precip_source=precip_source)
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    scans = [
-        validate_tif_time_series("降水", precip_dir, step_hours),
-        validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours),
-        validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours),
-    ]
-    count = sum(int(item["valid_time_steps"]) for item in scans)
-    ready = all(item["ok"] for item in scans)
-    message = "；".join(item["errors"][0] for item in scans if item["errors"]) or f"小时尺度气象驱动有效时间步：{count}"
-    return ready, message, count
+    return build_check_aligned_forcing_status(
+        config,
+        _forcing_aligned_status_context(),
+        profile=PROFILE_HOURLY,
+        label="小时尺度",
+        precip_source=precip_source,
+    )
 
 
 def check_hourly_inputs_ready(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:

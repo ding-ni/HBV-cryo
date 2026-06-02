@@ -12,10 +12,50 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from services.forcing_validation import ForcingValidationContext, validate_forcing_bundle  # noqa: E402
+from services.forcing_validation import (  # noqa: E402
+    ForcingAlignedStatusContext,
+    ForcingValidationContext,
+    check_aligned_forcing_status,
+    validate_forcing_bundle,
+)
 
 
 class ForcingValidationServiceTests(unittest.TestCase):
+    def _aligned_context(
+        self,
+        *,
+        scan_results: dict[str, dict[str, Any]] | None = None,
+        calls: list[tuple[Any, ...]] | None = None,
+    ) -> ForcingAlignedStatusContext:
+        results = scan_results or {
+            "降水": {"ok": True, "errors": [], "warnings": [], "valid_time_steps": 3},
+            "气温": {"ok": True, "errors": [], "warnings": [], "valid_time_steps": 2},
+            "蒸散发": {"ok": True, "errors": [], "warnings": [], "valid_time_steps": 1},
+        }
+        call_log = calls if calls is not None else []
+
+        def build_profile_paths(config: dict[str, Any], profile: str) -> dict[str, Any]:
+            call_log.append(("paths", profile))
+            return {
+                "aligned_temp_dir": "temp_dir",
+                "aligned_evap_dir": "evap_dir",
+            }
+
+        def effective_precip_paths(config: dict[str, Any], profile: str, **kwargs: Any) -> tuple[Path, Path, str]:
+            call_log.append(("precip", profile, kwargs.get("precip_source")))
+            return Path("prec_base"), Path("prec_effective"), "era5"
+
+        def validate_tif_time_series(label: str, directory: Path, step_hours: float) -> dict[str, Any]:
+            call_log.append(("scan", label, directory, step_hours))
+            return results[label]
+
+        return ForcingAlignedStatusContext(
+            build_profile_paths=build_profile_paths,
+            effective_precip_paths=effective_precip_paths,
+            normalize_time_step_hours=lambda value: 24.0,
+            validate_tif_time_series=validate_tif_time_series,
+        )
+
     def _context(
         self,
         *,
@@ -68,6 +108,47 @@ class ForcingValidationServiceTests(unittest.TestCase):
             event_windows_ui_summary=lambda event_info, step_hours: {"event_count": len(event_info["events"])},
             event_forcing_coverage_summary=lambda event_info, directories, step_hours: {"status": "ok", "event_count": len(event_info["events"])},
         )
+
+    def test_check_aligned_forcing_status_sums_valid_time_steps(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        context = self._aligned_context(calls=calls)
+
+        ready, message, count = check_aligned_forcing_status(
+            {"时间步长_小时": 24},
+            context,
+            profile="daily",
+            label="日尺度",
+            precip_source="custom_tif",
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "日尺度气象驱动有效时间步：6")
+        self.assertEqual(count, 6)
+        self.assertEqual(calls[0], ("paths", "daily"))
+        self.assertEqual(calls[1], ("precip", "daily", "custom_tif"))
+        self.assertEqual(calls[2], ("scan", "降水", Path("prec_base"), 24.0))
+        self.assertEqual(calls[3], ("scan", "气温", Path("temp_dir"), 24.0))
+        self.assertEqual(calls[4], ("scan", "蒸散发", Path("evap_dir"), 24.0))
+
+    def test_check_aligned_forcing_status_reports_first_scan_errors(self) -> None:
+        context = self._aligned_context(
+            scan_results={
+                "降水": {"ok": False, "errors": ["降水缺少 1 个时间步", "降水第二条"], "warnings": [], "valid_time_steps": 1},
+                "气温": {"ok": True, "errors": [], "warnings": [], "valid_time_steps": 2},
+                "蒸散发": {"ok": False, "errors": ["蒸散发目录为空"], "warnings": [], "valid_time_steps": 0},
+            }
+        )
+
+        ready, message, count = check_aligned_forcing_status(
+            {"时间步长_小时": 24},
+            context,
+            profile="hourly",
+            label="小时尺度",
+        )
+
+        self.assertFalse(ready)
+        self.assertEqual(message, "降水缺少 1 个时间步；蒸散发目录为空")
+        self.assertEqual(count, 3)
 
     def test_validate_forcing_bundle_aggregates_directory_and_grid_messages(self) -> None:
         context = self._context(selected_source="custom_tif", grid_error_label="气温")
