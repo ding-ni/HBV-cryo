@@ -36,6 +36,39 @@
     return status === "completed" ? "status-ok" : status === "failed" ? "status-fail" : "status-warn";
   }
 
+  function normalizeTaskFilters(filters = {}) {
+    return {
+      workspaceMode: String(filters.workspaceMode || "current").trim().toLowerCase() || "current",
+      workspacePath: String(filters.workspacePath || "").trim(),
+      status: String(filters.status || "active").trim().toLowerCase() || "active",
+      type: String(filters.type || "all").trim().toLowerCase() || "all",
+    };
+  }
+
+  function taskMatchesType(task, type) {
+    if (type === "all") return true;
+    if (type === "calibration") return task?.task_type === "calibration";
+    if (type === "prep") return ["data_prep", "bootstrap", "meteo_import"].includes(task?.task_type);
+    if (type === "simulate") return ["forward_sim", "manual_start", "forecast_restart"].includes(task?.task_type);
+    if (type === "support") return ["self_check", "sync"].includes(task?.task_type);
+    return true;
+  }
+
+  function filterTasks(tasks, filters = {}, helpers = {}) {
+    const items = Array.isArray(tasks) ? tasks : [];
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const normalized = normalizeTaskFilters(filters);
+    return items.filter(task => {
+      if (normalized.workspaceMode === "current" && normalized.workspacePath) {
+        if (!samePath(task?.config_path, normalized.workspacePath)) return false;
+      }
+      if (normalized.status === "active" && task?.status !== "running") return false;
+      if (normalized.status === "unfinished" && task?.status === "completed") return false;
+      if (normalized.status === "failed" && task?.status !== "failed") return false;
+      return taskMatchesType(task, normalized.type);
+    });
+  }
+
   function taskTypeLabel(taskType) {
     return ({
       calibration: "率定任务",
@@ -556,11 +589,86 @@
     `;
   }
 
+  function taskProgressStageEntries(task) {
+    const progress = task?.progress;
+    const stageEntries = Object.entries(progress?.stages || {})
+      .filter(([, stageInfo]) => (stageInfo?.history || []).length >= 2)
+      .sort((a, b) => {
+        const order = { mc: 0, global: 1, refine: 2 };
+        return (order[a[0]] ?? 99) - (order[b[0]] ?? 99);
+      });
+    if (stageEntries.length) {
+      return stageEntries.map(([stageName]) => stageName);
+    }
+    return (progress?.history || []).length >= 2 ? [progress?.stage || "global"] : [];
+  }
+
+  function renderTaskProgressNote(task, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const formatNumber = helpers.formatNumber || fallbackText;
+    const formatDurationSeconds = helpers.formatDurationSeconds || fallbackText;
+    const progress = task?.progress;
+    if (!progress) return "";
+    const isRunning = task?.status === "running";
+    const progressTitle = isRunning ? "当前阶段" : task?.status === "completed" ? "最后进度" : "失败前进度";
+    const trendHtml = taskProgressStageEntries(task).map(stageName =>
+      `<div class="chart-host" data-task-progress-chart="${escapeHtml(task?.id)}" data-task-progress-stage="${escapeHtml(stageName)}" style="height:180px;margin-top:8px"></div>`
+    ).join("");
+    return `
+      <div class="hint-box task-progress-note ${task?.status === "completed" ? "status-ok" : task?.status === "failed" ? "status-fail" : ""}">
+        ${escapeHtml(progressTitle)}：${escapeHtml(taskStageLabel(progress.stage || "global"))}
+        ${progress.gen ? ` · 第 ${escapeHtml(progress.gen)}/${escapeHtml(progress.maxiter || "\u2014")} 步` : ""}
+        · 率定纳什效率系数 ${escapeHtml(formatNumber(progress.nse_cal, 4))}
+        · 验证纳什效率系数 ${escapeHtml(formatNumber(progress.nse_val, 4))}
+        · 综合评分值 ${escapeHtml(formatNumber(progress.obj, 4))}
+        · 已耗时 ${escapeHtml(formatDurationSeconds(progress.elapsed_sec))}
+        ${isRunning && progress.eta_sec !== null && progress.eta_sec !== undefined ? ` · 预计剩余 ${escapeHtml(formatDurationSeconds(progress.eta_sec))}` : ""}
+        ${trendHtml}
+      </div>`;
+  }
+
+  function renderTaskCard(task, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const formatDateTime = helpers.formatDateTime || fallbackText;
+    const isRunning = task?.status === "running";
+    const contextSummary = taskContextSummary(task, helpers);
+    const summaryLine = taskSummaryLine(task, helpers);
+    const summaryClass = task?.status === "completed" ? "status-ok" : task?.status === "failed" ? "status-fail" : "";
+    return `
+    <div class="list-item task-card ${isRunning ? "task-running" : ""}">
+      <div class="task-card-topline">
+        <span class="task-kicker">${escapeHtml(taskTypeLabel(task?.task_type))}</span>
+        <span class="task-updated">最近更新 ${escapeHtml(formatDateTime(task?.updated_at))}</span>
+        <span class="status-badge ${taskStatusClass(task?.status)}">${escapeHtml(taskStatusLabel(task?.status))}${isRunning ? "..." : ""}</span>
+      </div>
+      <div class="task-card-hero">
+        <div class="task-card-title">
+          <strong>${escapeHtml(taskPrimaryTitle(task))}</strong>
+          ${contextSummary ? `<small class="task-meta-line">${escapeHtml(contextSummary)}</small>` : ""}
+        </div>
+      </div>
+      ${renderTaskMilestones(task, helpers)}
+      <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
+      ${renderTaskProgressNote(task, helpers)}
+      ${renderTaskActions(task, helpers)}
+      ${taskDebugDetails(task, { lines: isRunning ? 120 : 80 }, helpers)}
+    </div>`;
+  }
+
+  function renderTaskList(tasks, helpers = {}) {
+    const items = Array.isArray(tasks) ? tasks : [];
+    if (!items.length) return '<div class="hint-box">当前筛选下暂无任务。</div>';
+    return items.map(task => renderTaskCard(task, helpers)).join("");
+  }
+
   window.HBVStudioTaskView = {
     cleanTaskLogMessage,
+    filterTasks,
     methodLabel,
     optimizationMethodLabel,
+    renderTaskCard,
     renderTaskActions,
+    renderTaskList,
     renderTaskMilestones,
     taskContextSummary,
     taskDebugDetails,

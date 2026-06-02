@@ -1,8 +1,8 @@
 /* ===== HBV-Studio Design System ===== */
 :root {
-  --accent: #0f7d95;
-  --accent-strong: #0b5d74;
-  --accent-light: rgba(15,125,149,0.10);
+  --accent: #0e7490;
+  --accent-strong: #155e63;
+  --accent-light: rgba(14,116,144,0.10);
   --analysis: #1d4ed8;
   --terrain: #4d7c0f;
   --warm: #ef4444;
@@ -11,13 +11,13 @@
   --success-light: rgba(21,128,61,0.10);
   --danger: #b91c1c;
   --danger-light: rgba(185,28,28,0.08);
-  --bg: #edf3f7;
+  --bg: #f1f5f9;
   --panel: rgba(255,255,255,0.97);
   --panel-solid: #ffffff;
-  --surface-muted: #f4f7fa;
+  --surface-muted: #f8fafc;
   --text: #0f172a;
   --muted: #475569;
-  --line: #dbe5ed;
+  --line: #e2e8f0;
   --line-strong: #c7d4df;
   --radius-xl: 10px;
   --radius-lg: 8px;
@@ -152,12 +152,12 @@ body {
 
 .nav-item:hover {
   background: rgba(255,255,255,0.64);
-  border-color: rgba(15,125,149,0.14);
+  border-color: rgba(14,116,144,0.14);
   color: var(--text);
 }
 .nav-item.active {
   background: rgba(255,255,255,0.88);
-  border-color: rgba(15,125,149,0.22);
+  border-color: rgba(14,116,144,0.22);
   color: var(--accent-strong);
   box-shadow: 0 8px 18px rgba(15,23,42,0.055);
 }
@@ -220,7 +220,7 @@ body {
 /* ===== Buttons ===== */
 .primary-button {
   padding: 11px 22px;
-  border: 1px solid rgba(15,125,149,0.34);
+  border: 1px solid rgba(14,116,144,0.34);
   border-radius: var(--radius-sm);
   background: linear-gradient(180deg, #1388a3 0%, var(--accent-strong) 100%);
   color: #fff;
@@ -228,10 +228,10 @@ body {
   font-family: var(--font-body);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(15,125,149,0.18);
+  box-shadow: 0 8px 18px rgba(14,116,144,0.18);
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
-.primary-button:hover { opacity: 0.94; transform: translateY(-1px); box-shadow: 0 10px 22px rgba(15,125,149,0.22); }
+.primary-button:hover { opacity: 0.94; transform: translateY(-1px); box-shadow: 0 10px 22px rgba(14,116,144,0.22); }
 .primary-button:disabled { opacity: 0.4; cursor: default; }
 
 .ghost-button {
@@ -245,7 +245,7 @@ body {
   cursor: pointer;
   transition: all 160ms;
 }
-.ghost-button:hover { border-color: rgba(15,125,149,0.34); color: var(--accent); background: #fff; }
+.ghost-button:hover { border-color: rgba(14,116,144,0.34); color: var(--accent); background: #fff; }
 .ghost-button:disabled { opacity: 0.4; cursor: default; }
 
 .close-button {
@@ -274,7 +274,7 @@ body {
   position: absolute;
   inset: 0 0 auto;
   height: 3px;
-  background: linear-gradient(90deg, rgba(29,78,216,0.72), rgba(15,125,149,0.72), rgba(77,124,15,0.34));
+  background: linear-gradient(90deg, rgba(29,78,216,0.72), rgba(14,116,144,0.72), rgba(77,124,15,0.34));
 }
 
 .panel-head {
@@ -1278,10 +1278,10 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
 }
 .geo-map-plan {
   padding: 9px 10px;
-  border: 1px solid rgba(15,125,149,0.18);
+  border: 1px solid rgba(14,116,144,0.18);
   border-left: 3px solid var(--analysis);
   border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, rgba(15,125,149,0.07), rgba(255,255,255,0.86));
+  background: linear-gradient(180deg, rgba(14,116,144,0.07), rgba(255,255,255,0.86));
 }
 .geo-map-plan-head {
   display: flex;
@@ -1738,10 +1738,10 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
 /* ===== Hints & Action Rows ===== */
 .hint-box {
   padding: 12px 14px;
-  border: 1px solid rgba(15,125,149,0.15);
+  border: 1px solid rgba(14,116,144,0.15);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, rgba(15,125,149,0.08), rgba(255,255,255,0.68));
+  background: linear-gradient(180deg, rgba(14,116,144,0.08), rgba(255,255,255,0.68));
   font-size: 14px;
   color: var(--muted);
   margin-top: 8px;

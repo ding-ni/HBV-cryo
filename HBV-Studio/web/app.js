@@ -180,9 +180,12 @@ const frontendModuleContracts = [
     global: "HBVStudioTaskView",
     exports: [
       "cleanTaskLogMessage",
+      "filterTasks",
       "methodLabel",
       "optimizationMethodLabel",
       "renderTaskActions",
+      "renderTaskCard",
+      "renderTaskList",
       "renderTaskMilestones",
       "taskContextSummary",
       "taskDebugDetails",
@@ -593,37 +596,16 @@ function workspaceHasEditableRun(path) {
 }
 
 function visibleTasks() {
-  return state.tasks.filter(task => {
-    if (state.taskWorkspaceFilterMode === "current" && state.wizardWorkspacePath) {
-      if (!samePath(task.config_path, state.wizardWorkspacePath)) {
-        return false;
-      }
-    }
-    if (state.taskStatusFilter === "active" && task.status !== "running") {
-      return false;
-    }
-    if (state.taskStatusFilter === "unfinished" && task.status === "completed") {
-      return false;
-    }
-    if (state.taskStatusFilter === "failed" && task.status !== "failed") {
-      return false;
-    }
-    if (state.taskTypeFilter !== "all") {
-      if (state.taskTypeFilter === "calibration" && task.task_type !== "calibration") {
-        return false;
-      }
-      if (state.taskTypeFilter === "prep" && !["data_prep", "bootstrap", "meteo_import"].includes(task.task_type)) {
-        return false;
-      }
-      if (state.taskTypeFilter === "simulate" && !["forward_sim", "manual_start", "forecast_restart"].includes(task.task_type)) {
-        return false;
-      }
-      if (state.taskTypeFilter === "support" && !["self_check", "sync"].includes(task.task_type)) {
-        return false;
-      }
-    }
-    return true;
-  });
+  return window.HBVStudioTaskView.filterTasks(
+    state.tasks,
+    {
+      workspaceMode: state.taskWorkspaceFilterMode,
+      workspacePath: state.wizardWorkspacePath,
+      status: state.taskStatusFilter,
+      type: state.taskTypeFilter,
+    },
+    { samePath }
+  );
 }
 
 function latestEditableRunPath(runs = visibleRuns()) {
@@ -5659,58 +5641,19 @@ function renderTaskProgressCharts() {
 
 function renderTasks() {
   renderTaskFilterToolbar();
-  const html = visibleTasks().map(t => {
-    const isRunning = t.status === "running";
-    const progress = t.progress;
-    const contextSummary = taskContextSummary(t);
-    const summaryLine = taskSummaryLine(t);
-    const summaryClass = t.status === "completed" ? "status-ok" : t.status === "failed" ? "status-fail" : "";
-    const stageEntries = Object.entries(progress?.stages || {})
-      .filter(([, stageInfo]) => (stageInfo?.history || []).length >= 2)
-      .sort((a, b) => {
-        const order = { mc: 0, global: 1, refine: 2 };
-        return (order[a[0]] ?? 99) - (order[b[0]] ?? 99);
-      });
-    const trendHtml = stageEntries.length
-      ? stageEntries.map(([stageName]) =>
-        `<div class="chart-host" data-task-progress-chart="${escapeHtml(t.id)}" data-task-progress-stage="${escapeHtml(stageName)}" style="height:180px;margin-top:8px"></div>`
-      ).join("")
-      : ((progress?.history || []).length >= 2
-        ? `<div class="chart-host" data-task-progress-chart="${escapeHtml(t.id)}" data-task-progress-stage="${escapeHtml(progress?.stage || "global")}" style="height:180px;margin-top:8px"></div>`
-        : "");
-    const progressTitle = isRunning ? "当前阶段" : t.status === "completed" ? "最后进度" : "失败前进度";
-    const progressHtml = progress ? `
-      <div class="hint-box task-progress-note ${t.status === "completed" ? "status-ok" : t.status === "failed" ? "status-fail" : ""}">
-        ${escapeHtml(progressTitle)}：${escapeHtml(taskStageLabel(progress.stage || "global"))}
-        ${progress.gen ? ` · 第 ${escapeHtml(progress.gen)}/${escapeHtml(progress.maxiter || "\u2014")} 步` : ""}
-        · 率定纳什效率系数 ${escapeHtml(formatNumber(progress.nse_cal, 4))}
-        · 验证纳什效率系数 ${escapeHtml(formatNumber(progress.nse_val, 4))}
-        · 综合评分值 ${escapeHtml(formatNumber(progress.obj, 4))}
-        · 已耗时 ${escapeHtml(formatDurationSeconds(progress.elapsed_sec))}
-        ${isRunning && progress.eta_sec !== null && progress.eta_sec !== undefined ? ` · 预计剩余 ${escapeHtml(formatDurationSeconds(progress.eta_sec))}` : ""}
-        ${trendHtml}
-      </div>` : "";
-    return `
-    <div class="list-item task-card ${isRunning ? "task-running" : ""}">
-      <div class="task-card-topline">
-        <span class="task-kicker">${escapeHtml(taskTypeLabel(t.task_type))}</span>
-        <span class="task-updated">最近更新 ${escapeHtml(formatDateTime(t.updated_at))}</span>
-        <span class="status-badge ${taskStatusClass(t.status)}">${escapeHtml(taskStatusLabel(t.status))}${isRunning ? "..." : ""}</span>
-      </div>
-      <div class="task-card-hero">
-        <div class="task-card-title">
-          <strong>${escapeHtml(taskPrimaryTitle(t))}</strong>
-          ${contextSummary ? `<small class="task-meta-line">${escapeHtml(contextSummary)}</small>` : ""}
-        </div>
-      </div>
-      ${renderTaskMilestones(t)}
-      <div class="hint-box task-summary-box ${summaryClass}">${escapeHtml(summaryLine)}</div>
-      ${progressHtml}
-      ${renderTaskActions(t)}
-      ${taskDebugDetails(t, { lines: isRunning ? 120 : 80 })}
-    </div>`;
-  }).join("") || '<div class="hint-box">当前筛选下暂无任务。</div>';
-  $("#task-list").innerHTML = html;
+  $("#task-list").innerHTML = window.HBVStudioTaskView.renderTaskList(visibleTasks(), {
+    escapeHtml,
+    formatDateTime,
+    formatDurationSeconds,
+    formatNumber,
+    optimizationRefineSummary,
+    optimizationResultLabel,
+    profileLabel,
+    samePath,
+    shortPath,
+    taskDebugOpen: state.taskDebugOpen,
+    workspaceLabelByPath,
+  });
   restoreVisibleLogViewports("#task-list [data-log-key]");
   renderTaskProgressCharts();
 }
