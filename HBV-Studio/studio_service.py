@@ -236,7 +236,7 @@ from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as _first_existing_path
-from services.runs import has_custom_result_title as build_has_custom_result_title
+from services.runs import has_custom_result_title as _has_custom_result_title
 from services.runs import infer_project_roots_from_run_path as _infer_project_roots_from_run_path
 from services.runs import infer_selected_result_stage as _infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
@@ -246,7 +246,7 @@ from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import metadata_boundary_enabled as _metadata_boundary_enabled
-from services.runs import normalize_result_title as build_normalize_result_title
+from services.runs import normalize_result_title as _normalized_result_title
 from services.runs import normalize_metadata_object_type as _normalize_metadata_object_type
 from services.runs import normalize_run_metadata_payload as build_normalize_run_metadata_payload
 from services.runs import normalized_method_label as _normalized_method_label
@@ -263,15 +263,15 @@ from services.runs import restore_forward_observed_series as build_restore_forwa
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import resolve_workspace_config_reference as build_resolve_workspace_config_reference
-from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
-from services.runs import run_csv_preview as build_run_csv_preview
+from services.runs import run_csv_date_bounds as _run_csv_date_bounds
+from services.runs import run_csv_preview as _run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields
-from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
-from services.runs import run_kind_label as build_run_kind_label
+from services.runs import run_kind_from_metadata as _run_kind_from_metadata
+from services.runs import run_kind_label as _run_kind_label
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
-from services.runs import run_time_label as build_run_time_label
-from services.runs import run_update_timestamps as build_run_update_timestamps
+from services.runs import run_time_label as _run_time_label
+from services.runs import run_update_timestamps as _run_update_timestamps
 from services.runs import snapshot_run_paths as build_snapshot_run_paths
 from services.runs import to_portable_path as build_to_portable_path
 from services.runs import workspace_config_candidates as build_workspace_config_candidates
@@ -1916,10 +1916,6 @@ def iter_run_dirs() -> list[Path]:
     return build_iter_run_dirs(_run_discovery_context())
 
 
-def _run_update_timestamps(run_dir: Path) -> tuple[float, int]:
-    return build_run_update_timestamps(run_dir)
-
-
 def _run_workspace_name_context() -> RunWorkspaceNameContext:
     return RunWorkspaceNameContext(
         workspace_roots_hint_from_metadata=_workspace_roots_hint_from_metadata,
@@ -1930,26 +1926,6 @@ def _run_workspace_name_context() -> RunWorkspaceNameContext:
 
 def _workspace_name_for_summary(metadata: dict[str, Any], resolved_config: Path | None = None) -> str:
     return build_workspace_name_for_summary(metadata, resolved_config, _run_workspace_name_context())
-
-
-def _run_kind_from_metadata(metadata: dict[str, Any] | None, studio_compatible: bool = False) -> str:
-    return build_run_kind_from_metadata(metadata, studio_compatible)
-
-
-def _run_kind_label(kind: str) -> str:
-    return build_run_kind_label(kind)
-
-
-def _normalized_result_title(value: Any) -> str:
-    return build_normalize_result_title(value)
-
-
-def _has_custom_result_title(run_dir: Path, title: str) -> bool:
-    return build_has_custom_result_title(run_dir, title)
-
-
-def _run_time_label(raw_value: Any, updated_at: float | None = None) -> str:
-    return build_run_time_label(raw_value, updated_at)
 
 
 def _run_hydrology_context() -> RunHydrologyContext:
@@ -3666,14 +3642,6 @@ def replay_saved_run(run_path_raw: str, *, save_run: bool = True) -> dict[str, A
             "save_run": bool(save_run),
         }
     )
-
-
-def _run_csv_preview(run_path: Path, *, limit: int = 3) -> dict[str, Any]:
-    return build_run_csv_preview(run_path, limit=limit)
-
-
-def _run_csv_date_bounds(run_path: Path) -> dict[str, Any]:
-    return build_run_csv_date_bounds(run_path)
 
 
 def _read_run_metrics_snapshot(run_path: Path) -> dict[str, Any]:
