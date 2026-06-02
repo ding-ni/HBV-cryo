@@ -427,6 +427,43 @@
     return base;
   }
 
+  function forwardSimulationResultState(result = null) {
+    if (!result) {
+      return {
+        ok: false,
+        chartData: null,
+        calibrationMetrics: {},
+        validationMetrics: {},
+      };
+    }
+    const qSim = Array.isArray(result.q_sim) ? result.q_sim : [];
+    const qObs = Array.isArray(result.q_obs) ? result.q_obs : [];
+    const metrics = result.metrics || {};
+    return {
+      ok: true,
+      chartData: {
+        series: {
+          dates: Array.isArray(result.dates) ? result.dates : [],
+          q_sim: qSim,
+          q_obs: qObs,
+          q_rain: result.q_rain,
+          q_snow: result.q_snow,
+          q_ice: result.q_ice,
+          q_boundary_inflow: result.q_boundary_inflow,
+          residuals: qSim.map((sim, index) => (sim != null && qObs[index] != null) ? sim - qObs[index] : null),
+        },
+      },
+      calibrationMetrics: {
+        nse: metrics.nse_cal,
+        kge: metrics.kge_cal,
+        pbias: metrics.pbias_cal,
+      },
+      validationMetrics: {
+        nse: metrics.nse_val,
+      },
+    };
+  }
+
   function runManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
     const samePath = helpers.samePath || defaultSamePath;
     const targetPath = String(path || "").trim();
@@ -1037,6 +1074,7 @@
     forwardSimulationErrorState,
     forwardSimulationPreflight,
     forwardSimulationRequestContext,
+    forwardSimulationResultState,
     forwardSimulationStartState,
     forwardSimulationTaskUiState,
     latestEditableRunPath,

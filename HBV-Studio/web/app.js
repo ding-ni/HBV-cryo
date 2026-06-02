@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -3712,18 +3712,12 @@ function updateForwardSimUi(task) {
 }
 
 function applyForwardSimulationResult(result) {
-  if (!result) return;
-  const newSeries = {
-    dates: result.dates, q_sim: result.q_sim, q_obs: result.q_obs,
-    q_rain: result.q_rain, q_snow: result.q_snow, q_ice: result.q_ice,
-    q_boundary_inflow: result.q_boundary_inflow,
-    residuals: result.q_sim.map((s, i) => (s != null && result.q_obs[i] != null) ? s - result.q_obs[i] : null),
-  };
-  renderCharts({ series: newSeries });
-  const m = result.metrics || {};
+  const resultState = window.HBVStudioResultsView.forwardSimulationResultState(result);
+  if (!resultState.ok) return;
+  renderCharts(resultState.chartData);
   updateMetricsStrip(
-    { nse: m.nse_cal, kge: m.kge_cal, pbias: m.pbias_cal },
-    { nse: m.nse_val },
+    resultState.calibrationMetrics,
+    resultState.validationMetrics,
     state._runData.metadata,
   );
   updateCompareSummary();

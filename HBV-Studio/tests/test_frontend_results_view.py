@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -414,6 +414,39 @@ class FrontendResultsViewTests(unittest.TestCase):
             const missingForwardUi = results.forwardSimulationTaskUiState(null);
             if (missingForwardUi.shouldRender || missingForwardUi.hint.update || missingForwardUi.log.visible) {
               throw new Error(`missing forward UI state wrong: ${JSON.stringify(missingForwardUi)}`);
+            }
+            const forwardResult = results.forwardSimulationResultState({
+              dates: ["2020-01-01", "2020-01-02", "2020-01-03"],
+              q_sim: [10, null, 14],
+              q_obs: [9, 11, null],
+              q_rain: [4, 5, 6],
+              q_snow: [3, 4, 5],
+              q_ice: [2, 3, 4],
+              q_boundary_inflow: [1, 1.5, 2],
+              metrics: { nse_cal: 0.82, kge_cal: 0.74, pbias_cal: -1.2, nse_val: 0.69 },
+            });
+            if (!forwardResult.ok || forwardResult.chartData.series.dates.length !== 3 ||
+                forwardResult.chartData.series.q_rain[1] !== 5 ||
+                forwardResult.chartData.series.q_boundary_inflow[2] !== 2 ||
+                forwardResult.chartData.series.residuals.join("|") !== "1||" ||
+                forwardResult.calibrationMetrics.nse !== 0.82 ||
+                forwardResult.calibrationMetrics.kge !== 0.74 ||
+                forwardResult.calibrationMetrics.pbias !== -1.2 ||
+                forwardResult.validationMetrics.nse !== 0.69) {
+              throw new Error(`forward result state wrong: ${JSON.stringify(forwardResult)}`);
+            }
+            const emptyForwardResult = results.forwardSimulationResultState(null);
+            if (emptyForwardResult.ok || emptyForwardResult.chartData !== null ||
+                Object.keys(emptyForwardResult.calibrationMetrics).length ||
+                Object.keys(emptyForwardResult.validationMetrics).length) {
+              throw new Error(`empty forward result state wrong: ${JSON.stringify(emptyForwardResult)}`);
+            }
+            const fallbackForwardResult = results.forwardSimulationResultState({ metrics: {} });
+            if (!fallbackForwardResult.ok || fallbackForwardResult.chartData.series.dates.length ||
+                fallbackForwardResult.chartData.series.q_sim.length ||
+                fallbackForwardResult.chartData.series.residuals.length ||
+                Object.prototype.hasOwnProperty.call(fallbackForwardResult.validationMetrics, "nse") !== true) {
+              throw new Error(`fallback forward result state wrong: ${JSON.stringify(fallbackForwardResult)}`);
             }
             const emptyPresetLoad = results.runManualPresetLoadStartState(" ", "C:/ws/A", helpers);
             if (emptyPresetLoad.path !== "" || emptyPresetLoad.shouldRequest || !emptyPresetLoad.shouldRender ||
