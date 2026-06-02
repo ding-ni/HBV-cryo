@@ -141,7 +141,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "renderForecastResultOptions"]) {
+            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "forecastResultPanelState", "renderForecastResultOptions"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
             }
 
@@ -164,6 +164,38 @@ class FrontendForecastViewTests(unittest.TestCase):
             const fallback = view.forecastSelectedResultRun(forecastRuns, "C:/runs/missing", { samePath });
             if (fallback?.id !== "forecast-new") throw new Error(`fallback result mismatch: ${fallback?.id}`);
             if (view.forecastSelectedResultRun([], "", { samePath }) !== null) throw new Error("empty result list should return null");
+
+            const emptyPanel = view.forecastResultPanelState([], "C:/runs/forecast-mid", {
+              currentData: { run: { path: "C:/runs/forecast-mid" } },
+              loadingPath: "C:/runs/forecast-mid",
+            }, { samePath });
+            if (emptyPanel.hasRuns || emptyPanel.renderMode !== "empty" || emptyPanel.selectedPath !== "" || !emptyPanel.selectDisabled) {
+              throw new Error(`empty panel state wrong: ${JSON.stringify(emptyPanel)}`);
+            }
+
+            const detailPanel = view.forecastResultPanelState(forecastRuns, "c:/RUNS/forecast-mid", {
+              currentData: { run: { path: "C:/runs/forecast-mid" } },
+              loadingPath: "",
+            }, { samePath });
+            if (detailPanel.selected?.id !== "forecast-mid" || detailPanel.renderMode !== "detail" || detailPanel.loadPath !== "") {
+              throw new Error(`detail panel state wrong: ${JSON.stringify(detailPanel)}`);
+            }
+
+            const loadingPanel = view.forecastResultPanelState(forecastRuns, "C:/runs/forecast-old", {
+              currentData: null,
+              loadingPath: "c:/RUNS/forecast-old",
+            }, { samePath });
+            if (loadingPanel.selected?.id !== "forecast-old" || loadingPanel.renderMode !== "loading" || loadingPanel.loadPath !== "") {
+              throw new Error(`loading panel state wrong: ${JSON.stringify(loadingPanel)}`);
+            }
+
+            const loadPanel = view.forecastResultPanelState(forecastRuns, "C:/runs/missing", {
+              currentData: { run: { path: "C:/runs/forecast-old" } },
+              loadingPath: "",
+            }, { samePath });
+            if (loadPanel.selected?.id !== "forecast-new" || loadPanel.renderMode !== "load" || loadPanel.loadPath !== "C:/runs/forecast-new") {
+              throw new Error(`load panel state wrong: ${JSON.stringify(loadPanel)}`);
+            }
 
             const rendered = view.renderForecastResultOptions([
               {

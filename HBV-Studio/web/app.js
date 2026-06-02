@@ -161,6 +161,7 @@ const frontendModuleContracts = [
       "forecastResultButtonState",
       "forecastResultExportPayload",
       "forecastResultExportSuccess",
+      "forecastResultPanelState",
       "forecastRestartPreflight",
       "forecastRestartPayload",
       "forecastResultRuns",
@@ -5716,12 +5717,18 @@ function renderForecastResultPanel() {
   const select = $("#forecast-result-run");
   if (!select) return;
   const runs = forecastResultRuns();
-  if (!runs.length) {
+  const panel = window.HBVStudioForecastView.forecastResultPanelState(
+    runs,
+    state.forecastResultRunPath,
+    { currentData: state.forecastResultData, loadingPath: state.forecastResultLoadingPath },
+    { samePath },
+  );
+  if (!panel.hasRuns) {
     forecastResultRequestGuard.cancel();
     state.forecastResultRunPath = "";
     state.forecastResultData = null;
     state.forecastResultLoadingPath = "";
-    select.disabled = true;
+    select.disabled = panel.selectDisabled;
     select.innerHTML = '<option value="">暂无连续状态预报结果</option>';
     state.lastForecastExportPath = "";
     setForecastResultButtons(null);
@@ -5732,22 +5739,22 @@ function renderForecastResultPanel() {
   }
   const rendered = window.HBVStudioForecastView.renderForecastResultOptions(
     runs,
-    state.forecastResultRunPath,
+    panel.selectedPath,
     { escapeHtml, forecastFriendlyRunName, samePath, timeRangeText },
   );
-  const selected = rendered.selected || runs[0];
-  state.forecastResultRunPath = selected.path;
-  select.disabled = false;
+  const selected = panel.selected || rendered.selected || runs[0];
+  state.forecastResultRunPath = panel.selectedPath || selected?.path || "";
+  select.disabled = panel.selectDisabled;
   select.innerHTML = rendered.html;
   setForecastResultButtons(selected);
-  if (state.forecastResultData?.run?.path && samePath(state.forecastResultData.run.path, selected.path)) {
+  if (panel.renderMode === "detail") {
     renderForecastResultDetail(state.forecastResultData);
-  } else if (samePath(state.forecastResultLoadingPath, selected.path)) {
+  } else if (panel.renderMode === "loading") {
     if (window.HBVStudioForecastView) {
       window.HBVStudioForecastView.renderForecastResultLoading("正在读取连续状态预报结果。");
     }
-  } else {
-    loadForecastResultDetail(selected.path).catch(err => showToast(err.message, true));
+  } else if (panel.loadPath) {
+    loadForecastResultDetail(panel.loadPath).catch(err => showToast(err.message, true));
   }
 }
 

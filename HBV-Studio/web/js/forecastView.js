@@ -130,6 +130,39 @@
     return items[0] || null;
   }
 
+  function forecastResultPanelState(runs = [], selectedPath = "", context = {}, helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const items = Array.isArray(runs) ? runs : [];
+    if (!items.length) {
+      return {
+        hasRuns: false,
+        selected: null,
+        selectedPath: "",
+        selectDisabled: true,
+        renderMode: "empty",
+        loadPath: "",
+      };
+    }
+    const selected = forecastSelectedResultRun(items, selectedPath, { samePath }) || items[0];
+    const resolvedPath = selected?.path || "";
+    const currentData = context?.currentData || null;
+    const loadingPath = String(context?.loadingPath || "").trim();
+    let renderMode = "load";
+    if (currentData?.run?.path && samePath(currentData.run.path, resolvedPath)) {
+      renderMode = "detail";
+    } else if (loadingPath && samePath(loadingPath, resolvedPath)) {
+      renderMode = "loading";
+    }
+    return {
+      hasRuns: true,
+      selected,
+      selectedPath: resolvedPath,
+      selectDisabled: false,
+      renderMode,
+      loadPath: renderMode === "load" ? resolvedPath : "",
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1015,6 +1048,7 @@
     forecastResultButtonState,
     forecastResultExportPayload,
     forecastResultExportSuccess,
+    forecastResultPanelState,
     forecastRestartPreflight,
     forecastRestartPayload,
     forecastResultRuns,
