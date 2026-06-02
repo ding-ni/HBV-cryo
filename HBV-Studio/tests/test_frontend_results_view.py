@@ -532,6 +532,14 @@ class FrontendResultsViewTests(unittest.TestCase):
                 runningForwardUi.log.lines[0] !== "line-6" || runningForwardUi.log.lines[39] !== "line-45") {
               throw new Error(`running forward UI state wrong: ${JSON.stringify(runningForwardUi)}`);
             }
+            const runningForwardDom = Object.fromEntries(runningForwardUi.domUpdates.map(update => [update.selector, update]));
+            if (runningForwardDom["#resim-log"].visible !== true ||
+                runningForwardDom["#btn-resimulate"].disabled !== true ||
+                runningForwardDom["#resim-hint"].visible !== true ||
+                runningForwardDom["#resim-hint"].text !== "写出重算结果 · 已耗时 65s" ||
+                runningForwardDom["#resim-hint"].className !== "hint-box status-warn") {
+              throw new Error(`running forward UI DOM updates wrong: ${JSON.stringify(runningForwardDom)}`);
+            }
             const runningFallbackUi = results.forwardSimulationTaskUiState({ status: "running", output: [] }, { nowSeconds: 165 });
             if (!runningFallbackUi.hint.text.includes("正在保存并重算当前结果") || runningFallbackUi.hint.text.includes("已耗时") || runningFallbackUi.log.visible) {
               throw new Error(`running fallback forward UI state wrong: ${JSON.stringify(runningFallbackUi)}`);
@@ -551,6 +559,13 @@ class FrontendResultsViewTests(unittest.TestCase):
                 !savedForwardUi.log.visible || savedForwardUi.log.lines[0] !== "done") {
               throw new Error(`saved forward UI state wrong: ${JSON.stringify(savedForwardUi)}`);
             }
+            const savedForwardDom = Object.fromEntries(savedForwardUi.domUpdates.map(update => [update.selector, update]));
+            if (savedForwardDom["#resim-log"].visible !== true ||
+                savedForwardDom["#btn-resimulate"].disabled !== false ||
+                savedForwardDom["#resim-hint"].visible !== true ||
+                savedForwardDom["#resim-hint"].className !== "hint-box status-ok") {
+              throw new Error(`saved forward UI DOM updates wrong: ${JSON.stringify(savedForwardDom)}`);
+            }
             const transientForwardUi = results.forwardSimulationTaskUiState(
               { status: "completed", result: { metrics: { nse_cal: 0.81234, nse_val: 0.70123 } } },
               {},
@@ -564,6 +579,13 @@ class FrontendResultsViewTests(unittest.TestCase):
                 failedForwardUi.hint.text !== "last") {
               throw new Error(`failed forward UI state wrong: ${JSON.stringify(failedForwardUi)}`);
             }
+            const failedForwardDom = Object.fromEntries(failedForwardUi.domUpdates.map(update => [update.selector, update]));
+            if (failedForwardDom["#resim-log"].visible !== true ||
+                failedForwardDom["#btn-resimulate"].disabled !== false ||
+                failedForwardDom["#resim-hint"].text !== "last" ||
+                failedForwardDom["#resim-hint"].className !== "hint-box status-fail") {
+              throw new Error(`failed forward UI DOM updates wrong: ${JSON.stringify(failedForwardDom)}`);
+            }
             const failedFallbackForwardUi = results.forwardSimulationTaskUiState({ status: "failed", output: [] });
             if (failedFallbackForwardUi.hint.text !== "保存并重算失败。") {
               throw new Error(`failed fallback forward UI state wrong: ${JSON.stringify(failedFallbackForwardUi)}`);
@@ -573,7 +595,11 @@ class FrontendResultsViewTests(unittest.TestCase):
               throw new Error(`unknown forward UI state wrong: ${JSON.stringify(unknownForwardUi)}`);
             }
             const missingForwardUi = results.forwardSimulationTaskUiState(null);
-            if (missingForwardUi.shouldRender || missingForwardUi.hint.update || missingForwardUi.log.visible) {
+            const missingForwardDom = Object.fromEntries(missingForwardUi.domUpdates.map(update => [update.selector, update]));
+            if (missingForwardUi.shouldRender || missingForwardUi.hint.update || missingForwardUi.log.visible ||
+                missingForwardDom["#resim-log"].visible !== false ||
+                missingForwardDom["#btn-resimulate"].disabled !== false ||
+                Object.prototype.hasOwnProperty.call(missingForwardDom, "#resim-hint")) {
               throw new Error(`missing forward UI state wrong: ${JSON.stringify(missingForwardUi)}`);
             }
             const forwardResult = results.forwardSimulationResultState({

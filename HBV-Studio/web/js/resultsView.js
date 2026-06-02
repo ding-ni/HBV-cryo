@@ -479,13 +479,28 @@
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric.toFixed(digits) : "—";
     });
+    const withDomUpdates = state => {
+      const domUpdates = [
+        { selector: "#resim-log", visible: state.log.visible },
+        { selector: "#btn-resimulate", disabled: state.button.disabled },
+      ];
+      if (state.hint.update) {
+        domUpdates.push({
+          selector: "#resim-hint",
+          visible: state.hint.visible,
+          text: state.hint.text,
+          className: state.hint.className,
+        });
+      }
+      return { ...state, domUpdates };
+    };
     if (!task) {
-      return {
+      return withDomUpdates({
         shouldRender: false,
         log: { visible: false, lines: [] },
         button: { disabled: false },
         hint: { update: false, visible: false, text: "", className: "" },
-      };
+      });
     }
     const logs = Array.isArray(task.output) ? task.output : [];
     const createdAt = Number(task.created_at);
@@ -501,7 +516,7 @@
     };
     if (task.status === "running") {
       const stage = task.ui_progress?.stage || "正在保存并重算当前结果";
-      return {
+      return withDomUpdates({
         ...base,
         button: { disabled: true },
         hint: {
@@ -510,11 +525,11 @@
           text: `${stage}${elapsed !== null ? ` · 已耗时 ${formatDurationSeconds(elapsed)}` : ""}`,
           className: "hint-box status-warn",
         },
-      };
+      });
     }
     if (task.status === "completed" && task.result) {
       const m = task.result.metrics || {};
-      return {
+      return withDomUpdates({
         ...base,
         hint: {
           update: true,
@@ -524,10 +539,10 @@
             : `模拟完成：率定纳什效率系数=${formatNumber(m.nse_cal, 4)}，验证纳什效率系数=${formatNumber(m.nse_val, 4)}`,
           className: "hint-box status-ok",
         },
-      };
+      });
     }
     if (task.status === "failed") {
-      return {
+      return withDomUpdates({
         ...base,
         hint: {
           update: true,
@@ -535,9 +550,9 @@
           text: logs.length ? logs[logs.length - 1] : "保存并重算失败。",
           className: "hint-box status-fail",
         },
-      };
+      });
     }
-    return base;
+    return withDomUpdates(base);
   }
 
   function forwardSimulationResultState(result = null) {

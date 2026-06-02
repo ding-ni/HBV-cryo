@@ -3624,24 +3624,16 @@ function findCurrentForwardSimTask({ runningOnly = false } = {}) {
 }
 
 function updateForwardSimUi(task) {
-  const hint = $("#resim-hint");
   const logBox = $("#resim-log");
-  const btn = $("#btn-resimulate");
-  if (!hint || !logBox || !btn || !task) return;
+  if (!logBox || !task) return;
   const uiState = window.HBVStudioResultsView.forwardSimulationTaskUiState(
     task,
     { nowSeconds: Date.now() / 1000 },
     { formatDurationSeconds, formatNumber },
   );
   if (!uiState.shouldRender) return;
-  logBox.style.display = uiState.log.visible ? "" : "none";
+  applyDomUpdates(uiState.domUpdates);
   setLogBoxContent(logBox, uiState.log.lines, "results:resim-log");
-  btn.disabled = uiState.button.disabled;
-  if (uiState.hint.update) {
-    hint.style.display = uiState.hint.visible ? "" : "none";
-    hint.textContent = uiState.hint.text;
-    hint.className = uiState.hint.className;
-  }
 }
 
 function applyForwardSimulationResult(result) {
