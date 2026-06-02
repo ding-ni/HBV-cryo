@@ -141,7 +141,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "forecastResultPanelState", "renderForecastResultOptions"]) {
+            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "forecastResultDetailState", "forecastResultPanelState", "renderForecastResultOptions"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
             }
 
@@ -195,6 +195,24 @@ class FrontendForecastViewTests(unittest.TestCase):
             }, { samePath });
             if (loadPanel.selected?.id !== "forecast-new" || loadPanel.renderMode !== "load" || loadPanel.loadPath !== "C:/runs/forecast-new") {
               throw new Error(`load panel state wrong: ${JSON.stringify(loadPanel)}`);
+            }
+
+            const detailState = view.forecastResultDetailState({
+              run: { id: "detail-run", path: "C:/runs/detail" },
+              series: { dates: ["2026-06-01"] },
+            }, { id: "selected-run", path: "C:/runs/selected" });
+            if (detailState.renderMode !== "detail" || detailState.buttonRun?.id !== "detail-run" || !detailState.detailData?.series?.dates?.length) {
+              throw new Error(`detail state wrong: ${JSON.stringify(detailState)}`);
+            }
+
+            const emptyDetailState = view.forecastResultDetailState({}, { id: "selected-run", path: "C:/runs/selected" });
+            if (emptyDetailState.renderMode !== "empty" || emptyDetailState.buttonRun?.id !== "selected-run" || emptyDetailState.detailData !== null) {
+              throw new Error(`empty detail state should keep selected run buttons: ${JSON.stringify(emptyDetailState)}`);
+            }
+
+            const emptyNoRunState = view.forecastResultDetailState(null, null);
+            if (emptyNoRunState.renderMode !== "empty" || emptyNoRunState.buttonRun !== null || emptyNoRunState.detailData !== null) {
+              throw new Error(`empty no-run detail state wrong: ${JSON.stringify(emptyNoRunState)}`);
             }
 
             const rendered = view.renderForecastResultOptions([

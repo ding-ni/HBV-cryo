@@ -163,6 +163,16 @@
     };
   }
 
+  function forecastResultDetailState(data = null, selectedRun = null) {
+    const dataRun = data?.run || null;
+    const hasDetail = Boolean(dataRun?.path);
+    return {
+      renderMode: hasDetail ? "detail" : "empty",
+      buttonRun: dataRun || selectedRun || null,
+      detailData: hasDetail ? data : null,
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1046,6 +1056,7 @@
     forecastInputType,
     forecastParameterSourceSummary,
     forecastResultButtonState,
+    forecastResultDetailState,
     forecastResultExportPayload,
     forecastResultExportSuccess,
     forecastResultPanelState,

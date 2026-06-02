@@ -159,6 +159,7 @@ const frontendModuleContracts = [
       "forecastInputType",
       "forecastParameterSourceSummary",
       "forecastResultButtonState",
+      "forecastResultDetailState",
       "forecastResultExportPayload",
       "forecastResultExportSuccess",
       "forecastResultPanelState",
@@ -5663,14 +5664,14 @@ function setForecastResultButtons(run) {
 }
 
 function renderForecastResultDetail(data = state.forecastResultData) {
-  const run = data?.run || selectedForecastResultRun();
-  setForecastResultButtons(run);
+  const detailState = window.HBVStudioForecastView.forecastResultDetailState(data, selectedForecastResultRun());
+  setForecastResultButtons(detailState.buttonRun);
   if (!window.HBVStudioForecastView) return;
-  if (!data?.run?.path) {
+  if (detailState.renderMode === "empty") {
     window.HBVStudioForecastView.renderForecastResultEmpty("完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。");
     return;
   }
-  window.HBVStudioForecastView.renderForecastResultDetail(data, {
+  window.HBVStudioForecastView.renderForecastResultDetail(detailState.detailData, {
     escapeHtml,
     runDisplayName: forecastFriendlyRunName,
     shortPath,
