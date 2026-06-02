@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -221,6 +221,18 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const meteoFailed = view.meteoImportUiState({ status: "failed", output: [] }, helpers);
             if (meteoFailed.hint.text !== "导入失败，请检查目录与文件名格式。" || meteoFailed.hint.className !== "hint-box status-fail" || meteoFailed.log.visible) {
               throw new Error(`meteo import failed fallback mismatch: ${JSON.stringify(meteoFailed)}`);
+            }
+            const meteoCreating = view.meteoImportCreatingUiState();
+            if (meteoCreating.hint.text !== "正在创建导入任务..." || meteoCreating.hint.className !== "hint-box status-warn" || !meteoCreating.log.visible || meteoCreating.log.lines.length !== 0 || meteoCreating.log.key !== "wizard:import-log") {
+              throw new Error(`meteo import creating state mismatch: ${JSON.stringify(meteoCreating)}`);
+            }
+            const meteoPollError = view.meteoImportErrorUiState(new Error("网络中断"));
+            if (meteoPollError.hint.text !== "网络中断" || meteoPollError.hint.className !== "hint-box status-fail" || meteoPollError.log !== null || meteoPollError.button.disabled || meteoPollError.button.text !== "验证并导入") {
+              throw new Error(`meteo import polling error state mismatch: ${JSON.stringify(meteoPollError)}`);
+            }
+            const meteoStartError = view.meteoImportErrorUiState({ message: "目录错误" }, { hideLog: true });
+            if (meteoStartError.hint.text !== "目录错误" || !meteoStartError.log || meteoStartError.log.visible || meteoStartError.log.key !== "wizard:import-log") {
+              throw new Error(`meteo import start error state mismatch: ${JSON.stringify(meteoStartError)}`);
             }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });

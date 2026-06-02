@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportUiState", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3516,16 +3516,29 @@ function updateMeteoImportUi(task) {
   if (!hint || !logBox || !button || !task) return;
 
   const uiState = window.HBVStudioDataPrepView.meteoImportUiState(task, { escapeHtml, shortPath });
-  logBox.style.display = uiState.log.visible ? "" : "none";
-  setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
-  button.disabled = uiState.button.disabled;
-  button.textContent = uiState.button.text;
-  if (uiState.hint.html) {
-    hint.innerHTML = uiState.hint.html;
-  } else {
-    hint.textContent = uiState.hint.text;
+  applyMeteoImportUiState(uiState);
+}
+
+function applyMeteoImportUiState(uiState = {}) {
+  const hint = $("#wz-import-meteo-hint");
+  const logBox = $("#wz-import-meteo-log");
+  const button = $("#wz-import-meteo-btn");
+  if (uiState.log && logBox) {
+    logBox.style.display = uiState.log.visible ? "" : "none";
+    setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
   }
-  hint.className = uiState.hint.className;
+  if (uiState.button && button) {
+    button.disabled = uiState.button.disabled;
+    button.textContent = uiState.button.text;
+  }
+  if (uiState.hint && hint) {
+    if (uiState.hint.html) {
+      hint.innerHTML = uiState.hint.html;
+    } else {
+      hint.textContent = uiState.hint.text;
+    }
+    hint.className = uiState.hint.className;
+  }
 }
 
 function findCurrentMeteoImportTask({ runningOnly = false } = {}) {
@@ -3717,16 +3730,7 @@ async function pollMeteoImportTask(taskId) {
       }
     } catch (err) {
       stopMeteoImportPolling();
-      const hint = $("#wz-import-meteo-hint");
-      const btn = $("#wz-import-meteo-btn");
-      if (hint) {
-        hint.textContent = err.message;
-        hint.className = "hint-box status-fail";
-      }
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "验证并导入";
-      }
+      applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportErrorUiState(err));
     }
   };
 
@@ -3776,14 +3780,7 @@ async function importMeteoFiles() {
   if ($("#wz-import-prec-dir") && !$("#wz-import-prec-dir").value.trim()) $("#wz-import-prec-dir").value = precDir;
   if ($("#wz-import-temp-dir") && !$("#wz-import-temp-dir").value.trim()) $("#wz-import-temp-dir").value = tempDir;
   if ($("#wz-import-evap-dir") && !$("#wz-import-evap-dir").value.trim()) $("#wz-import-evap-dir").value = evapDir;
-  const hint = $("#wz-import-meteo-hint");
-  const logBox = $("#wz-import-meteo-log");
-  hint.textContent = "正在创建导入任务...";
-  hint.className = "hint-box status-warn";
-  if (logBox) {
-    logBox.textContent = "";
-    logBox.style.display = "";
-  }
+  applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportCreatingUiState());
   try {
     const payload = await apiPost("/api/meteo/import/start", {
       config_path: state.wizardWorkspacePath,
@@ -3800,11 +3797,7 @@ async function importMeteoFiles() {
       await pollMeteoImportTask(task.id);
     }
   } catch (err) {
-    hint.textContent = err.message;
-    hint.className = "hint-box status-fail";
-    if (logBox) {
-      logBox.style.display = "none";
-    }
+    applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportErrorUiState(err, { hideLog: true }));
   }
 }
 

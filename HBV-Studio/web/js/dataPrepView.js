@@ -378,6 +378,43 @@
     };
   }
 
+  function meteoImportCreatingUiState() {
+    return {
+      log: {
+        visible: true,
+        lines: [],
+        key: "wizard:import-log",
+      },
+      hint: {
+        html: "",
+        text: "正在创建导入任务...",
+        className: "hint-box status-warn",
+      },
+    };
+  }
+
+  function meteoImportErrorUiState(error = {}, { hideLog = false } = {}) {
+    const message = String(error?.message || error || "气象驱动导入失败");
+    return {
+      log: hideLog
+        ? {
+          visible: false,
+          lines: [],
+          key: "wizard:import-log",
+        }
+        : null,
+      button: {
+        disabled: false,
+        text: "验证并导入",
+      },
+      hint: {
+        html: "",
+        text: message,
+        className: "hint-box status-fail",
+      },
+    };
+  }
+
   function prepTaskUiState(task = {}) {
     const progress = task?.ui_progress || {};
     const logs = Array.isArray(task?.output) ? task.output : [];
@@ -549,6 +586,8 @@
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    meteoImportCreatingUiState,
+    meteoImportErrorUiState,
     meteoImportUiState,
     prepPanelSummary,
     prepTaskUiState,
