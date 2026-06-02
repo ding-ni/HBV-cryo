@@ -258,6 +258,29 @@
     };
   }
 
+  function manualPresetControlViewState(options = {}) {
+    const controlState = manualPresetControlState(options);
+    const baseSelectors = [
+      "#manual-preset-name",
+      "#manual-preset-scope",
+      "#manual-preset-select",
+      "#btn-save-manual-preset",
+    ];
+    const presetActionSelectors = [
+      "#btn-load-manual-preset",
+      "#btn-delete-manual-preset",
+      "#btn-compare-manual-preset",
+    ];
+    return {
+      ...controlState,
+      controls: [
+        ...baseSelectors.map(selector => ({ selector, disabled: !controlState.baseEnabled })),
+        ...presetActionSelectors.map(selector => ({ selector, disabled: !controlState.presetActionEnabled })),
+        { selector: "#btn-clear-manual-compare", disabled: !controlState.clearCompareEnabled },
+      ],
+    };
+  }
+
   function manualPresetSavePreflight(options = {}, helpers = {}) {
     const isEditable = Object.prototype.hasOwnProperty.call(options, "editable")
       ? Boolean(options.editable)
@@ -798,6 +821,7 @@
     taskManualPresetLoadSuccessState,
     shouldClearManualPresetComparison,
     manualPresetControlState,
+    manualPresetControlViewState,
     manualPresetSavePreflight,
     manualPresetLoadPreflight,
     manualPresetDeletePreflight,

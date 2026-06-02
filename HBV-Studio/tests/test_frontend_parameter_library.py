@@ -575,6 +575,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
+            if (typeof library.manualPresetControlViewState !== "function") {
+              throw new Error("manualPresetControlViewState was not exported");
+            }
             const ready = library.manualPresetControlState({
               editable: true,
               configPath: "C:/workspace.json",
@@ -602,6 +605,41 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             });
             if (readonly.baseEnabled || readonly.presetActionEnabled || !readonly.clearCompareEnabled) {
               throw new Error(`unexpected readonly state: ${JSON.stringify(readonly)}`);
+            }
+
+            const readyView = library.manualPresetControlViewState({
+              editable: true,
+              configPath: "C:/workspace.json",
+              preset: { id: "p1" },
+              compareMetrics: { nse_cal: 0.8 },
+            });
+            if (readyView.controls.length !== 8 || readyView.controls.some(item => item.disabled)) {
+              throw new Error(`unexpected ready controls: ${JSON.stringify(readyView.controls)}`);
+            }
+            const readonlyView = library.manualPresetControlViewState({
+              editable: false,
+              configPath: "C:/workspace.json",
+              preset: { id: "p1" },
+              compareSeries: { dates: [] },
+            });
+            const readonlyDisabled = Object.fromEntries(readonlyView.controls.map(item => [item.selector, item.disabled]));
+            if (!readonlyDisabled["#manual-preset-name"] ||
+                !readonlyDisabled["#btn-load-manual-preset"] ||
+                readonlyDisabled["#btn-clear-manual-compare"]) {
+              throw new Error(`unexpected readonly controls: ${JSON.stringify(readonlyView.controls)}`);
+            }
+            const expectedSelectors = [
+              "#manual-preset-name",
+              "#manual-preset-scope",
+              "#manual-preset-select",
+              "#btn-save-manual-preset",
+              "#btn-load-manual-preset",
+              "#btn-delete-manual-preset",
+              "#btn-compare-manual-preset",
+              "#btn-clear-manual-compare",
+            ].join("|");
+            if (readyView.controls.map(item => item.selector).join("|") !== expectedSelectors) {
+              throw new Error(`unexpected control selectors: ${JSON.stringify(readyView.controls)}`);
             }
             """
         )
