@@ -229,6 +229,38 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Bounds"])["east"], 101.0)
         self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Metrics"])["style"], "gray")
 
+    def test_geo_json_handlers_accept_workspace_alias_and_send_layer_payloads(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+        calls: list[dict] = []
+        handler.send_json = lambda payload, status=200: calls.append(payload) or True
+        encoded_workspace = "F%3A%2F%E6%B5%8B%E8%AF%95%20workspace%2Fconfig.json"
+        decoded_workspace = "F:/测试 workspace/config.json"
+
+        patches = {
+            "workspace_geo_overview": {"kind": "overview", "layers": []},
+            "workspace_basin_geojson": {"type": "FeatureCollection", "name": "basin"},
+            "workspace_elevation_zones_geojson": {"type": "FeatureCollection", "name": "elevation_zones"},
+            "workspace_glacier_geojson": {"type": "FeatureCollection", "name": "glacier"},
+            "workspace_station_geojson": {"type": "FeatureCollection", "name": "stations"},
+        }
+        with (
+            mock.patch.object(svc, "workspace_geo_overview", return_value=patches["workspace_geo_overview"]) as overview,
+            mock.patch.object(svc, "workspace_basin_geojson", return_value=patches["workspace_basin_geojson"]) as basin,
+            mock.patch.object(svc, "workspace_elevation_zones_geojson", return_value=patches["workspace_elevation_zones_geojson"]) as zones,
+            mock.patch.object(svc, "workspace_glacier_geojson", return_value=patches["workspace_glacier_geojson"]) as glacier,
+            mock.patch.object(svc, "workspace_station_geojson", return_value=patches["workspace_station_geojson"]) as stations,
+        ):
+            handler._api_get_geo_overview({"ws": [encoded_workspace]})
+            handler._api_get_geo_basin({"ws": [encoded_workspace]})
+            handler._api_get_geo_elevation_zones({"ws": [encoded_workspace]})
+            handler._api_get_geo_glacier({"ws": [encoded_workspace]})
+            handler._api_get_geo_stations({"ws": [encoded_workspace]})
+
+        for patched in (overview, basin, zones, glacier, stations):
+            patched.assert_called_once_with(decoded_workspace)
+        self.assertEqual([payload["ok"] for payload in calls], [True, True, True, True, True])
+        self.assertEqual([payload["data"] for payload in calls], list(patches.values()))
+
     def test_workspace_writability_probe_is_concurrency_safe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)

@@ -4284,7 +4284,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         )
 
     def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
-        raw_path = unquote(query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
 
     def _api_get_geo_basin(self, query: dict[str, list[str]]) -> None:
