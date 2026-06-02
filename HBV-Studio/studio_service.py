@@ -87,11 +87,11 @@ from services.filesystem import (
     FilesystemPathContext,
     FilesystemPlaceholderContext,
     count_matching,
-    ensure_within as build_ensure_within,
+    ensure_within,
     has_matching,
     is_within_any_root as build_is_within_any_root,
-    is_within_root as build_is_within_root,
-    list_drives as build_list_drives,
+    is_within_root,
+    list_drives,
     list_filesystem as build_list_filesystem,
     normalize_legacy_project_paths as build_normalize_legacy_project_paths,
     open_path_in_explorer as build_open_path_in_explorer,
@@ -100,7 +100,7 @@ from services.filesystem import (
     resolve_config_related_path as build_resolve_config_related_path,
     replace_placeholders as build_replace_placeholders,
     resolve_any_path as build_resolve_any_path,
-    safe_iterdir as build_safe_iterdir,
+    safe_iterdir as _safe_iterdir,
     same_path,
     to_display_path as build_to_display_path,
 )
@@ -346,7 +346,7 @@ from services.workspace_catalog import (
     load_workspace_config as build_load_workspace_config,
     normalize_config_before_save as build_normalize_config_before_save,
     runtime_root_for_workspace as build_runtime_root_for_workspace,
-    slugify_workspace_name as build_slugify_workspace_name,
+    slugify_workspace_name,
     suggest_time_windows as build_suggest_time_windows,
     template_files as build_template_files,
 )
@@ -814,14 +814,6 @@ def resolve_any_path(raw_path: str, *, must_exist: bool = False) -> Path:
     return build_resolve_any_path(raw_path, _filesystem_path_context(), must_exist=must_exist)
 
 
-def ensure_within(root: Path, candidate: Path) -> Path:
-    return build_ensure_within(root, candidate)
-
-
-def is_within_root(root: Path, candidate: Path) -> bool:
-    return build_is_within_root(root, candidate)
-
-
 def is_within_current_project(candidate: Path) -> bool:
     return build_is_within_any_root(candidate, (WORKSPACE_DIR, GUI_ROOT, PROJECT_ROOT))
 
@@ -1177,10 +1169,6 @@ def workspace_elevation_zones_geojson(config_path_raw: str) -> dict[str, Any]:
 
 def workspace_station_geojson(config_path_raw: str) -> dict[str, Any]:
     return build_workspace_station_geojson(config_path_raw, _geo_overview_context())
-
-
-def slugify_workspace_name(name: str) -> str:
-    return build_slugify_workspace_name(name)
 
 
 def runtime_root_for_workspace(name: str) -> Path:
@@ -2355,14 +2343,6 @@ def _tuotuohe_sync_start_context() -> TuotuoheSyncStartContext:
 def start_tuotuohe_sync(payload: dict[str, Any]) -> TaskRecord:
     plan = build_tuotuohe_sync_start_plan(payload, _tuotuohe_sync_start_context())
     return start_process("sync", plan.label, plan.command, plan.cwd)
-
-
-def list_drives() -> list[str]:
-    return build_list_drives()
-
-
-def _safe_iterdir(directory: Path) -> list[Path]:
-    return build_safe_iterdir(directory)
 
 
 def _filesystem_context() -> FilesystemContext:
