@@ -54,8 +54,7 @@
     return hit?.label || "";
   }
 
-  function render(layout, hostSelector, options = {}, helpers = {}) {
-    const select = helpers.select || (sel => document.querySelector(sel));
+  function workspaceLayoutHtml(layout, options = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const slashPath = helpers.slashPath || defaultSlashPath;
     const layoutStatusClass = helpers.layoutStatusClass || defaultLayoutStatusClass;
@@ -65,11 +64,8 @@
       title = "工作区目录结构",
       subtitle = "",
     } = options;
-    const host = select(hostSelector);
-    if (!host) return;
     if (!layout) {
-      host.innerHTML = `<div class="hint-box">${escapeHtml(emptyText)}</div>`;
-      return;
+      return `<div class="hint-box">${escapeHtml(emptyText)}</div>`;
     }
     const layoutTitle = layout.flow_name ? `${layout.flow_name} · ${title}` : title;
     const canOperate = layout.allow_operations !== false;
@@ -109,7 +105,7 @@
       </section>
     `).join("");
     const notes = (layout.notes || []).map(note => `<li>${escapeHtml(note)}</li>`).join("");
-    host.innerHTML = `
+    return `
       <div class="workspace-layout-head">
         <div>
           <div class="workspace-layout-title">${escapeHtml(layoutTitle)}</div>
@@ -133,8 +129,16 @@
     `;
   }
 
+  function render(layout, hostSelector, options = {}, helpers = {}) {
+    const select = helpers.select || (sel => document.querySelector(sel));
+    const host = select(hostSelector);
+    if (!host) return;
+    host.innerHTML = workspaceLayoutHtml(layout, options, helpers);
+  }
+
   window.HBVStudioWorkspaceLayout = {
     aliasForPath,
+    workspaceLayoutHtml,
     render,
   };
 })();

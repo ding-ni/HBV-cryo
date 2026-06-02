@@ -262,7 +262,7 @@ const frontendModuleContracts = [
   {
     script: "./js/workspaceLayout.js",
     global: "HBVStudioWorkspaceLayout",
-    exports: ["aliasForPath", "render"],
+    exports: ["aliasForPath", "render", "workspaceLayoutHtml"],
   },
   {
     script: "./js/taskView.js",
