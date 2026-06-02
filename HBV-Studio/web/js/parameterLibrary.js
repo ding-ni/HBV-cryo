@@ -159,7 +159,12 @@
     const compareMetrics = options.compareMetrics || null;
     const compareLabel = String(options.compareLabel || "").trim();
     if (!runData || !compareMetrics || !compareLabel) {
-      return { visible: false, className: "hint-box", text: "" };
+      return {
+        visible: false,
+        className: "hint-box",
+        text: "",
+        domUpdates: [{ selector: "#manual-compare-summary", visible: false, text: "", className: "hint-box" }],
+      };
     }
     const baseMeta = runData.metadata || {};
     const baseMetrics = baseMeta.metrics || {};
@@ -180,15 +185,29 @@
       },
     );
     return view.visible
-      ? { visible: true, className: view.className, text: view.text, summary: view.summary }
-      : { visible: false, className: "hint-box", text: "", summary: view.summary };
+      ? {
+        visible: true,
+        className: view.className,
+        text: view.text,
+        summary: view.summary,
+        domUpdates: [{ selector: "#manual-compare-summary", visible: true, text: view.text, className: view.className }],
+      }
+      : {
+        visible: false,
+        className: "hint-box",
+        text: "",
+        summary: view.summary,
+        domUpdates: [{ selector: "#manual-compare-summary", visible: false, text: "", className: "hint-box" }],
+      };
   }
 
   function manualPresetComparePendingView(preset = {}) {
+    const text = `正在计算参数集“${preset?.name || "参数集"}”的对比结果...`;
     return {
       visible: true,
       className: "hint-box",
-      text: `正在计算参数集“${preset?.name || "参数集"}”的对比结果...`,
+      text,
+      domUpdates: [{ selector: "#manual-compare-summary", visible: true, text, className: "hint-box" }],
     };
   }
 

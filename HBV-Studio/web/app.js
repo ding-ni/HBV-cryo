@@ -1444,17 +1444,13 @@ function clearManualPresetComparison({ silent = false } = {}) {
 }
 
 function updateCompareSummary() {
-  const host = $("#manual-compare-summary");
-  if (!host) return;
   const view = window.HBVStudioParameterLibrary.manualPresetComparePanelState({
     runData: state._runData,
     compareMetrics: state.compareMetrics,
     compareLabel: state.compareLabel,
     adjusted: state.compareAdjusted,
   });
-  host.style.display = view.visible ? "" : "none";
-  host.className = view.className;
-  host.textContent = view.text;
+  applyDomUpdates(view.domUpdates);
 }
 
 function clearStaleManualPresetComparison({ silent = true } = {}) {
@@ -5050,13 +5046,8 @@ async function compareSelectedManualPresetSimulation() {
     showToast(preflight.message, true);
     return;
   }
-  const host = $("#manual-compare-summary");
-  if (host) {
-    const view = window.HBVStudioParameterLibrary.manualPresetComparePendingView(preset);
-    host.style.display = "";
-    host.className = view.className;
-    host.textContent = view.text;
-  }
+  const pendingView = window.HBVStudioParameterLibrary.manualPresetComparePendingView(preset);
+  applyDomUpdates(pendingView.domUpdates);
   const requestToken = compareRequestGuard.next();
   const requestContext = window.HBVStudioResultsView.runComparisonRequestContext(preset, state._runData);
   try {

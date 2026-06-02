@@ -223,6 +223,12 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (!panelView.visible || panelView.className !== "hint-box status-ok" || panelView.text !== expectedPanelText) {
               throw new Error(`unexpected compare panel view: ${JSON.stringify(panelView)}`);
             }
+            const panelDom = Object.fromEntries(panelView.domUpdates.map(update => [update.selector, update]));
+            if (panelDom["#manual-compare-summary"].visible !== true ||
+                panelDom["#manual-compare-summary"].className !== "hint-box status-ok" ||
+                panelDom["#manual-compare-summary"].text !== expectedPanelText) {
+              throw new Error(`unexpected compare panel DOM updates: ${JSON.stringify(panelDom)}`);
+            }
             const hiddenPanelView = library.manualPresetComparePanelState({
               runData: null,
               compareMetrics: { nse_cal: 0.8 },
@@ -231,9 +237,21 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (hiddenPanelView.visible || hiddenPanelView.className !== "hint-box" || hiddenPanelView.text !== "") {
               throw new Error(`unexpected hidden compare panel view: ${JSON.stringify(hiddenPanelView)}`);
             }
+            const hiddenPanelDom = Object.fromEntries(hiddenPanelView.domUpdates.map(update => [update.selector, update]));
+            if (hiddenPanelDom["#manual-compare-summary"].visible !== false ||
+                hiddenPanelDom["#manual-compare-summary"].className !== "hint-box" ||
+                hiddenPanelDom["#manual-compare-summary"].text !== "") {
+              throw new Error(`unexpected hidden compare panel DOM updates: ${JSON.stringify(hiddenPanelDom)}`);
+            }
             const pendingView = library.manualPresetComparePendingView({ name: "Trial A" });
             if (!pendingView.visible || pendingView.className !== "hint-box" || pendingView.text !== "正在计算参数集“Trial A”的对比结果...") {
               throw new Error(`unexpected pending compare view: ${JSON.stringify(pendingView)}`);
+            }
+            const pendingDom = Object.fromEntries(pendingView.domUpdates.map(update => [update.selector, update]));
+            if (pendingDom["#manual-compare-summary"].visible !== true ||
+                pendingDom["#manual-compare-summary"].className !== "hint-box" ||
+                pendingDom["#manual-compare-summary"].text !== "正在计算参数集“Trial A”的对比结果...") {
+              throw new Error(`unexpected pending compare DOM updates: ${JSON.stringify(pendingDom)}`);
             }
             const fallbackPendingView = library.manualPresetComparePendingView({});
             if (!fallbackPendingView.text.includes("参数集")) {
