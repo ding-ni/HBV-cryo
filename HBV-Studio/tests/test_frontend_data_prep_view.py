@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
@@ -21,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.boundaryGuidanceState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -96,6 +97,35 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!noWorkspace.includes("请选择 &lt;workspace&gt;")) throw new Error("empty workspace text should be escaped");
             const noSteps = view.renderPrepStepList({ workspaceSelected: true, steps: [], noStepsText: "无步骤 <ok>" }, helpers);
             if (!noSteps.includes("无步骤 &lt;ok&gt;")) throw new Error("no steps text should be escaped");
+
+            const dailyFullFocus = view.projectFocusHintState({ hourly: false, objectType: "full_upstream_basin" });
+            if (dailyFullFocus.className !== "hint-box status-ok" || !dailyFullFocus.text.includes("日尺度 + 完整上游流域")) {
+              throw new Error(`daily full-upstream focus mismatch: ${JSON.stringify(dailyFullFocus)}`);
+            }
+            const dailyBoundaryFocus = view.projectFocusHintState({ hourly: false, objectType: "interbasin_with_boundary" });
+            if (dailyBoundaryFocus.className !== "hint-box status-warn" || !dailyBoundaryFocus.text.includes("上游边界入流 CSV")) {
+              throw new Error(`daily boundary focus mismatch: ${JSON.stringify(dailyBoundaryFocus)}`);
+            }
+            const hourlyFullFocus = view.projectFocusHintState({ hourly: true, objectType: "full_upstream_basin" });
+            if (hourlyFullFocus.className !== "hint-box status-warn" || !hourlyFullFocus.text.includes("小时尺度 + 完整上游流域")) {
+              throw new Error(`hourly full-upstream focus mismatch: ${JSON.stringify(hourlyFullFocus)}`);
+            }
+            const hourlyBoundaryFocus = view.projectFocusHintState({ hourly: true, objectType: "interbasin_with_boundary" });
+            if (hourlyBoundaryFocus.className !== "hint-box status-warn" || !hourlyBoundaryFocus.text.includes("小时尺度 + 区间流域")) {
+              throw new Error(`hourly boundary focus mismatch: ${JSON.stringify(hourlyBoundaryFocus)}`);
+            }
+            const fullBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: true, hourly: false });
+            if (fullBoundaryGuidance.className !== "hint-box" || !fullBoundaryGuidance.text.includes("不需要提供上游边界入流")) {
+              throw new Error(`full-upstream boundary guidance mismatch: ${JSON.stringify(fullBoundaryGuidance)}`);
+            }
+            const dailyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: false });
+            if (dailyBoundaryGuidance.className !== "hint-box status-warn" || !dailyBoundaryGuidance.text.includes("24 小时间隔")) {
+              throw new Error(`daily boundary guidance mismatch: ${JSON.stringify(dailyBoundaryGuidance)}`);
+            }
+            const hourlyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: true });
+            if (hourlyBoundaryGuidance.className !== "hint-box status-warn" || !hourlyBoundaryGuidance.text.includes("1 小时")) {
+              throw new Error(`hourly boundary guidance mismatch: ${JSON.stringify(hourlyBoundaryGuidance)}`);
+            }
 
             const sourceSteps = [
               "download_era5", "process_era5", "process_prec", "station_precip_strategy", "align_inputs", "apply_precip_strategy",
@@ -547,15 +577,23 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             }
             """
         )
-        result = subprocess.run(
-            ["node", "-e", script],
-            cwd=STUDIO_DIR,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            timeout=20,
-        )
+        script_path = None
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".js", dir=STUDIO_DIR, delete=False, encoding="utf-8") as temp_js:
+                temp_js.write(script)
+                script_path = Path(temp_js.name)
+            result = subprocess.run(
+                ["node", str(script_path)],
+                cwd=STUDIO_DIR,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=20,
+            )
+        finally:
+            if script_path:
+                script_path.unlink(missing_ok=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

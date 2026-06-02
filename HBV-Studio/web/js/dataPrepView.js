@@ -238,6 +238,50 @@
     };
   }
 
+  function projectFocusHintState(model = {}) {
+    const hourly = Boolean(model.hourly);
+    const objectType = String(model.objectType || "full_upstream_basin");
+    if (!hourly && objectType === "full_upstream_basin") {
+      return {
+        text: "当前是“日尺度 + 完整上游流域”组合，最适合作为正式项目接入前的主运行流程。优先把时间分段、观测时间步和气象驱动覆盖先跑顺。",
+        className: "hint-box status-ok",
+      };
+    }
+    if (!hourly && objectType === "interbasin_with_boundary") {
+      return {
+        text: "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流 CSV：时间步要和项目一致、覆盖预热到验证全时段、不能有重复时间戳。",
+        className: "hint-box status-warn",
+      };
+    }
+    if (hourly && objectType === "full_upstream_basin") {
+      return {
+        text: "当前是“小时尺度 + 完整上游流域”组合。洪水过程更细，但对气象驱动完整性更敏感，建议先在日尺度完成主流程核对，再扩大到小时尺度。",
+        className: "hint-box status-warn",
+      };
+    }
+    return {
+      text: "当前是“小时尺度 + 区间流域”组合，负载和输入要求都最高。建议先确认边界入流、小时气象驱动和时间分段都完全正确，再启动正式率定。",
+      className: "hint-box status-warn",
+    };
+  }
+
+  function boundaryGuidanceState(model = {}) {
+    const fullUpstream = Boolean(model.fullUpstream);
+    if (fullUpstream) {
+      return {
+        text: "当前流域工程类型为「完整上游流域」，本步通常可以跳过，不需要提供上游边界入流。",
+        className: "hint-box",
+      };
+    }
+    const hourly = Boolean(model.hourly);
+    return {
+      text: hourly
+        ? "区间流域小时项目对边界入流最敏感。建议先确认 CSV 时间步为 1 小时、覆盖预热至验证全时段、零值不是误填缺测。"
+        : "区间流域日尺度项目建议先确认边界入流为 24 小时间隔，并覆盖预热、率定、验证全时段；重复时间戳和负值要先清掉。",
+      className: "hint-box status-warn",
+    };
+  }
+
   function describeEra5Need(sources = {}) {
     if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
       return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
@@ -797,6 +841,7 @@
   }
 
   window.HBVStudioDataPrepView = {
+    boundaryGuidanceState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
@@ -818,6 +863,7 @@
     prepStepRunningStatus,
     prepTaskErrorUiState,
     prepTaskUiState,
+    projectFocusHintState,
     renderBootstrapStatus,
     renderInputCheckError,
     renderInputCheckImportBlock,

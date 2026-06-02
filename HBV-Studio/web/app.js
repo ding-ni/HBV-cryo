@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["boundaryGuidanceState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -1874,40 +1874,23 @@ function renderStationPrecipCheckOverview(validation = null) {
 function updateProjectFocusHint() {
   const host = $("#wz-project-focus");
   if (!host) return;
-  const hourly = isHourlyTimescaleSelected();
-  const objectType = getSelectedRadio("wz-object") || "full_upstream_basin";
-  let text = "";
-  let className = "hint-box";
-  if (!hourly && objectType === "full_upstream_basin") {
-    text = "当前是“日尺度 + 完整上游流域”组合，最适合作为正式项目接入前的主运行流程。优先把时间分段、观测时间步和气象驱动覆盖先跑顺。";
-    className = "hint-box status-ok";
-  } else if (!hourly && objectType === "interbasin_with_boundary") {
-    text = "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流 CSV：时间步要和项目一致、覆盖预热到验证全时段、不能有重复时间戳。";
-    className = "hint-box status-warn";
-  } else if (hourly && objectType === "full_upstream_basin") {
-    text = "当前是“小时尺度 + 完整上游流域”组合。洪水过程更细，但对气象驱动完整性更敏感，建议先在日尺度完成主流程核对，再扩大到小时尺度。";
-    className = "hint-box status-warn";
-  } else {
-    text = "当前是“小时尺度 + 区间流域”组合，负载和输入要求都最高。建议先确认边界入流、小时气象驱动和时间分段都完全正确，再启动正式率定。";
-    className = "hint-box status-warn";
-  }
-  host.textContent = text;
-  host.className = className;
+  const hint = window.HBVStudioDataPrepView.projectFocusHintState({
+    hourly: isHourlyTimescaleSelected(),
+    objectType: getSelectedRadio("wz-object") || "full_upstream_basin",
+  });
+  host.textContent = hint.text;
+  host.className = hint.className;
 }
 
 function updateBoundaryGuidance() {
   const host = $("#wz-boundary-guidance");
   if (!host) return;
-  if (isFullUpstream()) {
-    host.textContent = "当前流域工程类型为「完整上游流域」，本步通常可以跳过，不需要提供上游边界入流。";
-    host.className = "hint-box";
-    return;
-  }
-  const hourly = isHourlyTimescaleSelected();
-  host.textContent = hourly
-    ? "区间流域小时项目对边界入流最敏感。建议先确认 CSV 时间步为 1 小时、覆盖预热至验证全时段、零值不是误填缺测。"
-    : "区间流域日尺度项目建议先确认边界入流为 24 小时间隔，并覆盖预热、率定、验证全时段；重复时间戳和负值要先清掉。";
-  host.className = "hint-box status-warn";
+  const hint = window.HBVStudioDataPrepView.boundaryGuidanceState({
+    fullUpstream: isFullUpstream(),
+    hourly: isHourlyTimescaleSelected(),
+  });
+  host.textContent = hint.text;
+  host.className = hint.className;
 }
 
 function parseComparableTime(text) {
