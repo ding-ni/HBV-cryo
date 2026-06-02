@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -836,20 +836,28 @@ function updateManualStarterButtons() {
   const runningCalibrationTask = findCurrentManualStartTask({ workspacePath: calibrationWorkspacePath, runningOnly: true });
   const runningResultsTask = findCurrentManualStartTask({ workspacePath: resultsWorkspacePath, runningOnly: true });
   const resultsWorkspaceRunCount = resultsWorkspacePath ? runsForWorkspace(resultsWorkspacePath).length : 0;
+  const controlState = window.HBVStudioResultsView.manualStarterControlState({
+    calibrationWorkspacePath,
+    resultsWorkspacePath,
+    runningCalibrationTask,
+    runningResultsTask,
+    totalRuns: state.runs.length,
+    workspaceFilterActive: Boolean(state.runWorkspaceFilterPath),
+    resultsWorkspaceRunCount,
+  });
   const calibrationBtn = $("#start-manual-starter");
   if (calibrationBtn) {
-    calibrationBtn.disabled = !calibrationWorkspacePath || Boolean(runningCalibrationTask);
-    calibrationBtn.textContent = runningCalibrationTask ? "正在生成手调起点..." : "生成手调起点";
+    calibrationBtn.disabled = controlState.calibration.disabled;
+    calibrationBtn.textContent = controlState.calibration.text;
   }
   const resultsWrap = $("#results-empty-actions");
   const resultsBtn = $("#results-generate-manual-starter");
-  const showResultsStarter = Boolean(resultsWorkspacePath) && (!state.runs.length || (Boolean(state.runWorkspaceFilterPath) && resultsWorkspaceRunCount === 0));
   if (resultsWrap) {
-    resultsWrap.style.display = showResultsStarter ? "" : "none";
+    resultsWrap.style.display = controlState.results.visible ? "" : "none";
   }
   if (resultsBtn) {
-    resultsBtn.disabled = !resultsWorkspacePath || Boolean(runningResultsTask);
-    resultsBtn.textContent = runningResultsTask ? "正在生成手调起点..." : "生成手调起点";
+    resultsBtn.disabled = controlState.results.disabled;
+    resultsBtn.textContent = controlState.results.text;
   }
 }
 

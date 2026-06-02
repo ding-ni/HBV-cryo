@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -209,6 +209,48 @@ class FrontendResultsViewTests(unittest.TestCase):
             const selectedReadyState = results.runListState({ totalRuns: 2, visibleCount: 1, hasCurrentRun: true }, helpers);
             if (selectedReadyState.status !== "ready" || selectedReadyState.updateHint) {
               throw new Error(`selected run should not overwrite entry hint: ${JSON.stringify(selectedReadyState)}`);
+            }
+            const starterNoWorkspace = results.manualStarterControlState({});
+            if (!starterNoWorkspace.calibration.disabled || starterNoWorkspace.results.visible || !starterNoWorkspace.results.disabled) {
+              throw new Error(`manual starter controls should be disabled without workspace: ${JSON.stringify(starterNoWorkspace)}`);
+            }
+            const starterEmptyWorkspace = results.manualStarterControlState({
+              calibrationWorkspacePath: "C:/ws/A",
+              resultsWorkspacePath: "C:/ws/A",
+              totalRuns: 0,
+            });
+            if (starterEmptyWorkspace.calibration.disabled || !starterEmptyWorkspace.results.visible || starterEmptyWorkspace.results.disabled || starterEmptyWorkspace.results.text !== "生成手调起点") {
+              throw new Error(`manual starter controls should allow empty workspace starter: ${JSON.stringify(starterEmptyWorkspace)}`);
+            }
+            const starterRunning = results.manualStarterControlState({
+              calibrationWorkspacePath: "C:/ws/A",
+              resultsWorkspacePath: "C:/ws/A",
+              runningCalibrationTask: { id: "task-cal" },
+              runningResultsTask: { id: "task-run" },
+              totalRuns: 0,
+            });
+            if (!starterRunning.calibration.disabled || starterRunning.calibration.text !== "正在生成手调起点..." || !starterRunning.results.disabled || starterRunning.results.text !== "正在生成手调起点...") {
+              throw new Error(`manual starter running state mismatch: ${JSON.stringify(starterRunning)}`);
+            }
+            const starterHidden = results.manualStarterControlState({
+              calibrationWorkspacePath: "C:/ws/A",
+              resultsWorkspacePath: "C:/ws/A",
+              totalRuns: 3,
+              workspaceFilterActive: true,
+              resultsWorkspaceRunCount: 2,
+            });
+            if (starterHidden.results.visible) {
+              throw new Error(`results starter should hide when filtered workspace already has runs: ${JSON.stringify(starterHidden)}`);
+            }
+            const starterFilteredEmpty = results.manualStarterControlState({
+              calibrationWorkspacePath: "C:/ws/A",
+              resultsWorkspacePath: "C:/ws/B",
+              totalRuns: 3,
+              workspaceFilterActive: true,
+              resultsWorkspaceRunCount: 0,
+            });
+            if (!starterFilteredEmpty.results.visible || starterFilteredEmpty.results.disabled) {
+              throw new Error(`results starter should show for empty filtered workspace: ${JSON.stringify(starterFilteredEmpty)}`);
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);

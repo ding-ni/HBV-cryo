@@ -238,6 +238,28 @@
     return { status: "ready", listHtml: "", hintText: "", hintClassName: "", updateHint: false };
   }
 
+  function manualStarterControlState(model = {}) {
+    const calibrationWorkspacePath = String(model.calibrationWorkspacePath || "").trim();
+    const resultsWorkspacePath = String(model.resultsWorkspacePath || "").trim();
+    const hasRunningCalibrationTask = Boolean(model.runningCalibrationTask);
+    const hasRunningResultsTask = Boolean(model.runningResultsTask);
+    const totalRuns = Number(model.totalRuns || 0);
+    const resultsWorkspaceRunCount = Number(model.resultsWorkspaceRunCount || 0);
+    const workspaceFilterActive = Boolean(model.workspaceFilterActive);
+    const showResultsStarter = Boolean(resultsWorkspacePath) && (!totalRuns || (workspaceFilterActive && resultsWorkspaceRunCount === 0));
+    return {
+      calibration: {
+        disabled: !calibrationWorkspacePath || hasRunningCalibrationTask,
+        text: hasRunningCalibrationTask ? "正在生成手调起点..." : "生成手调起点",
+      },
+      results: {
+        visible: showResultsStarter,
+        disabled: !resultsWorkspacePath || hasRunningResultsTask,
+        text: hasRunningResultsTask ? "正在生成手调起点..." : "生成手调起点",
+      },
+    };
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -649,6 +671,7 @@
     alignedRunFiltersForSelection,
     filterRuns,
     latestEditableRunPath,
+    manualStarterControlState,
     resultMetricItems,
     renderFilterToolbar,
     renderMetricStrip,
