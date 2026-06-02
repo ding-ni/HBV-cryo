@@ -206,6 +206,8 @@ from services.workspace_catalog import (
     build_empty_workspace as build_empty_workspace_config,
     create_workspace_from_import as build_create_workspace_from_import,
     delete_workspace as build_delete_workspace,
+    detect_object_type as build_detect_object_type,
+    detect_profile_from_payload as build_detect_profile_from_payload,
     find_template as build_find_template,
     instantiate_template as build_instantiate_template,
     list_templates as build_list_templates,
@@ -2440,20 +2442,20 @@ def runtime_root_for_workspace(name: str) -> Path:
 
 
 def detect_profile_from_payload(data: dict[str, Any]) -> str:
-    explicit = str(data.get("率定模式", "")).strip().lower()
-    if explicit in {PROFILE_DAILY, PROFILE_HOURLY}:
-        return explicit
-    return PROFILE_HOURLY if normalize_time_step_hours(data.get("时间步长_小时", 24.0)) <= 1.5 else PROFILE_DAILY
+    return build_detect_profile_from_payload(
+        data,
+        profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
+    )
 
 
 def detect_object_type(data: dict[str, Any]) -> str:
-    explicit = str(data.get("项目对象", "")).strip().lower()
-    if explicit in {OBJECT_REGRESSION, OBJECT_INTERBASIN, OBJECT_FULL_UPSTREAM}:
-        return explicit
-    boundary = dict(data.get("边界条件", {}))
-    if boundary.get("上游边界入流_csv"):
-        return OBJECT_INTERBASIN
-    return OBJECT_FULL_UPSTREAM
+    return build_detect_object_type(
+        data,
+        object_regression=OBJECT_REGRESSION,
+        object_interbasin=OBJECT_INTERBASIN,
+        object_full_upstream=OBJECT_FULL_UPSTREAM,
+    )
 
 
 def _run_portable_path_context() -> RunPortablePathContext:
@@ -2824,7 +2826,6 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         resolve_any_path=resolve_any_path,
         resolve_profile=resolve_profile,
         normalize_config_before_save=normalize_config_before_save,
-        detect_object_type=detect_object_type,
         default_initial_state=profile_runner.DEFAULT_INIT_STATE,
         write_json_file=write_json_file,
         to_display_path=to_display_path,

@@ -14,6 +14,8 @@ if str(STUDIO_DIR) not in sys.path:
 from services.workspace_catalog import (  # noqa: E402
     WorkspaceCatalogContext,
     build_empty_workspace,
+    detect_object_type,
+    detect_profile_from_payload,
     runtime_root_for_workspace,
     slugify_workspace_name,
     suggest_time_windows,
@@ -52,7 +54,6 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
             resolve_any_path=lambda raw, **kwargs: Path(raw),
             resolve_profile=lambda config, fallback=None: fallback or "daily",
             normalize_config_before_save=lambda config, path: config,
-            detect_object_type=lambda config: "full_upstream_basin",
             default_initial_state={"SP": 0.0, "SM": 10.0},
             write_json_file=lambda path, data: None,
             to_display_path=lambda path: str(path),
@@ -96,6 +97,20 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
         self.assertEqual(config["时间步长_小时"], 1.0)
         self.assertEqual(config["初始状态"], {"SP": 0.0, "SM": 10.0})
         self.assertEqual(config["气象策略"]["降水来源"], "era5")
+
+    def test_detect_profile_from_payload_prefers_explicit_mode_then_step_hours(self) -> None:
+        self.assertEqual(detect_profile_from_payload({"率定模式": "hourly", "时间步长_小时": 24}), "hourly")
+        self.assertEqual(detect_profile_from_payload({"时间步长_小时": 1.5}), "hourly")
+        self.assertEqual(detect_profile_from_payload({"时间步长_小时": 2}), "daily")
+        self.assertEqual(detect_profile_from_payload({"时间步长_小时": "bad"}), "daily")
+
+    def test_detect_object_type_prefers_explicit_mode_then_boundary_file(self) -> None:
+        self.assertEqual(detect_object_type({"项目对象": "regression_validation"}), "regression_validation")
+        self.assertEqual(
+            detect_object_type({"边界条件": {"上游边界入流_csv": "boundary.csv"}}),
+            "interbasin_with_boundary",
+        )
+        self.assertEqual(detect_object_type({}), "full_upstream_basin")
 
     def test_suggest_time_windows_splits_full_daily_years(self) -> None:
         windows = suggest_time_windows("2001-01-01", "2012-12-31", "daily")

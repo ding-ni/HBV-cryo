@@ -36,7 +36,6 @@ class WorkspaceCatalogContext:
     resolve_any_path: Callable[..., Path]
     resolve_profile: Callable[[dict[str, Any], str | None], str]
     normalize_config_before_save: Callable[[dict[str, Any], Path], dict[str, Any]]
-    detect_object_type: Callable[[dict[str, Any]], str]
     default_initial_state: dict[str, Any]
     write_json_file: Callable[[Path, Any], None]
     to_display_path: Callable[[Path], str]
@@ -68,6 +67,38 @@ def slugify_workspace_name(name: str) -> str:
 
 def runtime_root_for_workspace(name: str, project_runtime_dir: Path) -> Path:
     return project_runtime_dir / slugify_workspace_name(name)
+
+
+def detect_profile_from_payload(
+    data: dict[str, Any],
+    *,
+    profile_daily: str = "daily",
+    profile_hourly: str = "hourly",
+) -> str:
+    explicit = str(data.get("率定模式", "")).strip().lower()
+    if explicit in {profile_daily, profile_hourly}:
+        return explicit
+    try:
+        numeric_step = float(data.get("时间步长_小时", 24.0))
+    except Exception:
+        numeric_step = 24.0
+    return profile_hourly if numeric_step <= 1.5 else profile_daily
+
+
+def detect_object_type(
+    data: dict[str, Any],
+    *,
+    object_regression: str = "regression_validation",
+    object_interbasin: str = "interbasin_with_boundary",
+    object_full_upstream: str = "full_upstream_basin",
+) -> str:
+    explicit = str(data.get("项目对象", "")).strip().lower()
+    if explicit in {object_regression, object_interbasin, object_full_upstream}:
+        return explicit
+    boundary = dict(data.get("边界条件", {}) or {})
+    if boundary.get("上游边界入流_csv"):
+        return object_interbasin
+    return object_full_upstream
 
 
 def build_empty_workspace(name: str = "新流域工作区", profile: str = "", context: WorkspaceCatalogContext | None = None) -> dict[str, Any]:
@@ -254,7 +285,12 @@ def list_templates(context: WorkspaceCatalogContext) -> list[dict[str, Any]]:
                     "title": meta.get("title", path.stem),
                     "description": meta.get("description", ""),
                     "calibration_mode": resolved.get("率定模式", context.profile_daily),
-                    "object_type": context.detect_object_type(resolved),
+                    "object_type": detect_object_type(
+                        resolved,
+                        object_regression=context.object_regression,
+                        object_interbasin=context.object_interbasin,
+                        object_full_upstream=context.object_full_upstream,
+                    ),
                     "path": str(path.resolve()),
                     "display_path": context.to_display_path(path),
                     "builtin": bool(meta.get("builtin", True)),
@@ -289,7 +325,12 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
     config = context.normalize_config_before_save(raw, context.default_workspace_path)
     if (not str(config.get("冰川边界_shp", "")).strip()) and context.builtin_glacier_shp.exists():
         config["冰川边界_shp"] = str(context.builtin_glacier_shp.resolve())
-    if context.detect_object_type(config) != context.object_regression:
+    if detect_object_type(
+        config,
+        object_regression=context.object_regression,
+        object_interbasin=context.object_interbasin,
+        object_full_upstream=context.object_full_upstream,
+    ) != context.object_regression:
         config["流域名称"] = target_name
         config["流域编号"] = slugify_workspace_name(target_name)
     if template_id == "blank-workspace":
@@ -322,7 +363,12 @@ def list_workspaces(context: WorkspaceCatalogContext) -> list[dict[str, Any]]:
                 "display_path": context.to_display_path(path),
                 "flow_name": data.get("流域名称", path.stem),
                 "flow_id": data.get("流域编号", path.stem),
-                "object_type": context.detect_object_type(data),
+                "object_type": detect_object_type(
+                    data,
+                    object_regression=context.object_regression,
+                    object_interbasin=context.object_interbasin,
+                    object_full_upstream=context.object_full_upstream,
+                ),
                 "calibration_mode": profile,
                 "time_step_hours": context.normalize_time_step_hours(data.get("时间步长_小时", 24.0)),
                 "workspace_root": runtime_root,
