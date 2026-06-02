@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3449,29 +3449,32 @@ function updateGisMode() {
 }
 
 function syncMeteoModeConstraints() {
-  const forceImport = allMeteoSourcesUseLocalTif();
+  const panel = window.HBVStudioDataPrepView.meteoModePanelState({
+    sources: getWizardMeteoSources(),
+    mode: getSelectedRadio("wz-meteo-mode"),
+  });
   const pipelineRadio = document.querySelector('input[name="wz-meteo-mode"][value="pipeline"]');
   const importRadio = document.querySelector('input[name="wz-meteo-mode"][value="import"]');
   const pipelineCard = pipelineRadio?.closest(".radio-card");
-  if (pipelineRadio) pipelineRadio.disabled = forceImport;
+  if (pipelineRadio) pipelineRadio.disabled = panel.pipelineRadio.disabled;
   if (pipelineCard) {
-    pipelineCard.classList.toggle("disabled", forceImport);
-    pipelineCard.title = forceImport ? "当降水、气温、蒸散发三项都来自本地栅格时，请在本步直接导入本地目录。" : "";
-    pipelineCard.style.opacity = forceImport ? "0.55" : "";
-    pipelineCard.style.pointerEvents = forceImport ? "none" : "";
+    pipelineCard.classList.toggle("disabled", panel.pipelineCard.disabled);
+    pipelineCard.title = panel.pipelineCard.title;
+    pipelineCard.style.opacity = panel.pipelineCard.opacity;
+    pipelineCard.style.pointerEvents = panel.pipelineCard.pointerEvents;
   }
-  if (forceImport && importRadio) {
+  if (panel.importRadio.checked && importRadio) {
     importRadio.closest(".radio-card-group")?.querySelectorAll(".radio-card").forEach(card => card.classList.remove("selected"));
     importRadio.checked = true;
     importRadio.closest(".radio-card")?.classList.add("selected");
   }
+  return panel;
 }
 
 function updateMeteoMode() {
-  syncMeteoModeConstraints();
-  const mode = getSelectedRadio("wz-meteo-mode");
-  $("#wz-meteo-pipeline-panel").classList.toggle("hidden", mode !== "pipeline");
-  $("#wz-meteo-import-panel").classList.toggle("hidden", mode !== "import");
+  const panel = syncMeteoModeConstraints();
+  $("#wz-meteo-pipeline-panel").classList.toggle("hidden", !panel.panels.pipelineVisible);
+  $("#wz-meteo-import-panel").classList.toggle("hidden", !panel.panels.importVisible);
   updateMeteoModeHint();
   renderEra5ApiPanel();
 }

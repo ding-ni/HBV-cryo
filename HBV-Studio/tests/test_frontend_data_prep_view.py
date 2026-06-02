@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -260,6 +260,27 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             });
             if (noLocalPreserveFail.shouldApply || noLocalPreserveFail.hint.text !== "") {
               throw new Error(`no-local meteo mode should preserve visible failure: ${JSON.stringify(noLocalPreserveFail)}`);
+            }
+            const pipelinePanel = view.meteoModePanelState({
+              sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" },
+              mode: "pipeline",
+            });
+            if (pipelinePanel.forceImport || pipelinePanel.pipelineRadio.disabled || pipelinePanel.importRadio.checked || !pipelinePanel.panels.pipelineVisible || pipelinePanel.panels.importVisible) {
+              throw new Error(`pipeline meteo mode panel mismatch: ${JSON.stringify(pipelinePanel)}`);
+            }
+            const importPanel = view.meteoModePanelState({
+              sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" },
+              mode: "import",
+            });
+            if (importPanel.forceImport || importPanel.panels.pipelineVisible || !importPanel.panels.importVisible) {
+              throw new Error(`import meteo mode panel mismatch: ${JSON.stringify(importPanel)}`);
+            }
+            const forcedImportPanel = view.meteoModePanelState({
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+              mode: "pipeline",
+            });
+            if (!forcedImportPanel.forceImport || forcedImportPanel.mode !== "import" || !forcedImportPanel.pipelineRadio.disabled || !forcedImportPanel.importRadio.checked || forcedImportPanel.panels.pipelineVisible || !forcedImportPanel.panels.importVisible || forcedImportPanel.pipelineCard.opacity !== "0.55" || !forcedImportPanel.pipelineCard.title.includes("直接导入本地目录")) {
+              throw new Error(`forced-import meteo mode panel mismatch: ${JSON.stringify(forcedImportPanel)}`);
             }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });

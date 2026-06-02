@@ -261,6 +261,32 @@
     };
   }
 
+  function meteoModePanelState(model = {}) {
+    const sources = model.sources || {};
+    const forceImport = meteoSourceLabels(sources, "local").length === 3;
+    const mode = forceImport ? "import" : String(model.mode || "");
+    return {
+      mode,
+      forceImport,
+      pipelineRadio: {
+        disabled: forceImport,
+      },
+      importRadio: {
+        checked: forceImport,
+      },
+      pipelineCard: {
+        disabled: forceImport,
+        title: forceImport ? "当降水、气温、蒸散发三项都来自本地栅格时，请在本步直接导入本地目录。" : "",
+        opacity: forceImport ? "0.55" : "",
+        pointerEvents: forceImport ? "none" : "",
+      },
+      panels: {
+        pipelineVisible: mode === "pipeline",
+        importVisible: mode === "import",
+      },
+    };
+  }
+
   function prepPanelSummary(sources = {}) {
     const precText = sources.prec === "custom_tif"
       ? "本地栅格"
@@ -740,6 +766,7 @@
     emptyInputCheckCache,
     hasRecentInputCheckCache,
     inputCheckCompletionState,
+    meteoModePanelState,
     inputCheckCacheEntry,
     meteoModeHintState,
     meteoImportCreatingUiState,
