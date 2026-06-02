@@ -21,7 +21,7 @@ def root_tokens(source: str) -> dict[str, str]:
 
 
 def rule_body(source: str, selector: str) -> str:
-    match = re.search(rf"{re.escape(selector)}\s*\{{(?P<body>.*?)\n\}}", source, re.S)
+    match = re.search(rf"{re.escape(selector)}\s*\{{(?P<body>.*?)\}}", source, re.S)
     if not match:
         raise AssertionError(f"Missing CSS rule for {selector}")
     return match.group("body")
@@ -51,6 +51,7 @@ class FrontendStyleTokenTests(unittest.TestCase):
             "--control-height": "32px",
             "--control-height-primary": "36px",
             "--field-height": "36px",
+            "--badge-height": "24px",
         }
 
         for name, value in expected.items():
@@ -151,6 +152,31 @@ class FrontendStyleTokenTests(unittest.TestCase):
         browse_button_body = rule_body(styles, ".path-input .browse-button")
         self.assertIn("min-height: var(--field-height);", browse_button_body)
         self.assertIn("padding: 7px 12px;", browse_button_body)
+
+    def test_status_badges_use_compact_height_and_semantic_borders(self) -> None:
+        styles = STYLES_PATH.read_text(encoding="utf-8")
+        tokens = root_tokens(styles)
+
+        self.assertEqual(tokens.get("--badge-height"), "24px")
+
+        status_body = rule_body(styles, ".status-badge")
+        self.assertIn("min-height: var(--badge-height);", status_body)
+        self.assertIn("padding: 3px 8px;", status_body)
+
+        service_body = rule_body(styles, ".service-pill")
+        self.assertIn("min-height: var(--control-height);", service_body)
+
+        task_chip_body = rule_body(styles, ".task-chip")
+        self.assertIn("min-height: var(--badge-height);", task_chip_body)
+
+        expected_border_colours = {
+            ".status-badge.status-ok": "border-color: rgba(21,128,61,0.22);",
+            ".status-badge.status-warn": "border-color: rgba(239,68,68,0.20);",
+            ".status-badge.status-fail": "border-color: rgba(185,28,28,0.22);",
+            ".status-badge.status-type": "border-color: rgba(14,116,144,0.14);",
+        }
+        for selector, declaration in expected_border_colours.items():
+            self.assertIn(declaration, rule_body(styles, selector), selector)
 
 
 if __name__ == "__main__":
