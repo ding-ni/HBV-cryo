@@ -73,7 +73,15 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText", "pickForecastSourceRun", "forecastSelectedSourceRun"]) {
+            for (const name of [
+              "forecastCandidateRuns",
+              "forecastRunReady",
+              "forecastRunReadinessText",
+              "pickForecastSourceRun",
+              "forecastSelectedSourceRun",
+              "forecastSourceOptionsState",
+              "forecastSourceSelectionState",
+            ]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing source readiness export: ${name}`);
             }
 
@@ -108,6 +116,23 @@ class FrontendForecastViewTests(unittest.TestCase):
             }
             if (view.forecastSelectedSourceRun(candidates, "", { samePath }) !== null) {
               throw new Error("empty source path should not fallback");
+            }
+            const selectionState = view.forecastSourceSelectionState(" C:/runs/manual ");
+            if (selectionState.statePatch.forecastSourceRunPath !== "C:/runs/manual") {
+              throw new Error(`source selection state wrong: ${JSON.stringify(selectionState)}`);
+            }
+            const emptySelectionState = view.forecastSourceSelectionState(null);
+            if (emptySelectionState.statePatch.forecastSourceRunPath !== "") {
+              throw new Error(`empty source selection state wrong: ${JSON.stringify(emptySelectionState)}`);
+            }
+            const sourceOptions = view.forecastSourceOptionsState(candidates, "c:/RUNS/manual", { samePath, forecastRunReady: view.forecastRunReady });
+            if (sourceOptions.selected?.id !== "manual-ready" || sourceOptions.selectedPath !== "C:/runs/manual" ||
+                sourceOptions.statePatch.forecastSourceRunPath !== "C:/runs/manual") {
+              throw new Error(`source options preferred state wrong: ${JSON.stringify(sourceOptions)}`);
+            }
+            const fallbackOptions = view.forecastSourceOptionsState(candidates, "C:/runs/missing", { samePath, forecastRunReady: view.forecastRunReady });
+            if (fallbackOptions.selected?.id !== "cal-ready" || fallbackOptions.selectedPath !== "C:/runs/cal") {
+              throw new Error(`source options ready fallback wrong: ${JSON.stringify(fallbackOptions)}`);
             }
             const preferred = view.pickForecastSourceRun(candidates, "c:/RUNS/manual", { samePath });
             if (preferred?.id !== "manual-ready") throw new Error(`preferred source mismatch: ${preferred?.id}`);

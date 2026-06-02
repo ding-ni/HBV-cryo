@@ -175,6 +175,8 @@ const frontendModuleContracts = [
       "forecastRunReadinessText",
       "forecastSelectedSourceRun",
       "forecastSelectedResultRun",
+      "forecastSourceOptionsState",
+      "forecastSourceSelectionState",
       "forecastSuggestedStart",
       "forecastTimeComparable",
       "formatForecastInputTime",
@@ -5523,11 +5525,11 @@ function renderForecastSourceOptions() {
   if (!select) return;
   const candidates = forecastCandidateRuns();
   const current = state.forecastSourceRunPath || currentSelectedRunPath() || "";
-  const selected = window.HBVStudioForecastView.pickForecastSourceRun(candidates, current, { samePath, forecastRunReady });
-  state.forecastSourceRunPath = selected?.path || "";
+  const sourceOptionsState = window.HBVStudioForecastView.forecastSourceOptionsState(candidates, current, { samePath, forecastRunReady });
+  Object.assign(state, sourceOptionsState.statePatch);
   const rendered = window.HBVStudioForecastView.renderForecastSourceOptions(
     candidates,
-    state.forecastSourceRunPath,
+    sourceOptionsState.selectedPath,
     { escapeHtml, forecastFriendlyRunName, forecastRunReadinessText, samePath },
   );
   select.disabled = rendered.disabled;
@@ -5809,7 +5811,7 @@ function selectLatestForecastSource() {
     renderForecastView();
     return;
   }
-  state.forecastSourceRunPath = run.path;
+  Object.assign(state, window.HBVStudioForecastView.forecastSourceSelectionState(run.path).statePatch);
   renderForecastView();
 }
 
@@ -6793,7 +6795,8 @@ function bindEvents() {
 
   // --- forecast restart ---
   $("#forecast-source-run")?.addEventListener("change", () => {
-    state.forecastSourceRunPath = $("#forecast-source-run")?.value || "";
+    const selectionState = window.HBVStudioForecastView.forecastSourceSelectionState($("#forecast-source-run")?.value || "");
+    Object.assign(state, selectionState.statePatch);
     renderForecastSourceSummary();
     scheduleForecastInputCheck(0);
   });

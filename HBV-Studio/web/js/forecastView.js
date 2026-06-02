@@ -111,6 +111,24 @@
     return items.find(run => samePath(run?.path, targetPath)) || null;
   }
 
+  function forecastSourceSelectionState(path = "") {
+    return {
+      statePatch: {
+        forecastSourceRunPath: String(path || "").trim(),
+      },
+    };
+  }
+
+  function forecastSourceOptionsState(candidates = [], preferredPath = "", helpers = {}) {
+    const selected = pickForecastSourceRun(candidates, preferredPath, helpers);
+    const selectedPath = selected?.path || "";
+    return {
+      selected,
+      selectedPath,
+      statePatch: forecastSourceSelectionState(selectedPath).statePatch,
+    };
+  }
+
   function forecastResultRuns(runs = [], helpers = {}) {
     const runTypeValue = helpers.runTypeValue || (run => run?.run_type || run?.kind || "");
     const items = Array.isArray(runs) ? runs : [];
@@ -1142,6 +1160,8 @@
     forecastRunReadinessText,
     forecastSelectedSourceRun,
     forecastSelectedResultRun,
+    forecastSourceOptionsState,
+    forecastSourceSelectionState,
     forecastSuggestedStart,
     forecastTimeComparable,
     formatForecastInputTime,
