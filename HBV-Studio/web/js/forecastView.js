@@ -612,7 +612,10 @@
     const runWorkspaceName = helpers.runWorkspaceName || (() => "");
     const withDomUpdates = state => ({
       ...state,
-      domUpdates: [{ selector: "#forecast-hint", text: state.hintText, className: state.hintClassName }],
+      domUpdates: [
+        { selector: "#forecast-source-summary", html: state.html },
+        { selector: "#forecast-hint", text: state.hintText, className: state.hintClassName },
+      ],
     });
     if (!run) {
       return withDomUpdates({

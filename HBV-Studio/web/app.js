@@ -5156,7 +5156,6 @@ function renderForecastSourceSummary() {
     runTypeValue,
     runWorkspaceName,
   });
-  host.innerHTML = rendered.html;
   if (run) {
     const inputType = forecastInputType(run);
     ["forecast-start", "forecast-end"].forEach(id => {
