@@ -144,6 +144,11 @@ from services.geo_overview import workspace_elevation_zones_geojson as build_wor
 from services.geo_overview import workspace_glacier_geojson as build_workspace_glacier_geojson
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
 from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
+from services.geo_status import GeoStatusContext
+from services.geo_status import check_clip_dem as build_check_clip_dem
+from services.geo_status import check_elevation_zone as build_check_elevation_zone
+from services.geo_status import check_flow_acc as build_check_flow_acc
+from services.geo_status import check_masked_flow as build_check_masked_flow
 from services.glacier_status import GlacierStatusContext
 from services.glacier_status import check_glacier_elev as build_check_glacier_elev
 from services.glacier_status import check_glacier_mask as build_check_glacier_mask
@@ -1406,6 +1411,15 @@ def _geo_overview_context() -> GeoOverviewContext:
     )
 
 
+def _geo_status_context() -> GeoStatusContext:
+    return GeoStatusContext(
+        current_profile=current_profile,
+        build_profile_paths=build_profile_paths,
+        workspace_dem_path=_workspace_dem_path,
+        configured_dem_kind=_configured_dem_kind,
+    )
+
+
 def workspace_geo_overview(config_path_raw: str) -> dict[str, Any]:
     return build_workspace_geo_overview(config_path_raw, _geo_overview_context())
 
@@ -1846,29 +1860,19 @@ StepCheck = Callable  # type alias: (config: dict) -> (bool, str, int)
 
 
 def check_clip_dem(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, current_profile(config))
-    target = _workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config))
-    return target.exists(), "已生成 DEM" if target.exists() else "尚未生成", 1 if target.exists() else 0
+    return build_check_clip_dem(config, _geo_status_context())
 
 
 def check_flow_acc(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, current_profile(config))
-    target = Path(paths["gis_dir"]) / "flow_accumulation.tif"
-    return target.exists(), "已生成流量累积" if target.exists() else "尚未生成", 1 if target.exists() else 0
+    return build_check_flow_acc(config, _geo_status_context())
 
 
 def check_masked_flow(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, current_profile(config))
-    target = Path(paths["gis_dir"]) / "flow_accumulation_masked.tif"
-    return target.exists(), "已生成流域掩膜" if target.exists() else "尚未生成", 1 if target.exists() else 0
+    return build_check_masked_flow(config, _geo_status_context())
 
 
 def check_elevation_zone(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, current_profile(config))
-    low_exists = (Path(paths["gis_dir"]) / "elevation_zone_low.tif").exists() or (Path(paths["gis_dir"]) / "elevation_zone_mid.tif").exists()
-    high_exists = (Path(paths["gis_dir"]) / "elevation_zone_high.tif").exists()
-    count = int(low_exists) + int(high_exists)
-    return count == 2, f"高程分区文件 {count}/2", count
+    return build_check_elevation_zone(config, _geo_status_context())
 
 
 def check_daily_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
