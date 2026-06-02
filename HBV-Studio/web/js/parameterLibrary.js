@@ -496,6 +496,17 @@
     };
   }
 
+  function manualPresetDeleteSuccessState(preflight = {}, comparePresetId = "") {
+    const preset = preflight?.preset || {};
+    const presetId = String(preflight?.presetId || preset?.id || preset?.parameter_set_id || "").trim();
+    const compareId = String(comparePresetId || "").trim();
+    return {
+      inputName: "",
+      shouldClearComparison: Boolean(presetId && compareId && presetId === compareId),
+      clearComparisonOptions: { silent: true },
+    };
+  }
+
   function manualPresetAppliedParams(currentParams = {}, originalParams = {}, preset = {}) {
     const params = preset && typeof preset.params === "object" ? preset.params : {};
     const baseParams = currentParams && typeof currentParams === "object" ? currentParams : {};
@@ -963,6 +974,7 @@
     manualPresetSaveSuccessState,
     manualPresetLoadSuccessState,
     manualPresetDeleteViewState,
+    manualPresetDeleteSuccessState,
     manualPresetAppliedParams,
     manualPresetApplyState,
     manualParamUpdateState,

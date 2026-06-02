@@ -283,6 +283,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
               "manualPresetSaveSuccessState",
               "manualPresetLoadSuccessState",
               "manualPresetDeleteViewState",
+              "manualPresetDeleteSuccessState",
             ]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
@@ -410,6 +411,19 @@ class FrontendParameterLibraryTests(unittest.TestCase):
                 deleteView.confirmText !== "确定删除参数集“Trial A”吗？" ||
                 deleteView.toastText !== "已删除参数集：Trial A") {
               throw new Error(`delete view state wrong: ${JSON.stringify(deleteView)}`);
+            }
+            const deleteMatched = library.manualPresetDeleteSuccessState(readyDelete, "global-1");
+            if (deleteMatched.inputName !== "" || !deleteMatched.shouldClearComparison ||
+                deleteMatched.clearComparisonOptions.silent !== true) {
+              throw new Error(`matched delete success state wrong: ${JSON.stringify(deleteMatched)}`);
+            }
+            const deleteUnmatched = library.manualPresetDeleteSuccessState(readyDelete, "local-1");
+            if (deleteUnmatched.inputName !== "" || deleteUnmatched.shouldClearComparison) {
+              throw new Error(`unmatched delete success state wrong: ${JSON.stringify(deleteUnmatched)}`);
+            }
+            const deleteFallbackId = library.manualPresetDeleteSuccessState({ preset: { parameter_set_id: "global-1" } }, "global-1");
+            if (!deleteFallbackId.shouldClearComparison) {
+              throw new Error(`delete success should fall back to preset parameter_set_id: ${JSON.stringify(deleteFallbackId)}`);
             }
             """
         )

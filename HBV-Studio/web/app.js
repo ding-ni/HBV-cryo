@@ -158,6 +158,7 @@ const frontendModuleContracts = [
       "manualPresetSaveSuccessState",
       "manualPresetLoadSuccessState",
       "manualPresetDeleteViewState",
+      "manualPresetDeleteSuccessState",
       "manualPresetAppliedParams",
       "manualPresetApplyState",
       "manualParamUpdateState",
@@ -4775,10 +4776,9 @@ async function deleteSelectedManualPreset() {
       calibrationProfile: taskSync.calibrationProfile,
     });
   }
-  if (preflight.presetId && preflight.presetId === String(state.comparePresetId || "").trim()) {
-    clearManualPresetComparison({ silent: true });
-  }
-  if ($("#manual-preset-name")) $("#manual-preset-name").value = "";
+  const deleteSuccess = window.HBVStudioParameterLibrary.manualPresetDeleteSuccessState(preflight, state.comparePresetId);
+  if (deleteSuccess.shouldClearComparison) clearManualPresetComparison(deleteSuccess.clearComparisonOptions);
+  if ($("#manual-preset-name")) $("#manual-preset-name").value = deleteSuccess.inputName;
   refreshCalibrationControls();
   renderManualPresetDiff();
   showToast(deleteView.toastText);
