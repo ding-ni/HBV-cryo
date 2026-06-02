@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderPrepStepList) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -96,6 +96,25 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!noWorkspace.includes("请选择 &lt;workspace&gt;")) throw new Error("empty workspace text should be escaped");
             const noSteps = view.renderPrepStepList({ workspaceSelected: true, steps: [], noStepsText: "无步骤 <ok>" }, helpers);
             if (!noSteps.includes("无步骤 &lt;ok&gt;")) throw new Error("no steps text should be escaped");
+
+            const bootstrapHtml = view.renderBootstrapStatus([
+              { id: "dem", title: "裁剪 DEM <1>", done: true, message: "已完成 & 可复核" },
+              { id: "flow_acc", title: "生成流向", done: false, message: "等待执行" },
+              { id: "glacier", title: "冰川高程", done: false, optional: true, message: "当前未启用冰川边界" },
+            ], helpers);
+            if (!bootstrapHtml.includes("bootstrap-item done") || !bootstrapHtml.includes("status-badge status-ok") || !bootstrapHtml.includes(">已完成<")) {
+              throw new Error(`bootstrap done item missing: ${bootstrapHtml}`);
+            }
+            if (!bootstrapHtml.includes("裁剪 DEM &lt;1&gt;") || bootstrapHtml.includes("裁剪 DEM <1>")) {
+              throw new Error("bootstrap title should be escaped");
+            }
+            if (!bootstrapHtml.includes("已完成 &amp; 可复核")) throw new Error("bootstrap message should be escaped");
+            if (!bootstrapHtml.includes("status-badge status-warn") || !bootstrapHtml.includes(">待执行<")) {
+              throw new Error("bootstrap pending item missing");
+            }
+            if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
+            const emptyBootstrap = view.renderBootstrapStatus([], helpers);
+            if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
             """
         )
         result = subprocess.run(

@@ -79,9 +79,28 @@
     return steps.map(step => renderPrepStep(step, prepStatus, steps, allSteps, helpers)).join("");
   }
 
+  function renderBootstrapStatus(items = [], helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    if (!Array.isArray(items) || !items.length) {
+      return '<div class="hint-box">暂无 GIS 步骤状态信息。</div>';
+    }
+    return items.map(item => {
+      const isDisabledOptional = item.optional && String(item.message || "").includes("未启用");
+      const badge = isDisabledOptional ? "未启用" : item.done ? "已完成" : "待执行";
+      const badgeClass = isDisabledOptional ? "" : item.done ? "status-ok" : "status-warn";
+      return `
+      <div class="bootstrap-item ${item.done ? "done" : ""}">
+        <span class="status-badge ${badgeClass}">${escapeHtml(badge)}</span>
+        <span>${escapeHtml(item.title || item.id)}</span>
+        <small style="margin-left:auto;color:var(--muted)">${escapeHtml(item.message || "")}</small>
+      </div>`;
+    }).join("");
+  }
+
   window.HBVStudioDataPrepView = {
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    renderBootstrapStatus,
     renderPrepStepList,
   };
 })();

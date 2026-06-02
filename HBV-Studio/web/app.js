@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderPrepStepList"],
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderPrepStepList"],
   },
   {
     script: "./js/taskView.js",
@@ -3458,21 +3458,9 @@ async function loadBootstrapStatus() {
     const payload = await apiGet(`/api/data-prep/status?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&prec_source=${encodeURIComponent(getTaskRuntimePrecipSource())}`);
     const items = (payload.data || []).filter(s => GIS_STEP_IDS.has(s.id));
     const host = $("#bootstrap-status");
-    if (!items.length) {
-      host.innerHTML = '<div class="hint-box">暂无 GIS 步骤状态信息。</div>';
-      return;
-    }
-    host.innerHTML = items.map(s => {
-      const isDisabledOptional = s.optional && String(s.message || "").includes("未启用");
-      const badge = isDisabledOptional ? "未启用" : (s.done ? "已完成" : "待执行");
-      const badgeClass = isDisabledOptional ? "" : (s.done ? "status-ok" : "status-warn");
-      return `
-      <div class="bootstrap-item ${s.done ? "done" : ""}">
-        <span class="status-badge ${badgeClass}">${badge}</span>
-        <span>${escapeHtml(s.title || s.id)}</span>
-        <small style="margin-left:auto;color:var(--muted)">${escapeHtml(s.message || "")}</small>
-      </div>`;
-    }).join("");
+    if (!host) return;
+    host.innerHTML = window.HBVStudioDataPrepView?.renderBootstrapStatus(items, { escapeHtml })
+      || '<div class="hint-box">暂无 GIS 步骤状态信息。</div>';
   } catch (err) {
     showToast(err.message, true);
   }
