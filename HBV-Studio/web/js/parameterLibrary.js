@@ -213,6 +213,35 @@
     return `/api/manual-presets?config_path=${encodeURIComponent(String(configPath || "").trim())}&calibration_profile=${encodeURIComponent(String(calibrationProfile || "").trim())}&scope=${encodeURIComponent(String(scope || "all").trim())}`;
   }
 
+  function manualPresetProfileState(configPath = "", explicitProfile = "", context = {}, helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const normalizeProfile = helpers.normalizeProfile || ((value, fallback = "") => {
+      const profile = normalizeKey(value);
+      return profile || fallback;
+    });
+    const path = String(configPath || "").trim();
+    const explicit = normalizeProfile(explicitProfile, "");
+    if (explicit) return { path, profile: explicit, source: "explicit" };
+
+    const runConfigPath = String(context.runConfigPath || "").trim();
+    if (path && runConfigPath && samePath(path, runConfigPath)) {
+      const runProfile = normalizeProfile(context.runCalibrationProfile, "");
+      if (runProfile) return { path, profile: runProfile, source: "run" };
+    }
+
+    const taskConfigPath = String(context.taskConfigPath || "").trim();
+    if (path && taskConfigPath && samePath(path, taskConfigPath)) {
+      const workspaceProfile = normalizeProfile(context.workspaceProfile, "");
+      if (workspaceProfile) return { path, profile: workspaceProfile, source: "workspace" };
+    }
+
+    return {
+      path,
+      profile: normalizeProfile(context.runCalibrationProfile || context.workspaceProfile, "daily"),
+      source: "fallback",
+    };
+  }
+
   function taskManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
     const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
     const targetPath = String(path || "").trim();
@@ -893,6 +922,7 @@
     manualPresetCompareErrorView,
     findPresetById,
     manualPresetListPath,
+    manualPresetProfileState,
     taskManualPresetLoadErrorState,
     taskManualPresetLoadStartState,
     taskManualPresetLoadSuccessState,

@@ -140,6 +140,7 @@ const frontendModuleContracts = [
       "manualPresetCompareErrorView",
       "findPresetById",
       "manualPresetListPath",
+      "manualPresetProfileState",
       "taskManualPresetLoadErrorState",
       "taskManualPresetLoadStartState",
       "taskManualPresetLoadSuccessState",
@@ -2516,22 +2517,12 @@ function getTaskManualPresetConfigPath() {
 }
 
 function resolveManualPresetProfile(configPath = "", explicitProfile = "") {
-  const explicit = normalizeCalibrationProfile(explicitProfile, "");
-  if (explicit) return explicit;
-  const path = String(configPath || "").trim();
-  const runConfigPath = String(state._runData?.metadata?.workspace_config || "").trim();
-  if (path && runConfigPath && samePath(path, runConfigPath)) {
-    const runProfile = normalizeCalibrationProfile(state._runData?.metadata?.calibration_profile, "");
-    if (runProfile) return runProfile;
-  }
-  if (path && state.wizardWorkspacePath && samePath(path, state.wizardWorkspacePath)) {
-    const workspaceProfile = normalizeCalibrationProfile(state.currentWorkspace?.率定模式, "");
-    if (workspaceProfile) return workspaceProfile;
-  }
-  return normalizeCalibrationProfile(
-    state._runData?.metadata?.calibration_profile || state.currentWorkspace?.率定模式,
-    "daily"
-  );
+  return window.HBVStudioParameterLibrary.manualPresetProfileState(configPath, explicitProfile, {
+    runConfigPath: state._runData?.metadata?.workspace_config,
+    runCalibrationProfile: state._runData?.metadata?.calibration_profile,
+    taskConfigPath: state.wizardWorkspacePath,
+    workspaceProfile: state.currentWorkspace?.率定模式,
+  }, { samePath, normalizeProfile: normalizeCalibrationProfile }).profile;
 }
 
 function renderPresetOptions(selector, presets, placeholder) {

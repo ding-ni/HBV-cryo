@@ -574,7 +574,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState"]) {
+            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState", "manualPresetProfileState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
@@ -640,6 +640,42 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const emptySync = library.manualPresetTaskSyncState("", "", { workspaceProfile: "hourly" }, { samePath });
             if (emptySync.shouldSync || emptySync.sourceConfigPath || emptySync.targetConfigPath || emptySync.calibrationProfile !== "hourly") {
               throw new Error(`manual preset task sync empty path wrong: ${JSON.stringify(emptySync)}`);
+            }
+            const explicitProfile = library.manualPresetProfileState("C:/ws/A/workspace.json", " Hourly ", {}, { samePath });
+            if (explicitProfile.profile !== "hourly" || explicitProfile.source !== "explicit") {
+              throw new Error(`explicit manual preset profile wrong: ${JSON.stringify(explicitProfile)}`);
+            }
+            const runProfile = library.manualPresetProfileState(
+              "C:/ws/A/workspace.json",
+              "",
+              {
+                runConfigPath: "C:\\ws\\A\\workspace.json",
+                runCalibrationProfile: " Daily ",
+                taskConfigPath: "C:/ws/B/workspace.json",
+                workspaceProfile: "hourly",
+              },
+              { samePath },
+            );
+            if (runProfile.profile !== "daily" || runProfile.source !== "run") {
+              throw new Error(`run manual preset profile wrong: ${JSON.stringify(runProfile)}`);
+            }
+            const workspaceProfile = library.manualPresetProfileState(
+              "C:/ws/B/workspace.json",
+              "",
+              {
+                runConfigPath: "C:/ws/A/workspace.json",
+                runCalibrationProfile: "daily",
+                taskConfigPath: "C:/ws/B/workspace.json",
+                workspaceProfile: "hourly",
+              },
+              { samePath },
+            );
+            if (workspaceProfile.profile !== "hourly" || workspaceProfile.source !== "workspace") {
+              throw new Error(`workspace manual preset profile wrong: ${JSON.stringify(workspaceProfile)}`);
+            }
+            const fallbackProfile = library.manualPresetProfileState("C:/ws/C/workspace.json", "", {}, { samePath });
+            if (fallbackProfile.profile !== "daily" || fallbackProfile.source !== "fallback") {
+              throw new Error(`fallback manual preset profile wrong: ${JSON.stringify(fallbackProfile)}`);
             }
             if (library.shouldClearManualPresetComparison({ id: "same" }, "same")) {
               throw new Error("same id should keep comparison");
