@@ -752,6 +752,17 @@
     return warnings.length ? `注意：${warnings.join("；")}。` : "";
   }
 
+  function manualPresetContextWarningState(preset = null, runData = null, helpers = {}) {
+    if (!preset || !runData?.metadata) return { text: "" };
+    const current = manualContextFromRunData(runData, {
+      effectiveObjectiveMode: helpers.effectiveObjectiveMode,
+    });
+    return {
+      text: manualContextWarning(preset, current, helpers),
+      current,
+    };
+  }
+
   function taskContextWarnings(preset, current = {}, helpers = {}) {
     if (!preset) return [];
     const ctx = preset.context || {};
@@ -955,6 +966,7 @@
     renderParamSliders,
     manualContextFromRunData,
     manualContextWarning,
+    manualPresetContextWarningState,
     taskPresetContext,
     taskContextWarnings,
     renderTaskContextHint,

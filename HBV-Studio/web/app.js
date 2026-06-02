@@ -169,6 +169,7 @@ const frontendModuleContracts = [
       "renderParamSliders",
       "manualContextFromRunData",
       "manualContextWarning",
+      "manualPresetContextWarningState",
       "taskPresetContext",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -1378,16 +1379,16 @@ function renderManualPresetDiff() {
 }
 
 function manualPresetContextWarning(preset, data = state._runData) {
-  if (!preset || !data?.metadata) return "";
-  return window.HBVStudioParameterLibrary?.manualContextWarning(
+  return window.HBVStudioParameterLibrary?.manualPresetContextWarningState(
     preset,
-    window.HBVStudioParameterLibrary.manualContextFromRunData(data, { effectiveObjectiveMode }),
+    data,
     {
+      effectiveObjectiveMode,
       objectiveLabel,
       precipSourceLabel: getConfiguredPrecipSourceLabel,
       boundsLabel: value => PARAM_BOUNDS_PROFILE_LABELS[value] || value,
     },
-  ) || "";
+  )?.text || "";
 }
 
 function timeBasisLabel(value) {

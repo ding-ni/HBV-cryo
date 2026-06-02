@@ -907,6 +907,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualContextFromRunData !== "function") {
               throw new Error("manualContextFromRunData was not exported");
             }
+            if (typeof library.manualPresetContextWarningState !== "function") {
+              throw new Error("manualPresetContextWarningState was not exported");
+            }
 
             const fromRun = library.manualContextFromRunData({
               metadata: {
@@ -947,6 +950,37 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             }
             if (fromMeta.prec_source !== "custom_tif" || fromMeta.param_bounds_profile !== "hourly_step") {
               throw new Error(`metadata fallback fields mismatch: ${JSON.stringify(fromMeta)}`);
+            }
+            const warningState = library.manualPresetContextWarningState(
+              {
+                objective_mode: "legacy_mode",
+                prec_source: "custom_tif",
+                param_bounds_profile: "wide_bounds",
+              },
+              {
+                metadata: {
+                  optimization: { objective_mode: "daily_unified_professional_v1" },
+                  data_sources: { configured_precip_source: "ERA5" },
+                  param_bounds_profile: "qtp_alpine_default",
+                },
+              },
+              {
+                objectiveLabel(value) { return `OBJ:${value}`; },
+                precipSourceLabel(value) { return `P:${value}`; },
+                boundsLabel(value) { return `B:${value}`; },
+              },
+            );
+            const expectedWarning = "注意：目标函数模式不同（参数集 OBJ:legacy_mode，当前 OBJ:daily_unified_professional_v1）；降水驱动不同（参数集 P:custom_tif，当前 P:era5）；参数范围不同（参数集 B:wide_bounds，当前 B:qtp_alpine_default）。";
+            if (warningState.text !== expectedWarning || warningState.current.objective_mode !== "daily_unified_professional_v1") {
+              throw new Error(`manual preset context warning state wrong: ${JSON.stringify(warningState)}`);
+            }
+            const emptyWarning = library.manualPresetContextWarningState(null, { metadata: {} });
+            if (emptyWarning.text !== "") {
+              throw new Error(`missing preset should not warn: ${JSON.stringify(emptyWarning)}`);
+            }
+            const missingRunWarning = library.manualPresetContextWarningState({ objective_mode: "legacy" }, null);
+            if (missingRunWarning.text !== "") {
+              throw new Error(`missing run data should not warn: ${JSON.stringify(missingRunWarning)}`);
             }
             """
         )
