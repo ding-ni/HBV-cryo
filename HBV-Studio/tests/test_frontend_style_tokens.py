@@ -37,6 +37,10 @@ class FrontendStyleTokenTests(unittest.TestCase):
             "--text": "#0f172a",
             "--muted": "#475569",
             "--line": "#e2e8f0",
+            "--radius-xl": "8px",
+            "--radius-lg": "8px",
+            "--radius-md": "7px",
+            "--radius-sm": "6px",
         }
 
         for name, value in expected.items():
@@ -71,6 +75,16 @@ class FrontendStyleTokenTests(unittest.TestCase):
         body_font = root_tokens(styles).get("--font-body", "")
         self.assertNotRegex(display_font, r"(?<!sans-)serif")
         self.assertNotRegex(body_font, r"(?<!sans-)serif")
+
+    def test_rectangular_corner_radius_stays_instrument_panel_tight(self) -> None:
+        styles = STYLES_PATH.read_text(encoding="utf-8")
+        oversized = []
+        for match in re.finditer(r"border-radius\s*:\s*(\d+)px", styles):
+            value = int(match.group(1))
+            if value > 8 and value != 999:
+                oversized.append(match.group(0))
+
+        self.assertEqual(oversized, [])
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@
   --muted: #475569;
   --line: #e2e8f0;
   --line-strong: #c7d4df;
-  --radius-xl: 10px;
+  --radius-xl: 8px;
   --radius-lg: 8px;
   --radius-md: 7px;
   --radius-sm: 6px;
@@ -186,7 +186,7 @@ body {
 .topbar-logo {
   width: 28px;
   height: 28px;
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   object-fit: cover;
   border: 1px solid rgba(14,116,144,0.14);
   background: rgba(255,255,255,0.94);
@@ -2407,7 +2407,7 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
 
 .metadata-raw-details {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(255,255,255,0.72);
   padding: 12px 14px;
 }
@@ -2429,7 +2429,7 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   max-height: 260px;
   overflow: auto;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: rgba(15,23,42,0.06);
   color: var(--ink);
   white-space: pre-wrap;
