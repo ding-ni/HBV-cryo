@@ -5732,12 +5732,9 @@ function renderForecastResultPanel() {
   );
   if (!panel.hasRuns) {
     forecastResultRequestGuard.cancel();
-    state.forecastResultRunPath = "";
-    state.forecastResultData = null;
-    state.forecastResultLoadingPath = "";
+    Object.assign(state, panel.statePatch);
     select.disabled = panel.selectDisabled;
     select.innerHTML = '<option value="">暂无连续状态预报结果</option>';
-    state.lastForecastExportPath = "";
     setForecastResultButtons(null);
     if (window.HBVStudioForecastView) {
       window.HBVStudioForecastView.renderForecastResultEmpty("完成连续状态预报后，将在这里查看过程线、起报依据和输入资料。");
@@ -5750,7 +5747,7 @@ function renderForecastResultPanel() {
     { escapeHtml, forecastFriendlyRunName, samePath, timeRangeText },
   );
   const selected = panel.selected || rendered.selected || runs[0];
-  state.forecastResultRunPath = panel.selectedPath || selected?.path || "";
+  Object.assign(state, panel.statePatch);
   select.disabled = panel.selectDisabled;
   select.innerHTML = rendered.html;
   setForecastResultButtons(selected);

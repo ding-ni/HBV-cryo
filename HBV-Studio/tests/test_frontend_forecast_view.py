@@ -208,6 +208,12 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (emptyPanel.hasRuns || emptyPanel.renderMode !== "empty" || emptyPanel.selectedPath !== "" || !emptyPanel.selectDisabled) {
               throw new Error(`empty panel state wrong: ${JSON.stringify(emptyPanel)}`);
             }
+            if (emptyPanel.statePatch.forecastResultRunPath !== "" ||
+                emptyPanel.statePatch.forecastResultData !== null ||
+                emptyPanel.statePatch.forecastResultLoadingPath !== "" ||
+                emptyPanel.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`empty panel patch should clear result state: ${JSON.stringify(emptyPanel.statePatch)}`);
+            }
 
             const detailPanel = view.forecastResultPanelState(forecastRuns, "c:/RUNS/forecast-mid", {
               currentData: { run: { path: "C:/runs/forecast-mid" } },
@@ -215,6 +221,12 @@ class FrontendForecastViewTests(unittest.TestCase):
             }, { samePath });
             if (detailPanel.selected?.id !== "forecast-mid" || detailPanel.renderMode !== "detail" || detailPanel.loadPath !== "") {
               throw new Error(`detail panel state wrong: ${JSON.stringify(detailPanel)}`);
+            }
+            if (detailPanel.statePatch.forecastResultRunPath !== "C:/runs/forecast-mid" ||
+                Object.prototype.hasOwnProperty.call(detailPanel.statePatch, "forecastResultData") ||
+                Object.prototype.hasOwnProperty.call(detailPanel.statePatch, "forecastResultLoadingPath") ||
+                Object.prototype.hasOwnProperty.call(detailPanel.statePatch, "lastForecastExportPath")) {
+              throw new Error(`detail panel patch should only select path: ${JSON.stringify(detailPanel.statePatch)}`);
             }
 
             const loadingPanel = view.forecastResultPanelState(forecastRuns, "C:/runs/forecast-old", {
@@ -224,6 +236,10 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (loadingPanel.selected?.id !== "forecast-old" || loadingPanel.renderMode !== "loading" || loadingPanel.loadPath !== "") {
               throw new Error(`loading panel state wrong: ${JSON.stringify(loadingPanel)}`);
             }
+            if (loadingPanel.statePatch.forecastResultRunPath !== "C:/runs/forecast-old" ||
+                Object.prototype.hasOwnProperty.call(loadingPanel.statePatch, "forecastResultLoadingPath")) {
+              throw new Error(`loading panel patch should not clear loading state: ${JSON.stringify(loadingPanel.statePatch)}`);
+            }
 
             const loadPanel = view.forecastResultPanelState(forecastRuns, "C:/runs/missing", {
               currentData: { run: { path: "C:/runs/forecast-old" } },
@@ -231,6 +247,10 @@ class FrontendForecastViewTests(unittest.TestCase):
             }, { samePath });
             if (loadPanel.selected?.id !== "forecast-new" || loadPanel.renderMode !== "load" || loadPanel.loadPath !== "C:/runs/forecast-new") {
               throw new Error(`load panel state wrong: ${JSON.stringify(loadPanel)}`);
+            }
+            if (loadPanel.statePatch.forecastResultRunPath !== "C:/runs/forecast-new" ||
+                Object.prototype.hasOwnProperty.call(loadPanel.statePatch, "forecastResultData")) {
+              throw new Error(`load panel patch should only select path: ${JSON.stringify(loadPanel.statePatch)}`);
             }
 
             const detailState = view.forecastResultDetailState({

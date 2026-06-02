@@ -159,6 +159,7 @@
         selectDisabled: true,
         renderMode: "empty",
         loadPath: "",
+        statePatch: forecastResultSelectionState("").statePatch,
       };
     }
     const selected = forecastSelectedResultRun(items, selectedPath, { samePath }) || items[0];
@@ -178,6 +179,9 @@
       selectDisabled: false,
       renderMode,
       loadPath: renderMode === "load" ? resolvedPath : "",
+      statePatch: {
+        forecastResultRunPath: resolvedPath,
+      },
     };
   }
 
