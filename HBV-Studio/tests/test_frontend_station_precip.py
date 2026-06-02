@@ -114,6 +114,70 @@ class FrontendStationPrecipTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_fallback_check_summarizes_station_precip_readiness(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/stationPrecip.js", "utf8"), context);
+
+            const station = context.window.HBVStudioStationPrecip;
+            const grid = station.stationPrecipFallbackCheck({ mode: "grid_only" });
+            if (grid.status !== "ok") throw new Error(`grid fallback status mismatch: ${grid.status}`);
+            if (!grid.summary.includes("不会执行站点降水订正专项分析")) {
+              throw new Error(`grid summary mismatch: ${grid.summary}`);
+            }
+            if (grid.items[0].status !== "warn" || grid.items[0].value !== "格点直接使用") {
+              throw new Error(`grid mode item mismatch: ${JSON.stringify(grid.items[0])}`);
+            }
+            if (grid.items[1].value !== "不需要" || grid.items[2].value !== "不需要") {
+              throw new Error(`grid station file items mismatch: ${JSON.stringify(grid.items)}`);
+            }
+
+            const missing = station.stationPrecipFallbackCheck({ mode: "grid_plus_station_bias" });
+            if (missing.status !== "fail") throw new Error(`missing station files should fail: ${missing.status}`);
+            if (missing.items[1].value !== "缺失" || missing.items[1].status !== "fail") {
+              throw new Error(`missing station precipitation item mismatch: ${JSON.stringify(missing.items[1])}`);
+            }
+            if (missing.items[2].value !== "缺失" || missing.items[2].status !== "fail") {
+              throw new Error(`missing station metadata item mismatch: ${JSON.stringify(missing.items[2])}`);
+            }
+
+            const ready = station.stationPrecipFallbackCheck(
+              {
+                mode: "thiessen_station_only",
+                stationPrec: "D:/data/prec.csv",
+                stationMeta: "D:/data/meta.csv",
+              },
+              {
+                shortPath: value => String(value).split("/").pop(),
+              },
+            );
+            if (ready.status !== "warn") throw new Error(`ready station files should await validation: ${ready.status}`);
+            if (!ready.summary.includes("输入检查会判断资料是否可用")) {
+              throw new Error(`ready summary mismatch: ${ready.summary}`);
+            }
+            if (ready.items[0].value !== "纯泰森多边形插值" || ready.items[0].status !== "ok") {
+              throw new Error(`ready mode item mismatch: ${JSON.stringify(ready.items[0])}`);
+            }
+            if (ready.items[1].value !== "prec.csv" || ready.items[2].value !== "meta.csv") {
+              throw new Error(`ready station file short paths mismatch: ${JSON.stringify(ready.items)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

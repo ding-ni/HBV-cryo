@@ -87,6 +87,38 @@
     `;
   }
 
+  function stationPrecipFallbackCheck(options = {}, helpers = {}) {
+    const shortPath = helpers.shortPath || (value => value || "");
+    const mode = options.mode || "grid_only";
+    const stationPrec = options.stationPrec || "";
+    const stationMeta = options.stationMeta || "";
+    const needsStation = mode !== "grid_only";
+    const status = !needsStation ? "ok" : (stationPrec && stationMeta ? "warn" : "fail");
+    const summary = !needsStation
+      ? "当前为格点基线模式，输入检查不会执行站点降水订正专项分析。"
+      : (stationPrec && stationMeta
+        ? "站点降水资料已登记，输入检查会判断资料是否可用。"
+        : "当前降水方案需要站点降水表和站点空间信息，资料未完整登记。");
+    return {
+      title: "站点降水专项检查",
+      summary,
+      status,
+      items: [
+        { label: "降水方案", value: stationPrecipModeLabel(mode), status: needsStation ? "ok" : "warn" },
+        {
+          label: "站点降水表",
+          value: stationPrec ? shortPath(stationPrec) : (needsStation ? "缺失" : "不需要"),
+          status: !needsStation || stationPrec ? "ok" : "fail",
+        },
+        {
+          label: "站点空间信息",
+          value: stationMeta ? shortPath(stationMeta) : (needsStation ? "缺失" : "不需要"),
+          status: !needsStation || stationMeta ? "ok" : "fail",
+        },
+      ],
+    };
+  }
+
   function renderTaskScopeSummary(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -181,6 +213,7 @@
     stationPrecipModeDescription,
     stationPrecipModeLabel,
     renderPrecipStrategyStatusCards,
+    stationPrecipFallbackCheck,
     renderTaskScopeSummary,
     renderEventCoverageMatrix,
   };

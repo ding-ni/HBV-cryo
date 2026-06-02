@@ -96,6 +96,7 @@ const frontendModuleContracts = [
       "stationPrecipModeDescription",
       "stationPrecipModeLabel",
       "renderPrecipStrategyStatusCards",
+      "stationPrecipFallbackCheck",
       "renderTaskScopeSummary",
       "renderEventCoverageMatrix",
     ],
@@ -1966,38 +1967,22 @@ function renderPrecipStrategyStatus() {
   );
 }
 
-function stationPrecipCheckFromValidation(validation) {
-  return window.HBVStudioStationPrecip.stationPrecipCheckFromValidation(validation);
-}
-
 function renderStationPrecipCheckOverview(validation = null) {
   const host = $("#wz-station-check-overview");
   if (!host) return;
   const mode = getSelectedRadio("wz-precip-mode") || state.currentWorkspace?.气象策略?.降水方案 || "grid_only";
-  const check = stationPrecipCheckFromValidation(validation);
+  const check = window.HBVStudioStationPrecip.stationPrecipCheckFromValidation(validation);
   if (check) {
     host.innerHTML = renderEngineeringFocusChecks([check], { title: "站点降水专项检查" });
     return;
   }
   const stationPrec = $("#wz-station-prec")?.value.trim() || state.currentWorkspace?.气象策略?.站点降水_csv || "";
   const stationMeta = $("#wz-station-meta")?.value.trim() || state.currentWorkspace?.气象策略?.站点信息_csv || "";
-  const needsStation = mode !== "grid_only";
-  const status = !needsStation ? "ok" : (stationPrec && stationMeta ? "warn" : "fail");
-  const summary = !needsStation
-    ? "当前为格点基线模式，输入检查不会执行站点降水订正专项分析。"
-    : (stationPrec && stationMeta
-      ? "站点降水资料已登记，输入检查会判断资料是否可用。"
-      : "当前降水方案需要站点降水表和站点空间信息，资料未完整登记。");
-  host.innerHTML = renderEngineeringFocusChecks([{
-    title: "站点降水专项检查",
-    summary,
-    status,
-    items: [
-      { label: "降水方案", value: stationPrecipModeLabel(mode), status: needsStation ? "ok" : "warn" },
-      { label: "站点降水表", value: stationPrec ? shortPath(stationPrec) : (needsStation ? "缺失" : "不需要"), status: !needsStation || stationPrec ? "ok" : "fail" },
-      { label: "站点空间信息", value: stationMeta ? shortPath(stationMeta) : (needsStation ? "缺失" : "不需要"), status: !needsStation || stationMeta ? "ok" : "fail" },
-    ],
-  }], { title: "站点降水专项检查" });
+  const fallback = window.HBVStudioStationPrecip.stationPrecipFallbackCheck(
+    { mode, stationPrec, stationMeta },
+    { shortPath },
+  );
+  host.innerHTML = renderEngineeringFocusChecks([fallback], { title: "站点降水专项检查" });
 }
 
 function updateProjectFocusHint() {
