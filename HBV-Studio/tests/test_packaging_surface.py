@@ -115,6 +115,9 @@ class PackagingSurfaceTests(unittest.TestCase):
             self.assertIn(name, copied_files)
 
     def test_installer_stage_collects_geo_frontend_services_and_base_layers(self) -> None:
+        web_src = STUDIO_DIR / "web"
+        script_sources = re.findall(r'<script\s+src="([^"]+)"', (web_src / "index.html").read_text(encoding="utf-8"))
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_root = root / "project"
@@ -143,11 +146,15 @@ class PackagingSurfaceTests(unittest.TestCase):
             (gui_root / "studio_service.py").write_text("# service\n", encoding="utf-8")
             (gui_root / "services" / "geo_overview.py").write_text("# geo\n", encoding="utf-8")
             (gui_root / "web" / "index.html").write_text(
-                '<script src="./js/mapLayerPlan.js"></script>\n<script src="./js/geoPreview.js"></script>\n',
+                "\n".join(f'<script src="{source}"></script>' for source in script_sources),
                 encoding="utf-8",
             )
-            (gui_root / "web" / "js" / "mapLayerPlan.js").write_text("window.HBVStudioMapLayerPlan = {};\n", encoding="utf-8")
-            (gui_root / "web" / "js" / "geoPreview.js").write_text("window.HBVStudioGeoPreview = {};\n", encoding="utf-8")
+            for source in script_sources:
+                relative = Path(source.removeprefix("./"))
+                if source.startswith("./") and relative.parts:
+                    target = gui_root / "web" / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(f"// packaged script: {source}\n", encoding="utf-8")
             (dem_source_dir / installer.DEFAULT_DEM_NAME).write_bytes(b"dem")
             for suffix in (".shp", ".dbf", ".shx", ".prj"):
                 (glacier_source_dir / f"glacier{suffix}").write_bytes(b"glacier")
@@ -167,12 +174,15 @@ class PackagingSurfaceTests(unittest.TestCase):
                 installer.copy_installer_files(bundle_root)
 
             expected_files = [
-                bundle_root / "HBV-Studio" / "web" / "js" / "mapLayerPlan.js",
-                bundle_root / "HBV-Studio" / "web" / "js" / "geoPreview.js",
                 bundle_root / "HBV-Studio" / "services" / "geo_overview.py",
                 bundle_root / installer.CN_BASE_DATA / installer.CN_DEM_DIR / installer.DEFAULT_DEM_NAME,
                 bundle_root / installer.CN_BASE_DATA / "冰川源" / glacier_source_dir.name / "glacier.shp",
             ]
+            expected_files.extend(
+                bundle_root / "HBV-Studio" / "web" / Path(source.removeprefix("./"))
+                for source in script_sources
+                if source.startswith("./")
+            )
 
             for path in expected_files:
                 self.assertTrue(path.is_file(), str(path))
