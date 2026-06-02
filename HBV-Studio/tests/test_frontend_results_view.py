@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.renderFilterToolbar || !results?.resultsFilterHint) {
+            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -194,6 +194,68 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (!engineering.noteText.includes("观测序列已从源结果回放恢复") || !engineering.noteText.includes("当前结果可靠性降级：缺少完整观测回放")) {
               throw new Error(`engineering note text missing replay/degraded context: ${engineering.noteText}`);
+            }
+
+            const detail = results.renderRunDetailMetadata({
+              run: {
+                path: "C:/runs/A",
+                run_type: "manual_result",
+                run_origin: "studio",
+                workspace_config: "C:/ws/A",
+              },
+              metadata: {
+                workspace_config: "C:/ws/A",
+                run_time: "2026-06-02 19:30",
+                param_bounds_profile: "daily",
+                time_config: {
+                  time_step_hours: 24,
+                  calib_start: "2020-01-01",
+                  calib_end: "2020-12-31",
+                  valid_start: "2021-01-01",
+                  valid_end: "2021-12-31",
+                },
+                manual_result: { enabled: true },
+                hydrology_summary: {
+                  workflow_label_zh: "正式率定<A>",
+                  objective_label_zh: "统一目标&口径",
+                  flow_status_zh: "径流拟合达标",
+                  diagnostics_detail_path: "C:/runs/A/report&detail.md",
+                },
+              },
+              series_range: {
+                warmup_start: "2019-01-01",
+                actual_start: "2020-01-02",
+                warmup_covered: false,
+              },
+            }, {
+              ...helpers,
+              compactTimeText(value) { return `${value} 00:00`; },
+              componentFractionBasisText() { return "率定期径流口径"; },
+              componentFractionReport() { return { ok: true }; },
+              componentFractionText() { return "雨水<50%> / 融雪 30% / 冰川 20%"; },
+              currentRunStepHours() { return 24; },
+              floodEventRows() { return [["事件<1>", "2/3&", "诊断<有效>"]]; },
+              hydrologySummaryValue(summary, key, fallback = "—") { return summary?.[key] || fallback; },
+              isStudioEditableRun() { return true; },
+              paramBoundsProfileLabels: { daily: "日尺度参数范围" },
+              restartStateRows() { return [["起报状态", "可用<稳定>", "来自上一场结果"]]; },
+              runMetricsText() { return "率定期<2020>&验证期"; },
+              runTypeLabel(value, fallback) { return fallback || value; },
+              shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
+              timeRangeText(start, end, stepHours) { return `${start} 至 ${end}，${stepHours}小时`; },
+              workspaceLabelByPath() { return "工作区<一>"; },
+            });
+            if (!detail.metadataHtml.includes("正式率定&lt;A&gt;") || detail.metadataHtml.includes("正式率定<A>")) {
+              throw new Error("detail metadata should escape hydrology summary values");
+            }
+            if (!detail.metadataHtml.includes("雨水&lt;50%&gt;") || !detail.metadataHtml.includes("起报状态与预报") || !detail.metadataHtml.includes("洪水事件评价")) {
+              throw new Error("detail metadata sections missing");
+            }
+            if (!detail.metadataHtml.includes('data-run-detail-open-dir="C:/runs/A"') || !detail.metadataHtml.includes('data-run-detail-open-report="C:/runs/A/report&amp;detail.md"')) {
+              throw new Error("detail metadata action buttons missing");
+            }
+            if (detail.hintClassName !== "hint-box status-warn" || !detail.hintText.includes("未包含预热段") || !detail.hintText.includes("率定期<2020>&验证期")) {
+              throw new Error(`unexpected detail hint: ${detail.hintClassName} ${detail.hintText}`);
             }
             """
         )

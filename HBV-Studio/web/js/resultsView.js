@@ -107,6 +107,29 @@
     return value === undefined || value === null || value === "" ? fallback : value;
   }
 
+  function metadataItem(label, value, detail = "", helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const displayValue = value === undefined || value === null || value === "" ? "—" : String(value);
+    return `
+      <div class="list-item metadata-list-item">
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(displayValue)}</small>
+        ${detail ? `<em>${escapeHtml(detail)}</em>` : ""}
+      </div>
+    `;
+  }
+
+  function metadataSection(title, rows = [], helpers = {}) {
+    const content = (rows || []).map(row => metadataItem(row?.[0], row?.[1], row?.[2], helpers)).join("");
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    return `
+      <section class="metadata-section">
+        <h4>${escapeHtml(title)}</h4>
+        <div class="metadata-section-grid">${content}</div>
+      </section>
+    `;
+  }
+
   function renderRunCard(run = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const samePath = helpers.samePath || defaultSamePath;
@@ -246,6 +269,92 @@
     };
   }
 
+  function renderRunDetailMetadata(data = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const meta = data?.metadata || {};
+    const run = data?.run || {};
+    const summary = hydrologySummaryFor(data);
+    const timeCfg = meta.time_config || {};
+    const seriesRange = data.series_range || {};
+    const paramBoundsProfileLabels = helpers.paramBoundsProfileLabels || {};
+    const hydrologySummaryValue = helpers.hydrologySummaryValue || defaultHydrologySummaryValue;
+    const componentFractionReport = helpers.componentFractionReport || (() => ({}));
+    const componentFractionText = helpers.componentFractionText || (() => "—");
+    const componentFractionBasisText = helpers.componentFractionBasisText || (() => "—");
+    const floodEventRows = helpers.floodEventRows || (() => []);
+    const restartStateRows = helpers.restartStateRows || (() => []);
+    const isStudioEditableRun = helpers.isStudioEditableRun || (() => false);
+    const runTypeLabel = helpers.runTypeLabel || ((value, fallback = "查看结果") => fallback || value || "查看结果");
+    const workspaceLabelByPath = helpers.workspaceLabelByPath || (() => "未命名工作区");
+    const timeRangeText = helpers.timeRangeText || ((start, end) => [start || "—", end || "—"].join(" 至 "));
+    const shortPath = helpers.shortPath || (value => String(value || "").replace(/\\/g, "/").split("/").pop() || "—");
+    const runMetricsText = helpers.runMetricsText || (() => "");
+    const compactTimeText = helpers.compactTimeText || (value => String(value || ""));
+    const currentRunStepHours = helpers.currentRunStepHours || (() => {
+      const hours = Number(meta?.time_config?.time_step_hours || run?.time_step_hours || 24);
+      return hours <= 1.5 ? 1 : 24;
+    });
+    const editable = isStudioEditableRun(data);
+    const manual = Boolean(meta?.manual_result?.enabled);
+    const starter = Boolean(meta?.starter_result?.enabled);
+    const stepHours = currentRunStepHours(data);
+    const reportPath = summary.diagnostics_detail_path || summary.diagnostics_detail_display_path || "";
+    const reportDisplayPath = summary.diagnostics_detail_display_path || summary.diagnostics_detail_path || "";
+    const componentReport = componentFractionReport(meta);
+    const restartRows = restartStateRows(meta) || [];
+    const floodRows = floodEventRows(meta) || [];
+    const metadataHtml = [
+      metadataSection("水文结果摘要", [
+        ["率定流程", hydrologySummaryValue(summary, "workflow_label_zh", "单流程参数率定")],
+        ["评分标准", hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数")],
+        ["参数范围", meta.param_bounds_profile_label || meta.parameter_profile?.bounds_profile_label || paramBoundsProfileLabels[meta.param_bounds_profile] || paramBoundsProfileLabels[meta.parameter_profile?.bounds_profile] || "当前运行范围"],
+        ["径流拟合", hydrologySummaryValue(summary, "flow_status_zh")],
+        ["三水源构成", componentFractionText(componentReport)],
+        ["口径", componentFractionBasisText(componentReport)],
+        ["结果说明", hydrologySummaryValue(summary, "diagnostics_detail_note", "水文模拟结果说明已保存至本地结果目录。")],
+        ["说明文件", reportDisplayPath ? shortPath(reportDisplayPath) : "结果目录内生成"],
+        ["运行时间", meta.run_time],
+        ["结果类型", run.run_type_label || runTypeLabel(run.run_type, manual ? "手调结果" : starter ? "手调起点" : run.run_origin === "studio" ? "可调结果" : "查看结果")],
+        ["所属工作区", workspaceLabelByPath(meta.workspace_config || run.workspace_config)],
+        ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
+        ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
+      ], helpers),
+      restartRows.length ? metadataSection("起报状态与预报", restartRows, helpers) : "",
+      floodRows.length ? metadataSection("洪水事件评价", floodRows, helpers) : "",
+      `
+        <section class="metadata-section">
+          <h4>本地过程复核报告</h4>
+          <div class="hint-box">页面显示摘要信息。详细水文过程复核已写入本地结果目录，供专业复核使用。</div>
+          <div class="workspace-card-actions" style="margin-top:10px">
+            ${run.path ? `<button class="ghost-button" data-run-detail-open-dir="${escapeHtml(run.path)}">打开结果目录</button>` : ""}
+            ${reportPath ? `<button class="ghost-button" data-run-detail-open-report="${escapeHtml(reportPath)}">打开过程复核报告</button>` : ""}
+          </div>
+        </section>
+      `,
+    ].join("");
+    const periodHint = runMetricsText(run);
+    const baseText = editable
+      ? manual
+        ? "当前结果来自一次手调后的保存结果。继续改参数后，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
+        : starter
+          ? "当前结果是系统生成的手调起点。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录。"
+          : "当前结果支持继续手调。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
+      : "当前结果只支持查看。若要手动调参，请选择一个可调结果。";
+    const legacyWarmupWarning = seriesRange.warmup_start && seriesRange.actual_start && !seriesRange.warmup_covered
+      ? `当前这个历史结果实际从 ${compactTimeText(seriesRange.actual_start, stepHours)} 开始保存，未包含预热段；如果需要导出或查看预热期，请用新版程序重新生成一次结果。`
+      : "";
+    return {
+      metadataHtml,
+      hintText: [
+        baseText,
+        periodHint ? `当前图表与导出都覆盖${periodHint}。` : "",
+        legacyWarmupWarning,
+        "结果页只显示简要水文解释；完整过程复核请打开本地过程复核报告。",
+      ].filter(Boolean).join(" "),
+      hintClassName: `hint-box ${(editable && !legacyWarmupWarning) ? "status-ok" : "status-warn"}`.trim(),
+    };
+  }
+
   function renderRunExportFields(fields = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (fields || []).map(field => `
@@ -261,6 +370,7 @@
     renderMetricStrip,
     renderRunCard,
     renderRunCards,
+    renderRunDetailMetadata,
     renderRunEngineeringSummary,
     renderRunExportFields,
     resultsFilterHint,

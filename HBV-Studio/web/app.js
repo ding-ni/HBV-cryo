@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
+    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -2350,26 +2350,6 @@ function iceContributionDetailText(analysis) {
 function formatMetricValue(value, digits = 4, suffix = "") {
   const num = Number(value);
   return Number.isFinite(num) ? `${formatNumber(num, digits)}${suffix}` : "—";
-}
-
-function metadataItem(label, value, detail = "") {
-  return `
-    <div class="list-item metadata-list-item">
-      <strong>${escapeHtml(label)}</strong>
-      <small>${escapeHtml(value === undefined || value === null || value === "" ? "—" : String(value))}</small>
-      ${detail ? `<em>${escapeHtml(detail)}</em>` : ""}
-    </div>
-  `;
-}
-
-function metadataSection(title, rows) {
-  const content = rows.map(row => metadataItem(row[0], row[1], row[2])).join("");
-  return `
-    <section class="metadata-section">
-      <h4>${escapeHtml(title)}</h4>
-      <div class="metadata-section-grid">${content}</div>
-    </section>
-  `;
 }
 
 function floodEventEvaluation(meta = {}) {
@@ -5067,14 +5047,6 @@ function renderRunDetail(data) {
   const cal = metrics.calibration || {};
   const val = metrics.validation || {};
   const editable = isStudioEditableRun(data);
-  const manual = Boolean(meta?.manual_result?.enabled);
-  const starter = Boolean(meta?.starter_result?.enabled);
-  const optimization = meta.optimization || {};
-  const debugWindow = optimization.debug_window || {};
-  const initPresetLabel = optimization.init_params_file ? shortPath(optimization.init_params_file) : "\u2014";
-  const replayInfo = replayCompatibilityInfo(meta);
-  const requestedObjective = requestedObjectiveMode(meta);
-  const effectiveObjective = effectiveObjectiveMode(meta);
 
   // Store for re-simulation
   state._runData = data;
@@ -5111,65 +5083,29 @@ function renderRunDetail(data) {
   updateCompareSummary();
   updateManualStarterButtons();
 
-  const summary = hydrologySummaryFor(data, meta);
-  const timeCfg = meta.time_config || {};
-  const seriesRange = data.series_range || {};
-  const stepHours = currentRunStepHours(data);
-  const reportPath = summary.diagnostics_detail_path || summary.diagnostics_detail_display_path || "";
-  const reportDisplayPath = summary.diagnostics_detail_display_path || summary.diagnostics_detail_path || "";
-  const componentReport = componentFractionReport(meta);
-  const floodRows = floodEventRows(meta);
-  const restartRows = restartStateRows(meta);
-  const metadataHtml = [
-    metadataSection("水文结果摘要", [
-      ["率定流程", hydrologySummaryValue(summary, "workflow_label_zh", "单流程参数率定")],
-      ["评分标准", hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数")],
-      ["参数范围", meta.param_bounds_profile_label || meta.parameter_profile?.bounds_profile_label || PARAM_BOUNDS_PROFILE_LABELS[meta.param_bounds_profile] || PARAM_BOUNDS_PROFILE_LABELS[meta.parameter_profile?.bounds_profile] || "当前运行范围"],
-      ["径流拟合", hydrologySummaryValue(summary, "flow_status_zh")],
-      ["三水源构成", componentFractionText(componentReport)],
-      ["口径", componentFractionBasisText(componentReport)],
-      ["结果说明", hydrologySummaryValue(summary, "diagnostics_detail_note", "水文模拟结果说明已保存至本地结果目录。")],
-      ["说明文件", reportDisplayPath ? shortPath(reportDisplayPath) : "结果目录内生成"],
-      ["运行时间", meta.run_time],
-      ["结果类型", data.run?.run_type_label || runTypeLabel(data.run?.run_type, manual ? "手调结果" : starter ? "手调起点" : data.run?.run_origin === "studio" ? "可调结果" : "查看结果")],
-      ["所属工作区", workspaceLabelByPath(meta.workspace_config || data.run?.workspace_config)],
-      ["率定时段", timeRangeText(timeCfg.calib_start, timeCfg.calib_end, stepHours)],
-      ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
-    ]),
-    restartRows.length ? metadataSection("起报状态与预报", restartRows) : "",
-    floodRows.length ? metadataSection("洪水事件评价", floodRows) : "",
-    `
-      <section class="metadata-section">
-        <h4>本地过程复核报告</h4>
-        <div class="hint-box">页面显示摘要信息。详细水文过程复核已写入本地结果目录，供专业复核使用。</div>
-        <div class="workspace-card-actions" style="margin-top:10px">
-          ${data?.run?.path ? `<button class="ghost-button" data-run-detail-open-dir="${escapeHtml(data.run.path)}">打开结果目录</button>` : ""}
-          ${reportPath ? `<button class="ghost-button" data-run-detail-open-report="${escapeHtml(reportPath)}">打开过程复核报告</button>` : ""}
-        </div>
-      </section>
-    `,
-  ].join("");
-  $("#metadata-grid").innerHTML = metadataHtml;
+  const detailMetadata = window.HBVStudioResultsView.renderRunDetailMetadata(data, {
+    compactTimeText,
+    componentFractionBasisText,
+    componentFractionReport,
+    componentFractionText,
+    currentRunStepHours,
+    escapeHtml,
+    floodEventRows,
+    hydrologySummaryValue,
+    isStudioEditableRun,
+    paramBoundsProfileLabels: PARAM_BOUNDS_PROFILE_LABELS,
+    restartStateRows,
+    runMetricsText,
+    runTypeLabel,
+    shortPath,
+    timeRangeText,
+    workspaceLabelByPath,
+  });
+  $("#metadata-grid").innerHTML = detailMetadata.metadataHtml;
   const hint = $("#results-entry-hint");
-  const periodHint = runMetricsText(data.run);
   if (hint) {
-    const baseText = editable
-      ? manual
-        ? "当前结果来自一次手调后的保存结果。继续改参数后，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
-        : starter
-          ? "当前结果是系统生成的手调起点。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录。"
-          : "当前结果支持继续手调。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
-      : "当前结果只支持查看。若要手动调参，请选择一个可调结果。";
-    const legacyWarmupWarning = seriesRange.warmup_start && seriesRange.actual_start && !seriesRange.warmup_covered
-      ? `当前这个历史结果实际从 ${compactTimeText(seriesRange.actual_start, stepHours)} 开始保存，未包含预热段；如果需要导出或查看预热期，请用新版程序重新生成一次结果。`
-      : "";
-    hint.textContent = [
-      baseText,
-      periodHint ? `当前图表与导出都覆盖${periodHint}。` : "",
-      legacyWarmupWarning,
-      "结果页只显示简要水文解释；完整过程复核请打开本地过程复核报告。",
-    ].filter(Boolean).join(" ");
-    hint.className = `hint-box ${(editable && !legacyWarmupWarning) ? "status-ok" : "status-warn"}`.trim();
+    hint.textContent = detailMetadata.hintText;
+    hint.className = detailMetadata.hintClassName;
   }
 }
 
