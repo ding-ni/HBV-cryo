@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunExportFields", "resultsFilterHint"],
+    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunExportFields", "resultsFilterHint"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5083,43 +5083,20 @@ function renderRunList() {
     hint.className = "hint-box";
   }
   updateManualStarterButtons();
-  host.innerHTML = runs.map(r => {
-    const hydro = r.hydrology_summary || {};
-    return `
-    <article class="list-item run-card ${selectedRunPath && samePath(selectedRunPath, r.path) ? "selected" : ""}" data-run-path="${escapeHtml(r.path)}">
-      <div class="run-card-topline">
-        <span class="run-card-kicker">${escapeHtml(runWorkspaceName(r))}</span>
-        <div class="run-card-badges">
-          ${runTypeBadge(r)}
-          ${objectiveVersionBadge(r)}
-          ${r.studio_compatible ? '<span class="status-badge status-ok">可继续手调</span>' : '<span class="status-badge status-warn">仅查看</span>'}
-        </div>
-      </div>
-      <div class="list-item-head run-card-head">
-        <div class="run-card-titlebox">
-          <strong>${escapeHtml(runDisplayName(r))}</strong>
-          ${runDisplaySubtitle(r) ? `<small class="run-card-subtitle">${escapeHtml(runDisplaySubtitle(r))}</small>` : ""}
-        </div>
-        <div class="run-card-score">
-          <span>NSE 率定 / 验证</span>
-          <strong>${escapeHtml(`${formatNumber(r?.nse_cal, 4)} / ${formatNumber(r?.nse_val, 4)}`)}</strong>
-          <small>${escapeHtml(`PBIAS ${formatMetricValue(r?.pbias_cal, 2, "%")} / ${formatMetricValue(r?.pbias_val, 2, "%")}`)}</small>
-        </div>
-      </div>
-      <div class="run-card-meta">
-        <span class="run-meta-pill">${escapeHtml(hydrologySummaryValue(hydro, "workflow_label_zh", "单流程参数率定"))}</span>
-        <span class="run-meta-pill">${escapeHtml(hydrologySummaryValue(hydro, "objective_label_zh", "综合水文目标函数"))}</span>
-        <span class="run-meta-pill">${escapeHtml(hydrologySummaryValue(hydro, "flow_status_zh", "径流拟合未达标"))}</span>
-      </div>
-      <div class="workspace-card-actions run-card-actions">
-        ${r.workspace_config && !samePath(r.workspace_config, state.runWorkspaceFilterPath) ? `<button class="ghost-button" data-filter-run-workspace="${escapeHtml(r.workspace_config)}">只看本工作区</button>` : ""}
-        <button class="ghost-button" data-rename-run="${escapeHtml(r.path)}">${r.has_custom_title ? "修改标题" : "命名结果"}</button>
-        <button class="ghost-button" data-open-run-dir="${escapeHtml(r.path)}">打开目录</button>
-        <button class="ghost-button" data-delete-run="${escapeHtml(r.path)}">删除</button>
-      </div>
-    </article>
-  `;
-  }).join("");
+  host.innerHTML = window.HBVStudioResultsView.renderRunCards(runs, {
+    escapeHtml,
+    formatMetricValue,
+    formatNumber,
+    hydrologySummaryValue,
+    objectiveVersionBadge,
+    runDisplayName,
+    runDisplaySubtitle,
+    runTypeBadge,
+    runWorkspaceFilterPath: state.runWorkspaceFilterPath,
+    runWorkspaceName,
+    samePath,
+    selectedRunPath,
+  });
 }
 
 function renderRunDetail(data) {

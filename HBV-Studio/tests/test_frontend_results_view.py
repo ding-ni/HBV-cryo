@@ -78,6 +78,72 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!fields.includes('data-run-export-field="q&lt;sim&gt;"') || !fields.includes("checked")) {
               throw new Error("export fields should keep keys and checked state");
             }
+
+            const cards = results.renderRunCards([
+              {
+                path: "C:/runs/A",
+                workspace_config: "C:/ws/A",
+                display_name: "结果<一>",
+                display_subtitle: "目录名：run_A",
+                nse_cal: 0.81234,
+                nse_val: 0.71234,
+                pbias_cal: -1.23,
+                pbias_val: 2.34,
+                studio_compatible: true,
+                has_custom_title: false,
+                hydrology_summary: {
+                  workflow_label_zh: "单流程参数率定",
+                  objective_label_zh: "统一专业目标",
+                  flow_status_zh: "径流拟合达标",
+                },
+              },
+              {
+                path: "C:/runs/B",
+                workspace_config: "C:/ws/active",
+                display_name: "只读结果",
+                nse_cal: null,
+                nse_val: null,
+                studio_compatible: false,
+                has_custom_title: true,
+                hydrology_summary: {},
+              },
+            ], {
+              ...helpers,
+              formatMetricValue(value, digits = 2, suffix = "") {
+                return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : "—";
+              },
+              formatNumber(value, digits = 4) {
+                return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+              },
+              hydrologySummaryValue(summary, key, fallback) {
+                return summary?.[key] || fallback || "—";
+              },
+              objectiveVersionBadge() { return '<span class="status-badge">当前口径</span>'; },
+              runDisplayName(run) { return run.display_name; },
+              runDisplaySubtitle(run) { return run.display_subtitle || ""; },
+              runTypeBadge() { return '<span class="status-badge status-type">正式率定</span>'; },
+              runWorkspaceFilterPath: "C:/ws/active",
+              runWorkspaceName() { return "流域A"; },
+              selectedRunPath: "C:/runs/A",
+            });
+            if (!cards.includes("run-card selected")) throw new Error("selected run should be highlighted");
+            if (!cards.includes("结果&lt;一&gt;")) throw new Error("run name should be escaped");
+            if (!cards.includes("NSE 率定 / 验证") || !cards.includes("0.8123 / 0.7123")) {
+              throw new Error("run score missing");
+            }
+            if (!cards.includes("PBIAS -1.23% / 2.34%")) throw new Error("pbias summary missing");
+            for (const attr of ["data-run-path", "data-rename-run", "data-open-run-dir", "data-delete-run"]) {
+              if (!cards.includes(attr)) throw new Error(`missing run card action ${attr}`);
+            }
+            if (!cards.includes("data-filter-run-workspace=\"C:/ws/A\"")) {
+              throw new Error("workspace quick filter should be shown for other workspace");
+            }
+            if (cards.includes("data-filter-run-workspace=\"C:/ws/active\"")) {
+              throw new Error("workspace quick filter should hide for active workspace");
+            }
+            if (!cards.includes("仅查看") || !cards.includes("修改标题")) {
+              throw new Error("readonly/custom title labels missing");
+            }
             """
         )
         result = subprocess.run(
