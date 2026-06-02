@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -743,19 +743,7 @@ function clearRunDetail(message = "请先从左侧选择一个结果。") {
   runDetailRequestGuard.cancel();
   runManualPresetRequestGuard.cancel();
   compareRequestGuard.cancel();
-  state.currentRun = null;
-  state.selectedRunPath = "";
-  state._runData = null;
-  state._runParams = null;
-  state._runOrigParams = null;
-  state.compareSeries = null;
-  state.compareMetrics = null;
-  state.compareLabel = "";
-  state.comparePresetId = "";
-  state.compareAdjusted = false;
-  state.lastRunExportPath = "";
-  state.runManualPresets = [];
-  state.runManualPresetConfigPath = "";
+  Object.assign(state, window.HBVStudioResultsView.clearRunDetailState().statePatch);
   $("#results-metric-strip").innerHTML = "";
   $("#run-engineering-summary").innerHTML = "";
   $("#run-engineering-actions").innerHTML = "";
@@ -4879,25 +4867,12 @@ function renderRunList() {
 }
 
 function renderRunDetail(data) {
-  const meta = data.metadata || {};
-  const metrics = meta.metrics || {};
-  const cal = metrics.calibration || {};
-  const val = metrics.validation || {};
-  const editable = isStudioEditableRun(data);
-
-  // Store for re-simulation
-  state._runData = data;
-  state._runParams = editable ? { ...(meta.optimized_params || {}) } : null;
-  state._runOrigParams = editable ? { ...(meta.optimized_params || {}) } : null;
+  const detailState = window.HBVStudioResultsView.runDetailState(data, {
+    selectedRunPath: state.selectedRunPath,
+  }, { isStudioEditableRun });
+  const { editable, metadata: meta, calibrationMetrics: cal, validationMetrics: val } = detailState;
   compareRequestGuard.cancel();
-  state.compareSeries = null;
-  state.compareMetrics = null;
-  state.compareLabel = "";
-  state.comparePresetId = "";
-  state.compareAdjusted = false;
-  state.selectedRunPath = String(data?.run?.path || data?.path || state.selectedRunPath || "").trim();
-  state.currentRun = data;
-  state.lastRunExportPath = "";
+  Object.assign(state, detailState.statePatch);
 
   renderRunEngineeringSummary(data);
   updateMetricsStrip(cal, val, meta);

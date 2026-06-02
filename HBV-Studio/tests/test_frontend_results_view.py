@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -164,6 +164,57 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (results.selectedRunPath({ currentRun: { run: { path: "nested-run" }, path: "fallback-run" } }) !== "nested-run") {
               throw new Error("selectedRunPath should use current run detail path before fallback path");
+            }
+            const clearedDetail = results.clearRunDetailState().statePatch;
+            for (const key of ["currentRun", "selectedRunPath", "_runData", "_runParams", "_runOrigParams", "compareSeries", "compareMetrics", "compareLabel", "comparePresetId", "compareAdjusted", "lastRunExportPath", "runManualPresets", "runManualPresetConfigPath"]) {
+              if (!Object.prototype.hasOwnProperty.call(clearedDetail, key)) {
+                throw new Error(`clear run detail state missing ${key}`);
+              }
+            }
+            if (clearedDetail.currentRun !== null || clearedDetail.selectedRunPath !== "" ||
+                clearedDetail._runData !== null || clearedDetail._runParams !== null ||
+                clearedDetail.compareAdjusted !== false || clearedDetail.runManualPresets.length !== 0 ||
+                clearedDetail.runManualPresetConfigPath !== "") {
+              throw new Error(`clear run detail state wrong: ${JSON.stringify(clearedDetail)}`);
+            }
+            const editableDetail = results.runDetailState({
+              run: { path: "C:/runs/detail" },
+              metadata: {
+                optimized_params: { TT: 0.2, FC: 120 },
+                metrics: {
+                  calibration: { nse: 0.8 },
+                  validation: { nse: 0.7 },
+                },
+              },
+            }, {
+              selectedRunPath: "C:/runs/previous",
+            }, {
+              isStudioEditableRun() { return true; },
+            });
+            if (!editableDetail.editable || editableDetail.selectedRunPath !== "C:/runs/detail" ||
+                editableDetail.calibrationMetrics.nse !== 0.8 || editableDetail.validationMetrics.nse !== 0.7 ||
+                editableDetail.statePatch.currentRun?.run?.path !== "C:/runs/detail" ||
+                editableDetail.statePatch.lastRunExportPath !== "" ||
+                editableDetail.statePatch.compareLabel !== "" ||
+                editableDetail.statePatch._runParams.TT !== 0.2 ||
+                editableDetail.statePatch._runOrigParams.FC !== 120) {
+              throw new Error(`editable run detail state wrong: ${JSON.stringify(editableDetail)}`);
+            }
+            editableDetail.statePatch._runParams.TT = 9;
+            if (editableDetail.statePatch._runOrigParams.TT !== 0.2) {
+              throw new Error("run detail params and original params should be independent copies");
+            }
+            const readonlyDetail = results.runDetailState({
+              path: "C:/runs/readonly",
+              metadata: { optimized_params: { TT: 0.2 } },
+            }, {
+              editable: false,
+              selectedRunPath: "C:/runs/previous",
+            });
+            if (readonlyDetail.editable || readonlyDetail.selectedRunPath !== "C:/runs/readonly" ||
+                readonlyDetail.statePatch._runParams !== null || readonlyDetail.statePatch._runOrigParams !== null ||
+                readonlyDetail.statePatch.currentRun?.path !== "C:/runs/readonly") {
+              throw new Error(`readonly run detail state wrong: ${JSON.stringify(readonlyDetail)}`);
             }
             if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
               throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");

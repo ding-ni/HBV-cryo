@@ -178,6 +178,63 @@
     return String(model.selectedRunPath || model.currentRun?.run?.path || model.currentRun?.path || "").trim();
   }
 
+  function clearRunDetailState() {
+    return {
+      statePatch: {
+        currentRun: null,
+        selectedRunPath: "",
+        _runData: null,
+        _runParams: null,
+        _runOrigParams: null,
+        compareSeries: null,
+        compareMetrics: null,
+        compareLabel: "",
+        comparePresetId: "",
+        compareAdjusted: false,
+        lastRunExportPath: "",
+        runManualPresets: [],
+        runManualPresetConfigPath: "",
+      },
+    };
+  }
+
+  function runDetailState(data = null, context = {}, helpers = {}) {
+    const isStudioEditableRun = helpers.isStudioEditableRun || (() => false);
+    const detailData = data || null;
+    const meta = detailData?.metadata || {};
+    const metrics = meta.metrics || {};
+    const editable = Object.prototype.hasOwnProperty.call(context, "editable")
+      ? Boolean(context.editable)
+      : Boolean(isStudioEditableRun(detailData));
+    const params = meta.optimized_params || {};
+    const resolvedRunPath = String(
+      detailData?.run?.path ||
+      detailData?.path ||
+      context.selectedRunPath ||
+      "",
+    ).trim();
+    return {
+      editable,
+      selectedRunPath: resolvedRunPath,
+      metadata: meta,
+      calibrationMetrics: metrics.calibration || {},
+      validationMetrics: metrics.validation || {},
+      statePatch: {
+        _runData: detailData,
+        _runParams: editable ? { ...params } : null,
+        _runOrigParams: editable ? { ...params } : null,
+        compareSeries: null,
+        compareMetrics: null,
+        compareLabel: "",
+        comparePresetId: "",
+        compareAdjusted: false,
+        selectedRunPath: resolvedRunPath,
+        currentRun: detailData,
+        lastRunExportPath: "",
+      },
+    };
+  }
+
   function workspaceHasEditableRun(runs = [], path = "", helpers = {}) {
     return runsForWorkspace(runs, path, helpers).some(run => run?.studio_compatible);
   }
@@ -748,6 +805,7 @@
 
   window.HBVStudioResultsView = {
     alignedRunFiltersForSelection,
+    clearRunDetailState,
     filterRuns,
     latestEditableRunPath,
     manualStarterControlState,
@@ -766,6 +824,7 @@
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
+    runDetailState,
     runListState,
     runProfileValue,
     runsForWorkspace,
