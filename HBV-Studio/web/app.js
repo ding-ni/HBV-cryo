@@ -153,6 +153,7 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastCandidateRuns",
+      "forecastInputCheckDecision",
       "forecastInputCheckError",
       "forecastInputPayload",
       "forecastInputType",
@@ -5817,15 +5818,14 @@ async function startForecastRestart() {
   const startButton = $("#forecast-start-button");
   if (startButton) startButton.disabled = true;
   const inputCheck = await refreshForecastInputCheck({ loading: true });
-  if (!inputCheck || inputCheck.status === "fail") {
-    const firstIssue = inputCheck?.errors?.[0] || "预报气象输入检查未通过。";
-    showToast(firstIssue, true);
+  const checkDecision = window.HBVStudioForecastView.forecastInputCheckDecision(inputCheck);
+  if (checkDecision.blocked) {
+    showToast(checkDecision.message, true);
     renderForecastSourceSummary();
     return;
   }
-  if (inputCheck.status === "warn") {
-    const firstWarning = inputCheck?.warnings?.[0] || "预报气象目录存在提示，系统将按预报窗口筛选归档。";
-    showToast(firstWarning);
+  if (checkDecision.message) {
+    showToast(checkDecision.message, checkDecision.isError);
   }
   const payload = window.HBVStudioForecastView.forecastRestartPayload(run, {
     forecast_start: forecastStart,

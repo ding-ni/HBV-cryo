@@ -200,6 +200,28 @@
     };
   }
 
+  function forecastInputCheckDecision(check = null) {
+    if (!check || check.status === "fail") {
+      return {
+        blocked: true,
+        isError: true,
+        message: check?.errors?.[0] || "预报气象输入检查未通过。",
+      };
+    }
+    if (check.status === "warn") {
+      return {
+        blocked: false,
+        isError: false,
+        message: check?.warnings?.[0] || "预报气象目录存在提示，系统将按预报窗口筛选归档。",
+      };
+    }
+    return {
+      blocked: false,
+      isError: false,
+      message: "",
+    };
+  }
+
   function forecastResultExportPayload(data = {}, selectedRun = null, helpers = {}) {
     const boundaryEnabledFromMeta = helpers.boundaryEnabledFromMeta || (() => false);
     const runPath = String(data?.run?.path || selectedRun?.path || "").trim();
@@ -965,6 +987,7 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastCandidateRuns,
+    forecastInputCheckDecision,
     forecastInputCheckError,
     forecastInputPayload,
     forecastInputType,

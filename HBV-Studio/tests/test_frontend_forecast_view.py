@@ -308,6 +308,57 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_input_check_decision_blocks_failures_and_surfaces_warnings(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastInputCheckDecision !== "function") {
+              throw new Error("missing forecast input check decision helper");
+            }
+
+            const missing = view.forecastInputCheckDecision(null);
+            if (!missing.blocked || !missing.isError || missing.message !== "预报气象输入检查未通过。") {
+              throw new Error(`missing check decision wrong: ${JSON.stringify(missing)}`);
+            }
+
+            const failed = view.forecastInputCheckDecision({ status: "fail", errors: ["未来降水缺失"] });
+            if (!failed.blocked || !failed.isError || failed.message !== "未来降水缺失") {
+              throw new Error(`failed check decision wrong: ${JSON.stringify(failed)}`);
+            }
+
+            const warning = view.forecastInputCheckDecision({ status: "warn", warnings: ["窗口外文件会被忽略"] });
+            if (warning.blocked || warning.isError || warning.message !== "窗口外文件会被忽略") {
+              throw new Error(`warning check decision wrong: ${JSON.stringify(warning)}`);
+            }
+
+            const defaultWarning = view.forecastInputCheckDecision({ status: "warn", warnings: [] });
+            if (defaultWarning.blocked || defaultWarning.isError || !defaultWarning.message.includes("按预报窗口筛选归档")) {
+              throw new Error(`default warning wrong: ${JSON.stringify(defaultWarning)}`);
+            }
+
+            const ok = view.forecastInputCheckDecision({ status: "ok" });
+            if (ok.blocked || ok.isError || ok.message !== "") {
+              throw new Error(`ok decision wrong: ${JSON.stringify(ok)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_restart_payload_uses_run_and_context_metadata(self) -> None:
         script = textwrap.dedent(
             r"""
