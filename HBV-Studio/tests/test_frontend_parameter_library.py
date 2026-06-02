@@ -108,6 +108,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetCompareView !== "function") {
               throw new Error("manualPresetCompareView was not exported");
             }
+            if (typeof library.compareMetricSummary !== "function") {
+              throw new Error("compareMetricSummary was not exported");
+            }
             for (const name of ["manualPresetComparePendingView", "manualPresetCompareErrorView"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
@@ -139,6 +142,24 @@ class FrontendParameterLibraryTests(unittest.TestCase):
 
             const hidden = library.manualPresetCompareSummary({ label: "", compareMetrics: { nse_cal: 0.8 } });
             if (hidden.visible || hidden.lines.length) throw new Error("missing label should hide summary");
+
+            const compareTexts = [
+              library.compareMetricSummary("率定纳什效率系数", 0.812345, 0.762345, 4),
+              library.compareMetricSummary("验证纳什效率系数", 0.7123, 0.75, 4),
+              library.compareMetricSummary("率定纳什效率系数", undefined, 0.76, 4),
+              library.compareMetricSummary("验证纳什效率系数", 0.72, undefined, 4),
+              library.compareMetricSummary("验证纳什效率系数", undefined, undefined, 4),
+            ].join("|");
+            const expectedCompareTexts = [
+              "率定纳什效率系数：0.8123（较当前 +0.0500）",
+              "验证纳什效率系数：0.7123（较当前 -0.0377）",
+              "率定纳什效率系数：—（该参数集未产生该指标）",
+              "验证纳什效率系数：0.7200（当前结果无可比指标）",
+              "验证纳什效率系数：—（当前结果和对比参数集都没有该指标）",
+            ].join("|");
+            if (compareTexts !== expectedCompareTexts) {
+              throw new Error(`unexpected compare metric summaries: ${compareTexts}`);
+            }
 
             const view = library.manualPresetCompareView(
               {

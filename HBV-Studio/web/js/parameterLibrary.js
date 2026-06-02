@@ -18,6 +18,12 @@
     return Number.isFinite(numeric) ? numeric : null;
   }
 
+  function formatMetricNumber(value, digits = 4) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric.toFixed(digits) : "—";
+  }
+
   function scopeLabel(scope, { short = false } = {}) {
     return normalizeKey(scope) === "global"
       ? (short ? "公共" : "公共参数库")
@@ -115,6 +121,17 @@
       options.adjusted ? adjustedNote() : "",
     ].filter(Boolean);
     return { visible: true, statusClass, lines, deltaCalibration, deltaValidation };
+  }
+
+  function compareMetricSummary(label, currentValue, baselineValue, digits = 4) {
+    const current = finiteNumber(currentValue);
+    const baseline = finiteNumber(baselineValue);
+    const currentText = formatMetricNumber(current, digits);
+    if (current === null && baseline === null) return `${label}：${currentText}（当前结果和对比参数集都没有该指标）`;
+    if (current === null) return `${label}：${currentText}（该参数集未产生该指标）`;
+    if (baseline === null) return `${label}：${currentText}（当前结果无可比指标）`;
+    const delta = current - baseline;
+    return `${label}：${currentText}（较当前 ${delta >= 0 ? "+" : ""}${formatMetricNumber(delta, digits)}）`;
   }
 
   function manualPresetCompareView(options = {}, helpers = {}) {
@@ -552,6 +569,7 @@
     renderPresetOptions,
     manualPresetDiffSummary,
     manualPresetDiffView,
+    compareMetricSummary,
     manualPresetCompareSummary,
     manualPresetCompareView,
     manualPresetComparePendingView,

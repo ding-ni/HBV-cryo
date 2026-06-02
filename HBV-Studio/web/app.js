@@ -131,6 +131,7 @@ const frontendModuleContracts = [
       "renderPresetOptions",
       "manualPresetDiffSummary",
       "manualPresetDiffView",
+      "compareMetricSummary",
       "manualPresetCompareSummary",
       "manualPresetCompareView",
       "manualPresetComparePendingView",
@@ -492,14 +493,7 @@ function finiteNumber(v) {
 }
 
 function compareMetricSummary(label, currentValue, baselineValue, digits = 4) {
-  const current = finiteNumber(currentValue);
-  const baseline = finiteNumber(baselineValue);
-  const currentText = formatNumber(current, digits);
-  if (current === null && baseline === null) return `${label}：${currentText}（当前结果和对比参数集都没有该指标）`;
-  if (current === null) return `${label}：${currentText}（该参数集未产生该指标）`;
-  if (baseline === null) return `${label}：${currentText}（当前结果无可比指标）`;
-  const delta = current - baseline;
-  return `${label}：${currentText}（较当前 ${delta >= 0 ? "+" : ""}${formatNumber(delta, digits)}）`;
+  return window.HBVStudioParameterLibrary.compareMetricSummary(label, currentValue, baselineValue, digits);
 }
 
 function formatDateTime(v) {
