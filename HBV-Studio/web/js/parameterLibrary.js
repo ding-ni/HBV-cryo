@@ -228,6 +228,48 @@
     };
   }
 
+  function manualPresetSavePreflight(options = {}, helpers = {}) {
+    const isEditable = Object.prototype.hasOwnProperty.call(options, "editable")
+      ? Boolean(options.editable)
+      : Boolean(helpers.isStudioEditableRun?.(options.runData));
+    const configPath = String(options.configPath || "").trim();
+    const name = String(options.name || "").trim();
+    if (!options.runData || !options.params || !isEditable) {
+      return {
+        ok: false,
+        reason: "unsupported-run",
+        message: "当前结果不支持保存手调参数集。",
+        configPath,
+        name,
+      };
+    }
+    if (!configPath) {
+      return {
+        ok: false,
+        reason: "missing-config",
+        message: "缺少工作区配置路径，无法保存参数集。",
+        configPath,
+        name,
+      };
+    }
+    if (!name) {
+      return {
+        ok: false,
+        reason: "missing-name",
+        message: "请输入参数集名称。",
+        configPath,
+        name,
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+      configPath,
+      name,
+    };
+  }
+
   function manualPresetSavePayload(options = {}) {
     const runData = options.runData || {};
     const metadata = runData.metadata || {};
@@ -615,6 +657,7 @@
     taskManualPresetLoadSuccessState,
     shouldClearManualPresetComparison,
     manualPresetControlState,
+    manualPresetSavePreflight,
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,

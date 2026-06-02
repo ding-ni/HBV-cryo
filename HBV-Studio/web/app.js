@@ -143,6 +143,7 @@ const frontendModuleContracts = [
       "taskManualPresetLoadSuccessState",
       "shouldClearManualPresetComparison",
       "manualPresetControlState",
+      "manualPresetSavePreflight",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
@@ -4739,18 +4740,17 @@ function applyManualPresetToCurrentRun(preset) {
 }
 
 async function saveCurrentManualPreset() {
-  if (!state._runData || !state._runParams || !isStudioEditableRun(state._runData)) {
-    showToast("当前结果不支持保存手调参数集。", true);
-    return;
-  }
   const configPath = getRunManualPresetConfigPath();
   const name = $("#manual-preset-name").value.trim();
-  if (!configPath) {
-    showToast("缺少工作区配置路径，无法保存参数集。", true);
-    return;
-  }
-  if (!name) {
-    showToast("请输入参数集名称。", true);
+  const preflight = window.HBVStudioParameterLibrary.manualPresetSavePreflight({
+    configPath,
+    editable: isStudioEditableRun(state._runData),
+    name,
+    params: state._runParams,
+    runData: state._runData,
+  });
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
   const payload = await apiPost("/api/manual-preset/save", window.HBVStudioParameterLibrary.manualPresetSavePayload({

@@ -232,6 +232,51 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (library.findPresetById(presets, "missing") !== null) {
               throw new Error("missing preset should return null");
             }
+            if (typeof library.manualPresetSavePreflight !== "function") {
+              throw new Error("manualPresetSavePreflight was not exported");
+            }
+
+            const unsupportedSave = library.manualPresetSavePreflight({
+              configPath: "C:/workspaces/A/workspace.json",
+              editable: false,
+              name: "Trial set",
+              params: { TT: 0.2 },
+              runData: { run: { path: "C:/runs/source" } },
+            });
+            if (unsupportedSave.ok || unsupportedSave.reason !== "unsupported-run" || !unsupportedSave.message.includes("不支持")) {
+              throw new Error(`unsupported save preflight wrong: ${JSON.stringify(unsupportedSave)}`);
+            }
+            const missingConfigSave = library.manualPresetSavePreflight({
+              editable: true,
+              name: "Trial set",
+              params: { TT: 0.2 },
+              runData: { run: { path: "C:/runs/source" } },
+            });
+            if (missingConfigSave.ok || missingConfigSave.reason !== "missing-config" || !missingConfigSave.message.includes("配置路径")) {
+              throw new Error(`missing config save preflight wrong: ${JSON.stringify(missingConfigSave)}`);
+            }
+            const missingNameSave = library.manualPresetSavePreflight({
+              configPath: "C:/workspaces/A/workspace.json",
+              editable: true,
+              name: " ",
+              params: { TT: 0.2 },
+              runData: { run: { path: "C:/runs/source" } },
+            });
+            if (missingNameSave.ok || missingNameSave.reason !== "missing-name" || !missingNameSave.message.includes("名称")) {
+              throw new Error(`missing name save preflight wrong: ${JSON.stringify(missingNameSave)}`);
+            }
+            const readySave = library.manualPresetSavePreflight({
+              configPath: " C:/workspaces/A/workspace.json ",
+              editable: true,
+              name: " Trial set ",
+              params: { TT: 0.2 },
+              runData: { run: { path: "C:/runs/source" } },
+            });
+            if (!readySave.ok || readySave.reason || readySave.message ||
+                readySave.configPath !== "C:/workspaces/A/workspace.json" ||
+                readySave.name !== "Trial set") {
+              throw new Error(`ready save preflight wrong: ${JSON.stringify(readySave)}`);
+            }
 
             const savePayload = library.manualPresetSavePayload({
               configPath: " C:/workspaces/A/workspace.json ",
