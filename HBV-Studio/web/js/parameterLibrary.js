@@ -176,6 +176,40 @@
     return `/api/manual-presets?config_path=${encodeURIComponent(String(configPath || "").trim())}&calibration_profile=${encodeURIComponent(String(calibrationProfile || "").trim())}&scope=${encodeURIComponent(String(scope || "all").trim())}`;
   }
 
+  function taskManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const targetPath = String(path || "").trim();
+    const changed = !samePath(targetPath, currentConfigPath);
+    const statePatch = { taskManualPresetConfigPath: targetPath };
+    if (!targetPath || changed) statePatch.taskManualPresets = [];
+    return {
+      path: targetPath,
+      changed,
+      shouldRequest: Boolean(targetPath),
+      shouldRender: !targetPath || changed,
+      statePatch,
+    };
+  }
+
+  function taskManualPresetLoadSuccessState(responseData = {}) {
+    const presets = Array.isArray(responseData?.presets) ? responseData.presets : [];
+    return {
+      presets,
+      statePatch: {
+        taskManualPresets: presets,
+      },
+    };
+  }
+
+  function taskManualPresetLoadErrorState() {
+    return {
+      presets: [],
+      statePatch: {
+        taskManualPresets: [],
+      },
+    };
+  }
+
   function shouldClearManualPresetComparison(currentPreset = null, comparePresetId = "") {
     const compareId = String(comparePresetId || "").trim();
     if (!compareId) return false;
@@ -576,6 +610,9 @@
     manualPresetCompareErrorView,
     findPresetById,
     manualPresetListPath,
+    taskManualPresetLoadErrorState,
+    taskManualPresetLoadStartState,
+    taskManualPresetLoadSuccessState,
     shouldClearManualPresetComparison,
     manualPresetControlState,
     manualPresetSavePayload,

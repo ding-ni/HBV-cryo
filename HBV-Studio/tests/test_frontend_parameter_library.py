@@ -326,9 +326,44 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
+            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState"]) {
+              if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
+            }
             const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
             if (path !== "/api/manual-presets?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2Fworkspace.json&calibration_profile=daily%20mode&scope=all") {
               throw new Error(`unexpected list path: ${path}`);
+            }
+            const samePath = (a, b) => String(a || "").replace(/\\/g, "/") === String(b || "").replace(/\\/g, "/");
+            const emptyLoad = library.taskManualPresetLoadStartState(" ", "C:/ws/A", { samePath });
+            if (emptyLoad.path !== "" || emptyLoad.shouldRequest || !emptyLoad.shouldRender ||
+                emptyLoad.statePatch.taskManualPresetConfigPath !== "" ||
+                emptyLoad.statePatch.taskManualPresets.length !== 0) {
+              throw new Error(`empty task preset load start wrong: ${JSON.stringify(emptyLoad)}`);
+            }
+            const sameLoad = library.taskManualPresetLoadStartState("C:/ws/A", "C:\\ws\\A", { samePath });
+            if (sameLoad.changed || !sameLoad.shouldRequest || sameLoad.shouldRender ||
+                sameLoad.statePatch.taskManualPresetConfigPath !== "C:/ws/A" ||
+                Object.prototype.hasOwnProperty.call(sameLoad.statePatch, "taskManualPresets")) {
+              throw new Error(`same task preset load start wrong: ${JSON.stringify(sameLoad)}`);
+            }
+            const changedLoad = library.taskManualPresetLoadStartState(" C:/ws/B ", "C:/ws/A", { samePath });
+            if (!changedLoad.changed || !changedLoad.shouldRequest || !changedLoad.shouldRender ||
+                changedLoad.path !== "C:/ws/B" ||
+                changedLoad.statePatch.taskManualPresetConfigPath !== "C:/ws/B" ||
+                changedLoad.statePatch.taskManualPresets.length !== 0) {
+              throw new Error(`changed task preset load start wrong: ${JSON.stringify(changedLoad)}`);
+            }
+            const loadSuccess = library.taskManualPresetLoadSuccessState({ presets: [{ id: "A" }, { id: "B" }] });
+            if (loadSuccess.presets.length !== 2 || loadSuccess.statePatch.taskManualPresets[1].id !== "B") {
+              throw new Error(`task preset load success wrong: ${JSON.stringify(loadSuccess)}`);
+            }
+            const loadSuccessFallback = library.taskManualPresetLoadSuccessState({});
+            if (loadSuccessFallback.presets.length !== 0 || loadSuccessFallback.statePatch.taskManualPresets.length !== 0) {
+              throw new Error(`task preset load success fallback wrong: ${JSON.stringify(loadSuccessFallback)}`);
+            }
+            const loadError = library.taskManualPresetLoadErrorState();
+            if (loadError.presets.length !== 0 || loadError.statePatch.taskManualPresets.length !== 0) {
+              throw new Error(`task preset load error wrong: ${JSON.stringify(loadError)}`);
             }
             if (library.shouldClearManualPresetComparison({ id: "same" }, "same")) {
               throw new Error("same id should keep comparison");

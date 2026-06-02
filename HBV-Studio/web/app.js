@@ -138,6 +138,9 @@ const frontendModuleContracts = [
       "manualPresetCompareErrorView",
       "findPresetById",
       "manualPresetListPath",
+      "taskManualPresetLoadErrorState",
+      "taskManualPresetLoadStartState",
+      "taskManualPresetLoadSuccessState",
       "shouldClearManualPresetComparison",
       "manualPresetControlState",
       "manualPresetSavePayload",
@@ -2632,16 +2635,14 @@ async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(
   const path = String(configPath || "").trim();
   const resolvedProfile = resolveManualPresetProfile(path, calibrationProfile);
   const requestToken = taskManualPresetRequestGuard.next();
-  const pathChanged = !samePath(path, state.taskManualPresetConfigPath);
-  state.taskManualPresetConfigPath = path;
-  if (!path) {
-    state.taskManualPresets = [];
+  const loadStart = window.HBVStudioParameterLibrary.taskManualPresetLoadStartState(path, state.taskManualPresetConfigPath, { samePath });
+  Object.assign(state, loadStart.statePatch);
+  if (!loadStart.shouldRequest) {
     renderManualPresetOptions();
     refreshCalibrationControls();
     return [];
   }
-  if (pathChanged) {
-    state.taskManualPresets = [];
+  if (loadStart.shouldRender) {
     renderManualPresetOptions();
     refreshCalibrationControls();
   }
@@ -2650,19 +2651,21 @@ async function loadTaskManualPresets(configPath = getTaskManualPresetConfigPath(
     if (!taskManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.taskManualPresetConfigPath)) {
       return p.data?.presets || [];
     }
-    state.taskManualPresets = p.data?.presets || [];
+    const loadSuccess = window.HBVStudioParameterLibrary.taskManualPresetLoadSuccessState(p.data || {});
+    Object.assign(state, loadSuccess.statePatch);
     renderManualPresetOptions();
     refreshCalibrationControls();
-    return state.taskManualPresets;
+    return loadSuccess.presets;
   } catch (err) {
     if (!taskManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.taskManualPresetConfigPath)) {
       return [];
     }
-    state.taskManualPresets = [];
+    const loadError = window.HBVStudioParameterLibrary.taskManualPresetLoadErrorState();
+    Object.assign(state, loadError.statePatch);
     renderManualPresetOptions();
     refreshCalibrationControls();
     if (!silent) showToast(err.message, true);
-    return [];
+    return loadError.presets;
   }
 }
 
