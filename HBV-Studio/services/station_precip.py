@@ -1,10 +1,85 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW
+
+
+def detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
+    lowered = {str(col).strip().lower(): str(col) for col in columns}
+    for candidate in candidates:
+        found = lowered.get(candidate.lower())
+        if found is not None:
+            return found
+    return None
+
+
+def detect_table_time_column(frame: pd.DataFrame) -> str | None:
+    for column in frame.columns:
+        parsed = pd.to_datetime(frame[column], errors="coerce")
+        if int(parsed.notna().sum()) >= max(1, len(frame) // 3):
+            return str(column)
+    return None
+
+
+def read_station_csv(path: Path) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "gbk"):
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return pd.read_csv(path)
+
+
+def load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:
+    frame = read_station_csv(path)
+    if frame.empty:
+        raise ValueError("\u7ad9\u70b9\u964d\u6c34 csv \u4e3a\u7a7a\u3002")
+    time_col = detect_table_time_column(frame)
+    if not time_col:
+        raise ValueError("\u7ad9\u70b9\u964d\u6c34 csv \u672a\u8bc6\u522b\u5230\u65f6\u95f4\u5217\u3002")
+
+    columns = [str(col) for col in frame.columns]
+    id_col = detect_table_column(columns, ["station_id", "station", "id", "name", "\u7ad9\u70b9", "\u7ad9\u53f7"])
+    value_col = detect_table_column(columns, ["precip", "prec", "ppt", "rain", "value", "\u964d\u6c34", "\u964d\u6c34\u91cf"])
+    if id_col and value_col and id_col != time_col and value_col != time_col:
+        data = frame[[time_col, id_col, value_col]].copy()
+        data.columns = ["time", "station_id", "value"]
+        data["time"] = pd.to_datetime(data["time"], errors="coerce")
+        data["station_id"] = data["station_id"].astype(str).str.strip()
+        data["value"] = pd.to_numeric(data["value"], errors="coerce")
+        wide = data.pivot_table(index="time", columns="station_id", values="value", aggfunc="mean")
+        wide.columns = [str(col).strip() for col in wide.columns]
+        return wide.sort_index(), "\u957f\u8868", time_col
+
+    wide = frame.copy()
+    wide[time_col] = pd.to_datetime(wide[time_col], errors="coerce")
+    wide = wide.dropna(subset=[time_col]).set_index(time_col).sort_index()
+    wide.columns = [str(col).strip() for col in wide.columns]
+    for column in list(wide.columns):
+        wide[column] = pd.to_numeric(wide[column], errors="coerce")
+    return wide, "\u5bbd\u8868", time_col
+
+
+def load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, str | None]]:
+    frame = read_station_csv(path)
+    if frame.empty:
+        raise ValueError("\u7ad9\u70b9\u4fe1\u606f csv \u4e3a\u7a7a\u3002")
+    columns = [str(col) for col in frame.columns]
+    id_col = detect_table_column(columns, ["station_id", "station", "id", "name", "\u7ad9\u70b9", "\u7ad9\u53f7"])
+    lon_col = detect_table_column(columns, ["lon", "longitude", "x", "\u7ecf\u5ea6"])
+    lat_col = detect_table_column(columns, ["lat", "latitude", "y", "\u7eac\u5ea6"])
+    if not id_col:
+        raise ValueError("\u7ad9\u70b9\u4fe1\u606f csv \u672a\u8bc6\u522b\u5230\u7ad9\u53f7\u5b57\u6bb5\u3002")
+    out = frame.copy()
+    out["_station_id"] = out[id_col].astype(str).str.strip()
+    return out, {"id": id_col, "lon": lon_col, "lat": lat_col}
 
 
 def format_time_for_check(value: Any, step_hours: float) -> str:

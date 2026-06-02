@@ -161,8 +161,13 @@ from services.meteo_config import (
 )
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
+from services.station_precip import detect_table_column as build_station_detect_table_column
+from services.station_precip import detect_table_time_column as build_station_detect_table_time_column
 from services.station_precip import index_display_range as build_station_index_display_range
+from services.station_precip import load_station_metadata_table as build_load_station_metadata_table
+from services.station_precip import load_station_precip_table as build_load_station_precip_table
 from services.station_precip import max_consecutive_true as build_max_consecutive_true
+from services.station_precip import read_station_csv as build_read_station_csv
 from services.station_precip import station_count_text as build_station_count_text
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
 from services.station_precip import station_precip_task_context_summary as build_station_precip_task_context_summary
@@ -2510,32 +2515,15 @@ def check_precip_strategy_outputs(config: dict[str, Any], precip_source: Any = N
 
 
 def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
-    lowered = {str(col).strip().lower(): str(col) for col in columns}
-    for candidate in candidates:
-        found = lowered.get(candidate.lower())
-        if found is not None:
-            return found
-    return None
+    return build_station_detect_table_column(columns, candidates)
 
 
 def _detect_table_time_column(frame: pd.DataFrame) -> str | None:
-    for column in frame.columns:
-        parsed = pd.to_datetime(frame[column], errors="coerce")
-        if int(parsed.notna().sum()) >= max(1, len(frame) // 3):
-            return str(column)
-    return None
+    return build_station_detect_table_time_column(frame)
 
 
 def _read_station_csv(path: Path) -> pd.DataFrame:
-    last_error: Exception | None = None
-    for encoding in ("utf-8-sig", "utf-8", "gbk"):
-        try:
-            return pd.read_csv(path, encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return pd.read_csv(path)
+    return build_read_station_csv(path)
 
 
 def _time_range_from_config(config: dict[str, Any]) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
@@ -2590,48 +2578,11 @@ def input_time_basis_ui_summary(
 
 
 def _load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:
-    frame = _read_station_csv(path)
-    if frame.empty:
-        raise ValueError("站点降水 csv 为空。")
-    time_col = _detect_table_time_column(frame)
-    if not time_col:
-        raise ValueError("站点降水 csv 未识别到时间列。")
-
-    columns = [str(col) for col in frame.columns]
-    id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
-    value_col = _detect_table_column(columns, ["precip", "prec", "ppt", "rain", "value", "降水", "降水量"])
-    if id_col and value_col and id_col != time_col and value_col != time_col:
-        data = frame[[time_col, id_col, value_col]].copy()
-        data.columns = ["time", "station_id", "value"]
-        data["time"] = pd.to_datetime(data["time"], errors="coerce")
-        data["station_id"] = data["station_id"].astype(str).str.strip()
-        data["value"] = pd.to_numeric(data["value"], errors="coerce")
-        wide = data.pivot_table(index="time", columns="station_id", values="value", aggfunc="mean")
-        wide.columns = [str(col).strip() for col in wide.columns]
-        return wide.sort_index(), "长表", time_col
-
-    wide = frame.copy()
-    wide[time_col] = pd.to_datetime(wide[time_col], errors="coerce")
-    wide = wide.dropna(subset=[time_col]).set_index(time_col).sort_index()
-    wide.columns = [str(col).strip() for col in wide.columns]
-    for column in list(wide.columns):
-        wide[column] = pd.to_numeric(wide[column], errors="coerce")
-    return wide, "宽表", time_col
+    return build_load_station_precip_table(path)
 
 
 def _load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, str | None]]:
-    frame = _read_station_csv(path)
-    if frame.empty:
-        raise ValueError("站点信息 csv 为空。")
-    columns = [str(col) for col in frame.columns]
-    id_col = _detect_table_column(columns, ["station_id", "station", "id", "name", "站点", "站号"])
-    lon_col = _detect_table_column(columns, ["lon", "longitude", "x", "经度"])
-    lat_col = _detect_table_column(columns, ["lat", "latitude", "y", "纬度"])
-    if not id_col:
-        raise ValueError("站点信息 csv 未识别到站号字段。")
-    out = frame.copy()
-    out["_station_id"] = out[id_col].astype(str).str.strip()
-    return out, {"id": id_col, "lon": lon_col, "lat": lat_col}
+    return build_load_station_metadata_table(path)
 
 
 def _station_precip_mode_label(mode: str) -> str:

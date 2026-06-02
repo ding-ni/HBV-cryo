@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,8 @@ if str(STUDIO_DIR) not in sys.path:
 from services.station_precip import (  # noqa: E402
     format_time_for_check,
     index_display_range,
+    load_station_metadata_table,
+    load_station_precip_table,
     max_consecutive_true,
     station_count_text,
     station_precip_mode_label,
@@ -36,6 +39,58 @@ class StationPrecipServiceTests(unittest.TestCase):
 
         start, end, count = index_display_range(pd.date_range("2026-01-01", periods=3, freq="1D"), 24)
         self.assertEqual((start, end, count), ("2026-01-01", "2026-01-03", 3))
+
+    def test_load_station_precip_table_reads_wide_format(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "station_precip.csv"
+            pd.DataFrame(
+                [
+                    {"time": "2026-01-02", "S2": "4.2", "S1": "5.1"},
+                    {"time": "2026-01-01", "S2": "4.0", "S1": "5.0"},
+                ]
+            ).to_csv(path, index=False, encoding="utf-8-sig")
+
+            table, table_format, time_col = load_station_precip_table(path)
+
+        self.assertEqual(table_format, "\u5bbd\u8868")
+        self.assertEqual(time_col, "time")
+        self.assertEqual(list(table.columns), ["S2", "S1"])
+        self.assertEqual(list(table.index), [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")])
+        self.assertEqual(float(table.loc[pd.Timestamp("2026-01-01"), "S1"]), 5.0)
+
+    def test_load_station_precip_table_pivots_long_format(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "station_precip_long.csv"
+            pd.DataFrame(
+                [
+                    {"time": "2026-01-01", "station_id": "S1", "precip": 5.0},
+                    {"time": "2026-01-01", "station_id": "S2", "precip": 4.0},
+                    {"time": "2026-01-02", "station_id": "S1", "precip": 5.2},
+                ]
+            ).to_csv(path, index=False, encoding="utf-8")
+
+            table, table_format, time_col = load_station_precip_table(path)
+
+        self.assertEqual(table_format, "\u957f\u8868")
+        self.assertEqual(time_col, "time")
+        self.assertEqual(list(table.columns), ["S1", "S2"])
+        self.assertEqual(float(table.loc[pd.Timestamp("2026-01-01"), "S2"]), 4.0)
+        self.assertTrue(pd.isna(table.loc[pd.Timestamp("2026-01-02"), "S2"]))
+
+    def test_load_station_metadata_table_normalizes_station_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "station_meta.csv"
+            pd.DataFrame(
+                [
+                    {"station_id": " S1 ", "lon": 92.1, "lat": 34.1},
+                    {"station_id": "S2", "lon": 92.2, "lat": 34.2},
+                ]
+            ).to_csv(path, index=False, encoding="utf-8-sig")
+
+            table, columns = load_station_metadata_table(path)
+
+        self.assertEqual(columns, {"id": "station_id", "lon": "lon", "lat": "lat"})
+        self.assertEqual(table["_station_id"].tolist(), ["S1", "S2"])
 
     def test_continuous_station_only_summary_fails_when_no_station_steps_exist(self) -> None:
         summary = station_precip_task_context_summary(
