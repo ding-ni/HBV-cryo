@@ -112,8 +112,10 @@ from services.forecast_restart import ForecastRestartWorkerContext
 from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forcing_validation import ForcingAlignedStatusContext
+from services.forcing_validation import ForcingInputsReadyContext
 from services.forcing_validation import ForcingValidationContext
 from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
+from services.forcing_validation import check_forcing_inputs_ready as build_check_forcing_inputs_ready
 from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import ForwardSimulationWorkerContext
@@ -1234,6 +1236,17 @@ def _forcing_aligned_status_context() -> ForcingAlignedStatusContext:
     )
 
 
+def _forcing_inputs_ready_context() -> ForcingInputsReadyContext:
+    return ForcingInputsReadyContext(
+        build_profile_paths=build_profile_paths,
+        workspace_dem_path=_workspace_dem_path,
+        configured_dem_kind=_configured_dem_kind,
+        resolve_config_related_path=_resolve_config_related_path,
+        validate_forcing_bundle=validate_forcing_bundle,
+        observed_flow_key=OBSERVED_FLOW_KEY,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -2110,25 +2123,12 @@ def glacier_formal_requirements(config: dict[str, Any], profile: str | None = No
 
 
 def check_daily_inputs_ready(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_DAILY)
-    required = [
-        _workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config)),
-        Path(paths["gis_dir"]) / "flow_accumulation_masked.tif",
-    ]
-    basin_path = _resolve_config_related_path(config, config.get("流域边界_shp"))
-    obs_path = _resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))
-    if basin_path is not None:
-        required.append(basin_path)
-    if obs_path is not None:
-        required.append(obs_path)
-    base_ready = all(item.exists() for item in required)
-    if basin_path is None or obs_path is None:
-        base_ready = False
-    forcing = validate_forcing_bundle(config, PROFILE_DAILY, precip_source=precip_source)
-    message = f"基础输入{'齐全' if base_ready else '缺失'}；气象驱动有效时间步数：{forcing['total_valid_steps']}"
-    if forcing["errors"]:
-        message += f"；问题：{'；'.join(forcing['errors'][:2])}"
-    return base_ready and forcing["ok"], message, forcing["total_valid_steps"] + int(base_ready)
+    return build_check_forcing_inputs_ready(
+        config,
+        _forcing_inputs_ready_context(),
+        profile=PROFILE_DAILY,
+        precip_source=precip_source,
+    )
 
 
 def check_hourly_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
@@ -2199,25 +2199,13 @@ def check_hourly_aligned(config: dict[str, Any], precip_source: Any = None) -> t
 
 
 def check_hourly_inputs_ready(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_HOURLY)
-    required = [
-        _workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config)),
-        Path(paths["gis_dir"]) / "flow_accumulation_masked.tif",
-    ]
-    basin_path = _resolve_config_related_path(config, config.get("流域边界_shp"))
-    obs_path = _resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))
-    if basin_path is not None:
-        required.append(basin_path)
-    if obs_path is not None:
-        required.append(obs_path)
-    base_ready = all(item.exists() for item in required)
-    if basin_path is None or obs_path is None:
-        base_ready = False
-    forcing = validate_forcing_bundle(config, PROFILE_HOURLY, precip_source=precip_source)
-    message = f"基础输入{'齐全' if base_ready else '缺失'}；小时气象驱动有效时间步数：{forcing['total_valid_steps']}"
-    if forcing["errors"]:
-        message += f"；问题：{'；'.join(forcing['errors'][:2])}"
-    return base_ready and forcing["ok"], message, forcing["total_valid_steps"] + int(base_ready)
+    return build_check_forcing_inputs_ready(
+        config,
+        _forcing_inputs_ready_context(),
+        profile=PROFILE_HOURLY,
+        forcing_label="小时",
+        precip_source=precip_source,
+    )
 
 
 def _data_prep_step_catalog_context() -> DataPrepStepCatalogContext:

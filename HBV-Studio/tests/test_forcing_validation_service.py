@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -14,8 +15,10 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.forcing_validation import (  # noqa: E402
     ForcingAlignedStatusContext,
+    ForcingInputsReadyContext,
     ForcingValidationContext,
     check_aligned_forcing_status,
+    check_forcing_inputs_ready,
     validate_forcing_bundle,
 )
 
@@ -109,6 +112,43 @@ class ForcingValidationServiceTests(unittest.TestCase):
             event_forcing_coverage_summary=lambda event_info, directories, step_hours: {"status": "ok", "event_count": len(event_info["events"])},
         )
 
+    def _inputs_ready_context(
+        self,
+        base_dir: Path,
+        *,
+        forcing: dict[str, Any],
+        calls: list[tuple[Any, ...]] | None = None,
+    ) -> ForcingInputsReadyContext:
+        call_log = calls if calls is not None else []
+        gis_dir = base_dir / "gis"
+
+        def build_profile_paths(config: dict[str, Any], profile: str) -> dict[str, Any]:
+            call_log.append(("paths", profile))
+            return {"gis_dir": gis_dir}
+
+        def workspace_dem_path(gis_path: Path, **kwargs: Any) -> Path:
+            call_log.append(("dem", gis_path, kwargs.get("prefer")))
+            return Path(gis_path) / "dem.tif"
+
+        def resolve_config_related_path(config: dict[str, Any], raw_value: Any) -> Path | None:
+            call_log.append(("resolve", raw_value))
+            if raw_value in (None, ""):
+                return None
+            return base_dir / str(raw_value)
+
+        def validate_forcing(config: dict[str, Any], profile: str, **kwargs: Any) -> dict[str, Any]:
+            call_log.append(("forcing", profile, kwargs.get("precip_source")))
+            return forcing
+
+        return ForcingInputsReadyContext(
+            build_profile_paths=build_profile_paths,
+            workspace_dem_path=workspace_dem_path,
+            configured_dem_kind=lambda config: "1km",
+            resolve_config_related_path=resolve_config_related_path,
+            validate_forcing_bundle=validate_forcing,
+            observed_flow_key="观测径流_csv",
+        )
+
     def test_check_aligned_forcing_status_sums_valid_time_steps(self) -> None:
         calls: list[tuple[Any, ...]] = []
         context = self._aligned_context(calls=calls)
@@ -148,6 +188,62 @@ class ForcingValidationServiceTests(unittest.TestCase):
 
         self.assertFalse(ready)
         self.assertEqual(message, "降水缺少 1 个时间步；蒸散发目录为空")
+        self.assertEqual(count, 3)
+
+    def test_check_forcing_inputs_ready_requires_base_files_and_valid_forcing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            gis_dir = base_dir / "gis"
+            gis_dir.mkdir()
+            for path in [
+                gis_dir / "dem.tif",
+                gis_dir / "flow_accumulation_masked.tif",
+                base_dir / "basin.shp",
+                base_dir / "obs.csv",
+            ]:
+                path.write_text("ok", encoding="utf-8")
+            calls: list[tuple[Any, ...]] = []
+            context = self._inputs_ready_context(
+                base_dir,
+                forcing={"ok": True, "errors": [], "total_valid_steps": 5},
+                calls=calls,
+            )
+
+            ready, message, count = check_forcing_inputs_ready(
+                {"流域边界_shp": "basin.shp", "观测径流_csv": "obs.csv"},
+                context,
+                profile="daily",
+                precip_source="custom_tif",
+            )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "基础输入齐全；气象驱动有效时间步数：5")
+        self.assertEqual(count, 6)
+        self.assertEqual(calls[0], ("paths", "daily"))
+        self.assertEqual(calls[1], ("dem", gis_dir, "1km"))
+        self.assertEqual(calls[-1], ("forcing", "daily", "custom_tif"))
+
+    def test_check_forcing_inputs_ready_reports_missing_base_and_first_forcing_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            context = self._inputs_ready_context(
+                base_dir,
+                forcing={
+                    "ok": False,
+                    "errors": ["气象缺少降水", "气象缺少气温", "气象缺少蒸散发"],
+                    "total_valid_steps": 3,
+                },
+            )
+
+            ready, message, count = check_forcing_inputs_ready(
+                {},
+                context,
+                profile="hourly",
+                forcing_label="小时",
+            )
+
+        self.assertFalse(ready)
+        self.assertEqual(message, "基础输入缺失；小时气象驱动有效时间步数：3；问题：气象缺少降水；气象缺少气温")
         self.assertEqual(count, 3)
 
     def test_validate_forcing_bundle_aggregates_directory_and_grid_messages(self) -> None:

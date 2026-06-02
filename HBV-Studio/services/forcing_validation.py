@@ -36,6 +36,16 @@ class ForcingAlignedStatusContext:
     validate_tif_time_series: Callable[..., dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ForcingInputsReadyContext:
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
+    workspace_dem_path: Callable[..., Path]
+    configured_dem_kind: Callable[[dict[str, Any]], str | None]
+    resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
+    validate_forcing_bundle: Callable[..., dict[str, Any]]
+    observed_flow_key: str
+
+
 def check_aligned_forcing_status(
     config: dict[str, Any],
     context: ForcingAlignedStatusContext,
@@ -56,6 +66,36 @@ def check_aligned_forcing_status(
     ready = all(item["ok"] for item in scans)
     message = "；".join(item["errors"][0] for item in scans if item["errors"]) or f"{label}气象驱动有效时间步：{count}"
     return ready, message, count
+
+
+def check_forcing_inputs_ready(
+    config: dict[str, Any],
+    context: ForcingInputsReadyContext,
+    *,
+    profile: str,
+    forcing_label: str = "",
+    precip_source: Any = None,
+) -> tuple[bool, str, int]:
+    paths = context.build_profile_paths(config, profile)
+    required = [
+        context.workspace_dem_path(paths["gis_dir"], prefer=context.configured_dem_kind(config)),
+        Path(paths["gis_dir"]) / "flow_accumulation_masked.tif",
+    ]
+    basin_path = context.resolve_config_related_path(config, config.get("流域边界_shp"))
+    obs_path = context.resolve_config_related_path(config, config.get(context.observed_flow_key))
+    if basin_path is not None:
+        required.append(basin_path)
+    if obs_path is not None:
+        required.append(obs_path)
+    base_ready = all(Path(item).exists() for item in required)
+    if basin_path is None or obs_path is None:
+        base_ready = False
+
+    forcing = context.validate_forcing_bundle(config, profile, precip_source=precip_source)
+    message = f"基础输入{'齐全' if base_ready else '缺失'}；{forcing_label}气象驱动有效时间步数：{forcing['total_valid_steps']}"
+    if forcing["errors"]:
+        message += f"；问题：{'；'.join(forcing['errors'][:2])}"
+    return base_ready and forcing["ok"], message, int(forcing["total_valid_steps"]) + int(base_ready)
 
 
 def validate_forcing_bundle(
