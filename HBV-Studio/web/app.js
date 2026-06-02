@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -727,7 +727,7 @@ function renderResultsFilterToolbar() {
     { label: "可继续手调", value: "editable" },
     { label: "仅查看", value: "readonly" },
   ];
-  host.innerHTML = window.HBVStudioResultsView.renderFilterToolbar({
+  const toolbar = window.HBVStudioResultsView.resultFilterToolbarState({
     workspaceOptions,
     profileOptions,
     stageOptions,
@@ -737,6 +737,7 @@ function renderResultsFilterToolbar() {
     selectedType: state.runTypeFilter,
     selectedEditability: state.runEditabilityFilter,
   }, { escapeHtml, samePath });
+  applyDomUpdates(toolbar.domUpdates);
   const shown = visibleRuns();
   const workspaceText = state.runWorkspaceFilterPath ? `工作区“${workspaceLabelByPath(state.runWorkspaceFilterPath)}”` : "全部工作区";
   const profileText = state.runProfileFilter ? profileLabel(state.runProfileFilter) : "全部尺度";
@@ -4759,7 +4760,7 @@ function renderRunList() {
     return;
   }
   updateManualStarterButtons();
-  host.innerHTML = window.HBVStudioResultsView.renderRunCards(runs, {
+  const cards = window.HBVStudioResultsView.runCardsState(runs, {
     escapeHtml,
     formatMetricValue,
     formatNumber,
@@ -4773,6 +4774,7 @@ function renderRunList() {
     samePath,
     selectedRunPath,
   });
+  applyDomUpdates(cards.domUpdates);
 }
 
 function renderRunDetail(data) {
@@ -4822,7 +4824,8 @@ function updateMetricsStrip(cal, val, meta) {
     formatNumber,
     eventMetricItems: item => window.HBVStudioEventMode.floodEventMetricItems(item, { formatNumber }),
   });
-  $("#results-metric-strip").innerHTML = window.HBVStudioResultsView.renderMetricStrip(items, { escapeHtml });
+  const strip = window.HBVStudioResultsView.resultMetricStripState(items, { escapeHtml });
+  applyDomUpdates(strip.domUpdates);
 }
 
 function renderRunExportFields() {
@@ -4831,7 +4834,8 @@ function renderRunExportFields() {
   const fields = window.HBVStudioResultsView.runExportFields({
     boundaryEnabled: boundaryEnabledFromMeta(state.currentRun?.metadata || {}),
   });
-  host.innerHTML = window.HBVStudioResultsView.renderRunExportFields(fields, { escapeHtml });
+  const rendered = window.HBVStudioResultsView.runExportFieldsState(fields, { escapeHtml });
+  applyDomUpdates(rendered.domUpdates);
 }
 
 function currentRunStepHours(data = state.currentRun) {

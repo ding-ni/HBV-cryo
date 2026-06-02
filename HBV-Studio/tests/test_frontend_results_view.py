@@ -39,6 +39,11 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
+            for (const name of ["resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
+              if (typeof results?.[name] !== "function") {
+                throw new Error(`missing results view state export: ${name}`);
+              }
+            }
             const helpers = {
               escapeHtml(value) {
                 return String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -74,6 +79,23 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!toolbar.includes("当前工作区：A&lt;1&gt;")) throw new Error("workspace label should be escaped");
             if ((toolbar.match(/class="phase-chip active"/g) || []).length !== 4) {
               throw new Error(`expected four active filter chips: ${toolbar}`);
+            }
+            const toolbarState = results.resultFilterToolbarState({
+              workspaceOptions: [
+                { label: "全部结果", path: "" },
+                { label: "当前工作区：A<1>", path: "C:/ws/A" },
+              ],
+              profileOptions: [{ label: "全部尺度", value: "" }, { label: "小时尺度", value: "hourly" }],
+              stageOptions: [{ label: "全部阶段", value: "" }, { label: "手调结果", value: "manual_result" }],
+              editabilityOptions: [{ label: "全部结果", value: "all" }, { label: "可继续手调", value: "editable" }],
+              selectedWorkspacePath: "C:\\ws\\A",
+              selectedProfile: "hourly",
+              selectedType: "manual_result",
+              selectedEditability: "editable",
+            }, helpers);
+            const toolbarDom = Object.fromEntries(toolbarState.domUpdates.map(update => [update.selector, update]));
+            if (toolbarState.html !== toolbar || toolbarDom["#results-filter-toolbar"].html !== toolbar) {
+              throw new Error(`unexpected filter toolbar DOM updates: ${JSON.stringify(toolbarState)}`);
             }
 
             const allHint = results.resultsFilterHint({ filtersActive: false, totalRuns: 3, breakdown: "正式率定 2" });
@@ -798,6 +820,11 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!metrics.includes("NSE&lt;率定&gt;") || !metrics.includes("0.91&amp;")) {
               throw new Error("metric strip should escape label and value");
             }
+            const metricsState = results.resultMetricStripState([{ l: "NSE<率定>", v: "0.91&" }], helpers);
+            const metricsDom = Object.fromEntries(metricsState.domUpdates.map(update => [update.selector, update]));
+            if (metricsState.html !== metrics || metricsDom["#results-metric-strip"].html !== metrics) {
+              throw new Error(`unexpected metric strip DOM updates: ${JSON.stringify(metricsState)}`);
+            }
             const metricItems = results.resultMetricItems(
               { nse: 0.81234, kge: 0.73456, pbias: -1.234 },
               { nse: 0.70123 },
@@ -819,6 +846,11 @@ class FrontendResultsViewTests(unittest.TestCase):
             const fields = results.renderRunExportFields([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
             if (!fields.includes('data-run-export-field="q&lt;sim&gt;"') || !fields.includes("checked")) {
               throw new Error("export fields should keep keys and checked state");
+            }
+            const fieldsState = results.runExportFieldsState([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
+            const fieldsDom = Object.fromEntries(fieldsState.domUpdates.map(update => [update.selector, update]));
+            if (fieldsState.html !== fields || fieldsDom["#run-export-fields"].html !== fields) {
+              throw new Error(`unexpected run export fields DOM updates: ${JSON.stringify(fieldsState)}`);
             }
             const defaultExportFields = results.runExportFields();
             if (defaultExportFields.map(field => field.key).join("|") !== "q_sim|q_obs|q_rain|q_snow|q_ice" || defaultExportFields.some(field => !field.checked)) {
@@ -1110,6 +1142,47 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (!cards.includes("仅查看") || !cards.includes("修改标题")) {
               throw new Error("readonly/custom title labels missing");
+            }
+            const cardsState = results.runCardsState([
+              {
+                path: "C:/runs/A",
+                workspace_config: "C:/ws/A",
+                display_name: "结果<一>",
+                display_subtitle: "目录名：run_A",
+                nse_cal: 0.81234,
+                nse_val: 0.71234,
+                pbias_cal: -1.23,
+                pbias_val: 2.34,
+                studio_compatible: true,
+                has_custom_title: false,
+                hydrology_summary: {
+                  workflow_label_zh: "单流程参数率定",
+                  objective_label_zh: "统一专业目标",
+                  flow_status_zh: "径流拟合达标",
+                },
+              },
+            ], {
+              ...helpers,
+              formatMetricValue(value, digits = 2, suffix = "") {
+                return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : "—";
+              },
+              formatNumber(value, digits = 4) {
+                return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+              },
+              hydrologySummaryValue(summary, key, fallback) {
+                return summary?.[key] || fallback || "—";
+              },
+              objectiveVersionBadge() { return '<span class="status-badge">当前口径</span>'; },
+              runDisplayName(run) { return run.display_name; },
+              runDisplaySubtitle(run) { return run.display_subtitle || ""; },
+              runTypeBadge() { return '<span class="status-badge status-type">正式率定</span>'; },
+              runWorkspaceFilterPath: "C:/ws/active",
+              runWorkspaceName() { return "流域A"; },
+              selectedRunPath: "C:/runs/A",
+            });
+            const cardsDom = Object.fromEntries(cardsState.domUpdates.map(update => [update.selector, update]));
+            if (!cardsState.html.includes("结果&lt;一&gt;") || cardsDom["#run-list"].html !== cardsState.html) {
+              throw new Error(`unexpected run cards DOM updates: ${JSON.stringify(cardsState)}`);
             }
 
             const engineering = results.renderRunEngineeringSummary({

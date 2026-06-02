@@ -61,6 +61,14 @@
     ].join("");
   }
 
+  function resultFilterToolbarState(model = {}, helpers = {}) {
+    const html = renderFilterToolbar(model, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#results-filter-toolbar", html }],
+    };
+  }
+
   function resultsFilterHint(model = {}) {
     const breakdown = String(model.breakdown || "").trim();
     const totalRuns = Number(model.totalRuns || 0);
@@ -745,6 +753,14 @@
     `).join("");
   }
 
+  function resultMetricStripState(items = [], helpers = {}) {
+    const html = renderMetricStrip(items, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#results-metric-strip", html }],
+    };
+  }
+
   function resultMetricItems(calibration = {}, validation = {}, meta = {}, helpers = {}) {
     const profileLabel = helpers.profileLabel || (value => value || "—");
     const formatNumber = helpers.formatNumber || defaultFormatNumber;
@@ -870,6 +886,14 @@
   function renderRunCards(runs = [], helpers = {}) {
     const items = Array.isArray(runs) ? runs : [];
     return items.map(run => renderRunCard(run, helpers)).join("");
+  }
+
+  function runCardsState(runs = [], helpers = {}) {
+    const html = renderRunCards(runs, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#run-list", html }],
+    };
   }
 
   function hydrologySummaryFor(data = {}) {
@@ -1067,6 +1091,14 @@
         ${escapeHtml(field.label)}
       </label>
     `).join("");
+  }
+
+  function runExportFieldsState(fields = [], helpers = {}) {
+    const html = renderRunExportFields(fields, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#run-export-fields", html }],
+    };
   }
 
   function runExportFields(options = {}) {
@@ -1271,7 +1303,9 @@
     forwardSimulationTaskUiState,
     latestEditableRunPath,
     manualStarterControlState,
+    resultFilterToolbarState,
     resultMetricItems,
+    resultMetricStripState,
     renderFilterToolbar,
     renderMetricStrip,
     renderRunCard,
@@ -1282,7 +1316,9 @@
     resultChartPayloads,
     resultsFilterBreakdown,
     resultsFilterHint,
+    runCardsState,
     runExportFields,
+    runExportFieldsState,
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
