@@ -71,6 +71,8 @@ from services.event_config import (
     task_time_basis as build_task_time_basis,
     truthy_config as build_truthy_config,
 )
+from services.event_io import read_csv_flexible as build_read_csv_flexible
+from services.event_io import read_event_table_file as build_read_event_table_file
 from services.filesystem import (
     FilesystemContext,
     FilesystemPathContext,
@@ -1095,34 +1097,11 @@ def _truthy_config(value: Any, default: bool = False) -> bool:
 
 
 def _read_csv_flexible(path: Path) -> pd.DataFrame:
-    last_error: Exception | None = None
-    for encoding in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
-        try:
-            return pd.read_csv(path, encoding=encoding)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error is not None:
-        raise last_error
-    return pd.read_csv(path)
+    return build_read_csv_flexible(path)
 
 
 def _read_event_table_file(path: Path) -> list[dict[str, Any]]:
-    suffix = path.suffix.lower()
-    if suffix in {".json", ".geojson"}:
-        raw = read_json_file(path)
-        if isinstance(raw, dict):
-            events = raw.get("事件表", raw.get("events", []))
-        else:
-            events = raw
-        return [dict(item) for item in events if isinstance(item, dict)] if isinstance(events, list) else []
-    if suffix in {".xlsx", ".xls"}:
-        frame = pd.read_excel(path)
-    else:
-        frame = _read_csv_flexible(path)
-    return [
-        {str(key).strip(): value for key, value in row.items() if str(key).strip()}
-        for row in frame.to_dict(orient="records")
-    ]
+    return build_read_event_table_file(path)
 
 
 def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
