@@ -119,6 +119,7 @@ const frontendModuleContracts = [
       "renderEventForcingCoverage",
       "renderEventObservationCoverage",
       "renderWizardEventSummary",
+      "wizardEventSummaryState",
       "renderInputTimeSummary",
       "renderValidationEventSections",
     ],
@@ -2034,15 +2035,15 @@ function clearWizardEventSummary() {
 function renderWizardEventSummary(eventInfo = null, observationCoverage = null) {
   const host = $("#wz-event-file-summary");
   if (!host) return;
-  if (!eventInfo || !window.HBVStudioEventMode?.renderWizardEventSummary) {
-    host.innerHTML = "";
+  if (!window.HBVStudioEventMode?.wizardEventSummaryState) {
     return;
   }
-  host.innerHTML = window.HBVStudioEventMode.renderWizardEventSummary(eventInfo, observationCoverage, {
+  const summary = window.HBVStudioEventMode.wizardEventSummaryState(eventInfo, observationCoverage, {
     escapeHtml,
     statusClass: focusStatusClass,
     shortPath,
   });
+  applyDomUpdates(summary.domUpdates);
 }
 
 function clearBoundaryPreview() {

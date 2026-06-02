@@ -392,6 +392,14 @@
     ].join("");
   }
 
+  function wizardEventSummaryState(eventInfo = null, observationCoverage = null, helpers = {}) {
+    const html = renderWizardEventSummary(eventInfo, observationCoverage, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#wz-event-file-summary", html }],
+    };
+  }
+
   function renderInputTimeSummary(summary = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     if (!summary || !summary.headline) return "";
@@ -435,6 +443,7 @@
     renderEventForcingCoverage,
     renderEventObservationCoverage,
     renderWizardEventSummary,
+    wizardEventSummaryState,
     renderInputTimeSummary,
     renderValidationEventSections,
   };

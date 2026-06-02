@@ -123,7 +123,7 @@ class FrontendEventModeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/eventMode.js", "utf8"), context);
 
             const eventMode = context.window.HBVStudioEventMode;
-            for (const name of ["renderWizardEventSummary", "renderInputTimeSummary"]) {
+            for (const name of ["renderWizardEventSummary", "wizardEventSummaryState", "renderInputTimeSummary"]) {
               if (typeof eventMode?.[name] !== "function") throw new Error(`missing event export: ${name}`);
             }
             const helpers = {
@@ -188,6 +188,26 @@ class FrontendEventModeTests(unittest.TestCase):
             if (!html.includes("1/2 场完整") || !html.includes("缺 12")) {
               throw new Error(`observation coverage details missing: ${html}`);
             }
+            const stateHtml = eventMode.renderWizardEventSummary({
+              event_count: 1,
+              valid_event_count: 1,
+              source_file: "C:/events/floods.csv",
+              events: [
+                { event_id: "E1", name: "洪水<一>", valid: true, score_start: "2020-07-01", score_end: "2020-07-02" },
+              ],
+            }, null, helpers);
+            const summaryState = eventMode.wizardEventSummaryState({
+              event_count: 1,
+              valid_event_count: 1,
+              source_file: "C:/events/floods.csv",
+              events: [
+                { event_id: "E1", name: "洪水<一>", valid: true, score_start: "2020-07-01", score_end: "2020-07-02" },
+              ],
+            }, null, helpers);
+            const summaryDom = Object.fromEntries(summaryState.domUpdates.map(update => [update.selector, update]));
+            if (summaryState.html !== stateHtml || summaryDom["#wz-event-file-summary"].html !== stateHtml) {
+              throw new Error(`unexpected wizard event DOM updates: ${JSON.stringify(summaryState)}`);
+            }
 
             const inputHtml = eventMode.renderInputTimeSummary({
               status: "warn",
@@ -209,6 +229,11 @@ class FrontendEventModeTests(unittest.TestCase):
             }
             if (eventMode.renderWizardEventSummary(null, null, helpers) !== "") {
               throw new Error("empty wizard event summary should render empty string");
+            }
+            const emptySummaryState = eventMode.wizardEventSummaryState(null, null, helpers);
+            const emptySummaryDom = Object.fromEntries(emptySummaryState.domUpdates.map(update => [update.selector, update]));
+            if (emptySummaryState.html !== "" || emptySummaryDom["#wz-event-file-summary"].html !== "") {
+              throw new Error(`empty wizard event summary DOM updates wrong: ${JSON.stringify(emptySummaryState)}`);
             }
 
             const validationHtml = eventMode.renderValidationEventSections({
