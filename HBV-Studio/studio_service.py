@@ -180,6 +180,8 @@ from services.observed import observed_window_messages as build_observed_window_
 from services.raster_time_series import scan_tif_time_series as build_scan_tif_time_series
 from services.raster_time_series import validate_tif_grid_alignment as build_validate_tif_grid_alignment
 from services.raster_time_series import validate_tif_time_series as build_validate_tif_time_series
+from services.precip_strategy_status import PrecipStrategyStatusContext
+from services.precip_strategy_status import check_precip_strategy_outputs as build_check_precip_strategy_outputs
 from services.station_precip import StationPrecipAnalysisContext
 from services.station_precip import analyze_station_precip_inputs as build_analyze_station_precip_inputs
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
@@ -1957,39 +1959,23 @@ def check_daily_aligned(config: dict[str, Any], precip_source: Any = None) -> tu
     return ready, message, count
 
 
+def _precip_strategy_status_context() -> PrecipStrategyStatusContext:
+    return PrecipStrategyStatusContext(
+        meteo_key=METEO_KEY,
+        meteo_precip_mode_key=METEO_PRECIP_MODE_KEY,
+        current_profile=current_profile,
+        effective_precip_paths=effective_precip_paths,
+        count_matching=count_matching,
+        read_json_file=read_json_file,
+    )
+
+
 def check_precip_strategy_outputs(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    meteo = dict(config.get("气象策略", {}))
-    mode = str(meteo.get("降水方案", "grid_only")).strip()
-    profile = current_profile(config)
-    base_dir, corrected_dir, selected_source = effective_precip_paths(config, profile, precip_source=precip_source)
-    if mode == "grid_only":
-        count = count_matching(base_dir)
-        label = "当前为本地栅格基线方案，不需要额外订正。" if selected_source == "custom_tif" else "当前为格点基线方案，不需要额外订正。"
-        return count > 0, label, count
-    count = count_matching(corrected_dir)
-    label = "站点订正降水" if mode == "grid_plus_station_bias" else "泰森插值降水"
-    summary_path = Path(corrected_dir) / "precipitation_strategy_summary.json"
-    if summary_path.exists():
-        try:
-            summary = read_json_file(summary_path)
-            time_basis_label = str(summary.get("time_basis_label", "") or "").strip()
-            selected_steps = int(summary.get("selected_steps", 0) or 0)
-            written_files = int(summary.get("written_files", 0) or 0)
-            zero_steps = int(summary.get("zero_available_station_steps", 0) or 0)
-            skipped_steps = int(summary.get("skipped_out_of_scope_steps", 0) or 0)
-            parts = [f"{label}文件数：{count}"]
-            if time_basis_label:
-                parts.append(f"资料口径：{time_basis_label}")
-            if selected_steps or written_files:
-                parts.append(f"参与时段：{written_files or selected_steps}/{selected_steps or count}")
-            if zero_steps:
-                parts.append(f"无可用站点时段：{zero_steps}")
-            if skipped_steps:
-                parts.append(f"已忽略口径外时段：{skipped_steps}")
-            return count > 0, "；".join(parts), count
-        except Exception:
-            pass
-    return count > 0, f"{label}文件数：{count}", count
+    return build_check_precip_strategy_outputs(
+        config,
+        _precip_strategy_status_context(),
+        precip_source=precip_source,
+    )
 
 
 def _time_range_from_config(config: dict[str, Any]) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
