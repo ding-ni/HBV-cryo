@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.boundaryGuidanceState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -125,6 +125,43 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const hourlyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: true });
             if (hourlyBoundaryGuidance.className !== "hint-box status-warn" || !hourlyBoundaryGuidance.text.includes("1 小时")) {
               throw new Error(`hourly boundary guidance mismatch: ${JSON.stringify(hourlyBoundaryGuidance)}`);
+            }
+            const emptyObsHint = view.observationHintState(null, helpers);
+            if (emptyObsHint.text !== "选择观测径流文件后将自动推断时间范围。" || emptyObsHint.className !== "hint-box" || emptyObsHint.html !== "") {
+              throw new Error(`empty observation hint mismatch: ${JSON.stringify(emptyObsHint)}`);
+            }
+            const okObsHint = view.observationHintState({
+              info: { date_field: "date <x>", start: "2020-01-01", end: "2020-12-31", suggested_calibration_mode: "daily" },
+              selectedProfile: "daily",
+              timeBasis: "continuous",
+              periods: [
+                { label: "率定期", start: "2020-01-01", end: "2020-06-30" },
+                { label: "验证期", start: "2020-07-01", end: "2020-12-31" },
+              ],
+            }, helpers);
+            if (okObsHint.className !== "hint-box status-ok" || okObsHint.html !== "" || !okObsHint.text.includes("date <x>") || !okObsHint.text.includes("当前率定期和验证期都落在观测覆盖范围内")) {
+              throw new Error(`ok observation hint mismatch: ${JSON.stringify(okObsHint)}`);
+            }
+            const failObsHint = view.observationHintState({
+              info: { date_field: "time", start: "2020-02-01", end: "2020-10-31", suggested_calibration_mode: "hourly", effective_calibration_mode: "hourly" },
+              selectedProfile: "daily",
+              timeBasis: "continuous",
+              periods: [
+                { label: "率定期", start: "2020-01-01", end: "2020-06-30" },
+                { label: "验证期", start: "2020-07-01", end: "2020-12-31" },
+              ],
+            }, helpers);
+            if (failObsHint.className !== "hint-box status-fail" || !failObsHint.html.includes("观测时段检查未通过") || !failObsHint.html.includes("观测序列更像小时尺度") || !failObsHint.html.includes("率定期开始早于观测起点") || !failObsHint.html.includes("验证期结束晚于观测终点")) {
+              throw new Error(`failed observation hint mismatch: ${failObsHint.html}`);
+            }
+            const warnObsHint = view.observationHintState({
+              info: { date_field: "date", start: "2020-01-01", end: "2020-12-31", suggested_calibration_mode: "daily", resampled_to_daily: true, daily_aggregation: { min_hours_per_day: 20 } },
+              selectedProfile: "daily",
+              timeBasis: "event_windows",
+              periods: [{ label: "率定期", start: "2019-01-01", end: "2019-01-10" }],
+            }, helpers);
+            if (warnObsHint.className !== "hint-box status-warn" || !warnObsHint.html.includes("至少 20 小时/天") || !warnObsHint.html.includes("当前按洪水事件检查资料") || warnObsHint.html.includes("率定期开始早于观测起点")) {
+              throw new Error(`warning observation hint mismatch: ${warnObsHint.html}`);
             }
 
             const sourceSteps = [

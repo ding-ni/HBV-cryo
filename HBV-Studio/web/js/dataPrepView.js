@@ -282,6 +282,106 @@
     };
   }
 
+  function parseObservationComparableTime(text) {
+    const value = String(text || "").trim();
+    if (!value) return null;
+    const normalized = value.replace("T", " ");
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}))?/);
+    if (!match) return null;
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4] || "0"),
+      Number(match[5] || "0"),
+      0,
+      0,
+    );
+  }
+
+  function formatObservationComparableTime(date, hourly = false) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "—";
+    const yyyy = String(date.getFullYear()).padStart(4, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    if (!hourly) return `${yyyy}-${mm}-${dd}`;
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mi = String(date.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  }
+
+  function observationHintState(model = {}, helpers = {}) {
+    model = model || {};
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const info = model.info || null;
+    if (!info) {
+      return {
+        html: "",
+        text: "选择观测径流文件后将自动推断时间范围。",
+        className: "hint-box",
+      };
+    }
+    const selectedProfile = model.selectedProfile === "hourly" ? "hourly" : "daily";
+    const hourly = selectedProfile === "hourly";
+    const timeBasis = String(model.timeBasis || "continuous");
+    const periods = Array.isArray(model.periods) ? model.periods : [];
+    const obsStart = parseObservationComparableTime(info.start);
+    const obsEnd = parseObservationComparableTime(info.end);
+    const issues = [];
+    const warnings = [];
+    const effectiveProfile = info.effective_calibration_mode || info.suggested_calibration_mode || "";
+    if (effectiveProfile && effectiveProfile !== selectedProfile) {
+      issues.push(`观测序列更像${info.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度"}，和当前项目模式不一致。`);
+    } else if (selectedProfile === "daily" && info.resampled_to_daily) {
+      const minHours = info.daily_aggregation?.min_hours_per_day || 18;
+      warnings.push(`当前项目为日尺度，系统会把小时观测按自然日聚合为日平均流量（至少 ${minHours} 小时/天）。`);
+    }
+    if (timeBasis === "event_windows") {
+      warnings.push("当前按洪水事件检查资料；观测覆盖将在第 7 步按各场洪水时段核验。");
+    }
+    if (timeBasis !== "event_windows") {
+      periods.forEach(period => {
+        const startTs = parseObservationComparableTime(period.start);
+        const endTs = parseObservationComparableTime(period.end);
+        if (!startTs || !endTs || !obsStart || !obsEnd) return;
+        if (startTs < obsStart) {
+          issues.push(`${period.label}开始早于观测起点（${formatObservationComparableTime(startTs, hourly)} < ${formatObservationComparableTime(obsStart, hourly)}）。`);
+        }
+        if (endTs > obsEnd) {
+          issues.push(`${period.label}结束晚于观测终点（${formatObservationComparableTime(endTs, hourly)} > ${formatObservationComparableTime(obsEnd, hourly)}）。`);
+        }
+        const stepHours = selectedProfile === "hourly" ? 1 : 24;
+        const steps = Math.round((endTs - startTs) / (stepHours * 3600000)) + 1;
+        if (selectedProfile === "daily" && steps > 0 && steps < 180) {
+          warnings.push(`${period.label}长度只有 ${steps} 天，正式率定通常建议至少半年以上。`);
+        }
+        if (selectedProfile === "hourly" && steps > 0 && steps < 24 * 30) {
+          warnings.push(`${period.label}长度只有 ${steps} 小时，小时尺度正式率定通常建议至少 30 天以上。`);
+        }
+      });
+    }
+    const summary = `识别到时间列：${info.date_field}；覆盖范围：${info.start} → ${info.end}；原始序列：${info.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度"}。`;
+    if (issues.length) {
+      return {
+        html: `<strong>观测时段检查未通过。</strong><br>${escapeHtml(summary)}<ul>${issues.slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`,
+        text: "",
+        className: "hint-box status-fail",
+      };
+    }
+    if (warnings.length) {
+      return {
+        html: `<strong>观测时段检查通过，但建议继续优化。</strong><br>${escapeHtml(summary)}<ul>${warnings.slice(0, 3).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`,
+        text: "",
+        className: "hint-box status-warn",
+      };
+    }
+    return {
+      html: "",
+      text: `${summary} 当前率定期和验证期都落在观测覆盖范围内。`,
+      className: "hint-box status-ok",
+    };
+  }
+
   function describeEra5Need(sources = {}) {
     if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
       return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
@@ -859,6 +959,7 @@
     meteoImportErrorUiState,
     meteoImportUiState,
     meteoSourceLabels,
+    observationHintState,
     prepPanelSummary,
     prepStepRunningStatus,
     prepTaskErrorUiState,

@@ -268,7 +268,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["boundaryGuidanceState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -1925,64 +1925,21 @@ function formatComparableTime(date, hourly = isHourlyTimescaleSelected()) {
 function updateObservationHint() {
   const host = $("#wz-obs-hint");
   if (!host) return;
-  const info = state.obsInfo;
-  if (!info) {
-    host.textContent = "选择观测径流文件后将自动推断时间范围。";
-    host.className = "hint-box";
-    return;
-  }
-  const selectedProfile = isHourlyTimescaleSelected() ? "hourly" : "daily";
-  const timeBasis = $("#wz-time-basis")?.value || "continuous";
-  const obsStart = parseComparableTime(info.start);
-  const obsEnd = parseComparableTime(info.end);
-  const issues = [];
-  const warnings = [];
-  const effectiveProfile = info.effective_calibration_mode || info.suggested_calibration_mode || "";
-  if (effectiveProfile && effectiveProfile !== selectedProfile) {
-    issues.push(`观测序列更像${info.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度"}，和当前项目模式不一致。`);
-  } else if (selectedProfile === "daily" && info.resampled_to_daily) {
-    const minHours = info.daily_aggregation?.min_hours_per_day || 18;
-    warnings.push(`当前项目为日尺度，系统会把小时观测按自然日聚合为日平均流量（至少 ${minHours} 小时/天）。`);
-  }
-  if (timeBasis === "event_windows") {
-    warnings.push("当前按洪水事件检查资料；观测覆盖将在第 7 步按各场洪水时段核验。");
-  }
-  const periods = [
-    { label: "率定期", start: getWizardTimeValue("#wz-calib-start"), end: getWizardTimeValue("#wz-calib-end") },
-    { label: "验证期", start: getWizardTimeValue("#wz-valid-start"), end: getWizardTimeValue("#wz-valid-end") },
-  ];
-  if (timeBasis !== "event_windows") {
-    periods.forEach(period => {
-      const startTs = parseComparableTime(period.start);
-      const endTs = parseComparableTime(period.end);
-      if (!startTs || !endTs || !obsStart || !obsEnd) return;
-      if (startTs < obsStart) {
-        issues.push(`${period.label}开始早于观测起点（${formatComparableTime(startTs)} < ${formatComparableTime(obsStart)}）。`);
-      }
-      if (endTs > obsEnd) {
-        issues.push(`${period.label}结束晚于观测终点（${formatComparableTime(endTs)} > ${formatComparableTime(obsEnd)}）。`);
-      }
-      const stepHours = selectedProfile === "hourly" ? 1 : 24;
-      const steps = Math.round((endTs - startTs) / (stepHours * 3600000)) + 1;
-      if (selectedProfile === "daily" && steps > 0 && steps < 180) {
-        warnings.push(`${period.label}长度只有 ${steps} 天，正式率定通常建议至少半年以上。`);
-      }
-      if (selectedProfile === "hourly" && steps > 0 && steps < 24 * 30) {
-        warnings.push(`${period.label}长度只有 ${steps} 小时，小时尺度正式率定通常建议至少 30 天以上。`);
-      }
-    });
-  }
-  const summary = `识别到时间列：${info.date_field}；覆盖范围：${info.start} → ${info.end}；原始序列：${info.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度"}。`;
-  if (issues.length) {
-    host.innerHTML = `<strong>观测时段检查未通过。</strong><br>${escapeHtml(summary)}<ul>${issues.slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-    host.className = "hint-box status-fail";
-  } else if (warnings.length) {
-    host.innerHTML = `<strong>观测时段检查通过，但建议继续优化。</strong><br>${escapeHtml(summary)}<ul>${warnings.slice(0, 3).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-    host.className = "hint-box status-warn";
+  const hint = window.HBVStudioDataPrepView.observationHintState({
+    info: state.obsInfo,
+    selectedProfile: isHourlyTimescaleSelected() ? "hourly" : "daily",
+    timeBasis: $("#wz-time-basis")?.value || "continuous",
+    periods: [
+      { label: "率定期", start: getWizardTimeValue("#wz-calib-start"), end: getWizardTimeValue("#wz-calib-end") },
+      { label: "验证期", start: getWizardTimeValue("#wz-valid-start"), end: getWizardTimeValue("#wz-valid-end") },
+    ],
+  }, { escapeHtml });
+  if (hint.html) {
+    host.innerHTML = hint.html;
   } else {
-    host.textContent = `${summary} 当前率定期和验证期都落在观测覆盖范围内。`;
-    host.className = "hint-box status-ok";
+    host.textContent = hint.text;
   }
+  host.className = hint.className;
 }
 
 function updateEventModeHint() {
