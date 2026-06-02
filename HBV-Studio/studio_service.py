@@ -179,6 +179,9 @@ from services.system_status import (
     health_payload as build_health_payload,
     source_files_latest_mtime as build_source_files_latest_mtime,
 )
+from services.time_utils import format_timestamp_for_display as build_format_timestamp_for_display
+from services.time_utils import is_date_only_string as build_is_date_only_string
+from services.time_utils import normalize_time_step_hours as build_normalize_time_step_hours
 from services.template_sync import TuotuoheSyncStartContext
 from services.template_sync import tuotuohe_sync_start_plan as build_tuotuohe_sync_start_plan
 from services.tasks import (
@@ -1054,11 +1057,7 @@ def normalize_legacy_project_paths(
 
 
 def normalize_time_step_hours(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except Exception:
-        numeric = 24.0
-    return 1.0 if numeric <= 1.5 else 24.0
+    return build_normalize_time_step_hours(value)
 
 
 def read_json_file(path: Path) -> dict[str, Any]:
@@ -1196,17 +1195,11 @@ def parse_time_from_name(name: str) -> pd.Timestamp | None:
 
 
 def is_date_only_string(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    text = value.strip()
-    return bool(text) and (" " not in text) and ("T" not in text) and len(text) <= 10
+    return build_is_date_only_string(value)
 
 
 def format_timestamp_for_display(timestamp: pd.Timestamp, step_hours: float) -> str:
-    ts = pd.Timestamp(timestamp)
-    if normalize_time_step_hours(step_hours) >= 24.0 and ts.hour == 0 and ts.minute == 0 and ts.second == 0:
-        return ts.strftime("%Y-%m-%d")
-    return ts.strftime("%Y-%m-%d %H:%M")
+    return build_format_timestamp_for_display(timestamp, step_hours)
 
 
 def expected_warmup_end(time_values: dict[str, pd.Timestamp], step_hours: float) -> pd.Timestamp | None:
