@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.filterRuns || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runStepHours) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runStepHours) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -106,6 +106,52 @@ class FrontendResultsViewTests(unittest.TestCase):
             });
             if (breakdown.text !== "正式率定 1 / 手调起点 1 / 手调结果 1 / 连续状态预报 1 / 历史结果 1") {
               throw new Error(`unexpected results filter breakdown: ${JSON.stringify(breakdown)}`);
+            }
+            const alignedNoChange = results.alignedRunFiltersForSelection(runItems[0], {
+              workspacePath: "C:/ws/A",
+              profile: "daily",
+              type: "calibration",
+              editability: "editable",
+            }, [runItems[0]], {
+              ...helpers,
+              runTypeValue(run) { return run.run_type; },
+            });
+            if (alignedNoChange.changed || JSON.stringify(alignedNoChange.filters) !== JSON.stringify({
+              workspacePath: "C:/ws/A",
+              profile: "daily",
+              type: "calibration",
+              editability: "editable",
+            })) {
+              throw new Error(`aligned filters should stay unchanged: ${JSON.stringify(alignedNoChange)}`);
+            }
+            const alignedMismatch = results.alignedRunFiltersForSelection(runItems[2], {
+              workspacePath: "C:/ws/A",
+              profile: "hourly",
+              type: "manual_result",
+              editability: "editable",
+            }, [runItems[1]], {
+              ...helpers,
+              runTypeValue(run) { return run.run_type; },
+            });
+            if (!alignedMismatch.changed || JSON.stringify(alignedMismatch.filters) !== JSON.stringify({
+              workspacePath: "C:/ws/B",
+              profile: "",
+              type: "",
+              editability: "all",
+            })) {
+              throw new Error(`aligned filters should clear incompatible selection: ${JSON.stringify(alignedMismatch)}`);
+            }
+            const alignedHiddenSelection = results.alignedRunFiltersForSelection(runItems[3], {
+              workspacePath: "",
+              profile: "",
+              type: "calibration",
+              editability: "all",
+            }, [runItems[0]], {
+              ...helpers,
+              runTypeValue(run) { return run.run_type; },
+            });
+            if (!alignedHiddenSelection.changed || alignedHiddenSelection.filters.workspacePath !== "C:/ws/A" || alignedHiddenSelection.filters.type !== "") {
+              throw new Error(`hidden selected run should activate its workspace and clear stage: ${JSON.stringify(alignedHiddenSelection)}`);
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);

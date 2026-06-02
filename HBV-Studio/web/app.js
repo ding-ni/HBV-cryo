@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["filterRuns", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runStepHours"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runStepHours"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -954,34 +954,22 @@ function runProfileValue(run) {
 
 function alignRunFiltersForSelection(run) {
   if (!run) return false;
-  let changed = false;
-  const workspacePath = String(run.workspace_config || "").trim();
-  const currentSelection = String(run.path || "").trim();
-  if (workspacePath && state.runWorkspaceFilterPath && !samePath(workspacePath, state.runWorkspaceFilterPath)) {
-    state.runWorkspaceFilterPath = workspacePath;
-    changed = true;
-  } else if (workspacePath && !state.runWorkspaceFilterPath) {
-    const currentlyVisible = visibleRuns();
-    if (currentSelection && !currentlyVisible.some(item => samePath(item.path, currentSelection))) {
-      state.runWorkspaceFilterPath = workspacePath;
-      changed = true;
-    }
-  }
-  const profile = runProfileValue(run);
-  if (state.runProfileFilter && profile && profile !== state.runProfileFilter) {
-    state.runProfileFilter = "";
-    changed = true;
-  }
-  const type = runTypeValue(run);
-  if (state.runTypeFilter && type && type !== state.runTypeFilter) {
-    state.runTypeFilter = "";
-    changed = true;
-  }
-  if ((state.runEditabilityFilter === "editable" && !run.studio_compatible) || (state.runEditabilityFilter === "readonly" && run.studio_compatible)) {
-    state.runEditabilityFilter = "all";
-    changed = true;
-  }
-  return changed;
+  const aligned = window.HBVStudioResultsView.alignedRunFiltersForSelection(
+    run,
+    {
+      workspacePath: state.runWorkspaceFilterPath,
+      profile: state.runProfileFilter,
+      type: state.runTypeFilter,
+      editability: state.runEditabilityFilter,
+    },
+    visibleRuns(),
+    { samePath, runTypeValue }
+  );
+  state.runWorkspaceFilterPath = aligned.filters.workspacePath;
+  state.runProfileFilter = aligned.filters.profile;
+  state.runTypeFilter = aligned.filters.type;
+  state.runEditabilityFilter = aligned.filters.editability;
+  return aligned.changed;
 }
 
 function layoutStatusClass(item) {

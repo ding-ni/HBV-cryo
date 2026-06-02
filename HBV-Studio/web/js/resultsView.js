@@ -129,6 +129,46 @@
     };
   }
 
+  function alignedRunFiltersForSelection(run = null, filters = {}, currentlyVisibleRuns = [], helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const runTypeValue = helpers.runTypeValue || (item => String(item?.run_type || item?.type || "").trim().toLowerCase());
+    const next = {
+      workspacePath: String(filters.workspacePath || "").trim(),
+      profile: String(filters.profile || "").trim().toLowerCase(),
+      type: String(filters.type || "").trim().toLowerCase(),
+      editability: String(filters.editability || "all").trim().toLowerCase() || "all",
+    };
+    if (!run) return { changed: false, filters: next };
+    let changed = false;
+    const workspacePath = String(run.workspace_config || "").trim();
+    const currentSelection = String(run.path || "").trim();
+    if (workspacePath && next.workspacePath && !samePath(workspacePath, next.workspacePath)) {
+      next.workspacePath = workspacePath;
+      changed = true;
+    } else if (workspacePath && !next.workspacePath) {
+      const visible = Array.isArray(currentlyVisibleRuns) ? currentlyVisibleRuns : [];
+      if (currentSelection && !visible.some(item => samePath(item?.path, currentSelection))) {
+        next.workspacePath = workspacePath;
+        changed = true;
+      }
+    }
+    const profile = runProfileValue(run);
+    if (next.profile && profile && profile !== next.profile) {
+      next.profile = "";
+      changed = true;
+    }
+    const type = runTypeValue(run);
+    if (next.type && type && type !== next.type) {
+      next.type = "";
+      changed = true;
+    }
+    if ((next.editability === "editable" && !run.studio_compatible) || (next.editability === "readonly" && run.studio_compatible)) {
+      next.editability = "all";
+      changed = true;
+    }
+    return { changed, filters: next };
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -537,6 +577,7 @@
   }
 
   window.HBVStudioResultsView = {
+    alignedRunFiltersForSelection,
     filterRuns,
     resultMetricItems,
     renderFilterToolbar,
