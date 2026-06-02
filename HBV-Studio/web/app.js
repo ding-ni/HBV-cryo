@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportUiState", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3515,52 +3515,17 @@ function updateMeteoImportUi(task) {
   const button = $("#wz-import-meteo-btn");
   if (!hint || !logBox || !button || !task) return;
 
-  const progress = task.ui_progress || {};
-  const logs = task.output || [];
-  logBox.style.display = logs.length ? "" : "none";
-  setLogBoxContent(logBox, logs.slice(-80), "wizard:import-log");
-
-  if (task.status === "running") {
-    const total = Number(progress.total || 0);
-    const current = Number(progress.current || 0);
-    const label = progress.label || "导入";
-    const itemCurrent = Number(progress.item_current || 0);
-    const itemTotal = Number(progress.item_total || 0);
-    const ts = progress.timestamp ? ` · 当前时间 ${progress.timestamp}` : "";
-    hint.textContent = total > 0
-      ? `${progress.stage || "正在导入"}：总进度 ${current}/${total}；${label} ${itemCurrent}/${itemTotal}${ts}`
-      : (progress.stage || "正在准备导入，请稍候...");
-    hint.className = "hint-box status-warn";
-    button.disabled = true;
-    button.textContent = "正在导入...";
-    return;
-  }
-
-  button.disabled = false;
-  button.textContent = "验证并导入";
-  const result = task.result || {};
-  if (task.status === "completed") {
-    const issues = [...(result.validation_errors || []), ...(result.validation_warnings || [])];
-    const modeLabel = result.preparation_mode_label || "本地栅格导入";
-    const sourceDirs = result.source_dirs || {};
-    const targetDirs = result.target_dirs || {};
-    const pathLines = ["prec", "temp", "evap"].map(key => {
-      const label = key === "prec" ? "降水" : key === "temp" ? "气温" : "蒸散发";
-      const sourceDir = String(sourceDirs[key] || "").trim();
-      const targetDir = String(targetDirs[key] || "").trim();
-      if (!sourceDir && !targetDir) return "";
-      const parts = [];
-      if (sourceDir) parts.push(`来源 <code>${escapeHtml(shortPath(sourceDir))}</code>`);
-      if (targetDir) parts.push(`写入 <code>${escapeHtml(shortPath(targetDir))}</code>`);
-      return `${label}：${parts.join(" → ")}`;
-    }).filter(Boolean);
-    hint.innerHTML = `${escapeHtml(modeLabel)}完成：降水 ${escapeHtml(String(result.prec_count || 0))} 文件、气温 ${escapeHtml(String(result.temp_count || 0))} 文件、蒸散 ${escapeHtml(String(result.evap_count || 0))} 文件；按时间顺序导入。${escapeHtml(result.aligned ? "网格已一致。" : "已自动裁剪对齐到 DEM 网格。")}${result.validation_ok ? "" : ` 当前仍有问题：${escapeHtml(issues.slice(0, 2).join("；") || "请到第 7 步继续检查。")}`}${pathLines.length ? `<div style="margin-top:8px">${pathLines.join("<br>")}</div>` : ""}`;
-    hint.className = `hint-box ${result.validation_ok ? "status-ok" : "status-warn"}`;
+  const uiState = window.HBVStudioDataPrepView.meteoImportUiState(task, { escapeHtml, shortPath });
+  logBox.style.display = uiState.log.visible ? "" : "none";
+  setLogBoxContent(logBox, uiState.log.lines, uiState.log.key);
+  button.disabled = uiState.button.disabled;
+  button.textContent = uiState.button.text;
+  if (uiState.hint.html) {
+    hint.innerHTML = uiState.hint.html;
   } else {
-    const lastLine = logs.length ? logs[logs.length - 1] : "导入失败，请检查目录与文件名格式。";
-    hint.textContent = lastLine;
-    hint.className = "hint-box status-fail";
+    hint.textContent = uiState.hint.text;
   }
+  hint.className = uiState.hint.className;
 }
 
 function findCurrentMeteoImportTask({ runningOnly = false } = {}) {

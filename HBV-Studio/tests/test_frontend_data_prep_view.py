@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -178,6 +178,49 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const missingEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "mswep", temp: "era5", pet: "era5_fao56" }, status: { exists: false } });
             if (missingEra5.hint.className !== "hint-box status-warn" || !missingEra5.hint.text.includes("当前方案要用的 ERA5 变量") || !missingEra5.hint.text.includes("还没检测到 .cdsapirc")) {
               throw new Error(`ERA5 missing panel mismatch: ${JSON.stringify(missingEra5)}`);
+            }
+
+            const meteoRunning = view.meteoImportUiState({
+              status: "running",
+              ui_progress: { stage: "裁剪导入", current: 2, total: 5, label: "降水", item_current: 3, item_total: 7, timestamp: "2026-06-03T09:00" },
+              output: Array.from({ length: 82 }, (_, index) => `导入日志 ${index}`),
+            }, helpers);
+            if (meteoRunning.hint.text !== "裁剪导入：总进度 2/5；降水 3/7 · 当前时间 2026-06-03T09:00" || meteoRunning.hint.className !== "hint-box status-warn") {
+              throw new Error(`meteo import running state mismatch: ${JSON.stringify(meteoRunning)}`);
+            }
+            if (!meteoRunning.button.disabled || meteoRunning.button.text !== "正在导入..." || meteoRunning.log.lines.length !== 80 || meteoRunning.log.lines[0] !== "导入日志 2") {
+              throw new Error(`meteo import running controls mismatch: ${JSON.stringify(meteoRunning)}`);
+            }
+            const meteoCompleted = view.meteoImportUiState({
+              status: "completed",
+              result: {
+                preparation_mode_label: "本地导入 <A>",
+                prec_count: 2,
+                temp_count: 3,
+                evap_count: 4,
+                aligned: false,
+                validation_ok: false,
+                validation_warnings: ["文件名 <不规范>", "缺测 & 待补", "第三条不显示"],
+                source_dirs: { prec: "C:/raw/precip <bad>", temp: "C:/raw/temp" },
+                target_dirs: { prec: "D:/workspace/prec", evap: "D:/workspace/evap <bad>" },
+              },
+              output: ["完成日志"],
+            }, { ...helpers, shortPath: value => String(value || "").split(/[\\/]/).pop() });
+            if (meteoCompleted.hint.className !== "hint-box status-warn" || meteoCompleted.button.disabled || meteoCompleted.button.text !== "验证并导入") {
+              throw new Error(`meteo import completed controls mismatch: ${JSON.stringify(meteoCompleted)}`);
+            }
+            if (!meteoCompleted.hint.html.includes("本地导入 &lt;A&gt;完成") || !meteoCompleted.hint.html.includes("已自动裁剪对齐到 DEM 网格。")) {
+              throw new Error(`meteo import completed text mismatch: ${meteoCompleted.hint.html}`);
+            }
+            if (!meteoCompleted.hint.html.includes("文件名 &lt;不规范&gt;；缺测 &amp; 待补") || meteoCompleted.hint.html.includes("第三条不显示")) {
+              throw new Error(`meteo import warning summary mismatch: ${meteoCompleted.hint.html}`);
+            }
+            if (!meteoCompleted.hint.html.includes("precip &lt;bad&gt;") || !meteoCompleted.hint.html.includes("evap &lt;bad&gt;")) {
+              throw new Error(`meteo import paths should be escaped: ${meteoCompleted.hint.html}`);
+            }
+            const meteoFailed = view.meteoImportUiState({ status: "failed", output: [] }, helpers);
+            if (meteoFailed.hint.text !== "导入失败，请检查目录与文件名格式。" || meteoFailed.hint.className !== "hint-box status-fail" || meteoFailed.log.visible) {
+              throw new Error(`meteo import failed fallback mismatch: ${JSON.stringify(meteoFailed)}`);
             }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });

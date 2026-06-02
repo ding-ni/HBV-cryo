@@ -299,6 +299,85 @@
     };
   }
 
+  function meteoImportUiState(task = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const progress = task?.ui_progress || {};
+    const logs = Array.isArray(task?.output) ? task.output : [];
+    const baseState = {
+      log: {
+        visible: logs.length > 0,
+        lines: logs.slice(-80),
+        key: "wizard:import-log",
+      },
+      button: {
+        disabled: false,
+        text: "验证并导入",
+      },
+      hint: {
+        html: "",
+        text: "",
+        className: "hint-box",
+      },
+    };
+
+    if (task?.status === "running") {
+      const total = Number(progress.total || 0);
+      const current = Number(progress.current || 0);
+      const label = progress.label || "导入";
+      const itemCurrent = Number(progress.item_current || 0);
+      const itemTotal = Number(progress.item_total || 0);
+      const ts = progress.timestamp ? ` · 当前时间 ${progress.timestamp}` : "";
+      return {
+        ...baseState,
+        button: { disabled: true, text: "正在导入..." },
+        hint: {
+          html: "",
+          text: total > 0
+            ? `${progress.stage || "正在导入"}：总进度 ${current}/${total}；${label} ${itemCurrent}/${itemTotal}${ts}`
+            : (progress.stage || "正在准备导入，请稍候..."),
+          className: "hint-box status-warn",
+        },
+      };
+    }
+
+    const result = task?.result || {};
+    if (task?.status === "completed") {
+      const issues = [...(result.validation_errors || []), ...(result.validation_warnings || [])];
+      const modeLabel = result.preparation_mode_label || "本地栅格导入";
+      const sourceDirs = result.source_dirs || {};
+      const targetDirs = result.target_dirs || {};
+      const pathLines = ["prec", "temp", "evap"].map(key => {
+        const label = key === "prec" ? "降水" : key === "temp" ? "气温" : "蒸散发";
+        const sourceDir = String(sourceDirs[key] || "").trim();
+        const targetDir = String(targetDirs[key] || "").trim();
+        if (!sourceDir && !targetDir) return "";
+        const parts = [];
+        if (sourceDir) parts.push(`来源 <code>${escapeHtml(shortPath(sourceDir))}</code>`);
+        if (targetDir) parts.push(`写入 <code>${escapeHtml(shortPath(targetDir))}</code>`);
+        return `${label}：${parts.join(" → ")}`;
+      }).filter(Boolean);
+      return {
+        ...baseState,
+        hint: {
+          html: `${escapeHtml(modeLabel)}完成：降水 ${escapeHtml(String(result.prec_count || 0))} 文件、气温 ${escapeHtml(String(result.temp_count || 0))} 文件、蒸散 ${escapeHtml(String(result.evap_count || 0))} 文件；按时间顺序导入。${escapeHtml(result.aligned ? "网格已一致。" : "已自动裁剪对齐到 DEM 网格。")}${result.validation_ok ? "" : ` 当前仍有问题：${escapeHtml(issues.slice(0, 2).join("；") || "请到第 7 步继续检查。")}`}${pathLines.length ? `<div style="margin-top:8px">${pathLines.join("<br>")}</div>` : ""}`,
+          text: "",
+          className: `hint-box ${result.validation_ok ? "status-ok" : "status-warn"}`,
+        },
+      };
+    }
+
+    const lastLine = logs.length ? logs[logs.length - 1] : "导入失败，请检查目录与文件名格式。";
+    return {
+      ...baseState,
+      hint: {
+        html: "",
+        text: lastLine,
+        className: "hint-box status-fail",
+      },
+    };
+  }
+
   function prepTaskUiState(task = {}) {
     const progress = task?.ui_progress || {};
     const logs = Array.isArray(task?.output) ? task.output : [];
@@ -470,6 +549,7 @@
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    meteoImportUiState,
     prepPanelSummary,
     prepTaskUiState,
     renderBootstrapStatus,
