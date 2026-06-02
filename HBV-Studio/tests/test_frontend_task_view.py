@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskProgressChartData"]) {
+            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListState", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -124,7 +124,8 @@ class FrontendTaskViewTests(unittest.TestCase):
               throw new Error(`unexpected toolbar hint: ${toolbar.hintClassName} ${toolbar.hintText}`);
             }
             const toolbarDom = Object.fromEntries(toolbar.domUpdates.map(update => [update.selector, update]));
-            if (toolbarDom["#task-filter-hint"].text !== "当前显示 1/4 个任务 · 运行中 0 · 失败 1 · 范围：全部工作区" ||
+            if (toolbarDom["#task-filter-toolbar"].html !== toolbar.toolbarHtml ||
+                toolbarDom["#task-filter-hint"].text !== "当前显示 1/4 个任务 · 运行中 0 · 失败 1 · 范围：全部工作区" ||
                 toolbarDom["#task-filter-hint"].className !== "hint-box status-warn") {
               throw new Error(`unexpected toolbar DOM updates: ${JSON.stringify(toolbarDom)}`);
             }
@@ -142,6 +143,11 @@ class FrontendTaskViewTests(unittest.TestCase):
             }
             if (!taskView.renderTaskList([], helpers).includes("当前筛选下暂无任务")) {
               throw new Error("empty task hint missing");
+            }
+            const listState = taskView.taskListState(currentActive, helpers);
+            const listDom = Object.fromEntries(listState.domUpdates.map(update => [update.selector, update]));
+            if (listState.html !== html || listDom["#task-list"].html !== html) {
+              throw new Error(`unexpected task list DOM updates: ${JSON.stringify(listState)}`);
             }
 
             if (taskView.taskProgressChartData([{ gen: 1 }]) !== null) {

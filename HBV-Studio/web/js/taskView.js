@@ -167,7 +167,10 @@
       total,
       running,
       failed,
-      domUpdates: [{ selector: "#task-filter-hint", text: hintText, className: hintClassName }],
+      domUpdates: [
+        { selector: "#task-filter-toolbar", html: toolbarHtml },
+        { selector: "#task-filter-hint", text: hintText, className: hintClassName },
+      ],
     };
   }
 
@@ -763,6 +766,14 @@
     return items.map(task => renderTaskCard(task, helpers)).join("");
   }
 
+  function taskListState(tasks, helpers = {}) {
+    const html = renderTaskList(tasks, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#task-list", html }],
+    };
+  }
+
   window.HBVStudioTaskView = {
     cleanTaskLogMessage,
     filterTasks,
@@ -773,6 +784,7 @@
     renderTaskFilterToolbar,
     renderTaskList,
     renderTaskMilestones,
+    taskListState,
     taskContextSummary,
     taskDebugDetails,
     taskLastMeaningfulLog,

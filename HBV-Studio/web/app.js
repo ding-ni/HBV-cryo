@@ -279,6 +279,7 @@ const frontendModuleContracts = [
       "taskStatusClass",
       "taskStatusLabel",
       "taskSummaryLine",
+      "taskListState",
       "taskTypeLabel",
     ],
   },
@@ -680,7 +681,6 @@ function renderTaskFilterToolbar() {
     status: state.taskStatusFilter,
     type: state.taskTypeFilter,
   }, { escapeHtml, samePath, workspaceLabelByPath });
-  host.innerHTML = rendered.toolbarHtml;
   applyDomUpdates(rendered.domUpdates);
 }
 
@@ -5072,7 +5072,7 @@ function renderTaskProgressCharts() {
 
 function renderTasks() {
   renderTaskFilterToolbar();
-  $("#task-list").innerHTML = window.HBVStudioTaskView.renderTaskList(visibleTasks(), {
+  const taskList = window.HBVStudioTaskView.taskListState(visibleTasks(), {
     escapeHtml,
     formatDateTime,
     formatDurationSeconds,
@@ -5085,6 +5085,7 @@ function renderTasks() {
     taskDebugOpen: state.taskDebugOpen,
     workspaceLabelByPath,
   });
+  applyDomUpdates(taskList.domUpdates);
   restoreVisibleLogViewports("#task-list [data-log-key]");
   renderTaskProgressCharts();
 }
