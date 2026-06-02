@@ -198,12 +198,12 @@ from services.meteo_config import (
     METEO_STATION_META_KEY,
     METEO_STATION_PREC_KEY,
     METEO_TEMP_SOURCE_KEY,
-    configured_precip_source as build_configured_precip_source,
-    display_precip_source_label as build_display_precip_source_label,
-    display_runtime_precip_label as build_display_runtime_precip_label,
+    configured_precip_source,
+    display_precip_source_label,
+    display_runtime_precip_label,
     effective_precip_paths as build_effective_precip_paths,
-    effective_precip_source as build_effective_precip_source,
-    resolve_precip_source as build_resolve_precip_source,
+    effective_precip_source,
+    resolve_precip_source,
 )
 from services.meteo_status import MeteoStateContext
 from services.meteo_status import cdsapi_status as build_cdsapi_status
@@ -648,26 +648,6 @@ VECTOR_BUNDLE_SUFFIXES = tuple(
         (".shp", ".dbf", ".shx", ".prj", ".cpg", ".sbn", ".sbx", ".xml"),
     )
 )
-
-
-def configured_precip_source(config: dict[str, Any]) -> str:
-    return build_configured_precip_source(config)
-
-
-def resolve_precip_source(config: dict[str, Any], source: Any = None) -> str:
-    return build_resolve_precip_source(config, source)
-
-
-def effective_precip_source(source: str) -> str:
-    return build_effective_precip_source(source)
-
-
-def display_precip_source_label(source: str) -> str:
-    return build_display_precip_source_label(source)
-
-
-def display_runtime_precip_label(config: dict[str, Any]) -> str:
-    return build_display_runtime_precip_label(config)
 
 
 def effective_precip_paths(
