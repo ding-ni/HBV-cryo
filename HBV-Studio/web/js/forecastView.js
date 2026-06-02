@@ -91,6 +91,37 @@
     return "需用新版结果";
   }
 
+  function pickForecastSourceRun(candidates = [], preferredPath = "", helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const isReady = helpers.forecastRunReady || forecastRunReady;
+    const items = Array.isArray(candidates) ? candidates : [];
+    const targetPath = String(preferredPath || "").trim();
+    if (targetPath) {
+      const matched = items.find(run => samePath(run?.path, targetPath));
+      if (matched) return matched;
+    }
+    return items.find(isReady) || items[0] || null;
+  }
+
+  function forecastResultRuns(runs = [], helpers = {}) {
+    const runTypeValue = helpers.runTypeValue || (run => run?.run_type || run?.kind || "");
+    const items = Array.isArray(runs) ? runs : [];
+    return items
+      .filter(run => runTypeValue(run) === "forecast_restart" && run?.path)
+      .sort((a, b) => Number(b?.updated_at || 0) - Number(a?.updated_at || 0));
+  }
+
+  function forecastSelectedResultRun(runs = [], selectedPath = "", helpers = {}) {
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const items = Array.isArray(runs) ? runs : [];
+    const targetPath = String(selectedPath || "").trim();
+    if (targetPath) {
+      const matched = items.find(run => samePath(run?.path, targetPath));
+      if (matched) return matched;
+    }
+    return items[0] || null;
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -800,12 +831,15 @@
     forecastCandidateRuns,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastResultRuns,
     forecastRunReady,
     forecastRunReadinessText,
+    forecastSelectedResultRun,
     forecastSuggestedStart,
     forecastTimeComparable,
     formatForecastInputTime,
     parseForecastTime,
+    pickForecastSourceRun,
     renderForecastSourceOptions,
     renderForecastSourceSummary,
     forecastRestartTasks,

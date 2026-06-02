@@ -155,12 +155,15 @@ const frontendModuleContracts = [
       "forecastCandidateRuns",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastResultRuns",
       "forecastRunReady",
       "forecastRunReadinessText",
+      "forecastSelectedResultRun",
       "forecastSuggestedStart",
       "forecastTimeComparable",
       "formatForecastInputTime",
       "parseForecastTime",
+      "pickForecastSourceRun",
       "renderForecastSourceOptions",
       "renderForecastSourceSummary",
       "forecastRestartTasks",
@@ -5503,8 +5506,7 @@ function renderForecastSourceOptions() {
   if (!select) return;
   const candidates = forecastCandidateRuns();
   const current = state.forecastSourceRunPath || currentSelectedRunPath() || "";
-  let selected = candidates.find(run => samePath(run.path, current));
-  if (!selected) selected = candidates.find(forecastRunReady) || candidates[0] || null;
+  const selected = window.HBVStudioForecastView.pickForecastSourceRun(candidates, current, { samePath, forecastRunReady });
   state.forecastSourceRunPath = selected?.path || "";
   const rendered = window.HBVStudioForecastView.renderForecastSourceOptions(
     candidates,
@@ -5643,14 +5645,12 @@ function renderForecastTaskList() {
 }
 
 function forecastResultRuns() {
-  return state.runs
-    .filter(run => runTypeValue(run) === "forecast_restart" && run?.path)
-    .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+  return window.HBVStudioForecastView.forecastResultRuns(state.runs, { runTypeValue });
 }
 
 function selectedForecastResultRun() {
   const selectedPath = $("#forecast-result-run")?.value || state.forecastResultRunPath || "";
-  return forecastResultRuns().find(run => samePath(run.path, selectedPath)) || forecastResultRuns()[0] || null;
+  return window.HBVStudioForecastView.forecastSelectedResultRun(forecastResultRuns(), selectedPath, { samePath });
 }
 
 function setForecastResultButtons(run) {
@@ -5802,7 +5802,7 @@ function renderForecastView() {
 }
 
 function selectLatestForecastSource() {
-  const run = forecastCandidateRuns().find(forecastRunReady) || forecastCandidateRuns()[0] || null;
+  const run = window.HBVStudioForecastView.pickForecastSourceRun(forecastCandidateRuns(), "", { samePath, forecastRunReady });
   if (!run) {
     showToast("当前没有可用于预报的源结果。", true);
     renderForecastView();

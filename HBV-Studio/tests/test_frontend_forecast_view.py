@@ -73,7 +73,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText"]) {
+            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText", "pickForecastSourceRun"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing source readiness export: ${name}`);
             }
 
@@ -99,6 +99,63 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (view.forecastRunReadinessText(runs[1]) !== "可起报") throw new Error("ready text wrong");
             if (view.forecastRunReadinessText(runs[3]) !== "缺少率定参数") throw new Error("missing parameter text wrong");
             if (view.forecastRunReadinessText(runs[5]) !== "缺少起报状态") throw new Error("missing state text wrong");
+
+            const samePath = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+            const preferred = view.pickForecastSourceRun(candidates, "c:/RUNS/manual", { samePath });
+            if (preferred?.id !== "manual-ready") throw new Error(`preferred source mismatch: ${preferred?.id}`);
+            const fallbackReady = view.pickForecastSourceRun(candidates, "", { samePath });
+            if (fallbackReady?.id !== "cal-ready") throw new Error(`ready fallback mismatch: ${fallbackReady?.id}`);
+            const fallbackFirst = view.pickForecastSourceRun([
+              { id: "blocked-first", path: "C:/runs/blocked", forecast_source_ready: false },
+              { id: "blocked-second", path: "C:/runs/blocked2", forecast_source_ready: false },
+            ], "", { samePath });
+            if (fallbackFirst?.id !== "blocked-first") throw new Error(`first fallback mismatch: ${fallbackFirst?.id}`);
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_result_selection_helpers_filter_sort_and_fallback(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            for (const name of ["forecastResultRuns", "forecastSelectedResultRun"]) {
+              if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
+            }
+
+            const runs = [
+              { id: "cal", path: "C:/runs/cal", kind: "calibration", updated_at: 999 },
+              { id: "forecast-old", path: "C:/runs/forecast-old", kind: "forecast_restart", updated_at: 10 },
+              { id: "forecast-empty", path: "", kind: "forecast_restart", updated_at: 200 },
+              { id: "forecast-new", path: "C:/runs/forecast-new", kind: "forecast_restart", updated_at: 30 },
+              { id: "forecast-mid", path: "C:/runs/forecast-mid", kind: "forecast_restart", updated_at: 20 },
+            ];
+            const forecastRuns = view.forecastResultRuns(runs, { runTypeValue: run => run.kind });
+            const ids = forecastRuns.map(run => run.id).join(",");
+            if (ids !== "forecast-new,forecast-mid,forecast-old") {
+              throw new Error(`unexpected forecast result order: ${ids}`);
+            }
+
+            const samePath = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+            const selected = view.forecastSelectedResultRun(forecastRuns, "c:/RUNS/forecast-mid", { samePath });
+            if (selected?.id !== "forecast-mid") throw new Error(`selected result mismatch: ${selected?.id}`);
+            const fallback = view.forecastSelectedResultRun(forecastRuns, "C:/runs/missing", { samePath });
+            if (fallback?.id !== "forecast-new") throw new Error(`fallback result mismatch: ${fallback?.id}`);
+            if (view.forecastSelectedResultRun([], "", { samePath }) !== null) throw new Error("empty result list should return null");
             """
         )
         result = subprocess.run(
