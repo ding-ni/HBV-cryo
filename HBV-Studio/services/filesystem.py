@@ -33,6 +33,12 @@ class FilesystemContext:
 
 
 @dataclass(frozen=True)
+class FilesystemPlaceholderContext:
+    project_root: Path
+    gui_root: Path
+
+
+@dataclass(frozen=True)
 class FilesystemPathContext:
     gui_root: Path
     project_root: Path
@@ -70,6 +76,174 @@ def safe_iterdir(directory: Path) -> list[Path]:
     finally:
         scanner.close()
     return results
+
+
+def placeholder_roots_for_config_path(
+    config_path: Path | str | None,
+    context: FilesystemPlaceholderContext,
+) -> tuple[Path, Path]:
+    try:
+        path = Path(config_path).resolve(strict=False) if config_path else None
+    except Exception:
+        path = None
+    if path is not None:
+        for candidate in [path] + list(path.parents):
+            if candidate.name.lower() == "hbv-studio":
+                gui_root = candidate.resolve(strict=False)
+                return gui_root.parent.resolve(strict=False), gui_root
+    return context.project_root, context.gui_root
+
+
+def replace_placeholders(
+    value: Any,
+    context: FilesystemPlaceholderContext,
+    *,
+    project_root: Path | None = None,
+    gui_root: Path | None = None,
+) -> Any:
+    project_root = project_root or context.project_root
+    gui_root = gui_root or context.gui_root
+    placeholders = {
+        "__PROJECT_ROOT__": str(project_root),
+        "__GUI_ROOT__": str(gui_root),
+    }
+    if isinstance(value, dict):
+        return {
+            key: replace_placeholders(item, context, project_root=project_root, gui_root=gui_root)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            replace_placeholders(item, context, project_root=project_root, gui_root=gui_root)
+            for item in value
+        ]
+    if isinstance(value, str):
+        updated = value
+        for old, new in placeholders.items():
+            updated = updated.replace(old, new)
+        return updated
+    return value
+
+
+def remap_legacy_project_path(
+    raw_value: Any,
+    context: FilesystemPlaceholderContext,
+    *,
+    preserve_project_root: Path | None = None,
+    preserve_gui_root: Path | None = None,
+) -> Any:
+    if not isinstance(raw_value, str):
+        return raw_value
+    text = str(raw_value or "").strip()
+    if (not text) or ("__PROJECT_ROOT__" in text) or ("__GUI_ROOT__" in text):
+        return raw_value
+    candidate = Path(text.replace("/", "\\")).expanduser()
+    if not candidate.is_absolute():
+        return raw_value
+    try:
+        if candidate.exists():
+            return raw_value
+    except Exception:
+        return raw_value
+    for root in (preserve_gui_root, preserve_project_root):
+        if root is None:
+            continue
+        try:
+            candidate.resolve(strict=False).relative_to(Path(root).resolve(strict=False))
+            return raw_value
+        except Exception:
+            pass
+
+    normalized = str(candidate).replace("/", "\\")
+    lowered = normalized.lower()
+    markers = (
+        (f"\\{context.gui_root.name.lower()}\\", context.gui_root),
+        (f"\\{context.project_root.name.lower()}\\", context.project_root),
+    )
+    for marker, root in markers:
+        idx = lowered.find(marker)
+        if idx < 0:
+            suffix_marker = marker.rstrip("\\")
+            if not lowered.endswith(suffix_marker):
+                continue
+            suffix = ""
+        else:
+            suffix = normalized[idx + len(marker):].lstrip("\\/")
+        remapped = (root / suffix) if suffix else root
+        try:
+            return str(remapped.resolve(strict=False))
+        except Exception:
+            return str(remapped)
+    legacy_markers = (
+        ("\\hbv-studio\\", context.gui_root),
+        ("\\workspaces\\", context.gui_root / "workspaces"),
+        ("\\运行目录\\", context.project_root / "运行目录"),
+        ("\\runtime\\", context.project_root / "运行目录"),
+        ("\\hbv-cryo\\", context.project_root / "HBV-Cryo"),
+        ("\\数据准备\\", context.project_root / "数据准备"),
+        ("\\基础数据\\", context.project_root / "基础数据"),
+    )
+    for marker, root in legacy_markers:
+        idx = lowered.find(marker)
+        if idx < 0:
+            suffix_marker = marker.rstrip("\\")
+            if not lowered.endswith(suffix_marker):
+                continue
+            suffix = ""
+        else:
+            suffix = normalized[idx + len(marker):].lstrip("\\/")
+        remapped = (root / suffix) if suffix else root
+        try:
+            return str(remapped.resolve(strict=False))
+        except Exception:
+            return str(remapped)
+    return raw_value
+
+
+def normalize_legacy_project_paths(
+    value: Any,
+    context: FilesystemPlaceholderContext,
+    parent_key: str = "",
+    *,
+    preserve_project_root: Path | None = None,
+    preserve_gui_root: Path | None = None,
+) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: normalize_legacy_project_paths(
+                item,
+                context,
+                str(key),
+                preserve_project_root=preserve_project_root,
+                preserve_gui_root=preserve_gui_root,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            normalize_legacy_project_paths(
+                item,
+                context,
+                parent_key,
+                preserve_project_root=preserve_project_root,
+                preserve_gui_root=preserve_gui_root,
+            )
+            for item in value
+        ]
+    if isinstance(value, str):
+        key = str(parent_key or "").strip().lower()
+        if (
+            key.endswith(("_csv", "_shp", "_tif", "_dir", "_path"))
+            or ("目录" in key)
+            or key in {"运行目录", "basin_shp", "obs_csv", "dem_tif", "glacier_shp"}
+        ):
+            return remap_legacy_project_path(
+                value,
+                context,
+                preserve_project_root=preserve_project_root,
+                preserve_gui_root=preserve_gui_root,
+            )
+    return value
 
 
 def resolve_any_path(raw_path: str, context: FilesystemPathContext, *, must_exist: bool = False) -> Path:

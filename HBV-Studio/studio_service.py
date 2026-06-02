@@ -58,12 +58,17 @@ from services.dashboard import DashboardContext, dashboard_payload as build_dash
 from services.filesystem import (
     FilesystemContext,
     FilesystemPathContext,
+    FilesystemPlaceholderContext,
     ensure_within as build_ensure_within,
     is_within_any_root as build_is_within_any_root,
     is_within_root as build_is_within_root,
     list_drives as build_list_drives,
     list_filesystem as build_list_filesystem,
+    normalize_legacy_project_paths as build_normalize_legacy_project_paths,
     open_path_in_explorer as build_open_path_in_explorer,
+    placeholder_roots_for_config_path as build_placeholder_roots_for_config_path,
+    remap_legacy_project_path as build_remap_legacy_project_path,
+    replace_placeholders as build_replace_placeholders,
     resolve_any_path as build_resolve_any_path,
     safe_iterdir as build_safe_iterdir,
     to_display_path as build_to_display_path,
@@ -969,6 +974,10 @@ def _filesystem_path_context() -> FilesystemPathContext:
     )
 
 
+def _filesystem_placeholder_context() -> FilesystemPlaceholderContext:
+    return FilesystemPlaceholderContext(project_root=PROJECT_ROOT, gui_root=GUI_ROOT)
+
+
 def resolve_any_path(raw_path: str, *, must_exist: bool = False) -> Path:
     return build_resolve_any_path(raw_path, _filesystem_path_context(), must_exist=must_exist)
 
@@ -1002,38 +1011,16 @@ def safe_float(value: Any) -> float | None:
 
 
 def _placeholder_roots_for_config_path(config_path: Path | str | None) -> tuple[Path, Path]:
-    try:
-        path = Path(config_path).resolve(strict=False) if config_path else None
-    except Exception:
-        path = None
-    if path is not None:
-        for candidate in [path] + list(path.parents):
-            if candidate.name.lower() == "hbv-studio":
-                gui_root = candidate.resolve(strict=False)
-                return gui_root.parent.resolve(strict=False), gui_root
-    return PROJECT_ROOT, GUI_ROOT
+    return build_placeholder_roots_for_config_path(config_path, _filesystem_placeholder_context())
 
 
 def replace_placeholders(value: Any, *, project_root: Path | None = None, gui_root: Path | None = None) -> Any:
-    project_root = project_root or PROJECT_ROOT
-    gui_root = gui_root or GUI_ROOT
-    placeholders = {
-        "__PROJECT_ROOT__": str(project_root),
-        "__GUI_ROOT__": str(gui_root),
-    }
-    if isinstance(value, dict):
-        return {
-            key: replace_placeholders(item, project_root=project_root, gui_root=gui_root)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [replace_placeholders(item, project_root=project_root, gui_root=gui_root) for item in value]
-    if isinstance(value, str):
-        updated = value
-        for old, new in placeholders.items():
-            updated = updated.replace(old, new)
-        return updated
-    return value
+    return build_replace_placeholders(
+        value,
+        _filesystem_placeholder_context(),
+        project_root=project_root,
+        gui_root=gui_root,
+    )
 
 
 def remap_legacy_project_path(
@@ -1042,72 +1029,12 @@ def remap_legacy_project_path(
     preserve_project_root: Path | None = None,
     preserve_gui_root: Path | None = None,
 ) -> Any:
-    if not isinstance(raw_value, str):
-        return raw_value
-    text = str(raw_value or "").strip()
-    if (not text) or ("__PROJECT_ROOT__" in text) or ("__GUI_ROOT__" in text):
-        return raw_value
-    candidate = Path(text.replace("/", "\\")).expanduser()
-    if not candidate.is_absolute():
-        return raw_value
-    try:
-        if candidate.exists():
-            return raw_value
-    except Exception:
-        return raw_value
-    for root in (preserve_gui_root, preserve_project_root):
-        if root is None:
-            continue
-        try:
-            candidate.resolve(strict=False).relative_to(Path(root).resolve(strict=False))
-            return raw_value
-        except Exception:
-            pass
-
-    normalized = str(candidate).replace("/", "\\")
-    lowered = normalized.lower()
-    markers = (
-        (f"\\{GUI_ROOT.name.lower()}\\", GUI_ROOT),
-        (f"\\{PROJECT_ROOT.name.lower()}\\", PROJECT_ROOT),
+    return build_remap_legacy_project_path(
+        raw_value,
+        _filesystem_placeholder_context(),
+        preserve_project_root=preserve_project_root,
+        preserve_gui_root=preserve_gui_root,
     )
-    for marker, root in markers:
-        idx = lowered.find(marker)
-        if idx < 0:
-            suffix_marker = marker.rstrip("\\")
-            if not lowered.endswith(suffix_marker):
-                continue
-            suffix = ""
-        else:
-            suffix = normalized[idx + len(marker):].lstrip("\\/")
-        remapped = (root / suffix) if suffix else root
-        try:
-            return str(remapped.resolve(strict=False))
-        except Exception:
-            return str(remapped)
-    legacy_markers = (
-        ("\\hbv-studio\\", GUI_ROOT),
-        ("\\workspaces\\", GUI_ROOT / "workspaces"),
-        ("\\运行目录\\", PROJECT_ROOT / "运行目录"),
-        ("\\runtime\\", PROJECT_ROOT / "运行目录"),
-        ("\\hbv-cryo\\", PROJECT_ROOT / "HBV-Cryo"),
-        ("\\数据准备\\", PROJECT_ROOT / "数据准备"),
-        ("\\基础数据\\", PROJECT_ROOT / "基础数据"),
-    )
-    for marker, root in legacy_markers:
-        idx = lowered.find(marker)
-        if idx < 0:
-            suffix_marker = marker.rstrip("\\")
-            if not lowered.endswith(suffix_marker):
-                continue
-            suffix = ""
-        else:
-            suffix = normalized[idx + len(marker):].lstrip("\\/")
-        remapped = (root / suffix) if suffix else root
-        try:
-            return str(remapped.resolve(strict=False))
-        except Exception:
-            return str(remapped)
-    return raw_value
 
 
 def normalize_legacy_project_paths(
@@ -1117,39 +1044,13 @@ def normalize_legacy_project_paths(
     preserve_project_root: Path | None = None,
     preserve_gui_root: Path | None = None,
 ) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: normalize_legacy_project_paths(
-                item,
-                str(key),
-                preserve_project_root=preserve_project_root,
-                preserve_gui_root=preserve_gui_root,
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [
-            normalize_legacy_project_paths(
-                item,
-                parent_key,
-                preserve_project_root=preserve_project_root,
-                preserve_gui_root=preserve_gui_root,
-            )
-            for item in value
-        ]
-    if isinstance(value, str):
-        key = str(parent_key or "").strip().lower()
-        if (
-            key.endswith(("_csv", "_shp", "_tif", "_dir", "_path"))
-            or ("目录" in key)
-            or key in {"运行目录", "basin_shp", "obs_csv", "dem_tif", "glacier_shp"}
-        ):
-            return remap_legacy_project_path(
-                value,
-                preserve_project_root=preserve_project_root,
-                preserve_gui_root=preserve_gui_root,
-            )
-    return value
+    return build_normalize_legacy_project_paths(
+        value,
+        _filesystem_placeholder_context(),
+        parent_key,
+        preserve_project_root=preserve_project_root,
+        preserve_gui_root=preserve_gui_root,
+    )
 
 
 def normalize_time_step_hours(value: Any) -> float:

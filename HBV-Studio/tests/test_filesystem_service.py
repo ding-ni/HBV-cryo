@@ -13,9 +13,14 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.filesystem import (  # noqa: E402
     FilesystemPathContext,
+    FilesystemPlaceholderContext,
     ensure_within,
     is_within_any_root,
     is_within_root,
+    normalize_legacy_project_paths,
+    placeholder_roots_for_config_path,
+    remap_legacy_project_path,
+    replace_placeholders,
     resolve_any_path,
     to_display_path,
 )
@@ -38,6 +43,9 @@ class FilesystemServiceTests(unittest.TestCase):
             replace_placeholders=replace_placeholders,
             remap_legacy_project_path=lambda value, **kwargs: value,
         )
+
+    def _placeholder_context(self, project_root: Path, gui_root: Path) -> FilesystemPlaceholderContext:
+        return FilesystemPlaceholderContext(project_root=project_root, gui_root=gui_root)
 
     def test_resolve_any_path_expands_placeholders_and_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -83,6 +91,68 @@ class FilesystemServiceTests(unittest.TestCase):
             self.assertEqual(to_display_path(workspace, (gui_root, root)), "workspaces/demo.json")
             with self.assertRaisesRegex(ValueError, "路径超出允许范围"):
                 ensure_within(gui_root, outside)
+
+    def test_placeholder_roots_and_replacement_use_context_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir) / "CurrentProject"
+            gui_root = project_root / "HBV-Studio"
+            config_path = gui_root / "workspaces" / "demo.json"
+            config_path.parent.mkdir(parents=True)
+            context = self._placeholder_context(project_root, gui_root)
+
+            detected_project, detected_gui = placeholder_roots_for_config_path(config_path, context)
+            payload = replace_placeholders(
+                {
+                    "workspace": "__GUI_ROOT__/workspaces/demo.json",
+                    "items": ["__PROJECT_ROOT__/运行目录/demo"],
+                },
+                context,
+            )
+
+        self.assertEqual(detected_project, project_root.resolve(strict=False))
+        self.assertEqual(detected_gui, gui_root.resolve(strict=False))
+        self.assertEqual(Path(payload["workspace"]).resolve(strict=False), (gui_root / "workspaces" / "demo.json").resolve(strict=False))
+        self.assertEqual(
+            [Path(item).resolve(strict=False) for item in payload["items"]],
+            [(project_root / "运行目录" / "demo").resolve(strict=False)],
+        )
+
+    def test_remap_legacy_project_path_uses_current_project_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir) / "CurrentProject"
+            gui_root = project_root / "HBV-Studio"
+            context = self._placeholder_context(project_root, gui_root)
+            legacy_gui_path = project_root.parent / "legacy" / "HBV-Studio" / "workspaces" / "demo.json"
+            legacy_runtime_path = project_root.parent / "legacy" / "runtime" / "demo"
+
+            remapped_gui = remap_legacy_project_path(str(legacy_gui_path), context)
+            remapped_runtime = remap_legacy_project_path(str(legacy_runtime_path), context)
+
+        self.assertEqual(remapped_gui, str((gui_root / "workspaces" / "demo.json").resolve(strict=False)))
+        self.assertEqual(remapped_runtime, str((project_root / "运行目录" / "demo").resolve(strict=False)))
+
+    def test_normalize_legacy_project_paths_only_rewrites_path_like_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir) / "CurrentProject"
+            gui_root = project_root / "HBV-Studio"
+            context = self._placeholder_context(project_root, gui_root)
+            legacy_root = project_root.parent / "legacy"
+
+            normalized = normalize_legacy_project_paths(
+                {
+                    "运行目录": str(legacy_root / "runtime" / "demo"),
+                    "title": str(legacy_root / "runtime" / "not_a_path_label"),
+                    "nested": [{"dem_tif": str(legacy_root / "HBV-Cryo" / "dem.tif")}],
+                },
+                context,
+            )
+
+        self.assertEqual(normalized["运行目录"], str((project_root / "运行目录" / "demo").resolve(strict=False)))
+        self.assertEqual(normalized["title"], str(legacy_root / "runtime" / "not_a_path_label"))
+        self.assertEqual(
+            normalized["nested"][0]["dem_tif"],
+            str((project_root / "HBV-Cryo" / "dem.tif").resolve(strict=False)),
+        )
 
 
 if __name__ == "__main__":
