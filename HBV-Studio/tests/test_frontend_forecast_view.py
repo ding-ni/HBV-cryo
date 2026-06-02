@@ -1057,6 +1057,11 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (emptySummary.ready || emptySummary.hintClassName !== "hint-box status-warn" || !emptySummary.html.includes("当前没有可作为预报起点")) {
               throw new Error(`empty summary wrong: ${JSON.stringify(emptySummary)}`);
             }
+            const emptySummaryDom = Object.fromEntries(emptySummary.domUpdates.map(update => [update.selector, update]));
+            if (emptySummaryDom["#forecast-hint"].text !== "完成一次新版率定或手调重算后，可在这里直接接入未来气象驱动。" ||
+                emptySummaryDom["#forecast-hint"].className !== "hint-box status-warn") {
+              throw new Error(`empty summary DOM updates wrong: ${JSON.stringify(emptySummaryDom)}`);
+            }
 
             const summary = view.renderForecastSourceSummary({
               path: "C:/runs/A",
@@ -1071,6 +1076,11 @@ class FrontendForecastViewTests(unittest.TestCase):
             }, helpers);
             if (!summary.ready || summary.hintClassName !== "hint-box status-ok" || !summary.hintText.includes("建议从 2026-01-11 起报")) {
               throw new Error(`summary hint wrong: ${summary.hintClassName} ${summary.hintText}`);
+            }
+            const summaryDom = Object.fromEntries(summary.domUpdates.map(update => [update.selector, update]));
+            if (!summaryDom["#forecast-hint"].text.includes("建议从 2026-01-11 起报") ||
+                summaryDom["#forecast-hint"].className !== "hint-box status-ok") {
+              throw new Error(`summary DOM updates wrong: ${JSON.stringify(summaryDom)}`);
             }
             for (const text of ["友好名&lt;A&gt;", "结果类型", "率定结果", "日尺度", "目标-daily_unified_professional_v1", "源结果参数（15 项）", "参数上下文", "工作区&lt;A&gt;"]) {
               if (!summary.html.includes(text)) throw new Error(`summary missing ${text}: ${summary.html}`);

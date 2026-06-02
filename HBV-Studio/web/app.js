@@ -5137,7 +5137,6 @@ function renderForecastSourceSummary() {
   const host = $("#forecast-source-summary");
   const openBtn = $("#forecast-open-source");
   const startBtn = $("#forecast-start-button");
-  const hint = $("#forecast-hint");
   if (!host) return;
   const run = selectedForecastRun();
   const buttons = window.HBVStudioForecastView.forecastSourceButtonState(run, { forecastRunReady });
@@ -5171,10 +5170,7 @@ function renderForecastSourceSummary() {
   }
   const startInput = $("#forecast-start");
   if (startInput && rendered.suggestedStart && !startInput.value) startInput.value = rendered.suggestedStart;
-  if (hint) {
-    hint.textContent = rendered.hintText;
-    hint.className = rendered.hintClassName;
-  }
+  applyDomUpdates(rendered.domUpdates);
 }
 
 function forecastInputPayload(run = selectedForecastRun()) {

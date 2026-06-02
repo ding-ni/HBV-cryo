@@ -587,14 +587,18 @@
     const forecastParameterSourceSummaryHelper = helpers.forecastParameterSourceSummary || forecastParameterSourceSummary;
     const forecastParameterContextHtml = helpers.forecastParameterContextHtml || (() => "");
     const runWorkspaceName = helpers.runWorkspaceName || (() => "");
+    const withDomUpdates = state => ({
+      ...state,
+      domUpdates: [{ selector: "#forecast-hint", text: state.hintText, className: state.hintClassName }],
+    });
     if (!run) {
-      return {
+      return withDomUpdates({
         html: '<div class="hint-box status-warn" style="margin-top:12px">当前没有可作为预报起点的率定或手调结果。</div>',
         hintText: "完成一次新版率定或手调重算后，可在这里直接接入未来气象驱动。",
         hintClassName: "hint-box status-warn",
         ready: false,
         suggestedStart: "",
-      };
+      });
     }
     const ready = sourceReady(run);
     const stateTime = run.state_snapshot_time || run.time_config?.forecast_end || run.time_config?.valid_end || run.time_config?.calib_end || "";
@@ -606,7 +610,7 @@
     const archiveText = forecastArchiveSummaryTextHelper(archive, runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成");
     const archiveDetail = forecastArchiveDetailTextHelper(archive);
     const suggestedStart = forecastSuggestedStart(run);
-    return {
+    return withDomUpdates({
       html: `
         <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
           <div class="forecast-source-card-head">
@@ -633,7 +637,7 @@
       hintClassName: `hint-box ${ready ? "status-ok" : "status-warn"}`,
       ready,
       suggestedStart,
-    };
+    });
   }
 
   function restartStateRows(meta = {}, helpers = {}) {
