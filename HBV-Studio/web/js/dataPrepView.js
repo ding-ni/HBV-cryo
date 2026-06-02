@@ -231,6 +231,74 @@
     };
   }
 
+  function era5ApiPanelState(model = {}) {
+    const mode = String(model.mode || "");
+    const needsDownload = Boolean(model.needsDownload);
+    if (mode !== "pipeline" || !needsDownload) {
+      return {
+        hint: { visible: false, text: "", className: "hint-box" },
+        actions: { visible: false },
+      };
+    }
+    const sources = model.sources || {};
+    const status = model.status || null;
+    const petOnly = sources.pet !== "custom_tif" && sources.temp === "custom_tif";
+    const precipOnly = sources.prec === "era5" && sources.temp === "custom_tif" && sources.pet === "custom_tif";
+    if (!status || status.loading) {
+      return {
+        hint: {
+          visible: true,
+          text: "正在检查当前电脑的 ERA5 / CDS API 配置...",
+          className: "hint-box status-warn",
+        },
+        actions: { visible: true },
+      };
+    }
+    if (status.error) {
+      return {
+        hint: {
+          visible: true,
+          text: `ERA5 API 配置检查失败：${status.error}`,
+          className: "hint-box status-fail",
+        },
+        actions: { visible: true },
+      };
+    }
+    const basis = precipOnly
+      ? "这一步会下载 ERA5 降水。"
+      : petOnly
+        ? "这一步会下载计算潜在蒸散发要用的 ERA5 变量。"
+        : "这一步会下载当前方案要用的 ERA5 变量。";
+    if (status.exists && status.looks_valid !== false) {
+      return {
+        hint: {
+          visible: true,
+          text: `${basis} 已检测到 CDS API 配置，可以直接下载。`,
+          className: "hint-box status-ok",
+        },
+        actions: { visible: true },
+      };
+    }
+    if (status.exists) {
+      return {
+        hint: {
+          visible: true,
+          text: `${basis} 已找到 .cdsapirc，但内容看起来不完整，建议检查里面是否包含 url 和 key。`,
+          className: "hint-box status-warn",
+        },
+        actions: { visible: true },
+      };
+    }
+    return {
+      hint: {
+        visible: true,
+        text: `${basis} 这台电脑还没检测到 .cdsapirc，请先配置 CDS API。`,
+        className: "hint-box status-warn",
+      },
+      actions: { visible: true },
+    };
+  }
+
   function prepTaskUiState(task = {}) {
     const progress = task?.ui_progress || {};
     const logs = Array.isArray(task?.output) ? task.output : [];
@@ -399,6 +467,7 @@
   }
 
   window.HBVStudioDataPrepView = {
+    era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
     prepPanelSummary,

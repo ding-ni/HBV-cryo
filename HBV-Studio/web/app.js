@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3901,44 +3901,16 @@ function renderEra5ApiPanel() {
   const actions = $("#wz-era5-api-actions");
   const mode = getSelectedRadio("wz-meteo-mode");
   if (!hint || !actions) return;
-  if (mode !== "pipeline" || !wizardNeedsEra5Download()) {
-    hint.style.display = "none";
-    actions.style.display = "none";
-    return;
-  }
-  const sources = getWizardMeteoSources();
-  const petOnly = sources.pet !== "custom_tif" && sources.temp === "custom_tif";
-  const precipOnly = sources.prec === "era5" && sources.temp === "custom_tif" && sources.pet === "custom_tif";
-  const status = state.cdsApiStatus;
-  hint.style.display = "";
-  actions.style.display = "";
-  if (!status || status.loading) {
-    hint.textContent = "正在检查当前电脑的 ERA5 / CDS API 配置...";
-    hint.className = "hint-box status-warn";
-    return;
-  }
-  if (status.error) {
-    hint.textContent = `ERA5 API 配置检查失败：${status.error}`;
-    hint.className = "hint-box status-fail";
-    return;
-  }
-  const basis = precipOnly
-    ? "这一步会下载 ERA5 降水。"
-    : petOnly
-    ? "这一步会下载计算潜在蒸散发要用的 ERA5 变量。"
-    : "这一步会下载当前方案要用的 ERA5 变量。";
-  if (status.exists && status.looks_valid !== false) {
-    hint.textContent = `${basis} 已检测到 CDS API 配置，可以直接下载。`;
-    hint.className = "hint-box status-ok";
-    return;
-  }
-  if (status.exists) {
-    hint.textContent = `${basis} 已找到 .cdsapirc，但内容看起来不完整，建议检查里面是否包含 url 和 key。`;
-    hint.className = "hint-box status-warn";
-    return;
-  }
-  hint.textContent = `${basis} 这台电脑还没检测到 .cdsapirc，请先配置 CDS API。`;
-  hint.className = "hint-box status-warn";
+  const panel = window.HBVStudioDataPrepView.era5ApiPanelState({
+    mode,
+    needsDownload: wizardNeedsEra5Download(),
+    sources: getWizardMeteoSources(),
+    status: state.cdsApiStatus,
+  });
+  hint.style.display = panel.hint.visible ? "" : "none";
+  hint.textContent = panel.hint.text;
+  hint.className = panel.hint.className;
+  actions.style.display = panel.actions.visible ? "" : "none";
 }
 
 async function refreshEra5ApiStatus({ force = false } = {}) {

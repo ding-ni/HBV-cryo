@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -154,6 +154,31 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
+
+            const hiddenEra5 = view.era5ApiPanelState({ mode: "manual", needsDownload: true });
+            if (hiddenEra5.hint.visible || hiddenEra5.actions.visible || hiddenEra5.hint.className !== "hint-box") {
+              throw new Error(`ERA5 panel should hide outside pipeline mode: ${JSON.stringify(hiddenEra5)}`);
+            }
+            const loadingEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" }, status: { loading: true } });
+            if (!loadingEra5.hint.visible || !loadingEra5.actions.visible || loadingEra5.hint.className !== "hint-box status-warn" || !loadingEra5.hint.text.includes("正在检查当前电脑")) {
+              throw new Error(`ERA5 loading panel mismatch: ${JSON.stringify(loadingEra5)}`);
+            }
+            const errorEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" }, status: { error: "key <bad>" } });
+            if (errorEra5.hint.className !== "hint-box status-fail" || !errorEra5.hint.text.includes("key <bad>")) {
+              throw new Error(`ERA5 error panel mismatch: ${JSON.stringify(errorEra5)}`);
+            }
+            const validEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" }, status: { exists: true, looks_valid: true } });
+            if (validEra5.hint.className !== "hint-box status-ok" || !validEra5.hint.text.includes("这一步会下载 ERA5 降水。 已检测到 CDS API 配置")) {
+              throw new Error(`ERA5 valid panel mismatch: ${JSON.stringify(validEra5)}`);
+            }
+            const invalidPetEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "custom_tif", temp: "custom_tif", pet: "era5_fao56" }, status: { exists: true, looks_valid: false } });
+            if (invalidPetEra5.hint.className !== "hint-box status-warn" || !invalidPetEra5.hint.text.includes("计算潜在蒸散发要用的 ERA5 变量") || !invalidPetEra5.hint.text.includes("内容看起来不完整")) {
+              throw new Error(`ERA5 invalid PET panel mismatch: ${JSON.stringify(invalidPetEra5)}`);
+            }
+            const missingEra5 = view.era5ApiPanelState({ mode: "pipeline", needsDownload: true, sources: { prec: "mswep", temp: "era5", pet: "era5_fao56" }, status: { exists: false } });
+            if (missingEra5.hint.className !== "hint-box status-warn" || !missingEra5.hint.text.includes("当前方案要用的 ERA5 变量") || !missingEra5.hint.text.includes("还没检测到 .cdsapirc")) {
+              throw new Error(`ERA5 missing panel mismatch: ${JSON.stringify(missingEra5)}`);
+            }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });
             if (era5PrecipSummary.className !== "hint-box status-ok" || !era5PrecipSummary.text.includes("降水用ERA5 自动下载") || !era5PrecipSummary.text.includes("下面先下载 ERA5 降水")) {
