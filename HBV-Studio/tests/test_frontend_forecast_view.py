@@ -813,7 +813,13 @@ class FrontendForecastViewTests(unittest.TestCase):
               throw new Error(`explicit export text wrong: ${JSON.stringify(explicit)}`);
             }
             if (explicit.hintText !== "已导出 12 行到 预报导出.xlsx。") throw new Error(`hint wrong: ${explicit.hintText}`);
+            if (explicit.hintClassName !== "hint-box status-ok") throw new Error(`hint class wrong: ${explicit.hintClassName}`);
             if (explicit.toastText !== "预报结果 Excel 已导出：12 行") throw new Error(`toast wrong: ${explicit.toastText}`);
+            const explicitDom = Object.fromEntries(explicit.domUpdates.map(update => [update.selector, update]));
+            if (explicitDom["#forecast-result-hint"].text !== "已导出 12 行到 预报导出.xlsx。" ||
+                explicitDom["#forecast-result-hint"].className !== "hint-box status-ok") {
+              throw new Error(`explicit export DOM updates wrong: ${JSON.stringify(explicitDom)}`);
+            }
 
             const fallback = view.forecastResultExportSuccess({}, "C:/exports/fallback.xlsx", {
               shortPath(value) { return String(value).split(/[\\/]/).pop(); },

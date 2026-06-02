@@ -5385,11 +5385,7 @@ async function exportForecastResultExcel() {
     exportState.exportPath,
     { shortPath },
   );
-  const hint = $("#forecast-result-hint");
-  if (hint) {
-    hint.textContent = exportSuccess.hintText;
-    hint.className = "hint-box status-ok";
-  }
+  applyDomUpdates(exportSuccess.domUpdates);
   showToast(exportSuccess.toastText);
 }
 

@@ -410,11 +410,15 @@
     const shortPath = helpers.shortPath || (value => String(value || ""));
     const rowCount = Number(responseData?.row_count || 0);
     const displayPath = responseData?.display_path || shortPath(lastExportPath);
+    const hintText = `已导出 ${rowCount} 行到 ${displayPath}。`;
+    const hintClassName = "hint-box status-ok";
     return {
       rowCount,
       displayPath,
-      hintText: `已导出 ${rowCount} 行到 ${displayPath}。`,
+      hintText,
+      hintClassName,
       toastText: `预报结果 Excel 已导出：${rowCount} 行`,
+      domUpdates: [{ selector: "#forecast-result-hint", text: hintText, className: hintClassName }],
     };
   }
 
