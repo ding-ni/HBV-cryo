@@ -115,6 +115,25 @@ from services.meteo_import import MeteoImportStartContext
 from services.meteo_import import MeteoImportWorkerContext
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
+from services.meteo_config import (
+    METEO_CUSTOM_PET_DIR_KEY,
+    METEO_CUSTOM_PREC_DIR_KEY,
+    METEO_CUSTOM_TEMP_DIR_KEY,
+    METEO_HOURLY_PREC_DIR_KEY,
+    METEO_KEY,
+    METEO_PET_SOURCE_KEY,
+    METEO_PRECIP_MODE_KEY,
+    METEO_PRECIP_SOURCE_KEY,
+    METEO_PRECIP_SOURCE_LEGACY_KEY,
+    METEO_STATION_META_KEY,
+    METEO_STATION_PREC_KEY,
+    METEO_TEMP_SOURCE_KEY,
+    configured_precip_source as build_configured_precip_source,
+    display_precip_source_label as build_display_precip_source_label,
+    display_runtime_precip_label as build_display_runtime_precip_label,
+    effective_precip_source as build_effective_precip_source,
+    resolve_precip_source as build_resolve_precip_source,
+)
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
@@ -610,7 +629,6 @@ FORWARD_RUNTIME_CACHE: dict[str, ForwardRuntimeCacheEntry] = {}
 FORWARD_RUNTIME_CACHE_LOCK = threading.Lock()
 MAX_FORWARD_RUNTIME_CACHE = 4
 
-METEO_KEY = "\u6c14\u8c61\u7b56\u7565"
 OBSERVED_FLOW_KEY = "\u89c2\u6d4b\u5f84\u6d41_csv"
 OBSERVED_FLOW_SUFFIXES = {".csv", ".xlsx", ".xls", ".xlsm"}
 VECTOR_BUNDLE_SUFFIXES = tuple(
@@ -620,68 +638,26 @@ VECTOR_BUNDLE_SUFFIXES = tuple(
         (".shp", ".dbf", ".shx", ".prj", ".cpg", ".sbn", ".sbx", ".xml"),
     )
 )
-METEO_PRECIP_MODE_KEY = "\u964d\u6c34\u65b9\u6848"
-METEO_PRECIP_SOURCE_KEY = "\u964d\u6c34\u6765\u6e90"
-METEO_PRECIP_SOURCE_LEGACY_KEY = "\u964d\u6c34\u6e90"
-METEO_STATION_PREC_KEY = "\u7ad9\u70b9\u964d\u6c34_csv"
-METEO_STATION_META_KEY = "\u7ad9\u70b9\u4fe1\u606f_csv"
-METEO_HOURLY_PREC_DIR_KEY = "\u539f\u59cb\u5c0f\u65f6\u964d\u6c34\u76ee\u5f55"
-METEO_TEMP_SOURCE_KEY = "\u6e29\u5ea6\u6765\u6e90"
-METEO_CUSTOM_TEMP_DIR_KEY = "\u81ea\u5e26\u6e29\u5ea6tif\u76ee\u5f55"
-METEO_CUSTOM_PREC_DIR_KEY = "\u81ea\u5e26\u964d\u6c34tif\u76ee\u5f55"
-METEO_PET_SOURCE_KEY = "\u6f5c\u5728\u84b8\u6563\u53d1\u6765\u6e90"
-METEO_CUSTOM_PET_DIR_KEY = "\u81ea\u5e26\u84b8\u6563\u53d1tif\u76ee\u5f55"
 
 
 def configured_precip_source(config: dict[str, Any]) -> str:
-    meteo = dict(config.get(METEO_KEY, {}))
-    source = str(meteo.get(METEO_PRECIP_SOURCE_KEY, "")).strip().lower()
-    legacy_source = str(meteo.get(METEO_PRECIP_SOURCE_LEGACY_KEY, "")).strip().lower()
-    top_level_source = str(config.get("默认降水源", "")).strip().lower()
-    if source:
-        return source
-    if top_level_source in {"era5", "cmfd", "custom_tif"} and legacy_source in {"", "mswep"}:
-        return top_level_source
-    return legacy_source or top_level_source or "era5"
+    return build_configured_precip_source(config)
 
 
 def resolve_precip_source(config: dict[str, Any], source: Any = None) -> str:
-    raw = str(source or "").strip().lower()
-    if raw in {"era5", "mswep", "cmfd", "custom_tif"}:
-        return raw
-    configured = configured_precip_source(config)
-    if configured in {"era5", "mswep", "cmfd", "custom_tif"}:
-        return configured
-    return "era5"
+    return build_resolve_precip_source(config, source)
 
 
 def effective_precip_source(source: str) -> str:
-    key = str(source).strip().lower()
-    if key in {"era5", "cmfd"}:
-        return key
-    if key == "mswep":
-        return "mswep"
-    return "era5"
-
-
-PRECIP_SOURCE_LABELS = {
-    "era5": "ERA5 自动下载降水",
-    "mswep": "MSWEP 本地原始文件",
-    "cmfd": "CMFD 本地原始文件",
-    "custom_tif": "本地降水栅格目录",
-}
+    return build_effective_precip_source(source)
 
 
 def display_precip_source_label(source: str) -> str:
-    key = str(source or "").strip().lower()
-    return PRECIP_SOURCE_LABELS.get(key, str(source or "").strip() or "MSWEP 格点降水")
+    return build_display_precip_source_label(source)
 
 
 def display_runtime_precip_label(config: dict[str, Any]) -> str:
-    configured = configured_precip_source(config)
-    if configured == "custom_tif":
-        return "工程独立降水目录（本地导入）"
-    return display_precip_source_label(effective_precip_source(configured))
+    return build_display_runtime_precip_label(config)
 
 
 def effective_precip_paths(
