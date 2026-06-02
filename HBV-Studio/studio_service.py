@@ -298,7 +298,9 @@ from services.workspace_detailed_check import (
     workspace_detailed_check as build_workspace_detailed_check,
 )
 from services.workspace_layout import WorkspaceLayoutContext, workspace_layout_summary as build_workspace_layout_summary
-from services.workspace_validation import WorkspaceValidationContext, validate_workspace_fields as build_validate_workspace_fields
+from services.workspace_validation import WorkspaceValidationContext
+from services.workspace_validation import build_engineering_focus_checks as build_workspace_engineering_focus_checks
+from services.workspace_validation import validate_workspace_fields as build_validate_workspace_fields
 from services.wizard_validation import WizardValidationContext, wizard_validate_step as build_wizard_validate_step
 from profile_runner import (
     PROFILE_DAILY,
@@ -2994,187 +2996,18 @@ def build_engineering_focus_checks(
     station_precip_info: dict[str, Any] | None = None,
     boundary_csv: str = "",
 ) -> list[dict[str, Any]]:
-    checks: list[dict[str, Any]] = []
-
-    if profile == PROFILE_DAILY:
-        observed_profile = (
-            obs_info.get("effective_calibration_mode")
-            or obs_info.get("suggested_calibration_mode")
-            if obs_info else None
-        )
-        resampled_to_daily = bool(obs_info.get("resampled_to_daily")) if obs_info else False
-        forcing_ok = bool(forcing.get("ok")) if forcing is not None else None
-        expected_steps = int(forcing.get("expected_steps") or 0) if forcing is not None and forcing.get("expected_steps") is not None else None
-        time_basis_label = str(forcing.get("time_basis_label", "连续时段") if forcing else "连续时段")
-        if step_hours != 24.0:
-            status = "fail"
-            summary = "当前设置为日尺度，但项目时间步长不是 24 小时。"
-        elif observed_profile and observed_profile != PROFILE_DAILY:
-            status = "fail"
-            summary = "观测径流识别为小时尺度，和当前日尺度项目不一致。"
-        elif resampled_to_daily:
-            status = "ok"
-            summary = "观测径流原始时步为小时尺度，已按自然日聚合为日平均流量后用于日尺度项目。"
-        elif forcing is not None and not forcing_ok:
-            status = "warn"
-            summary = f"日尺度主流程已选定，但气象驱动在{time_basis_label}内的覆盖或文件命名仍有问题。"
-        else:
-            status = "ok"
-            summary = f"日尺度主流程基本合理，重点继续检查{time_basis_label}和气象驱动完整性。"
-        items = [
-            {"label": "项目时间步长", "value": f"{int(step_hours)} 小时", "status": "ok" if step_hours == 24.0 else "fail"},
-            {
-                "label": "观测径流识别模式",
-                "value": PROFILE_LABELS.get(observed_profile, "尚未识别") if observed_profile else "尚未识别",
-                "status": "ok" if observed_profile in {None, PROFILE_DAILY} else "fail",
-            },
-        ]
-        if resampled_to_daily:
-            aggregation = dict(obs_info.get("daily_aggregation") or {})
-            items.append(
-                {
-                    "label": "小时观测转日尺度",
-                    "value": (
-                        f"已聚合（日均；至少 {aggregation.get('min_hours_per_day', DEFAULT_MIN_DAILY_HOURS)} 小时/天）"
-                    ),
-                    "status": "ok",
-                }
-            )
-        if expected_steps is not None:
-            items.append(
-                {
-                    "label": "期望时间步数",
-                    "value": str(expected_steps),
-                    "status": "ok" if forcing_ok is not False else "warn",
-                }
-            )
-        if forcing is not None:
-            items.append(
-                {
-                    "label": "气象驱动状态",
-                    "value": f"已覆盖{time_basis_label}" if forcing_ok else "仍有覆盖或命名问题",
-                    "status": "ok" if forcing_ok else "warn",
-                }
-            )
-            items.append({"label": "资料口径", "value": time_basis_label, "status": "ok"})
-            event_windows = dict(forcing.get("event_windows") or {})
-            if event_windows:
-                items.append(
-                    {
-                        "label": "洪水事件",
-                        "value": f"{int(event_windows.get('valid_event_count', 0) or 0)}/{int(event_windows.get('event_count', 0) or 0)} 场有效",
-                        "status": "ok" if int(event_windows.get("valid_event_count", 0) or 0) > 0 else "fail",
-                    }
-                )
-        checks.append(
-            {
-                "id": "daily_profile",
-                "title": "日尺度专项检查",
-                "summary": summary,
-                "status": status,
-                "target_step": 2 if any(item["status"] == "fail" for item in items[:2]) else 6,
-                "items": items,
-            }
-        )
-
-    if object_type == OBJECT_INTERBASIN or boundary_csv:
-        if object_type != OBJECT_INTERBASIN and boundary_csv:
-            checks.append(
-                {
-                    "id": "boundary_inflow",
-                    "title": "上游边界入流专项检查",
-                    "summary": "当前项目不是区间流域，但配置了上游边界入流，请确认对象类型是否正确。",
-                    "status": "warn",
-                    "target_step": 3,
-                    "items": [
-                        {"label": "项目对象", "value": OBJECT_LABELS.get(object_type, object_type), "status": "warn"},
-                        {"label": "边界入流文件", "value": "已配置" if boundary_csv else "未配置", "status": "warn" if boundary_csv else "ok"},
-                    ],
-                }
-            )
-        elif not boundary_csv:
-            checks.append(
-                {
-                    "id": "boundary_inflow",
-                    "title": "上游边界入流专项检查",
-                    "summary": "区间流域必须提供上游边界入流 CSV。",
-                    "status": "fail",
-                    "target_step": 3,
-                    "items": [
-                        {"label": "边界入流文件", "value": "缺失", "status": "fail"},
-                    ],
-                }
-            )
-        elif boundary_info is not None:
-            coverage_ratio = boundary_info.get("coverage_ratio")
-            duplicate_count = int(boundary_info.get("duplicate_count", 0) or 0)
-            negative_count = int(boundary_info.get("negative_count", 0) or 0)
-            out_of_range_count = len(boundary_info.get("out_of_range_steps", []) or [])
-            zero_ratio = int(boundary_info.get("zero_count", 0) or 0) / max(1, int(boundary_info.get("valid_rows", 0) or 0))
-            detected_step = normalize_time_step_hours(boundary_info.get("time_step_hours"))
-            step_match = detected_step == step_hours if boundary_info.get("time_step_hours") is not None else None
-            if duplicate_count > 0 or negative_count > 0 or step_match is False or (coverage_ratio is not None and coverage_ratio < 0.99):
-                status = "fail"
-                summary = "边界入流仍有关键问题，正式率定前需要先修正时间步长、覆盖率或异常值。"
-            elif zero_ratio >= 0.8 or int(boundary_info.get("invalid_rows", 0) or 0) > 0 or out_of_range_count > 0:
-                status = "warn"
-                summary = "边界入流可以继续核查，但仍有高零值比例或范围外记录等风险。"
-            else:
-                status = "ok"
-                summary = "边界入流时间步和覆盖范围基本合理，可进入后续调试或率定。"
-            checks.append(
-                {
-                    "id": "boundary_inflow",
-                    "title": "上游边界入流专项检查",
-                    "summary": summary,
-                    "status": status,
-                    "target_step": 3,
-                    "items": [
-                        {"label": "识别时间步长", "value": f"{int(detected_step)} 小时" if detected_step is not None else "未识别", "status": "ok" if step_match in {True, None} else "fail"},
-                        {
-                            "label": "覆盖率",
-                            "value": (f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未与当前时段对比"),
-                            "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "fail",
-                        },
-                        {
-                            "label": "重复时间戳",
-                            "value": str(duplicate_count),
-                            "status": "ok" if duplicate_count == 0 else "fail",
-                        },
-                        {
-                            "label": "负流量记录",
-                            "value": str(negative_count),
-                            "status": "ok" if negative_count == 0 else "fail",
-                        },
-                        {
-                            "label": "零值比例",
-                            "value": f"{zero_ratio * 100:.1f}%",
-                            "status": "warn" if zero_ratio >= 0.8 else "ok",
-                        },
-                    ],
-                }
-            )
-    if station_precip_info and station_precip_info.get("enabled"):
-        event_coverage = list(station_precip_info.get("event_coverage", []) or [])
-        event_ok_count = sum(1 for item in event_coverage if str(item.get("status", "") or "") == "ok")
-        checks.append(
-            {
-                "id": "station_precip",
-                "title": "站点降水专项检查",
-                "summary": str(station_precip_info.get("summary", "")),
-                "status": str(station_precip_info.get("status", "warn") or "warn"),
-                "target_step": 4,
-                "items": list(station_precip_info.get("items", []) or []),
-                "task_context": dict(station_precip_info.get("task_context", {}) or {}),
-                "event_coverage": event_coverage,
-                "event_coverage_summary": {
-                    "enabled": bool(event_coverage),
-                    "ok_count": int(event_ok_count),
-                    "event_count": int(len(event_coverage)),
-                },
-            }
-        )
-    return checks
+    return build_workspace_engineering_focus_checks(
+        config,
+        _workspace_validation_context(),
+        profile=profile,
+        object_type=object_type,
+        step_hours=step_hours,
+        obs_info=obs_info,
+        boundary_info=boundary_info,
+        forcing=forcing,
+        station_precip_info=station_precip_info,
+        boundary_csv=boundary_csv,
+    )
 
 
 def validate_workspace_fields(
@@ -3220,15 +3053,17 @@ def _workspace_validation_context() -> WorkspaceValidationContext:
         analyze_station_precip_inputs=analyze_station_precip_inputs,
         validate_forcing_bundle=validate_forcing_bundle,
         glacier_formal_requirements=glacier_formal_requirements,
-        build_engineering_focus_checks=build_engineering_focus_checks,
         input_time_basis_ui_summary=input_time_basis_ui_summary,
         event_windows_ui_summary=event_windows_ui_summary,
         default_init_state=profile_runner.DEFAULT_INIT_STATE,
         observed_flow_key=OBSERVED_FLOW_KEY,
         profile_daily=PROFILE_DAILY,
         profile_hourly=PROFILE_HOURLY,
+        profile_labels=PROFILE_LABELS,
+        default_min_daily_hours=DEFAULT_MIN_DAILY_HOURS,
         object_interbasin=OBJECT_INTERBASIN,
         object_full_upstream=OBJECT_FULL_UPSTREAM,
+        object_labels=OBJECT_LABELS,
         time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
         time_basis_labels=TIME_BASIS_LABELS,
         meteo_key=METEO_KEY,
