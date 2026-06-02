@@ -16,9 +16,13 @@ if str(STUDIO_DIR) not in sys.path:
 from services.forcing_validation import (  # noqa: E402
     ForcingAlignedStatusContext,
     ForcingInputsReadyContext,
+    ForcingPreprocessStatusContext,
     ForcingValidationContext,
     check_aligned_forcing_status,
+    check_daily_prec_status,
     check_forcing_inputs_ready,
+    check_hourly_prec_status,
+    prefer_raw_or_aligned_group_status,
     validate_forcing_bundle,
 )
 
@@ -149,6 +153,77 @@ class ForcingValidationServiceTests(unittest.TestCase):
             observed_flow_key="观测径流_csv",
         )
 
+    def _preprocess_context(
+        self,
+        *,
+        precip_source: str = "era5",
+        effective_source: str | None = None,
+        scan_results: dict[str, dict[str, Any]] | None = None,
+        counts: dict[Path, int] | None = None,
+        calls: list[tuple[Any, ...]] | None = None,
+    ) -> ForcingPreprocessStatusContext:
+        call_log = calls if calls is not None else []
+        results = scan_results or {}
+        count_map = counts or {}
+
+        profile_paths = {
+            "raw_prec_era5_daily_dir": "raw_daily_era5",
+            "raw_prec_cmfd_daily_dir": "raw_daily_cmfd",
+            "raw_prec_daily_dir": "raw_daily_default",
+            "aligned_prec_era5_base_dir": "aligned_daily_era5",
+            "aligned_prec_cmfd_base_dir": "aligned_daily_cmfd",
+            "aligned_prec_base_dir": "aligned_daily_default",
+            "aligned_prec_custom_base_dir": "aligned_custom",
+        }
+        hourly_profile_paths = {
+            "aligned_prec_era5_base_dir": "aligned_hourly_era5",
+            "aligned_prec_cmfd_base_dir": "aligned_hourly_cmfd",
+            "aligned_prec_base_dir": "aligned_hourly_default",
+            "aligned_prec_custom_base_dir": "aligned_hourly_custom",
+        }
+        workspace_paths = {
+            "raw_prec_era5_hourly_dir": "raw_hourly_era5",
+            "raw_prec_cmfd_hourly_dir": "raw_hourly_cmfd",
+            "raw_prec_hourly_dir": "raw_hourly_default",
+        }
+
+        def build_profile_paths(config: dict[str, Any], profile: str) -> dict[str, Any]:
+            call_log.append(("profile_paths", profile))
+            if profile == "hourly":
+                return hourly_profile_paths
+            return profile_paths
+
+        def build_workspace_paths(config: dict[str, Any]) -> dict[str, Any]:
+            call_log.append(("workspace_paths",))
+            return workspace_paths
+
+        def validate_tif_time_series(label: str, directory: Path, step_hours: float) -> dict[str, Any]:
+            call_log.append(("scan", label, directory, step_hours))
+            return results.get(
+                label,
+                {
+                    "label": label,
+                    "ok": False,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 0,
+                    "total_files": 0,
+                },
+            )
+
+        def count_matching(path: Path, pattern: str = "*.tif") -> int:
+            call_log.append(("count", path, pattern))
+            return count_map.get(path, 0)
+
+        return ForcingPreprocessStatusContext(
+            build_workspace_paths=build_workspace_paths,
+            build_profile_paths=build_profile_paths,
+            resolve_precip_source=lambda config, source: str(source or precip_source),
+            effective_precip_source=lambda source: effective_source or source,
+            count_matching=count_matching,
+            validate_tif_time_series=validate_tif_time_series,
+        )
+
     def test_check_aligned_forcing_status_sums_valid_time_steps(self) -> None:
         calls: list[tuple[Any, ...]] = []
         context = self._aligned_context(calls=calls)
@@ -245,6 +320,91 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertFalse(ready)
         self.assertEqual(message, "基础输入缺失；小时气象驱动有效时间步数：3；问题：气象缺少降水；气象缺少气温")
         self.assertEqual(count, 3)
+
+    def test_prefer_raw_or_aligned_group_status_prefers_ready_raw_series(self) -> None:
+        context = self._preprocess_context(
+            scan_results={
+                "raw": {"label": "raw", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 4, "total_files": 4},
+                "aligned": {"label": "aligned", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 2, "total_files": 2},
+            }
+        )
+
+        ready, message, count = prefer_raw_or_aligned_group_status(
+            [("raw", Path("raw_dir"))],
+            [("aligned", Path("aligned_dir"))],
+            24.0,
+            context,
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "raw: 4")
+        self.assertEqual(count, 4)
+
+    def test_prefer_raw_or_aligned_group_status_falls_back_to_ready_aligned_series(self) -> None:
+        context = self._preprocess_context(
+            scan_results={
+                "raw": {"label": "raw", "ok": False, "errors": ["raw 缺少时间步"], "warnings": [], "valid_time_steps": 1, "total_files": 1},
+                "aligned": {"label": "aligned", "ok": True, "errors": [], "warnings": [], "valid_time_steps": 3, "total_files": 3},
+            }
+        )
+
+        ready, message, count = prefer_raw_or_aligned_group_status(
+            [("raw", Path("raw_dir"))],
+            [("aligned", Path("aligned_dir"))],
+            24.0,
+            context,
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "aligned: 3（已导入并完成网格对齐）")
+        self.assertEqual(count, 3)
+
+    def test_check_daily_prec_status_handles_custom_tif_without_raw_processing(self) -> None:
+        context = self._preprocess_context(
+            precip_source="custom_tif",
+            counts={Path("aligned_custom"): 2},
+        )
+
+        ready, message, count = check_daily_prec_status({}, context, profile="daily")
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "当前为本地栅格降水模式，降水已导入工程独立降水目录。")
+        self.assertEqual(count, 2)
+
+    def test_check_hourly_prec_status_uses_effective_cmfd_paths(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        context = self._preprocess_context(
+            precip_source="cmfd",
+            effective_source="cmfd",
+            scan_results={
+                "小时尺度降水中间结果": {
+                    "label": "小时尺度降水中间结果",
+                    "ok": False,
+                    "errors": ["小时降水时间步不连续"],
+                    "warnings": [],
+                    "valid_time_steps": 1,
+                    "total_files": 1,
+                },
+                "工程降水输入": {
+                    "label": "工程降水输入",
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 5,
+                    "total_files": 5,
+                },
+            },
+            calls=calls,
+        )
+
+        ready, message, count = check_hourly_prec_status({}, context, profile="hourly")
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "工程降水输入: 5（已导入并完成网格对齐）")
+        self.assertEqual(count, 5)
+        self.assertIn(("workspace_paths",), calls)
+        self.assertIn(("scan", "小时尺度降水中间结果", Path("raw_hourly_cmfd"), 1.0), calls)
+        self.assertIn(("scan", "工程降水输入", Path("aligned_hourly_cmfd"), 1.0), calls)
 
     def test_validate_forcing_bundle_aggregates_directory_and_grid_messages(self) -> None:
         context = self._context(selected_source="custom_tif", grid_error_label="气温")

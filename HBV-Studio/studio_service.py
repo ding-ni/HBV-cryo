@@ -113,9 +113,13 @@ from services.forecast_restart import forecast_restart_worker_run as build_forec
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forcing_validation import ForcingAlignedStatusContext
 from services.forcing_validation import ForcingInputsReadyContext
+from services.forcing_validation import ForcingPreprocessStatusContext
 from services.forcing_validation import ForcingValidationContext
 from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
+from services.forcing_validation import check_daily_prec_status as build_check_daily_prec_status
 from services.forcing_validation import check_forcing_inputs_ready as build_check_forcing_inputs_ready
+from services.forcing_validation import check_hourly_prec_status as build_check_hourly_prec_status
+from services.forcing_validation import prefer_raw_or_aligned_group_status as build_prefer_raw_or_aligned_group_status
 from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import ForwardSimulationWorkerContext
@@ -1247,6 +1251,17 @@ def _forcing_inputs_ready_context() -> ForcingInputsReadyContext:
     )
 
 
+def _forcing_preprocess_status_context() -> ForcingPreprocessStatusContext:
+    return ForcingPreprocessStatusContext(
+        build_workspace_paths=build_workspace_paths,
+        build_profile_paths=build_profile_paths,
+        resolve_precip_source=resolve_precip_source,
+        effective_precip_source=effective_precip_source,
+        count_matching=count_matching,
+        validate_tif_time_series=validate_tif_time_series,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -1778,41 +1793,17 @@ def has_matching(path: Path, pattern: str = "*.tif") -> bool:
     return next(path.glob(pattern), None) is not None
 
 
-def _series_group_status(entries: list[tuple[str, Path]], step_hours: float) -> tuple[bool, str, int, list[dict[str, Any]]]:
-    results: list[dict[str, Any]] = []
-    total = 0
-    for label, directory in entries:
-        result = validate_tif_time_series(label, directory, step_hours)
-        results.append(result)
-        total += int(result["valid_time_steps"])
-    ready = all(result["ok"] and int(result["valid_time_steps"]) > 0 for result in results)
-    if ready:
-        message = "；".join(f"{result['label']}: {result['valid_time_steps']}" for result in results)
-        return True, message, total, results
-    issues = [result["errors"][0] for result in results if result["errors"]]
-    if issues:
-        return False, "；".join(issues[:2]), total, results
-    return False, "未检测到有效 tif 时间序列。", total, results
-
-
 def _prefer_raw_or_aligned_group_status(
     raw_entries: list[tuple[str, Path]],
     aligned_entries: list[tuple[str, Path]],
     step_hours: float,
 ) -> tuple[bool, str, int]:
-    raw_ok, raw_message, raw_count, raw_results = _series_group_status(raw_entries, step_hours)
-    aligned_ok, aligned_message, aligned_count, aligned_results = _series_group_status(aligned_entries, step_hours)
-    if raw_ok:
-        return True, raw_message, raw_count
-    if aligned_ok:
-        return True, f"{aligned_message}（已导入并完成网格对齐）", aligned_count
-    raw_has_files = any(int(result["total_files"]) > 0 for result in raw_results)
-    aligned_has_files = any(int(result["total_files"]) > 0 for result in aligned_results)
-    if aligned_has_files:
-        return False, aligned_message, aligned_count
-    if raw_has_files:
-        return False, raw_message, raw_count
-    return False, raw_message, 0
+    return build_prefer_raw_or_aligned_group_status(
+        raw_entries,
+        aligned_entries,
+        step_hours,
+        _forcing_preprocess_status_context(),
+    )
 
 
 def _configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
@@ -1944,27 +1935,11 @@ def check_daily_era5_processed(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_daily_prec(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_profile_paths(config, PROFILE_DAILY)
-    source_key = resolve_precip_source(config, precip_source)
-    if source_key == "custom_tif":
-        aligned = Path(paths["aligned_prec_custom_base_dir"])
-        if count_matching(aligned) > 0:
-            return True, "当前为本地栅格降水模式，降水已导入工程独立降水目录。", count_matching(aligned)
-        return True, "当前为本地栅格降水模式，不需要执行原始降水预处理。", 0
-    source = effective_precip_source(source_key)
-    if source == "era5":
-        target = paths["raw_prec_era5_daily_dir"]
-        aligned = paths["aligned_prec_era5_base_dir"]
-    elif source == "cmfd":
-        target = paths["raw_prec_cmfd_daily_dir"]
-        aligned = paths["aligned_prec_cmfd_base_dir"]
-    else:
-        target = paths["raw_prec_daily_dir"]
-        aligned = paths["aligned_prec_base_dir"]
-    return _prefer_raw_or_aligned_group_status(
-        [("日尺度降水中间结果", Path(target))],
-        [("工程降水输入", Path(aligned))],
-        24.0,
+    return build_check_daily_prec_status(
+        config,
+        _forcing_preprocess_status_context(),
+        profile=PROFILE_DAILY,
+        precip_source=precip_source,
     )
 
 
@@ -2163,28 +2138,11 @@ def check_hourly_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_hourly_prec(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    paths = build_workspace_paths(config)
-    profile_paths = build_profile_paths(config, PROFILE_HOURLY)
-    source_key = resolve_precip_source(config, precip_source)
-    if source_key == "custom_tif":
-        aligned = Path(profile_paths["aligned_prec_custom_base_dir"])
-        if count_matching(aligned) > 0:
-            return True, "当前为本地栅格降水模式，小时降水已导入工程独立降水目录。", count_matching(aligned)
-        return True, "当前为本地栅格降水模式，不需要执行原始小时降水标准化。", 0
-    source = effective_precip_source(source_key)
-    if source == "era5":
-        target = paths["raw_prec_era5_hourly_dir"]
-        aligned = profile_paths["aligned_prec_era5_base_dir"]
-    elif source == "cmfd":
-        target = paths["raw_prec_cmfd_hourly_dir"]
-        aligned = profile_paths["aligned_prec_cmfd_base_dir"]
-    else:
-        target = paths["raw_prec_hourly_dir"]
-        aligned = profile_paths["aligned_prec_base_dir"]
-    return _prefer_raw_or_aligned_group_status(
-        [("小时尺度降水中间结果", Path(target))],
-        [("工程降水输入", Path(aligned))],
-        1.0,
+    return build_check_hourly_prec_status(
+        config,
+        _forcing_preprocess_status_context(),
+        profile=PROFILE_HOURLY,
+        precip_source=precip_source,
     )
 
 
