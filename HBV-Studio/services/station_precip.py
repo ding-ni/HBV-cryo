@@ -133,6 +133,96 @@ def station_count_text(min_count: int | None, mean_count: float | None) -> str:
     return f"\u6700\u5c11 {int(min_count)}\uff0c\u5e73\u5747 {mean_count:.1f}"
 
 
+def station_precip_id_match_summary(
+    station_series: pd.DataFrame,
+    station_meta: pd.DataFrame,
+    meta_columns: dict[str, str | None],
+) -> dict[str, Any]:
+    precip_ids = [str(col).strip() for col in station_series.columns if str(col).strip()]
+    meta_values = station_meta["_station_id"].tolist() if "_station_id" in station_meta.columns else []
+    meta_ids = [str(item).strip() for item in meta_values if str(item).strip()]
+    precip_id_set = set(precip_ids)
+    meta_id_set = set(meta_ids)
+    matched_ids = sorted(precip_id_set & meta_id_set)
+    missing_in_precip = sorted(meta_id_set - precip_id_set)
+    missing_in_meta = sorted(precip_id_set - meta_id_set)
+
+    missing: list[str] = []
+    warnings: list[str] = []
+    if not matched_ids:
+        missing.append("\u7ad9\u70b9\u4fe1\u606f\u4e0e\u7ad9\u70b9\u964d\u6c34\u4e4b\u95f4\u6ca1\u6709\u53ef\u5339\u914d\u7684\u7ad9\u53f7\u3002")
+    elif missing_in_precip:
+        warnings.append(f"{len(missing_in_precip)} \u4e2a\u7ad9\u70b9\u5728\u7ad9\u70b9\u4fe1\u606f\u4e2d\u5b58\u5728\uff0c\u4f46\u7ad9\u70b9\u964d\u6c34\u8868\u6ca1\u6709\u5bf9\u5e94\u5217\u3002")
+    if missing_in_meta:
+        warnings.append(f"{len(missing_in_meta)} \u4e2a\u7ad9\u70b9\u964d\u6c34\u5217\u6ca1\u6709\u5bf9\u5e94\u7ad9\u70b9\u4fe1\u606f\u3002")
+    if not meta_columns.get("lon") or not meta_columns.get("lat"):
+        warnings.append("\u7ad9\u70b9\u4fe1\u606f\u672a\u8bc6\u522b\u5230\u7ecf\u7eac\u5ea6\u6216\u5750\u6807\u5b57\u6bb5\uff0c\u6267\u884c\u964d\u6c34\u65b9\u6848\u65f6\u4f1a\u5931\u8d25\u3002")
+
+    return {
+        "precip_ids": precip_ids,
+        "meta_ids": meta_ids,
+        "matched_ids": matched_ids,
+        "missing_in_precip": missing_in_precip,
+        "missing_in_meta": missing_in_meta,
+        "precip_station_count": int(len(precip_id_set)),
+        "station_count": int(len(meta_id_set)),
+        "missing": missing,
+        "warnings": warnings,
+    }
+
+
+def station_precip_expected_coverage(
+    matched_series: pd.DataFrame,
+    expected_index: pd.DatetimeIndex | None,
+    *,
+    mode: str,
+    time_basis_label: str,
+) -> dict[str, Any]:
+    expected_count = 0
+    covered_count = 0
+    coverage_ratio: float | None = None
+    zero_available_steps = 0
+    max_consecutive_zero_steps = 0
+    min_available_station_count: int | None = None
+    mean_available_station_count: float | None = None
+    quality_series = matched_series
+    missing: list[str] = []
+    warnings: list[str] = []
+    if expected_index is not None and len(expected_index) > 0:
+        expected_count = int(len(expected_index))
+        if expected_count > 0 and not matched_series.empty:
+            present = matched_series.reindex(expected_index)
+            quality_series = present
+            available_counts = present.notna().sum(axis=1)
+            covered_count = int((available_counts > 0).sum())
+            coverage_ratio = covered_count / expected_count
+            zero_flags = available_counts == 0
+            zero_available_steps = int(zero_flags.sum())
+            max_consecutive_zero_steps = max_consecutive_true(zero_flags.tolist())
+            min_available_station_count = int(available_counts.min()) if not available_counts.empty else None
+            mean_available_station_count = float(available_counts.mean()) if not available_counts.empty else None
+            if covered_count == 0:
+                missing.append(f"\u7ad9\u70b9\u964d\u6c34\u65f6\u95f4\u8303\u56f4\u4e0e{time_basis_label}\u5b8c\u5168\u4e0d\u91cd\u53e0\u3002")
+            elif coverage_ratio < 0.99:
+                message = f"\u7ad9\u70b9\u964d\u6c34\u5728{time_basis_label}\u5185\u8986\u76d6\u4e0d\u8db3\uff1a\u8986\u76d6 {coverage_ratio * 100:.1f}%\u3002"
+                if mode == "thiessen_station_only":
+                    missing.append(message)
+                else:
+                    warnings.append(message)
+    return {
+        "expected_count": expected_count,
+        "covered_count": covered_count,
+        "coverage_ratio": coverage_ratio,
+        "zero_available_steps": zero_available_steps,
+        "max_consecutive_zero_steps": max_consecutive_zero_steps,
+        "min_available_station_count": min_available_station_count,
+        "mean_available_station_count": mean_available_station_count,
+        "quality_series": quality_series,
+        "missing": missing,
+        "warnings": warnings,
+    }
+
+
 def station_precip_task_context_summary(
     *,
     mode: str,

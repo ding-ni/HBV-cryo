@@ -169,6 +169,8 @@ from services.station_precip import load_station_precip_table as build_load_stat
 from services.station_precip import max_consecutive_true as build_max_consecutive_true
 from services.station_precip import read_station_csv as build_read_station_csv
 from services.station_precip import station_count_text as build_station_count_text
+from services.station_precip import station_precip_expected_coverage as build_station_precip_expected_coverage
+from services.station_precip import station_precip_id_match_summary as build_station_precip_id_match_summary
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
 from services.station_precip import station_precip_task_context_summary as build_station_precip_task_context_summary
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
@@ -2601,6 +2603,29 @@ def _station_count_text(min_count: int | None, mean_count: float | None) -> str:
     return build_station_count_text(min_count, mean_count)
 
 
+def _station_precip_id_match_summary(
+    station_series: pd.DataFrame,
+    station_meta: pd.DataFrame,
+    meta_columns: dict[str, str | None],
+) -> dict[str, Any]:
+    return build_station_precip_id_match_summary(station_series, station_meta, meta_columns)
+
+
+def _station_precip_expected_coverage(
+    matched_series: pd.DataFrame,
+    expected_index: pd.DatetimeIndex | None,
+    *,
+    mode: str,
+    time_basis_label: str,
+) -> dict[str, Any]:
+    return build_station_precip_expected_coverage(
+        matched_series,
+        expected_index,
+        mode=mode,
+        time_basis_label=time_basis_label,
+    )
+
+
 def _station_precip_task_context_summary(
     *,
     mode: str,
@@ -2749,54 +2774,33 @@ def analyze_station_precip_inputs(
 
     station_series = station_series.loc[station_series.index.notna()].copy()
     station_series = station_series[~station_series.index.duplicated(keep="first")].sort_index()
-    precip_ids = [str(col).strip() for col in station_series.columns if str(col).strip()]
-    meta_ids = [str(item).strip() for item in station_meta["_station_id"].tolist() if str(item).strip()]
-    precip_id_set = set(precip_ids)
-    meta_id_set = set(meta_ids)
-    matched_ids = sorted(precip_id_set & meta_id_set)
-    missing_in_precip = sorted(meta_id_set - precip_id_set)
-    missing_in_meta = sorted(precip_id_set - meta_id_set)
-
-    if not matched_ids:
-        missing.append("站点信息与站点降水之间没有可匹配的站号。")
-    elif missing_in_precip:
-        warnings.append(f"{len(missing_in_precip)} 个站点在站点信息中存在，但站点降水表没有对应列。")
-    if missing_in_meta:
-        warnings.append(f"{len(missing_in_meta)} 个站点降水列没有对应站点信息。")
-    if not meta_columns.get("lon") or not meta_columns.get("lat"):
-        warnings.append("站点信息未识别到经纬度或坐标字段，执行降水方案时会失败。")
+    match_info = _station_precip_id_match_summary(station_series, station_meta, meta_columns)
+    matched_ids = list(match_info["matched_ids"])
+    missing_in_precip = list(match_info["missing_in_precip"])
+    missing_in_meta = list(match_info["missing_in_meta"])
+    station_count = int(match_info["station_count"])
+    precip_station_count = int(match_info["precip_station_count"])
+    missing.extend(match_info["missing"])
+    warnings.extend(match_info["warnings"])
 
     matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
-    expected_count = 0
-    covered_count = 0
-    coverage_ratio: float | None = None
+    coverage_info = _station_precip_expected_coverage(
+        matched_series,
+        expected_index,
+        mode=mode,
+        time_basis_label=time_basis_label,
+    )
+    expected_count = int(coverage_info["expected_count"])
+    covered_count = int(coverage_info["covered_count"])
+    coverage_ratio = coverage_info["coverage_ratio"]
     event_coverage: list[dict[str, Any]] = []
-    zero_available_steps = 0
-    max_consecutive_zero_steps = 0
-    min_available_station_count: int | None = None
-    mean_available_station_count: float | None = None
-    quality_series = matched_series
-    if expected_index is not None and len(expected_index) > 0:
-        expected_count = int(len(expected_index))
-        if expected_count > 0 and not matched_series.empty:
-            present = matched_series.reindex(expected_index)
-            quality_series = present
-            available_counts = present.notna().sum(axis=1)
-            covered_count = int((available_counts > 0).sum())
-            coverage_ratio = covered_count / expected_count
-            zero_flags = available_counts == 0
-            zero_available_steps = int(zero_flags.sum())
-            max_consecutive_zero_steps = _max_consecutive_true(zero_flags.tolist())
-            min_available_station_count = int(available_counts.min()) if not available_counts.empty else None
-            mean_available_station_count = float(available_counts.mean()) if not available_counts.empty else None
-            if covered_count == 0:
-                missing.append(f"站点降水时间范围与{time_basis_label}完全不重叠。")
-            elif coverage_ratio < 0.99:
-                message = f"站点降水在{time_basis_label}内覆盖不足：覆盖 {coverage_ratio * 100:.1f}%。"
-                if mode == "thiessen_station_only":
-                    missing.append(message)
-                else:
-                    warnings.append(message)
+    zero_available_steps = int(coverage_info["zero_available_steps"])
+    max_consecutive_zero_steps = int(coverage_info["max_consecutive_zero_steps"])
+    min_available_station_count = coverage_info["min_available_station_count"]
+    mean_available_station_count = coverage_info["mean_available_station_count"]
+    quality_series = coverage_info["quality_series"]
+    missing.extend(coverage_info["missing"])
+    warnings.extend(coverage_info["warnings"])
     if event_info:
         for event in event_info.get("valid_events", []):
             event_index = _event_date_range(event["run_start"], event["run_end"], step)
@@ -2917,7 +2921,7 @@ def analyze_station_precip_inputs(
             {"label": "降水方案", "value": "格点+站点偏差订正" if mode == "grid_plus_station_bias" else "站点泰森分配", "status": "ok"},
             {"label": "检查口径", "value": task_context["headline"], "status": str(task_context.get("status", "warn"))},
             {"label": "资料口径", "value": time_basis_label, "status": "ok"},
-            {"label": "站号匹配", "value": f"{len(matched_ids)}/{len(meta_id_set)}", "status": "ok" if matched_ids and not missing_in_precip else "warn" if matched_ids else "fail"},
+            {"label": "站号匹配", "value": f"{len(matched_ids)}/{station_count}", "status": "ok" if matched_ids and not missing_in_precip else "warn" if matched_ids else "fail"},
             {"label": "降水表额外站号", "value": str(len(missing_in_meta)), "status": "ok" if not missing_in_meta else "warn"},
             {"label": "资料格式", "value": station_format, "status": "ok"},
             {"label": "时间范围", "value": f"{_format_time_for_check(station_start, step)} 至 {_format_time_for_check(station_end, step)}", "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
@@ -2953,8 +2957,8 @@ def analyze_station_precip_inputs(
         "warnings": warnings,
         "missing": missing,
         "matched_station_count": len(matched_ids),
-        "station_count": len(meta_id_set),
-        "precip_station_count": len(precip_id_set),
+        "station_count": station_count,
+        "precip_station_count": precip_station_count,
         "missing_in_precip": missing_in_precip[:20],
         "missing_in_meta": missing_in_meta[:20],
         "expected_time_steps": expected_count,

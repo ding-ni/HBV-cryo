@@ -19,6 +19,8 @@ from services.station_precip import (  # noqa: E402
     load_station_precip_table,
     max_consecutive_true,
     station_count_text,
+    station_precip_expected_coverage,
+    station_precip_id_match_summary,
     station_precip_mode_label,
     station_precip_task_context_summary,
 )
@@ -91,6 +93,74 @@ class StationPrecipServiceTests(unittest.TestCase):
 
         self.assertEqual(columns, {"id": "station_id", "lon": "lon", "lat": "lat"})
         self.assertEqual(table["_station_id"].tolist(), ["S1", "S2"])
+
+    def test_station_precip_id_match_summary_reports_mismatch_and_coordinate_risk(self) -> None:
+        station_series = pd.DataFrame(
+            {"S1": [1.0], "S3": [2.0]},
+            index=pd.date_range("2026-01-01", periods=1, freq="1D"),
+        )
+        station_meta = pd.DataFrame({"_station_id": ["S1", "S2"]})
+
+        summary = station_precip_id_match_summary(
+            station_series,
+            station_meta,
+            {"id": "station_id", "lon": "lon", "lat": None},
+        )
+
+        self.assertEqual(summary["matched_ids"], ["S1"])
+        self.assertEqual(summary["missing_in_precip"], ["S2"])
+        self.assertEqual(summary["missing_in_meta"], ["S3"])
+        self.assertEqual(summary["station_count"], 2)
+        self.assertEqual(summary["precip_station_count"], 2)
+        self.assertEqual(summary["missing"], [])
+        self.assertEqual(len(summary["warnings"]), 3)
+        self.assertIn("\u6ca1\u6709\u5bf9\u5e94\u5217", summary["warnings"][0])
+        self.assertIn("\u6ca1\u6709\u5bf9\u5e94\u7ad9\u70b9\u4fe1\u606f", summary["warnings"][1])
+        self.assertIn("\u7ecf\u7eac\u5ea6", summary["warnings"][2])
+
+    def test_station_precip_expected_coverage_warns_when_target_window_is_partial(self) -> None:
+        matched_series = pd.DataFrame(
+            {
+                "S1": [1.0, None, 3.0],
+                "S2": [None, None, 4.0],
+            },
+            index=pd.date_range("2026-01-01", periods=3, freq="1D"),
+        )
+        expected_index = pd.date_range("2026-01-01", periods=4, freq="1D")
+
+        coverage = station_precip_expected_coverage(
+            matched_series,
+            expected_index,
+            mode="grid_plus_station_bias",
+            time_basis_label="\u8fde\u7eed\u65f6\u6bb5",
+        )
+
+        self.assertEqual(coverage["expected_count"], 4)
+        self.assertEqual(coverage["covered_count"], 2)
+        self.assertEqual(coverage["coverage_ratio"], 0.5)
+        self.assertEqual(coverage["zero_available_steps"], 2)
+        self.assertEqual(coverage["max_consecutive_zero_steps"], 1)
+        self.assertEqual(coverage["min_available_station_count"], 0)
+        self.assertEqual(coverage["mean_available_station_count"], 0.75)
+        self.assertEqual(coverage["missing"], [])
+        self.assertIn("\u8986\u76d6\u4e0d\u8db3", coverage["warnings"][0])
+        self.assertEqual(list(coverage["quality_series"].index), list(expected_index))
+
+    def test_station_precip_expected_coverage_fails_station_only_when_target_window_is_partial(self) -> None:
+        matched_series = pd.DataFrame(
+            {"S1": [1.0, None]},
+            index=pd.date_range("2026-01-01", periods=2, freq="1D"),
+        )
+
+        coverage = station_precip_expected_coverage(
+            matched_series,
+            pd.date_range("2026-01-01", periods=2, freq="1D"),
+            mode="thiessen_station_only",
+            time_basis_label="\u8fde\u7eed\u65f6\u6bb5",
+        )
+
+        self.assertEqual(coverage["warnings"], [])
+        self.assertIn("\u8986\u76d6\u4e0d\u8db3", coverage["missing"][0])
 
     def test_continuous_station_only_summary_fails_when_no_station_steps_exist(self) -> None:
         summary = station_precip_task_context_summary(
