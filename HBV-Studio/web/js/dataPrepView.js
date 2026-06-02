@@ -458,6 +458,54 @@
     };
   }
 
+  function inputCheckCompletionState(model = {}) {
+    const validation = model.validation || {};
+    const previousWorkflow = model.previousWorkflow || {};
+    const detail = Boolean(model.detail);
+    const advice = model.advice || null;
+    const stage = String(model.stage || "calibration");
+    const missing = Array.isArray(validation.missing) ? validation.missing : [];
+    const warnings = Array.isArray(validation.warnings) ? validation.warnings : [];
+    const comp = {
+      ready: Boolean(validation.valid),
+      ready_for_calibration: Boolean(validation.valid),
+      missing,
+      warnings,
+    };
+    const statePatch = {};
+    if (stage === "calibration") {
+      const totalSteps = Number(previousWorkflow.total_steps || 0);
+      const fallbackCompleted = totalSteps
+        ? Math.max(0, Math.min(Number(previousWorkflow.completed_count || 0), totalSteps - 1))
+        : Number(previousWorkflow.completed_count || 0);
+      const pendingSteps = comp.ready_for_calibration
+        ? []
+        : Array.from(new Set([...(Array.isArray(previousWorkflow.steps_remaining) ? previousWorkflow.steps_remaining : []), 7]))
+            .sort((left, right) => Number(left) - Number(right));
+      statePatch.currentWorkspaceWorkflow = {
+        ...previousWorkflow,
+        ready_for_calibration: comp.ready_for_calibration,
+        pending_validation: !comp.ready_for_calibration,
+        next_step: comp.ready_for_calibration ? null : 7,
+        completed_count: comp.ready_for_calibration ? (totalSteps || Number(previousWorkflow.completed_count || 0)) : fallbackCompleted,
+        completion_ratio: totalSteps
+          ? ((comp.ready_for_calibration ? totalSteps : fallbackCompleted) / totalSteps)
+          : Number(previousWorkflow.completion_ratio || 0),
+        steps_remaining: pendingSteps,
+        missing: [...comp.missing],
+        warnings: [...comp.warnings],
+        missing_count: comp.missing.length,
+        warning_count: comp.warnings.length,
+      };
+      if (detail && advice) statePatch.currentWorkspaceAdvice = advice;
+    }
+    return {
+      comp,
+      statePatch,
+      shouldUpdateCalibrationUi: stage === "calibration",
+    };
+  }
+
   function inputCheckReadyHeadline(stage = "calibration") {
     if (stage === "calibration") return "所有率定所需数据已就位，可以进入率定！";
     if (stage === "quick_test") return "输入预核算所需数据已就位，可以进行限定时段前向计算。";
@@ -606,6 +654,7 @@
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    inputCheckCompletionState,
     meteoImportCreatingUiState,
     meteoImportErrorUiState,
     meteoImportUiState,

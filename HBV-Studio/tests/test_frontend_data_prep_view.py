@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -314,6 +314,40 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const errorHtml = view.renderInputCheckError({ message: "缺少文件 <dem>", stage: "详细输入检查 <B>", elapsed: 9 }, helpers);
             if (!errorHtml.includes("检查失败：缺少文件 &lt;dem&gt;") || !errorHtml.includes("失败阶段：详细输入检查 &lt;B&gt;；已用时 9 秒")) {
               throw new Error(`input check error should be escaped: ${errorHtml}`);
+            }
+            const failedCompletion = view.inputCheckCompletionState({
+              validation: { valid: false, missing: ["缺 DEM"], warnings: ["站点偏少"] },
+              previousWorkflow: { total_steps: 8, completed_count: 8, completion_ratio: 1, steps_remaining: [2, 5] },
+              detail: true,
+              advice: { recommendations: [{ title: "补资料", detail: "回到第 5 步" }] },
+              stage: "calibration",
+            });
+            if (failedCompletion.comp.ready || failedCompletion.comp.missing.length !== 1 || failedCompletion.comp.warnings.length !== 1 || !failedCompletion.shouldUpdateCalibrationUi) {
+              throw new Error(`failed input check comp mismatch: ${JSON.stringify(failedCompletion)}`);
+            }
+            const failedWorkflow = failedCompletion.statePatch.currentWorkspaceWorkflow;
+            if (failedWorkflow.ready_for_calibration || !failedWorkflow.pending_validation || failedWorkflow.next_step !== 7 || failedWorkflow.completed_count !== 7 || failedWorkflow.completion_ratio !== 7 / 8 || failedWorkflow.steps_remaining.join(",") !== "2,5,7" || failedWorkflow.missing_count !== 1 || failedWorkflow.warning_count !== 1) {
+              throw new Error(`failed input check workflow mismatch: ${JSON.stringify(failedWorkflow)}`);
+            }
+            if (failedCompletion.statePatch.currentWorkspaceAdvice.recommendations.length !== 1) {
+              throw new Error("detailed calibration check should carry advice into state patch");
+            }
+            const readyCompletion = view.inputCheckCompletionState({
+              validation: { valid: true },
+              previousWorkflow: { total_steps: 8, completed_count: 5, completion_ratio: 0.5, steps_remaining: [7] },
+              stage: "calibration",
+            });
+            const readyWorkflow = readyCompletion.statePatch.currentWorkspaceWorkflow;
+            if (!readyCompletion.comp.ready_for_calibration || !readyWorkflow.ready_for_calibration || readyWorkflow.pending_validation || readyWorkflow.next_step !== null || readyWorkflow.completed_count !== 8 || readyWorkflow.completion_ratio !== 1 || readyWorkflow.steps_remaining.length !== 0) {
+              throw new Error(`ready input check workflow mismatch: ${JSON.stringify(readyCompletion)}`);
+            }
+            const quickCompletion = view.inputCheckCompletionState({
+              validation: { valid: true, missing: ["ignored"], warnings: ["ignored"] },
+              previousWorkflow: { total_steps: 8 },
+              stage: "quick_test",
+            });
+            if (!quickCompletion.comp.ready || quickCompletion.shouldUpdateCalibrationUi || Object.keys(quickCompletion.statePatch).length !== 0) {
+              throw new Error(`quick input check should not patch calibration workflow: ${JSON.stringify(quickCompletion)}`);
             }
 
             const checkHelpers = {

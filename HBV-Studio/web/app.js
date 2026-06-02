@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -4084,38 +4084,16 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     const detailData = detailResp.data;
     const advice = adviceResp.data;
     renderStationPrecipCheckOverview(validation);
-    const comp = {
-      ready: Boolean(validation.valid),
-      ready_for_calibration: Boolean(validation.valid),
-      missing: validation.missing || [],
-      warnings: validation.warnings || [],
-    };
-    if (stage === "calibration") {
-      const previousWorkflow = state.currentWorkspaceWorkflow || {};
-      const totalSteps = Number(previousWorkflow.total_steps || 0);
-      const fallbackCompleted = totalSteps
-        ? Math.max(0, Math.min(Number(previousWorkflow.completed_count || 0), totalSteps - 1))
-        : Number(previousWorkflow.completed_count || 0);
-      const pendingSteps = comp.ready_for_calibration
-        ? []
-        : Array.from(new Set([...(Array.isArray(previousWorkflow.steps_remaining) ? previousWorkflow.steps_remaining : []), 7]))
-            .sort((left, right) => Number(left) - Number(right));
-      state.currentWorkspaceWorkflow = {
-        ...previousWorkflow,
-        ready_for_calibration: comp.ready_for_calibration,
-        pending_validation: !comp.ready_for_calibration,
-        next_step: comp.ready_for_calibration ? null : 7,
-        completed_count: comp.ready_for_calibration ? (totalSteps || Number(previousWorkflow.completed_count || 0)) : fallbackCompleted,
-        completion_ratio: totalSteps
-          ? ((comp.ready_for_calibration ? totalSteps : fallbackCompleted) / totalSteps)
-          : Number(previousWorkflow.completion_ratio || 0),
-        steps_remaining: pendingSteps,
-        missing: [...comp.missing],
-        warnings: [...comp.warnings],
-        missing_count: comp.missing.length,
-        warning_count: comp.warnings.length,
-      };
-      if (detail && advice) state.currentWorkspaceAdvice = advice;
+    const checkState = window.HBVStudioDataPrepView.inputCheckCompletionState({
+      validation,
+      previousWorkflow: state.currentWorkspaceWorkflow || {},
+      detail,
+      advice,
+      stage,
+    });
+    const comp = checkState.comp;
+    if (checkState.shouldUpdateCalibrationUi) {
+      Object.assign(state, checkState.statePatch);
       updateSidebar();
       refreshCalibrationControls();
     }
