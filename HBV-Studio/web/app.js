@@ -5259,10 +5259,7 @@ function selectedForecastResultRun() {
 
 function setForecastResultButtons(run) {
   const buttons = window.HBVStudioForecastView.forecastResultButtonState(run, state.lastForecastExportPath);
-  if ($("#forecast-open-result")) $("#forecast-open-result").disabled = buttons.openResultDisabled;
-  if ($("#forecast-open-result-dir")) $("#forecast-open-result-dir").disabled = buttons.openResultDirDisabled;
-  if ($("#forecast-export-excel")) $("#forecast-export-excel").disabled = buttons.exportExcelDisabled;
-  if ($("#forecast-open-export-file")) $("#forecast-open-export-file").disabled = buttons.openExportFileDisabled;
+  applyDomUpdates(buttons.domUpdates);
 }
 
 function renderForecastResultDetail(data = state.forecastResultData) {

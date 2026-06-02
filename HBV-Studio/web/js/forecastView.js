@@ -435,11 +435,20 @@
   function forecastResultButtonState(run = null, lastExportPath = "") {
     const hasRun = Boolean(run?.path);
     const hasExportPath = Boolean(lastExportPath);
-    return {
+    const state = {
       openResultDisabled: !hasRun,
       openResultDirDisabled: !hasRun,
       exportExcelDisabled: !hasRun,
       openExportFileDisabled: !hasExportPath,
+    };
+    return {
+      ...state,
+      domUpdates: [
+        { selector: "#forecast-open-result", disabled: state.openResultDisabled },
+        { selector: "#forecast-open-result-dir", disabled: state.openResultDirDisabled },
+        { selector: "#forecast-export-excel", disabled: state.exportExcelDisabled },
+        { selector: "#forecast-open-export-file", disabled: state.openExportFileDisabled },
+      ],
     };
   }
 

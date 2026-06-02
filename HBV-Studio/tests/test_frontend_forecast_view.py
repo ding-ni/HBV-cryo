@@ -858,6 +858,13 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (!empty.openResultDisabled || !empty.openResultDirDisabled || !empty.exportExcelDisabled || !empty.openExportFileDisabled) {
               throw new Error(`empty state should disable every button: ${JSON.stringify(empty)}`);
             }
+            const emptyDom = Object.fromEntries(empty.domUpdates.map(update => [update.selector, update]));
+            if (emptyDom["#forecast-open-result"].disabled !== true ||
+                emptyDom["#forecast-open-result-dir"].disabled !== true ||
+                emptyDom["#forecast-export-excel"].disabled !== true ||
+                emptyDom["#forecast-open-export-file"].disabled !== true) {
+              throw new Error(`empty button DOM updates wrong: ${JSON.stringify(emptyDom)}`);
+            }
 
             const withRun = view.forecastResultButtonState({ path: "C:/runs/forecast" }, "");
             if (withRun.openResultDisabled || withRun.openResultDirDisabled || withRun.exportExcelDisabled || !withRun.openExportFileDisabled) {
@@ -867,6 +874,13 @@ class FrontendForecastViewTests(unittest.TestCase):
             const withExport = view.forecastResultButtonState({ path: "C:/runs/forecast" }, "C:/exports/forecast.xlsx");
             if (withExport.openResultDisabled || withExport.openResultDirDisabled || withExport.exportExcelDisabled || withExport.openExportFileDisabled) {
               throw new Error(`export state should enable every button: ${JSON.stringify(withExport)}`);
+            }
+            const withExportDom = Object.fromEntries(withExport.domUpdates.map(update => [update.selector, update]));
+            if (withExportDom["#forecast-open-result"].disabled !== false ||
+                withExportDom["#forecast-open-result-dir"].disabled !== false ||
+                withExportDom["#forecast-export-excel"].disabled !== false ||
+                withExportDom["#forecast-open-export-file"].disabled !== false) {
+              throw new Error(`export button DOM updates wrong: ${JSON.stringify(withExportDom)}`);
             }
             """
         )
