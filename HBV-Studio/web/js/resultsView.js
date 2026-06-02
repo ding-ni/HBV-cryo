@@ -92,6 +92,21 @@
     `).join("");
   }
 
+  function resultMetricItems(calibration = {}, validation = {}, meta = {}, helpers = {}) {
+    const profileLabel = helpers.profileLabel || (value => value || "—");
+    const formatNumber = helpers.formatNumber || defaultFormatNumber;
+    const eventMetricItems = helpers.eventMetricItems || (() => []);
+    return [
+      { l: "模式", v: profileLabel(meta.calibration_profile) },
+      { l: "步长", v: `${formatNumber(meta.time_config?.time_step_hours, 0)} 小时` },
+      { l: "率定纳什效率系数", v: formatNumber(calibration.nse, 4) },
+      { l: "验证纳什效率系数", v: formatNumber(validation.nse, 4) },
+      { l: "率定 KGE 综合效率", v: formatNumber(calibration.kge, 4) },
+      { l: "率定水量偏差", v: `${formatNumber(calibration.pbias, 2)}%` },
+      ...eventMetricItems(meta),
+    ];
+  }
+
   function defaultFormatNumber(value, digits = 4) {
     const num = Number(value);
     return Number.isFinite(num) ? num.toFixed(digits) : "—";
@@ -366,6 +381,7 @@
   }
 
   window.HBVStudioResultsView = {
+    resultMetricItems,
     renderFilterToolbar,
     renderMetricStrip,
     renderRunCard,

@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint) {
+            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint || !results?.resultMetricItems) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -73,6 +73,24 @@ class FrontendResultsViewTests(unittest.TestCase):
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);
             if (!metrics.includes("NSE&lt;率定&gt;") || !metrics.includes("0.91&amp;")) {
               throw new Error("metric strip should escape label and value");
+            }
+            const metricItems = results.resultMetricItems(
+              { nse: 0.81234, kge: 0.73456, pbias: -1.234 },
+              { nse: 0.70123 },
+              { calibration_profile: "daily", time_config: { time_step_hours: 24 } },
+              {
+                profileLabel(value) { return value === "daily" ? "日尺度" : String(value || ""); },
+                formatNumber(value, digits = 4) {
+                  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+                },
+                eventMetricItems() {
+                  return [{ l: "洪水事件", v: "事件目标函数：2/3 场有效" }];
+                },
+              },
+            );
+            const metricText = metricItems.map(item => `${item.l}:${item.v}`).join("|");
+            if (metricText !== "模式:日尺度|步长:24 小时|率定纳什效率系数:0.8123|验证纳什效率系数:0.7012|率定 KGE 综合效率:0.7346|率定水量偏差:-1.23%|洪水事件:事件目标函数：2/3 场有效") {
+              throw new Error(`unexpected result metric items: ${metricText}`);
             }
             const fields = results.renderRunExportFields([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
             if (!fields.includes('data-run-export-field="q&lt;sim&gt;"') || !fields.includes("checked")) {

@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
+    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -4999,15 +4999,11 @@ function renderRunDetail(data) {
 }
 
 function updateMetricsStrip(cal, val, meta) {
-  const items = [
-    { l: "模式", v: profileLabel(meta.calibration_profile) },
-    { l: "步长", v: `${formatNumber(meta.time_config?.time_step_hours, 0)} 小时` },
-    { l: "率定纳什效率系数", v: formatNumber(cal.nse, 4) },
-    { l: "验证纳什效率系数", v: formatNumber(val.nse, 4) },
-    { l: "率定 KGE 综合效率", v: formatNumber(cal.kge, 4) },
-    { l: "率定水量偏差", v: `${formatNumber(cal.pbias, 2)}%` },
-  ];
-  items.push(...window.HBVStudioEventMode.floodEventMetricItems(meta, { formatNumber }));
+  const items = window.HBVStudioResultsView.resultMetricItems(cal, val, meta, {
+    profileLabel,
+    formatNumber,
+    eventMetricItems: item => window.HBVStudioEventMode.floodEventMetricItems(item, { formatNumber }),
+  });
   $("#results-metric-strip").innerHTML = window.HBVStudioResultsView.renderMetricStrip(items, { escapeHtml });
 }
 
