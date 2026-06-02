@@ -150,6 +150,8 @@ const frontendModuleContracts = [
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
       "manualPresetApplyState",
+      "manualParamUpdateState",
+      "manualParamResetState",
       "manualGroupParamNames",
       "manualPhaseGuide",
       "manualChangeSummary",
@@ -5059,9 +5061,15 @@ function renderParamSliders(data) {
     const input = $(`[data-param-input="${name}"]`);
     const item = slider.closest(".param-slider-item");
     const applyValue = numeric => {
-      if (!Number.isFinite(numeric)) return;
-      state._runParams[name] = numeric;
-      item.classList.toggle("changed", Math.abs(numeric - state._runOrigParams[name]) > 1e-8);
+      const update = window.HBVStudioParameterLibrary.manualParamUpdateState(
+        state._runParams,
+        state._runOrigParams,
+        name,
+        numeric,
+      );
+      if (!update.applied) return;
+      state._runParams = update.params;
+      item.classList.toggle("changed", update.changed);
       updateManualChangeSummary();
     };
     slider.addEventListener("input", () => {
@@ -5088,23 +5096,29 @@ function renderParamSliders(data) {
 }
 
 function resetParamsToOriginal() {
-  if (!state._runOrigParams) return;
-  state._runParams = { ...state._runOrigParams };
-  for (const [name, val] of Object.entries(state._runOrigParams)) {
+  const reset = window.HBVStudioParameterLibrary.manualParamResetState(state._runOrigParams);
+  if (!reset.reset) return;
+  state._runParams = reset.params;
+  reset.paramUpdates.forEach(({ name, value, changed }) => {
     const slider = $(`[data-param-slider="${name}"]`);
     const input = $(`[data-param-input="${name}"]`);
-    if (slider) slider.value = val;
-    if (input) input.value = val;
+    if (slider) slider.value = value;
+    if (input) input.value = value;
     const item = slider?.closest(".param-slider-item");
-    if (item) item.classList.remove("changed");
-  }
+    if (item) item.classList.toggle("changed", changed);
+  });
   // Restore original charts
   if (state._runData) renderCharts(state._runData);
   const meta = state._runData?.metadata || {};
   const cal = meta.metrics?.calibration || {};
   const val = meta.metrics?.validation || {};
   updateMetricsStrip(cal, val, meta);
-  $("#resim-hint").style.display = "none";
+  const hint = $("#resim-hint");
+  if (hint) {
+    hint.style.display = reset.hint.visible ? "" : "none";
+    hint.textContent = reset.hint.text;
+    hint.className = reset.hint.className;
+  }
   updateManualChangeSummary();
   updateCompareSummary();
 }

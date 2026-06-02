@@ -359,7 +359,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["manualPresetAppliedParams", "manualPresetApplyState"]) {
+            for (const name of ["manualPresetAppliedParams", "manualPresetApplyState", "manualParamUpdateState", "manualParamResetState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const result = library.manualPresetAppliedParams(
@@ -408,6 +408,44 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const missing = library.manualPresetApplyState(null, { TT: 0.1 }, { name: "Trial", params: { TT: 0.2 } });
             if (missing.applied || missing.paramUpdates.length || missing.hint.visible || missing.presetName) {
               throw new Error(`missing context should not apply preset: ${JSON.stringify(missing)}`);
+            }
+
+            const currentParams = { TT: 0.1, FC: 110 };
+            const update = library.manualParamUpdateState(currentParams, { TT: 0.1, FC: 120 }, " FC ", "130.5");
+            if (!update.applied || update.name !== "FC" || update.value !== 130.5 || !update.changed ||
+                update.params.FC !== 130.5 || update.params.TT !== 0.1) {
+              throw new Error(`manual param update state wrong: ${JSON.stringify(update)}`);
+            }
+            if (currentParams.FC !== 110) {
+              throw new Error("manual param update state should not mutate current params");
+            }
+            const unchangedUpdate = library.manualParamUpdateState({ TT: 0.1 }, { TT: 0.1 }, "TT", 0.1);
+            if (!unchangedUpdate.applied || unchangedUpdate.changed) {
+              throw new Error(`unchanged manual param update wrong: ${JSON.stringify(unchangedUpdate)}`);
+            }
+            for (const bad of [
+              library.manualParamUpdateState({ TT: 0.1 }, { TT: 0.1 }, "", 0.2),
+              library.manualParamUpdateState({ TT: 0.1 }, { TT: 0.1 }, "TT", "bad"),
+              library.manualParamUpdateState(null, { TT: 0.1 }, "TT", 0.2),
+            ]) {
+              if (bad.applied || bad.changed || bad.value !== null) {
+                throw new Error(`bad manual param update should not apply: ${JSON.stringify(bad)}`);
+              }
+            }
+
+            const reset = library.manualParamResetState({ TT: 0.1, FC: 120 });
+            if (!reset.reset || reset.params.TT !== 0.1 || reset.params.FC !== 120 ||
+                reset.paramUpdates.length !== 2 || reset.paramUpdates.some(item => item.changed) ||
+                reset.hint.visible || reset.hint.className !== "hint-box") {
+              throw new Error(`manual param reset state wrong: ${JSON.stringify(reset)}`);
+            }
+            reset.params.TT = 9;
+            if (reset.paramUpdates.find(item => item.name === "TT").value !== 0.1) {
+              throw new Error("manual param reset updates should not track later params mutation");
+            }
+            const missingReset = library.manualParamResetState(null);
+            if (missingReset.reset || missingReset.paramUpdates.length || missingReset.hint.visible) {
+              throw new Error(`missing manual param reset should not reset: ${JSON.stringify(missingReset)}`);
             }
             """
         )

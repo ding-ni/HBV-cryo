@@ -389,6 +389,47 @@
     };
   }
 
+  function manualParamUpdateState(currentParams = null, originalParams = null, name = "", value = null) {
+    const paramName = String(name || "").trim();
+    const numeric = Number(value);
+    if (!paramName || !Number.isFinite(numeric) || !currentParams || typeof currentParams !== "object") {
+      return {
+        applied: false,
+        params: currentParams,
+        name: paramName,
+        value: null,
+        changed: false,
+      };
+    }
+    const originals = originalParams && typeof originalParams === "object" ? originalParams : {};
+    const params = { ...currentParams, [paramName]: numeric };
+    return {
+      applied: true,
+      params,
+      name: paramName,
+      value: numeric,
+      changed: Math.abs(numeric - Number(originals[paramName])) > 1e-8,
+    };
+  }
+
+  function manualParamResetState(originalParams = null) {
+    if (!originalParams || typeof originalParams !== "object") {
+      return {
+        reset: false,
+        params: originalParams,
+        paramUpdates: [],
+        hint: { visible: false, className: "", text: "" },
+      };
+    }
+    const params = { ...originalParams };
+    return {
+      reset: true,
+      params,
+      paramUpdates: Object.entries(params).map(([name, value]) => ({ name, value, changed: false })),
+      hint: { visible: false, className: "hint-box", text: "" },
+    };
+  }
+
   function manualGroupParamNames(group = "all", names = [], groupParams = {}) {
     const paramNames = Array.isArray(names) ? names : [];
     if (normalizeKey(group) === "all") return paramNames.slice();
@@ -733,6 +774,8 @@
     manualPresetDeletePayload,
     manualPresetAppliedParams,
     manualPresetApplyState,
+    manualParamUpdateState,
+    manualParamResetState,
     manualGroupParamNames,
     manualPhaseGuide,
     manualChangeSummary,
