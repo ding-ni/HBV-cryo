@@ -10,6 +10,58 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 
 class FrontendForecastViewTests(unittest.TestCase):
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_time_helpers_handle_daily_and_hourly_runs(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            for (const name of ["forecastInputType", "forecastSuggestedStart", "forecastTimeComparable", "formatForecastInputTime", "parseForecastTime"]) {
+              if (typeof view?.[name] !== "function") throw new Error(`missing forecast time export: ${name}`);
+            }
+
+            const dailyRun = {
+              time_step_hours: 24,
+              state_snapshot_time: "2026-01-10",
+            };
+            if (view.forecastInputType(dailyRun) !== "date") throw new Error("daily run should use date input");
+            if (view.forecastSuggestedStart(dailyRun) !== "2026-01-11") {
+              throw new Error(`daily suggested start wrong: ${view.forecastSuggestedStart(dailyRun)}`);
+            }
+            if (view.forecastTimeComparable("2026-01-11 00:00", dailyRun) !== "2026-01-11") {
+              throw new Error("daily comparable should normalize to date");
+            }
+
+            const hourlyRun = {
+              time_config: { time_step_hours: 1, valid_end: "2026-01-10T23:00" },
+            };
+            if (view.forecastInputType(hourlyRun) !== "datetime-local") throw new Error("hourly run should use datetime-local input");
+            if (view.forecastSuggestedStart(hourlyRun) !== "2026-01-11T00:00") {
+              throw new Error(`hourly suggested start wrong: ${view.forecastSuggestedStart(hourlyRun)}`);
+            }
+            if (view.forecastTimeComparable("2026-01-11 00:00", hourlyRun) !== "2026-01-11T00:00") {
+              throw new Error("hourly comparable should normalize space separator");
+            }
+
+            if (view.parseForecastTime("not-a-date") !== null) throw new Error("invalid dates should return null");
+            if (view.formatForecastInputTime(null, 24) !== "") throw new Error("missing date should format as empty string");
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""

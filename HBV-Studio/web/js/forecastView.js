@@ -22,6 +22,53 @@
     };
   }
 
+  function forecastStepHours(run = {}) {
+    return Number(run?.time_step_hours || run?.time_config?.time_step_hours || 24);
+  }
+
+  function forecastInputType(run = {}) {
+    return forecastStepHours(run) <= 1.5 ? "datetime-local" : "date";
+  }
+
+  function parseForecastTime(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      return new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 0, 0, 0, 0);
+    }
+    const normalized = raw.replace(" ", "T");
+    const dt = new Date(normalized);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  function formatForecastInputTime(date, stepHours) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    const pad = value => String(value).padStart(2, "0");
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    if (Number(stepHours || 24) <= 1.5) {
+      return `${y}-${m}-${d}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+    return `${y}-${m}-${d}`;
+  }
+
+  function forecastSuggestedStart(run = {}) {
+    const stepHours = forecastStepHours(run);
+    const stateTime = run?.state_snapshot_time || run?.time_config?.forecast_end || run?.time_config?.valid_end || run?.time_config?.calib_end || "";
+    const dt = parseForecastTime(stateTime);
+    if (!dt) return "";
+    dt.setMinutes(dt.getMinutes() + Math.round(stepHours * 60));
+    return formatForecastInputTime(dt, stepHours);
+  }
+
+  function forecastTimeComparable(value, run = {}) {
+    const stepHours = forecastStepHours(run);
+    const dt = parseForecastTime(value);
+    return dt ? formatForecastInputTime(dt, stepHours) : String(value || "").trim();
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -728,7 +775,12 @@
     forecastArchiveSummaryText,
     forecastArchiveVariableItems,
     forecastArchiveVariables,
+    forecastInputType,
     forecastParameterSourceSummary,
+    forecastSuggestedStart,
+    forecastTimeComparable,
+    formatForecastInputTime,
+    parseForecastTime,
     renderForecastSourceOptions,
     renderForecastSourceSummary,
     forecastRestartTasks,
