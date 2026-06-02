@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList"],
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "prepPanelSummary", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3877,117 +3877,15 @@ function pollBootstrapLog(task) {
 
 // --- prep steps (step 6) ---
 
-function formatPrepDisplayTitle(index, title) {
-  return window.HBVStudioDataPrepView?.formatPrepDisplayTitle(index, title) || `${index}. ${String(title || "").replace(/^\d+\.\s*/, "").trim()}`;
-}
-
 function buildVisiblePrepSteps() {
-  const rawSteps = state.prepSteps.filter(step => !GIS_STEP_IDS.has(step.id) && !CHECK_STEP_IDS.has(step.id));
-  const byId = Object.fromEntries(rawSteps.map(step => [step.id, step]));
-  const sources = getWizardMeteoSources();
-  const precipMode = getSelectedRadio("wz-precip-mode") || "grid_only";
-  const visible = [];
-  const add = (id, title, description) => {
-    const step = byId[id];
-    if (!step) return;
-    visible.push({ ...step, displayTitle: title, displayDescription: description });
-  };
-  const needsEra5Temp = sources.temp !== "custom_tif";
-  const needsEra5Pet = sources.pet !== "custom_tif";
-  const needsEra5Precip = sources.prec === "era5";
-  const needsGridPrec = sources.prec !== "custom_tif";
-
-  if (isHourlyTimescaleSelected()) {
-    if (needsEra5Precip || needsEra5Temp || needsEra5Pet) {
-      const hourlyDownloadTitle = needsEra5Pet
-        ? (needsEra5Temp ? "下载小时 ERA5 变量" : "下载 PET 所需 ERA5 变量")
-        : needsEra5Precip
-          ? "下载小时 ERA5 降水"
-          : "下载小时 ERA5 气温";
-      const hourlyDownloadDesc = needsEra5Pet
-        ? "下载这一步要用到的 ERA5 原始变量。"
-        : needsEra5Precip
-          ? "下载小时 ERA5 total_precipitation 原始变量。"
-          : "下载小时气温要用的 ERA5 原始变量。";
-      const hourlyProcessTitle = needsEra5Pet
-        ? (needsEra5Temp ? "生成小时气温和潜在蒸散发" : "生成小时潜在蒸散发")
-        : needsEra5Precip
-          ? "生成小时 ERA5 降水"
-          : "生成小时气温";
-      const hourlyProcessDesc = needsEra5Pet
-        ? "把下载结果处理成当前项目要用的小时结果。"
-        : needsEra5Precip
-          ? "把 ERA5 降水下载结果处理成小时降水栅格。"
-          : "把下载结果处理成小时气温。";
-      add(
-        "download_hourly_era5",
-        hourlyDownloadTitle,
-        hourlyDownloadDesc
-      );
-      add(
-        "process_hourly_era5",
-        hourlyProcessTitle,
-        hourlyProcessDesc
-      );
-    }
-    if (needsGridPrec) {
-      add("process_hourly_prec", "整理小时降水", "把降水整理到当前工程可直接使用的格式。");
-    }
-    if (precipMode !== "grid_only") {
-      add("station_precip_strategy", "分析站点降水资料", "核对站点匹配、时间覆盖、缺测和异常值。");
-    }
-    add("align_hourly_inputs", "写入工程目录", "把最终要用的气象数据裁剪对齐到 DEM，并写入工程目录。");
-    if (precipMode !== "grid_only") {
-      add("apply_precip_strategy", "执行降水方案", "按你选的站点订正或泰森方案，生成最终降水输入。");
-    }
-  } else {
-    if (needsEra5Precip || needsEra5Temp || needsEra5Pet) {
-      const dailyDownloadTitle = needsEra5Pet
-        ? (needsEra5Temp ? "下载 ERA5 变量" : "下载 PET 所需 ERA5 变量")
-        : needsEra5Precip
-          ? "下载 ERA5 降水"
-          : "下载 ERA5 气温";
-      const dailyDownloadDesc = needsEra5Pet
-        ? "下载这一步要用到的 ERA5 原始变量。"
-        : needsEra5Precip
-          ? "下载 ERA5 total_precipitation 原始变量。"
-          : "下载气温要用的 ERA5 原始变量。";
-      const dailyProcessTitle = needsEra5Pet
-        ? (needsEra5Temp ? "生成日尺度气温和潜在蒸散发" : "生成日尺度潜在蒸散发")
-        : "生成日尺度气温";
-      const dailyProcessDesc = needsEra5Pet
-        ? "把下载结果处理成当前项目要用的日尺度结果。"
-        : "把下载结果处理成日尺度气温。";
-      add(
-        "download_era5",
-        dailyDownloadTitle,
-        dailyDownloadDesc
-      );
-      if (needsEra5Temp || needsEra5Pet) {
-        add(
-          "process_era5",
-          dailyProcessTitle,
-          dailyProcessDesc
-        );
-      }
-    }
-    if (needsGridPrec) {
-      add("process_prec", "整理降水", "把降水整理到当前工程可直接使用的格式。");
-    }
-    if (precipMode !== "grid_only") {
-      add("station_precip_strategy", "分析站点降水资料", "核对站点匹配、时间覆盖、缺测和异常值。");
-    }
-    add("align_inputs", "写入工程目录", "把最终要用的气象数据裁剪对齐到 DEM，并写入工程目录。");
-    if (precipMode !== "grid_only") {
-      add("apply_precip_strategy", "执行降水方案", "按你选的站点订正或泰森方案，生成最终降水输入。");
-    }
-  }
-
-  return visible.map((step, index) => ({
-    ...step,
-    displayTitle: formatPrepDisplayTitle(index + 1, step.displayTitle || step.title),
-    displayDescription: step.displayDescription || step.description || "",
-  }));
+  return window.HBVStudioDataPrepView.visiblePrepSteps({
+    steps: state.prepSteps,
+    sources: getWizardMeteoSources(),
+    precipMode: getSelectedRadio("wz-precip-mode") || "grid_only",
+    hourly: isHourlyTimescaleSelected(),
+    gisStepIds: GIS_STEP_IDS,
+    checkStepIds: CHECK_STEP_IDS,
+  });
 }
 
 function updatePrepPanelSummary(steps) {

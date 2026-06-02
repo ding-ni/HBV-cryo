@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -96,6 +96,45 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!noWorkspace.includes("请选择 &lt;workspace&gt;")) throw new Error("empty workspace text should be escaped");
             const noSteps = view.renderPrepStepList({ workspaceSelected: true, steps: [], noStepsText: "无步骤 <ok>" }, helpers);
             if (!noSteps.includes("无步骤 &lt;ok&gt;")) throw new Error("no steps text should be escaped");
+
+            const sourceSteps = [
+              "download_era5", "process_era5", "process_prec", "station_precip_strategy", "align_inputs", "apply_precip_strategy",
+              "download_hourly_era5", "process_hourly_era5", "process_hourly_prec", "align_hourly_inputs",
+              "clip_dem", "check_inputs",
+            ].map(id => ({ id, title: `旧标题 ${id}`, description: `旧说明 ${id}` }));
+            const dailySteps = view.visiblePrepSteps({
+              steps: sourceSteps,
+              sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" },
+              precipMode: "thiessen",
+              hourly: false,
+              gisStepIds: ["clip_dem"],
+              checkStepIds: ["check_inputs"],
+            });
+            if (dailySteps.map(step => step.id).join(",") !== "download_era5,process_prec,station_precip_strategy,align_inputs,apply_precip_strategy") {
+              throw new Error(`daily visible prep ids mismatch: ${dailySteps.map(step => step.id).join(",")}`);
+            }
+            if (dailySteps[0].displayTitle !== "1. 下载 ERA5 降水" || dailySteps[1].displayTitle !== "2. 整理降水" || dailySteps[4].displayTitle !== "5. 执行降水方案") {
+              throw new Error(`daily visible prep titles mismatch: ${JSON.stringify(dailySteps.map(step => step.displayTitle))}`);
+            }
+            if (dailySteps.some(step => step.id === "clip_dem" || step.id === "check_inputs")) {
+              throw new Error("GIS/check steps should be excluded from visible prep steps");
+            }
+            const hourlySteps = view.visiblePrepSteps({
+              steps: sourceSteps,
+              sources: { prec: "custom_tif", temp: "era5", pet: "era5_fao56" },
+              precipMode: "grid_only",
+              hourly: true,
+              excludedStepIds: new Set(["clip_dem", "check_inputs"]),
+            });
+            if (hourlySteps.map(step => step.id).join(",") !== "download_hourly_era5,process_hourly_era5,align_hourly_inputs") {
+              throw new Error(`hourly visible prep ids mismatch: ${hourlySteps.map(step => step.id).join(",")}`);
+            }
+            if (hourlySteps[0].displayTitle !== "1. 下载小时 ERA5 变量" || hourlySteps[1].displayTitle !== "2. 生成小时气温和潜在蒸散发") {
+              throw new Error(`hourly visible prep titles mismatch: ${JSON.stringify(hourlySteps.map(step => step.displayTitle))}`);
+            }
+            if (!hourlySteps[1].displayDescription.includes("小时结果")) {
+              throw new Error(`hourly visible prep description mismatch: ${hourlySteps[1].displayDescription}`);
+            }
 
             const bootstrapHtml = view.renderBootstrapStatus([
               { id: "dem", title: "裁剪 DEM <1>", done: true, message: "已完成 & 可复核" },
