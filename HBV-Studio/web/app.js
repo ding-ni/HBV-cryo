@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunExportFields", "resultsFilterHint"],
+    exports: ["renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -2492,63 +2492,25 @@ function renderRunEngineeringSummary(data) {
   const actions = $("#run-engineering-actions");
   const note = $("#run-engineering-note");
   if (!host || !actions || !note) return;
-  const meta = data?.metadata || {};
-  const summary = hydrologySummaryFor(data, meta);
-  const editable = isStudioEditableRun(data);
-  const manual = Boolean(meta?.manual_result?.enabled);
-  const starter = Boolean(meta?.starter_result?.enabled);
-  const workspaceConfig = meta.workspace_config || data?.run?.workspace_config || "";
-  const replayInfo = replayCompatibilityInfo(meta);
-  const reliabilityFlag = String(meta?.reliability_flag || "ok").trim();
-  const isDegraded = reliabilityFlag !== "ok";
-  const reportPath = summary.diagnostics_detail_path || summary.diagnostics_detail_display_path || "";
-  const componentReport = componentFractionReport(meta);
-  const floodEval = floodEventEvaluation(meta);
-  const cards = [
-    { label: "率定流程", value: hydrologySummaryValue(summary, "workflow_label_zh", runTypeLabel(data?.run?.run_type, manual ? "手调结果" : starter ? "手调起点" : editable ? "单流程参数率定" : "历史率定结果")), detail: "当前页面显示水文摘要，详细数据见本地结果目录" },
-    { label: "评分标准", value: hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数"), detail: "径流拟合与三水源构成综合评分" },
-    { label: "径流拟合", value: hydrologySummaryValue(summary, "flow_status_zh"), detail: "综合 NSE、KGE、PBIAS 径流指标" },
-    ...(floodEval?.enabled ? [{ label: "洪水事件", value: floodEventStatusText(floodEval), detail: floodEval.objective_enabled ? "本次按事件窗口参与率定评分" : "本次输出逐场洪水诊断" }] : []),
-    { label: "三水源构成", value: componentFractionText(componentReport), detail: componentFractionBasisText(componentReport) },
-    { label: "结果说明", value: reportPath ? shortPath(summary.diagnostics_detail_display_path || reportPath) : "结果目录内生成", detail: "水文模拟结果说明已保存至本地结果目录" },
-  ];
-  host.innerHTML = cards.map(card => `
-    <article class="engineering-card">
-      <span>${escapeHtml(card.label)}</span>
-      <strong>${escapeHtml(card.value || "—")}</strong>
-      <small>${escapeHtml(card.detail || "—")}</small>
-    </article>
-  `).join("");
-  const actionButtons = [
-    data?.run?.path ? `<button class="ghost-button" data-rename-run="${escapeHtml(data.run.path)}">${data?.run?.has_custom_title ? "修改标题" : "命名结果"}</button>` : "",
-    data?.run?.path ? `<button class="ghost-button" data-run-summary-open-dir="${escapeHtml(data.run.path)}">打开结果目录</button>` : "",
-    reportPath ? `<button class="ghost-button" data-run-summary-open-report="${escapeHtml(reportPath)}">打开过程复核报告</button>` : "",
-    workspaceConfig && !samePath(workspaceConfig, state.runWorkspaceFilterPath) ? `<button class="ghost-button" data-run-summary-filter-workspace="${escapeHtml(workspaceConfig)}">只看本工作区</button>` : "",
-    workspaceConfig ? `<button class="ghost-button" data-run-summary-open-workspace="${escapeHtml(workspaceConfig)}">回到工作区配置</button>` : "",
-    data?.run?.path ? `<button class="ghost-button" data-delete-run="${escapeHtml(data.run.path)}">删除当前结果</button>` : "",
-  ].filter(Boolean);
-  actions.innerHTML = actionButtons.join("");
-  const noteParts = [
-    "结果页已压缩为水文摘要；完整过程复核和逐年分析保存在本地过程复核报告中。",
-    editable
-      ? (manual ? "该结果来自手动调参后的保存重算，可继续在此基础上调整。" : starter ? "该结果是系统生成的手调起点，可作为后续人工复核起点。" : "该结果保留工作区配置和参数边界，可继续手动调参与保存重算。")
-      : "当前结果仅支持查看。",
-  ];
-  if (replayInfo.obsReplay) {
-    noteParts.push("观测序列已从源结果回放恢复，即使当前工作区原始观测 CSV 缺失，也能继续打开和重算。");
-  }
-  if (replayInfo.boundaryReplay) {
-    noteParts.push("上游边界入流已从源结果回放恢复；当前继续修改 Muskingum 路由参数时，不会重新路由原始边界 CSV。");
-  }
-  if (isDegraded) {
-    const degradedReason = Array.isArray(meta?.reliability_notes) ? meta.reliability_notes.join("；") : "";
-    noteParts.push(`当前结果可靠性降级${degradedReason ? `：${degradedReason}` : "。"} `);
-  }
-  if (meta?.project_object_type === "regression_validation" || String(data?.run?.path || "").includes("HBVStudio_Demo")) {
-    noteParts.push("当前结果仅代表本次工程配置下的一次率定结果，请结合输入数据、参数设置和本地过程复核报告综合判断。");
-  }
-  note.textContent = noteParts.join("");
-  note.className = `hint-box ${(!editable || replayInfo.boundaryReplay || isDegraded) ? "status-warn" : "status-ok"}`.trim();
+  const content = window.HBVStudioResultsView.renderRunEngineeringSummary(data, {
+    escapeHtml,
+    componentFractionBasisText,
+    componentFractionReport,
+    componentFractionText,
+    floodEventEvaluation,
+    floodEventStatusText,
+    hydrologySummaryValue,
+    isStudioEditableRun,
+    replayCompatibilityInfo,
+    runTypeLabel,
+    runWorkspaceFilterPath: state.runWorkspaceFilterPath,
+    samePath,
+    shortPath,
+  });
+  host.innerHTML = content.summaryHtml;
+  actions.innerHTML = content.actionsHtml;
+  note.textContent = content.noteText;
+  note.className = content.noteClassName;
 }
 
 // --------------- API helpers ---------------

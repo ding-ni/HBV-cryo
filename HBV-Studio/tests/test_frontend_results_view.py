@@ -144,6 +144,57 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!cards.includes("仅查看") || !cards.includes("修改标题")) {
               throw new Error("readonly/custom title labels missing");
             }
+
+            const engineering = results.renderRunEngineeringSummary({
+              run: {
+                path: "C:/runs/A",
+                run_type: "calibration",
+                workspace_config: "C:/ws/A",
+                has_custom_title: false,
+              },
+              metadata: {
+                workspace_config: "C:/ws/A",
+                hydrology_summary: {
+                  workflow_label_zh: "正式率定",
+                  objective_label_zh: "统一专业目标",
+                  flow_status_zh: "径流拟合达标",
+                  diagnostics_detail_path: "C:/runs/A/水文模拟结果说明.md",
+                },
+                manual_result: { enabled: false },
+                starter_result: { enabled: false },
+                reliability_flag: "degraded",
+                reliability_notes: ["缺少完整观测回放"],
+                project_object_type: "regression_validation",
+              },
+            }, {
+              ...helpers,
+              componentFractionBasisText() { return "率定期径流口径"; },
+              componentFractionReport() { return { ok: true }; },
+              componentFractionText() { return "雨水 50% / 融雪 30% / 冰川 20%"; },
+              floodEventEvaluation() { return { enabled: true, objective_enabled: false }; },
+              floodEventStatusText() { return "事件目标函数：2/3 场有效"; },
+              hydrologySummaryValue(summary, key, fallback = "—") { return summary?.[key] || fallback; },
+              isStudioEditableRun() { return true; },
+              replayCompatibilityInfo() { return { obsReplay: true, boundaryReplay: true }; },
+              runTypeLabel(value, fallback) { return fallback || value; },
+              runWorkspaceFilterPath: "C:/ws/active",
+              shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
+            });
+            if (!engineering.summaryHtml.includes("正式率定") || !engineering.summaryHtml.includes("事件目标函数：2/3 场有效")) {
+              throw new Error("engineering summary cards missing");
+            }
+            if (!engineering.summaryHtml.includes("水文模拟结果说明.md") || !engineering.summaryHtml.includes("雨水 50%")) {
+              throw new Error("engineering report or component summary missing");
+            }
+            for (const attr of ["data-rename-run", "data-run-summary-open-dir", "data-run-summary-open-report", "data-run-summary-filter-workspace", "data-run-summary-open-workspace", "data-delete-run"]) {
+              if (!engineering.actionsHtml.includes(attr)) throw new Error(`missing engineering action ${attr}`);
+            }
+            if (engineering.noteClassName !== "hint-box status-warn") {
+              throw new Error(`unexpected engineering note class: ${engineering.noteClassName}`);
+            }
+            if (!engineering.noteText.includes("观测序列已从源结果回放恢复") || !engineering.noteText.includes("当前结果可靠性降级：缺少完整观测回放")) {
+              throw new Error(`engineering note text missing replay/degraded context: ${engineering.noteText}`);
+            }
             """
         )
         result = subprocess.run(
