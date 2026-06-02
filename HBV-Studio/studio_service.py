@@ -76,9 +76,9 @@ from services.event_windows import EventWindowContext
 from services.event_windows import build_expected_forcing_index as build_event_expected_forcing_index
 from services.event_windows import build_expected_observation_index as build_event_expected_observation_index
 from services.event_windows import build_expected_time_index as build_event_expected_time_index
-from services.event_windows import event_forcing_coverage_summary as build_event_forcing_coverage_summary
-from services.event_windows import event_observation_coverage_messages as build_event_observation_coverage_messages
-from services.event_windows import event_observation_coverage_summary as build_event_observation_coverage_summary
+from services.event_windows import event_forcing_coverage_summary
+from services.event_windows import event_observation_coverage_messages
+from services.event_windows import event_observation_coverage_summary
 from services.event_windows import event_windows_ui_summary as build_event_windows_ui_summary
 from services.event_windows import input_time_basis_ui_summary as build_input_time_basis_ui_summary
 from services.event_windows import normalized_flood_events as build_normalized_flood_events
@@ -213,9 +213,9 @@ from services.meteo_status import write_meteo_state as build_write_meteo_state
 from services.observed import ObservedInfoContext, ObservedWindowContext
 from services.observed import observed_info as build_observed_info
 from services.observed import observed_window_messages as build_observed_window_messages
-from services.raster_time_series import scan_tif_time_series as build_scan_tif_time_series
-from services.raster_time_series import validate_tif_grid_alignment as build_validate_tif_grid_alignment
-from services.raster_time_series import validate_tif_time_series as build_validate_tif_time_series
+from services.raster_time_series import scan_tif_time_series
+from services.raster_time_series import validate_tif_grid_alignment
+from services.raster_time_series import validate_tif_time_series
 from services.precip_strategy_status import PrecipStrategyStatusContext
 from services.precip_strategy_status import check_precip_strategy_outputs as build_check_precip_strategy_outputs
 from services.station_precip import StationPrecipAnalysisContext
@@ -994,44 +994,6 @@ def build_expected_forcing_index(config: dict[str, Any], *, context: str = "cali
 
 def build_expected_observation_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
     return build_event_expected_observation_index(config, _event_window_context(), runtime_context=context)
-
-
-def scan_tif_time_series(directory: Path) -> dict[str, Any]:
-    return build_scan_tif_time_series(directory)
-
-
-def validate_tif_grid_alignment(label: str, directory: Path, dem_path: Path) -> dict[str, Any]:
-    return build_validate_tif_grid_alignment(label, directory, dem_path)
-
-
-def validate_tif_time_series(
-    label: str,
-    directory: Path,
-    step_hours: float,
-    expected_index: pd.DatetimeIndex | None = None,
-    time_basis_label: str = "当前配置时间范围",
-) -> dict[str, Any]:
-    return build_validate_tif_time_series(label, directory, step_hours, expected_index, time_basis_label)
-
-
-def event_forcing_coverage_summary(
-    event_info: dict[str, Any] | None,
-    directories: dict[str, dict[str, Any]],
-    step_hours: float,
-) -> dict[str, Any] | None:
-    return build_event_forcing_coverage_summary(event_info, directories, step_hours)
-
-
-def event_observation_coverage_summary(
-    event_info: dict[str, Any] | None,
-    observed_series: Any,
-    step_hours: float,
-) -> dict[str, Any] | None:
-    return build_event_observation_coverage_summary(event_info, observed_series, step_hours)
-
-
-def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tuple[list[str], list[str]]:
-    return build_event_observation_coverage_messages(coverage)
 
 
 def _forcing_validation_context() -> ForcingValidationContext:
