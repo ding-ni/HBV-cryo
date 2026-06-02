@@ -408,6 +408,36 @@
     };
   }
 
+  function manualPresetSaveSuccessState(responseData = {}, fallbackName = "") {
+    const preset = responseData?.preset || {};
+    const savedId = String(preset.id || preset.parameter_set_id || "").trim();
+    const scopeLabel = normalizeKey(preset.scope) === "global" ? "公共参数库" : "当前工作区";
+    const presetName = String(preset.name || fallbackName || "参数集").trim() || "参数集";
+    return {
+      savedId,
+      presetName,
+      scopeLabel,
+      toastText: `已保存到${scopeLabel}：${presetName}${preset.params_adjusted ? "（已按约束自动修正）" : ""}`,
+    };
+  }
+
+  function manualPresetLoadSuccessState(preset = {}, presetName = "") {
+    const resolvedName = String(presetName || preset?.name || "参数集").trim() || "参数集";
+    return {
+      inputName: resolvedName,
+      toastText: `已载入参数集：${resolvedName}${preset?.params_adjusted ? "（已按约束自动修正）" : ""}`,
+    };
+  }
+
+  function manualPresetDeleteViewState(presetName = "") {
+    const resolvedName = String(presetName || "参数集").trim() || "参数集";
+    return {
+      presetName: resolvedName,
+      confirmText: `确定删除参数集“${resolvedName}”吗？`,
+      toastText: `已删除参数集：${resolvedName}`,
+    };
+  }
+
   function manualPresetAppliedParams(currentParams = {}, originalParams = {}, preset = {}) {
     const params = preset && typeof preset.params === "object" ? preset.params : {};
     const baseParams = currentParams && typeof currentParams === "object" ? currentParams : {};
@@ -857,6 +887,9 @@
     manualPresetDeletePreflight,
     manualPresetSavePayload,
     manualPresetDeletePayload,
+    manualPresetSaveSuccessState,
+    manualPresetLoadSuccessState,
+    manualPresetDeleteViewState,
     manualPresetAppliedParams,
     manualPresetApplyState,
     manualParamUpdateState,

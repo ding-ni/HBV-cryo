@@ -276,7 +276,14 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (library.findPresetById(presets, "missing") !== null) {
               throw new Error("missing preset should return null");
             }
-            for (const name of ["manualPresetSavePreflight", "manualPresetLoadPreflight", "manualPresetDeletePreflight"]) {
+            for (const name of [
+              "manualPresetSavePreflight",
+              "manualPresetLoadPreflight",
+              "manualPresetDeletePreflight",
+              "manualPresetSaveSuccessState",
+              "manualPresetLoadSuccessState",
+              "manualPresetDeleteViewState",
+            ]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
 
@@ -379,6 +386,30 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const deletePayload = library.manualPresetDeletePayload("C:/workspace.json", presets[1]);
             if (deletePayload.preset_id !== "global-1" || deletePayload.scope !== "global") {
               throw new Error("delete payload did not use parameter_set_id and scope");
+            }
+            const saveSuccess = library.manualPresetSaveSuccessState({
+              preset: { id: "p1", name: "Trial set", scope: "global", params_adjusted: true },
+            }, "Fallback");
+            if (saveSuccess.savedId !== "p1" || saveSuccess.scopeLabel !== "公共参数库" ||
+                saveSuccess.presetName !== "Trial set" ||
+                saveSuccess.toastText !== "已保存到公共参数库：Trial set（已按约束自动修正）") {
+              throw new Error(`save success state wrong: ${JSON.stringify(saveSuccess)}`);
+            }
+            const saveFallback = library.manualPresetSaveSuccessState({}, " Fallback ");
+            if (saveFallback.savedId !== "" || saveFallback.scopeLabel !== "当前工作区" ||
+                saveFallback.presetName !== "Fallback" ||
+                saveFallback.toastText !== "已保存到当前工作区：Fallback") {
+              throw new Error(`save fallback state wrong: ${JSON.stringify(saveFallback)}`);
+            }
+            const loadSuccess = library.manualPresetLoadSuccessState({ name: "Trial A", params_adjusted: true }, "");
+            if (loadSuccess.inputName !== "Trial A" || loadSuccess.toastText !== "已载入参数集：Trial A（已按约束自动修正）") {
+              throw new Error(`load success state wrong: ${JSON.stringify(loadSuccess)}`);
+            }
+            const deleteView = library.manualPresetDeleteViewState(" Trial A ");
+            if (deleteView.presetName !== "Trial A" ||
+                deleteView.confirmText !== "确定删除参数集“Trial A”吗？" ||
+                deleteView.toastText !== "已删除参数集：Trial A") {
+              throw new Error(`delete view state wrong: ${JSON.stringify(deleteView)}`);
             }
             """
         )

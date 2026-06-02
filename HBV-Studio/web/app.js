@@ -151,6 +151,9 @@ const frontendModuleContracts = [
       "manualPresetDeletePreflight",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
+      "manualPresetSaveSuccessState",
+      "manualPresetLoadSuccessState",
+      "manualPresetDeleteViewState",
       "manualPresetAppliedParams",
       "manualPresetApplyState",
       "manualParamUpdateState",
@@ -4728,14 +4731,13 @@ async function saveCurrentManualPreset() {
       calibrationProfile: state.currentWorkspace?.率定模式 || state._runData?.metadata?.calibration_profile || "daily",
     });
   }
-  const savedId = payload.data?.preset?.id || "";
-  if ($("#manual-preset-select")) $("#manual-preset-select").value = savedId;
-  if (samePath(configPath, getTaskManualPresetConfigPath()) && $("#task-init-preset")) $("#task-init-preset").value = savedId;
+  const saveState = window.HBVStudioParameterLibrary.manualPresetSaveSuccessState(payload.data || {}, name);
+  if ($("#manual-preset-select")) $("#manual-preset-select").value = saveState.savedId;
+  if (samePath(configPath, getTaskManualPresetConfigPath()) && $("#task-init-preset")) $("#task-init-preset").value = saveState.savedId;
   updateManualPresetControls();
   refreshCalibrationControls();
   renderManualPresetDiff();
-  const scopeLabel = String(payload.data?.preset?.scope || "workspace") === "global" ? "公共参数库" : "当前工作区";
-  showToast(`已保存到${scopeLabel}：${name}${payload.data?.preset?.params_adjusted ? "（已按约束自动修正）" : ""}`);
+  showToast(saveState.toastText);
 }
 
 async function loadSelectedManualPreset() {
@@ -4745,10 +4747,11 @@ async function loadSelectedManualPreset() {
     showToast(preflight.message, true);
     return;
   }
-  $("#manual-preset-name").value = preflight.presetName;
+  const loadState = window.HBVStudioParameterLibrary.manualPresetLoadSuccessState(preflight.preset, preflight.presetName);
+  $("#manual-preset-name").value = loadState.inputName;
   applyManualPresetToCurrentRun(preflight.preset);
   renderManualPresetDiff();
-  showToast(`已载入参数集：${preflight.presetName}${preflight.preset.params_adjusted ? "（已按约束自动修正）" : ""}`);
+  showToast(loadState.toastText);
 }
 
 async function deleteSelectedManualPreset() {
@@ -4759,7 +4762,8 @@ async function deleteSelectedManualPreset() {
     showToast(preflight.message, true);
     return;
   }
-  if (!window.confirm(`确定删除参数集“${preflight.presetName}”吗？`)) return;
+  const deleteView = window.HBVStudioParameterLibrary.manualPresetDeleteViewState(preflight.presetName);
+  if (!window.confirm(deleteView.confirmText)) return;
   await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(preflight.configPath, preflight.preset));
   await loadRunManualPresets(preflight.configPath, { silent: true });
   if (samePath(preflight.configPath, getTaskManualPresetConfigPath())) {
@@ -4774,7 +4778,7 @@ async function deleteSelectedManualPreset() {
   if ($("#manual-preset-name")) $("#manual-preset-name").value = "";
   refreshCalibrationControls();
   renderManualPresetDiff();
-  showToast(`已删除参数集：${preflight.presetName}`);
+  showToast(deleteView.toastText);
 }
 
 function renderRunList() {
