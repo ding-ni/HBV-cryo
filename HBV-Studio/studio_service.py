@@ -174,7 +174,9 @@ from services.meteo_config import (
     resolve_precip_source as build_resolve_precip_source,
 )
 from services.meteo_status import cdsapi_status as build_cdsapi_status
-from services.observed import ObservedInfoContext, observed_info as build_observed_info
+from services.observed import ObservedInfoContext, ObservedWindowContext
+from services.observed import observed_info as build_observed_info
+from services.observed import observed_window_messages as build_observed_window_messages
 from services.raster_time_series import scan_tif_time_series as build_scan_tif_time_series
 from services.raster_time_series import validate_tif_grid_alignment as build_validate_tif_grid_alignment
 from services.raster_time_series import validate_tif_time_series as build_validate_tif_time_series
@@ -1260,64 +1262,21 @@ def observed_info(csv_path: str, *, date_field: str | None = None, target_step_h
     )
 
 
+def _observed_window_context() -> ObservedWindowContext:
+    return ObservedWindowContext(
+        current_profile=current_profile,
+        normalize_time_step_hours=normalize_time_step_hours,
+        task_time_basis=task_time_basis,
+        format_timestamp_for_display=format_timestamp_for_display,
+        profile_labels=PROFILE_LABELS,
+        profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
+        time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
+    )
+
+
 def observed_window_messages(config: dict[str, Any], obs_info: dict[str, Any]) -> tuple[list[str], list[str]]:
-    issues: list[str] = []
-    warnings: list[str] = []
-    profile = current_profile(config)
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    effective_profile = str(
-        obs_info.get("effective_calibration_mode")
-        or obs_info.get("suggested_calibration_mode")
-        or ""
-    ).strip().lower()
-    if effective_profile and effective_profile != profile:
-        issues.append(f"观测径流时间步识别为 {PROFILE_LABELS[effective_profile]}，与当前率定模式不一致。")
-    elif profile == PROFILE_DAILY and bool(obs_info.get("resampled_to_daily")):
-        aggregation = dict(obs_info.get("daily_aggregation") or {})
-        valid_days = int(aggregation.get("valid_days", 0) or 0)
-        insufficient_days = int(aggregation.get("insufficient_days", 0) or 0)
-        warnings.append(
-            f"观测径流已从小时尺度按自然日聚合为日平均流量；有效日数 {valid_days} 天，小时覆盖不足天数 {insufficient_days} 天。"
-        )
-    coverage_ratio = obs_info.get("coverage_ratio")
-    if coverage_ratio is not None:
-        coverage_ratio = float(coverage_ratio)
-        if coverage_ratio < 0.75:
-            issues.append(f"观测径流在当前模拟时段内覆盖率只有 {coverage_ratio * 100:.1f}%，无法支撑稳定率定。")
-        elif coverage_ratio < 0.95:
-            warnings.append(f"观测径流在当前模拟时段内覆盖率只有 {coverage_ratio * 100:.1f}%，目标函数会只在部分时间步上计算。")
-
-    if task_time_basis(config, context="calibration") == TIME_BASIS_EVENT_WINDOWS:
-        return issues, warnings
-
-    obs_start = pd.to_datetime(obs_info.get("start"))
-    obs_end = pd.to_datetime(obs_info.get("end"))
-    time_cfg = dict(config.get("时间", {}))
-    parsed: dict[str, pd.Timestamp] = {}
-    for key in ("率定开始", "率定结束", "验证开始", "验证结束"):
-        value = time_cfg.get(key)
-        if not value:
-            continue
-        try:
-            parsed[key] = pd.to_datetime(value)
-        except Exception:
-            continue
-
-    for start_key, end_key, label in (("率定开始", "率定结束", "率定期"), ("验证开始", "验证结束", "验证期")):
-        start_ts = parsed.get(start_key)
-        end_ts = parsed.get(end_key)
-        if start_ts is None or end_ts is None:
-            continue
-        if start_ts < obs_start:
-            issues.append(f"{label}开始时间早于观测覆盖起点：{format_timestamp_for_display(start_ts, step_hours)} < {format_timestamp_for_display(obs_start, step_hours)}")
-        if end_ts > obs_end:
-            issues.append(f"{label}结束时间晚于观测覆盖终点：{format_timestamp_for_display(end_ts, step_hours)} > {format_timestamp_for_display(obs_end, step_hours)}")
-        steps = int(((end_ts - start_ts) / pd.Timedelta(hours=step_hours)) + 1)
-        if profile == PROFILE_DAILY and steps < 180:
-            warnings.append(f"{label}长度只有 {steps} 天，正式率定通常建议至少半年以上。")
-        if profile == PROFILE_HOURLY and steps < 24 * 30:
-            warnings.append(f"{label}长度只有 {steps} 小时，小时尺度正式率定通常建议至少 30 天以上。")
-    return issues, warnings
+    return build_observed_window_messages(config, obs_info, _observed_window_context())
 
 
 def _boundary_inflow_inspect_context() -> BoundaryInflowInspectContext:
