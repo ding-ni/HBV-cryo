@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportFields", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -4999,40 +4999,32 @@ function configureRunExportPanel(data) {
 }
 
 function selectedRunExportFields() {
-  return $all("[data-run-export-field]")
-    .filter(input => input.checked)
-    .map(input => input.dataset.runExportField)
-    .filter(Boolean);
+  return window.HBVStudioResultsView.selectedRunExportFields($all("[data-run-export-field]"));
 }
 
 async function exportCurrentRunExcel() {
-  const runPath = String(state.currentRun?.run?.path || "").trim();
-  if (!runPath) {
-    showToast("请先选择一个结果。", true);
+  const exportRequest = window.HBVStudioResultsView.runExportPayload(
+    state.currentRun,
+    selectedRunExportFields(),
+    {
+      start: $("#run-export-start")?.value || "",
+      end: $("#run-export-end")?.value || "",
+    },
+    { fromInputTime: fromWizardInputTimeValue },
+  );
+  if (!exportRequest.ok) {
+    showToast(exportRequest.message, true);
     return;
   }
-  const hourly = currentRunStepHours() <= 1.5;
-  const fields = selectedRunExportFields();
-  if (!fields.length) {
-    showToast("请至少勾选一个导出字段。", true);
-    return;
-  }
-  const startValue = fromWizardInputTimeValue($("#run-export-start")?.value || "", hourly);
-  const endValue = fromWizardInputTimeValue($("#run-export-end")?.value || "", hourly);
-  const payload = await apiPost("/api/run/export-excel", {
-    path: runPath,
-    start_date: startValue,
-    end_date: endValue,
-    fields,
-  });
-  state.lastRunExportPath = payload.data?.path || "";
-  if ($("#btn-open-export-file")) $("#btn-open-export-file").disabled = !state.lastRunExportPath;
+  const payload = await apiPost("/api/run/export-excel", exportRequest.payload);
+  const exportSuccess = window.HBVStudioResultsView.runExportSuccess(payload.data || {}, { shortPath });
+  Object.assign(state, exportSuccess.statePatch);
+  if ($("#btn-open-export-file")) $("#btn-open-export-file").disabled = exportSuccess.openExportDisabled;
   if ($("#run-export-hint")) {
-    $("#run-export-hint").textContent =
-      `已导出 ${payload.data?.row_count || 0} 行到 ${payload.data?.display_path || shortPath(state.lastRunExportPath)}。`;
-    $("#run-export-hint").className = "hint-box status-ok";
+    $("#run-export-hint").textContent = exportSuccess.hintText;
+    $("#run-export-hint").className = exportSuccess.hintClassName;
   }
-  showToast(`Excel 已导出：${payload.data?.row_count || 0} 行`);
+  showToast(exportSuccess.toastText);
 }
 
 function renderCharts(data) {

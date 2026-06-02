@@ -586,6 +586,13 @@
       .map(field => ({ ...field }));
   }
 
+  function selectedRunExportFields(inputs = []) {
+    return (Array.isArray(inputs) ? inputs : [])
+      .filter(input => Boolean(input?.checked))
+      .map(input => String(input?.dataset?.runExportField || "").trim())
+      .filter(Boolean);
+  }
+
   function resultChartPayloads(data = {}, options = {}, helpers = {}) {
     const palette = helpers.colors || DEFAULT_RESULT_CHART_COLORS;
     const series = data?.series || {};
@@ -683,6 +690,62 @@
     };
   }
 
+  function runExportPayload(data = {}, fields = [], range = {}, helpers = {}) {
+    const fromInputTime = helpers.fromInputTime || ((value) => String(value || "").trim());
+    const runPath = String(data?.run?.path || "").trim();
+    const selectedFields = (Array.isArray(fields) ? fields : [])
+      .map(field => String(field || "").trim())
+      .filter(Boolean);
+    if (!runPath) {
+      return {
+        ok: false,
+        reason: "missing-run",
+        message: "请先选择一个结果。",
+        payload: null,
+      };
+    }
+    if (!selectedFields.length) {
+      return {
+        ok: false,
+        reason: "missing-fields",
+        message: "请至少勾选一个导出字段。",
+        payload: null,
+      };
+    }
+    const hourly = runStepHours(data) <= 1.5;
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+      hourly,
+      payload: {
+        path: runPath,
+        start_date: fromInputTime(range.start, hourly),
+        end_date: fromInputTime(range.end, hourly),
+        fields: selectedFields,
+      },
+    };
+  }
+
+  function runExportSuccess(responseData = {}, helpers = {}) {
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const exportPath = String(responseData?.path || "");
+    const rowCount = Number(responseData?.row_count || 0);
+    const displayPath = responseData?.display_path || shortPath(exportPath);
+    return {
+      exportPath,
+      rowCount,
+      displayPath,
+      openExportDisabled: !exportPath,
+      hintText: `已导出 ${rowCount} 行到 ${displayPath}。`,
+      hintClassName: "hint-box status-ok",
+      toastText: `Excel 已导出：${rowCount} 行`,
+      statePatch: {
+        lastRunExportPath: exportPath,
+      },
+    };
+  }
+
   window.HBVStudioResultsView = {
     alignedRunFiltersForSelection,
     filterRuns,
@@ -701,9 +764,12 @@
     resultsFilterHint,
     runExportFields,
     runExportPanelState,
+    runExportPayload,
+    runExportSuccess,
     runListState,
     runProfileValue,
     runsForWorkspace,
+    selectedRunExportFields,
     selectedRunPath,
     runStepHours,
     workspaceHasEditableRun,

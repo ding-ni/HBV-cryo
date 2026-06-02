@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportFields || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -351,6 +351,64 @@ class FrontendResultsViewTests(unittest.TestCase):
             const emptyExport = results.runExportPanelState(null);
             if (!emptyExport.exportDisabled || !emptyExport.openDisabled || emptyExport.start.value !== "" || emptyExport.hintText !== "选择一个结果后，可按时间范围导出 Excel。") {
               throw new Error(`unexpected empty export panel state: ${JSON.stringify(emptyExport)}`);
+            }
+
+            const selectedFields = results.selectedRunExportFields([
+              { checked: true, dataset: { runExportField: "q_sim" } },
+              { checked: false, dataset: { runExportField: "q_obs" } },
+              { checked: true, dataset: { runExportField: " q_ice " } },
+              { checked: true, dataset: { runExportField: "" } },
+            ]);
+            if (selectedFields.join("|") !== "q_sim|q_ice") {
+              throw new Error(`unexpected selected export fields: ${JSON.stringify(selectedFields)}`);
+            }
+
+            const missingRunPayload = results.runExportPayload(null, ["q_sim"]);
+            if (missingRunPayload.ok || missingRunPayload.reason !== "missing-run" || missingRunPayload.payload !== null) {
+              throw new Error(`missing run export payload should be blocked: ${JSON.stringify(missingRunPayload)}`);
+            }
+            const missingFieldsPayload = results.runExportPayload({ run: { path: "C:/runs/daily" } }, []);
+            if (missingFieldsPayload.ok || missingFieldsPayload.reason !== "missing-fields" || missingFieldsPayload.payload !== null) {
+              throw new Error(`missing field export payload should be blocked: ${JSON.stringify(missingFieldsPayload)}`);
+            }
+            const exportPayload = results.runExportPayload({
+              run: { path: "C:/runs/hourly" },
+              metadata: { time_config: { time_step_hours: 1 } },
+            }, [" q_sim ", "q_ice"], {
+              start: "2020-01-01T00:00",
+              end: "2020-01-02T00:00",
+            }, {
+              fromInputTime(value, hourly) {
+                return `${hourly ? "H" : "D"}:${value}`;
+              },
+            });
+            if (!exportPayload.ok || !exportPayload.hourly || exportPayload.payload.path !== "C:/runs/hourly" ||
+                exportPayload.payload.start_date !== "H:2020-01-01T00:00" ||
+                exportPayload.payload.end_date !== "H:2020-01-02T00:00" ||
+                exportPayload.payload.fields.join("|") !== "q_sim|q_ice") {
+              throw new Error(`unexpected export payload: ${JSON.stringify(exportPayload)}`);
+            }
+
+            const exportSuccess = results.runExportSuccess({
+              path: "C:/exports/result.xlsx",
+              row_count: 42,
+            }, {
+              shortPath(value) { return String(value).split("/").pop(); },
+            });
+            if (exportSuccess.exportPath !== "C:/exports/result.xlsx" ||
+                exportSuccess.statePatch.lastRunExportPath !== "C:/exports/result.xlsx" ||
+                exportSuccess.openExportDisabled ||
+                exportSuccess.rowCount !== 42 ||
+                exportSuccess.displayPath !== "result.xlsx" ||
+                !exportSuccess.hintText.includes("42") ||
+                !exportSuccess.hintText.includes("result.xlsx") ||
+                !exportSuccess.toastText.includes("42") ||
+                exportSuccess.hintClassName !== "hint-box status-ok") {
+              throw new Error(`unexpected export success state: ${JSON.stringify(exportSuccess)}`);
+            }
+            const emptyExportSuccess = results.runExportSuccess({});
+            if (!emptyExportSuccess.openExportDisabled || emptyExportSuccess.statePatch.lastRunExportPath !== "") {
+              throw new Error(`empty export success should disable open file: ${JSON.stringify(emptyExportSuccess)}`);
             }
 
             const chartPayloads = results.resultChartPayloads({
