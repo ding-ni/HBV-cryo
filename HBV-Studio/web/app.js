@@ -134,6 +134,7 @@ const frontendModuleContracts = [
       "compareMetricSummary",
       "manualPresetCompareSummary",
       "manualPresetCompareView",
+      "manualPresetComparePanelState",
       "manualPresetComparePendingView",
       "manualPresetCompareErrorView",
       "findPresetById",
@@ -490,10 +491,6 @@ function formatNumber(v, digits = 3) {
 function finiteNumber(v) {
   const numeric = Number(v);
   return Number.isFinite(numeric) ? numeric : null;
-}
-
-function compareMetricSummary(label, currentValue, baselineValue, digits = 4) {
-  return window.HBVStudioParameterLibrary.compareMetricSummary(label, currentValue, baselineValue, digits);
 }
 
 function formatDateTime(v) {
@@ -1466,36 +1463,13 @@ function clearManualPresetComparison({ silent = false } = {}) {
 function updateCompareSummary() {
   const host = $("#manual-compare-summary");
   if (!host) return;
-  if (!state.compareMetrics || !state.compareLabel || !state._runData) {
-    host.style.display = "none";
-    host.textContent = "";
-    return;
-  }
-  const baseMeta = state._runData.metadata || {};
-  const baseCal = baseMeta.metrics?.calibration || {};
-  const baseVal = baseMeta.metrics?.validation || {};
-  const view = window.HBVStudioParameterLibrary.manualPresetCompareView(
-    {
-      label: state.compareLabel,
-      compareMetrics: state.compareMetrics,
-      baseCalibration: baseCal,
-      baseValidation: baseVal,
-      adjusted: state.compareAdjusted,
-    },
-    {
-      title: label => `当前正在对比参数集“${label}”。`,
-      metricSummary: (label, currentValue, baselineValue) => `${compareMetricSummary(label, currentValue, baselineValue)}。`,
-      calibrationLabel: "率定纳什效率系数",
-      validationLabel: "验证纳什效率系数",
-      adjustedNote: () => "该参数集在运行前已按约束自动修正。",
-    },
-  );
-  if (!view.visible) {
-    host.style.display = "none";
-    host.textContent = "";
-    return;
-  }
-  host.style.display = "";
+  const view = window.HBVStudioParameterLibrary.manualPresetComparePanelState({
+    runData: state._runData,
+    compareMetrics: state.compareMetrics,
+    compareLabel: state.compareLabel,
+    adjusted: state.compareAdjusted,
+  });
+  host.style.display = view.visible ? "" : "none";
   host.className = view.className;
   host.textContent = view.text;
 }

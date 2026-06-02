@@ -108,6 +108,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetCompareView !== "function") {
               throw new Error("manualPresetCompareView was not exported");
             }
+            if (typeof library.manualPresetComparePanelState !== "function") {
+              throw new Error("manualPresetComparePanelState was not exported");
+            }
             if (typeof library.compareMetricSummary !== "function") {
               throw new Error("compareMetricSummary was not exported");
             }
@@ -186,6 +189,31 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const hiddenView = library.manualPresetCompareView({ label: "", compareMetrics: { nse_cal: 0.8 } });
             if (hiddenView.visible || hiddenView.className || hiddenView.text) {
               throw new Error(`unexpected hidden compare view: ${JSON.stringify(hiddenView)}`);
+            }
+            const panelView = library.manualPresetComparePanelState({
+              runData: {
+                metadata: {
+                  metrics: {
+                    calibration: { nse: 0.76 },
+                    validation: { nse: 0.75 },
+                  },
+                },
+              },
+              compareMetrics: { nse_cal: 0.81, nse_val: 0.72 },
+              compareLabel: "Trial A",
+              adjusted: true,
+            });
+            const expectedPanelText = "当前正在对比参数集“Trial A”。 率定纳什效率系数：0.8100（较当前 +0.0500）。 验证纳什效率系数：0.7200（较当前 -0.0300）。 该参数集在运行前已按约束自动修正。";
+            if (!panelView.visible || panelView.className !== "hint-box status-ok" || panelView.text !== expectedPanelText) {
+              throw new Error(`unexpected compare panel view: ${JSON.stringify(panelView)}`);
+            }
+            const hiddenPanelView = library.manualPresetComparePanelState({
+              runData: null,
+              compareMetrics: { nse_cal: 0.8 },
+              compareLabel: "Trial A",
+            });
+            if (hiddenPanelView.visible || hiddenPanelView.className !== "hint-box" || hiddenPanelView.text !== "") {
+              throw new Error(`unexpected hidden compare panel view: ${JSON.stringify(hiddenPanelView)}`);
             }
             const pendingView = library.manualPresetComparePendingView({ name: "Trial A" });
             if (!pendingView.visible || pendingView.className !== "hint-box" || pendingView.text !== "正在计算参数集“Trial A”的对比结果...") {

@@ -147,6 +147,36 @@
     };
   }
 
+  function manualPresetComparePanelState(options = {}) {
+    const runData = options.runData || null;
+    const compareMetrics = options.compareMetrics || null;
+    const compareLabel = String(options.compareLabel || "").trim();
+    if (!runData || !compareMetrics || !compareLabel) {
+      return { visible: false, className: "hint-box", text: "" };
+    }
+    const baseMeta = runData.metadata || {};
+    const baseMetrics = baseMeta.metrics || {};
+    const view = manualPresetCompareView(
+      {
+        label: compareLabel,
+        compareMetrics,
+        baseCalibration: baseMetrics.calibration || {},
+        baseValidation: baseMetrics.validation || {},
+        adjusted: options.adjusted,
+      },
+      {
+        title: label => `当前正在对比参数集“${label}”。`,
+        metricSummary: (label, currentValue, baselineValue) => `${compareMetricSummary(label, currentValue, baselineValue)}。`,
+        calibrationLabel: "率定纳什效率系数",
+        validationLabel: "验证纳什效率系数",
+        adjustedNote: () => "该参数集在运行前已按约束自动修正。",
+      },
+    );
+    return view.visible
+      ? { visible: true, className: view.className, text: view.text, summary: view.summary }
+      : { visible: false, className: "hint-box", text: "", summary: view.summary };
+  }
+
   function manualPresetComparePendingView(preset = {}) {
     return {
       visible: true,
@@ -758,6 +788,7 @@
     compareMetricSummary,
     manualPresetCompareSummary,
     manualPresetCompareView,
+    manualPresetComparePanelState,
     manualPresetComparePendingView,
     manualPresetCompareErrorView,
     findPresetById,
