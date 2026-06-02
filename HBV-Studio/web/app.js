@@ -120,6 +120,7 @@ const frontendModuleContracts = [
       "renderEventObservationCoverage",
       "renderWizardEventSummary",
       "wizardEventSummaryState",
+      "eventModeHintState",
       "renderInputTimeSummary",
       "renderValidationEventSections",
     ],
@@ -1988,17 +1989,12 @@ function updateEventModeHint() {
   const host = $("#wz-event-mode-hint");
   if (!host) return;
   clearWizardEventSummary();
-  const basis = $("#wz-time-basis")?.value || "continuous";
-  const eventFile = $("#wz-event-file")?.value.trim() || "";
-  if (basis === "event_windows") {
-    host.className = `hint-box ${eventFile ? "status-ok" : "status-warn"}`;
-    host.textContent = eventFile
-      ? "当前按洪水事件组织资料。系统只检查每场洪水内部资料，事件之间允许间断。"
-      : "已选择洪水事件，请提供事件表。推荐表头为：编号、开始时间、结束时间。";
-  } else {
-    host.className = "hint-box";
-    host.textContent = "连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。";
-  }
+  const hint = window.HBVStudioEventMode.eventModeHintState({
+    basis: $("#wz-time-basis")?.value || "continuous",
+    eventFile: $("#wz-event-file")?.value.trim() || "",
+  });
+  host.className = hint.className;
+  host.textContent = hint.text;
 }
 
 function clearWizardEventSummary() {

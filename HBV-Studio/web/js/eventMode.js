@@ -400,6 +400,23 @@
     };
   }
 
+  function eventModeHintState(model = {}) {
+    const basis = String(model.basis || "continuous");
+    const eventFile = String(model.eventFile || "").trim();
+    if (basis === "event_windows") {
+      return {
+        text: eventFile
+          ? "当前按洪水事件组织资料。系统只检查每场洪水内部资料，事件之间允许间断。"
+          : "已选择洪水事件，请提供事件表。推荐表头为：编号、开始时间、结束时间。",
+        className: `hint-box ${eventFile ? "status-ok" : "status-warn"}`,
+      };
+    }
+    return {
+      text: "连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。",
+      className: "hint-box",
+    };
+  }
+
   function renderInputTimeSummary(summary = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     if (!summary || !summary.headline) return "";
@@ -444,6 +461,7 @@
     renderEventObservationCoverage,
     renderWizardEventSummary,
     wizardEventSummaryState,
+    eventModeHintState,
     renderInputTimeSummary,
     renderValidationEventSections,
   };

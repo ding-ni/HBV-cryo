@@ -123,7 +123,7 @@ class FrontendEventModeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/eventMode.js", "utf8"), context);
 
             const eventMode = context.window.HBVStudioEventMode;
-            for (const name of ["renderWizardEventSummary", "wizardEventSummaryState", "renderInputTimeSummary"]) {
+            for (const name of ["eventModeHintState", "renderWizardEventSummary", "wizardEventSummaryState", "renderInputTimeSummary"]) {
               if (typeof eventMode?.[name] !== "function") throw new Error(`missing event export: ${name}`);
             }
             const helpers = {
@@ -141,6 +141,19 @@ class FrontendEventModeTests(unittest.TestCase):
               },
               shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
             };
+
+            const continuousHint = eventMode.eventModeHintState({ basis: "continuous" });
+            if (continuousHint.className !== "hint-box" || !continuousHint.text.includes("连续时段要求完整覆盖")) {
+              throw new Error(`continuous event hint mismatch: ${JSON.stringify(continuousHint)}`);
+            }
+            const missingEventFileHint = eventMode.eventModeHintState({ basis: "event_windows", eventFile: "" });
+            if (missingEventFileHint.className !== "hint-box status-warn" || !missingEventFileHint.text.includes("请提供事件表")) {
+              throw new Error(`missing event file hint mismatch: ${JSON.stringify(missingEventFileHint)}`);
+            }
+            const eventFileHint = eventMode.eventModeHintState({ basis: "event_windows", eventFile: "C:/events/flood.csv" });
+            if (eventFileHint.className !== "hint-box status-ok" || !eventFileHint.text.includes("当前按洪水事件组织资料")) {
+              throw new Error(`event file hint mismatch: ${JSON.stringify(eventFileHint)}`);
+            }
 
             const html = eventMode.renderWizardEventSummary({
               event_count: 2,
