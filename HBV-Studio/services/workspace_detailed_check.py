@@ -25,13 +25,354 @@ class WorkspaceDetailedCheckContext:
     validate_forcing_bundle: Callable[..., dict[str, Any]]
     normalize_time_step_hours: Callable[[Any], float]
     resolve_config_related_path: Callable[[dict[str, Any], Any], Path | None]
-    build_reasonableness_checks: Callable[..., list[dict[str, Any]]]
     format_timestamp_for_display: Callable[[pd.Timestamp, float], str]
-    fmt_num: Callable[[Any, int, str], str]
+    resolve_objective_mode: Callable[..., str]
+    count_matching: Callable[..., int]
+    profile_daily: str
     profile_labels: dict[str, str]
     object_labels: dict[str, str]
     object_interbasin: str
+    objective_mode_multi: str
     observed_flow_key: str
+
+
+def sample_daily_raster_stats(
+    directory: Path,
+    *,
+    max_samples_per_file: int = 2048,
+    above_thresholds: tuple[float, ...] = (),
+    below_thresholds: tuple[float, ...] = (),
+) -> dict[str, Any]:
+    import numpy as np
+    import rasterio
+
+    tif_files = sorted(directory.glob("*.tif")) if directory.exists() else []
+    if not tif_files:
+        return {"ok": False, "message": f"目录中没有 tif：{directory}", "path": str(directory)}
+
+    sampled_values: list[Any] = []
+    valid_pixels = 0
+    zero_pixels = 0
+    negative_pixels = 0
+    above_counts = {threshold: 0 for threshold in above_thresholds}
+    below_counts = {threshold: 0 for threshold in below_thresholds}
+    global_min: float | None = None
+    global_max: float | None = None
+    valid_files = 0
+
+    for tif_path in tif_files:
+        with rasterio.open(tif_path) as src:
+            arr = src.read(1).astype("float64")
+            mask = np.isfinite(arr)
+            if src.nodata is not None:
+                mask &= arr != src.nodata
+            values = arr[mask]
+            if values.size == 0:
+                continue
+            valid_files += 1
+            valid_pixels += int(values.size)
+            zero_pixels += int(np.sum(values == 0))
+            negative_pixels += int(np.sum(values < 0))
+            for threshold in above_thresholds:
+                above_counts[threshold] += int(np.sum(values > threshold))
+            for threshold in below_thresholds:
+                below_counts[threshold] += int(np.sum(values < threshold))
+            local_min = float(np.min(values))
+            local_max = float(np.max(values))
+            global_min = local_min if global_min is None else min(global_min, local_min)
+            global_max = local_max if global_max is None else max(global_max, local_max)
+            if values.size <= max_samples_per_file:
+                sampled_values.append(values.astype("float32", copy=False))
+            else:
+                stride = max(1, values.size // max_samples_per_file)
+                sampled_values.append(values[::stride][:max_samples_per_file].astype("float32", copy=False))
+
+    if valid_pixels <= 0 or not sampled_values:
+        return {"ok": False, "message": f"没有读到有效像元：{directory}", "path": str(directory)}
+
+    sample = np.concatenate(sampled_values)
+    return {
+        "ok": True,
+        "path": str(directory),
+        "valid_files": valid_files,
+        "valid_pixels": valid_pixels,
+        "zero_pixels": zero_pixels,
+        "negative_pixels": negative_pixels,
+        "min": global_min,
+        "max": global_max,
+        "p5": float(np.percentile(sample, 5)),
+        "p50": float(np.percentile(sample, 50)),
+        "p95": float(np.percentile(sample, 95)),
+        "above_counts": above_counts,
+        "below_counts": below_counts,
+    }
+
+
+def ratio_percent(numerator: int, denominator: int) -> float:
+    return (float(numerator) / float(max(1, denominator))) * 100.0
+
+
+def fmt_num(value: Any, digits: int = 2, suffix: str = "") -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.{digits}f}{suffix}"
+    except Exception:
+        return "—"
+
+
+def build_reasonableness_checks(
+    config: dict[str, Any],
+    forcing: dict[str, Any],
+    context: WorkspaceDetailedCheckContext,
+    *,
+    dem_stats: dict[str, Any] | None = None,
+    glacier_mask_summary: dict[str, Any] | None = None,
+    glacier_mask_exists: bool = False,
+    gis_dir: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    profile = context.current_profile(config)
+    if profile != context.profile_daily:
+        return checks
+    objective_mode = context.resolve_objective_mode(config, None, profile)
+
+    directory_map = {
+        "prec": Path(str(forcing.get("directories", {}).get("prec", {}).get("path", "") or "")),
+        "temp": Path(str(forcing.get("directories", {}).get("temp", {}).get("path", "") or "")),
+        "evap": Path(str(forcing.get("directories", {}).get("evap", {}).get("path", "") or "")),
+    }
+
+    def build_data_unavailable(title: str, message: str) -> dict[str, Any]:
+        return {"title": title, "summary": message, "status": "warn", "items": [{"label": "状态", "value": message, "status": "warn"}]}
+
+    precip_stats = sample_daily_raster_stats(directory_map["prec"], above_thresholds=(120.0, 250.0), below_thresholds=(-0.1,))
+    if not precip_stats["ok"]:
+        checks.append(build_data_unavailable("降水合理性检查", "当前还没有足够的降水运行栅格，暂不做数值检查。"))
+    else:
+        precip_status = "ok"
+        precip_summary = "降水范围基本正常。"
+        if int(precip_stats["below_counts"].get(-0.1, 0)) > 0:
+            precip_status = "fail"
+            precip_summary = "降水中出现了负值，建议先检查单位或写入过程。"
+        elif float(precip_stats["max"] or 0.0) > 250.0:
+            precip_status = "fail"
+            precip_summary = "降水极大值过高，建议重点复查原始栅格和单位。"
+        elif float(precip_stats["p95"] or 0.0) > 50.0 or int(precip_stats["above_counts"].get(120.0, 0)) > 0:
+            precip_status = "warn"
+            precip_summary = "降水整体可以继续用，但高值偏多，建议抽样复核。"
+        checks.append(
+            {
+                "title": "降水合理性检查",
+                "summary": precip_summary,
+                "status": precip_status,
+                "items": [
+                    {"label": "最小值", "value": fmt_num(precip_stats["min"], 2, " mm/d"), "status": "fail" if int(precip_stats["below_counts"].get(-0.1, 0)) > 0 else "ok"},
+                    {"label": "最大值", "value": fmt_num(precip_stats["max"], 2, " mm/d"), "status": "fail" if float(precip_stats["max"] or 0.0) > 250.0 else ("warn" if float(precip_stats["max"] or 0.0) > 120.0 else "ok")},
+                    {"label": "P95", "value": fmt_num(precip_stats["p95"], 2, " mm/d"), "status": "warn" if float(precip_stats["p95"] or 0.0) > 50.0 else "ok"},
+                    {"label": "负值比例", "value": fmt_num(ratio_percent(int(precip_stats["negative_pixels"]), int(precip_stats["valid_pixels"])), 3, "%"), "status": "fail" if int(precip_stats["below_counts"].get(-0.1, 0)) > 0 else "ok"},
+                    {"label": "零值比例", "value": fmt_num(ratio_percent(int(precip_stats["zero_pixels"]), int(precip_stats["valid_pixels"])), 2, "%"), "status": "ok"},
+                ],
+            }
+        )
+
+    temp_stats = sample_daily_raster_stats(directory_map["temp"], above_thresholds=(45.0,), below_thresholds=(-60.0,))
+    if not temp_stats["ok"]:
+        checks.append(build_data_unavailable("气温合理性检查", "当前还没有足够的气温运行栅格，暂不做数值检查。"))
+    else:
+        temp_status = "ok"
+        temp_summary = "气温范围基本正常。"
+        if float(temp_stats["p50"] or 0.0) > 120.0:
+            temp_status = "fail"
+            temp_summary = "气温中位数异常偏高，疑似仍为 Kelvin，尚未转为 Celsius。"
+        elif float(temp_stats["min"] or 0.0) < -60.0 or float(temp_stats["max"] or 0.0) > 45.0:
+            temp_status = "fail"
+            temp_summary = "气温极值超出高原项目常见范围，建议优先检查。"
+        elif float(temp_stats["p5"] or 0.0) < -45.0 or float(temp_stats["p95"] or 0.0) > 30.0:
+            temp_status = "warn"
+            temp_summary = "气温整体可用，但冷热端偏激，建议抽样复核。"
+        checks.append(
+            {
+                "title": "气温合理性检查",
+                "summary": temp_summary,
+                "status": temp_status,
+                "items": [
+                    {"label": "最小值", "value": fmt_num(temp_stats["min"], 2, " ℃"), "status": "fail" if float(temp_stats["min"] or 0.0) < -60.0 else ("warn" if float(temp_stats["p5"] or 0.0) < -45.0 else "ok")},
+                    {"label": "最大值", "value": fmt_num(temp_stats["max"], 2, " ℃"), "status": "fail" if float(temp_stats["max"] or 0.0) > 45.0 else ("warn" if float(temp_stats["p95"] or 0.0) > 30.0 else "ok")},
+                    {"label": "P5 / P95", "value": f"{fmt_num(temp_stats['p5'], 2, ' ℃')} / {fmt_num(temp_stats['p95'], 2, ' ℃')}", "status": "warn" if float(temp_stats["p5"] or 0.0) < -45.0 or float(temp_stats["p95"] or 0.0) > 30.0 else "ok"},
+                    {"label": "中位数", "value": fmt_num(temp_stats["p50"], 2, " ℃"), "status": "fail" if float(temp_stats["p50"] or 0.0) > 120.0 else "ok"},
+                    {"label": "温标判断", "value": "疑似 Kelvin" if float(temp_stats["p50"] or 0.0) > 120.0 else "看起来正常", "status": "fail" if float(temp_stats["p50"] or 0.0) > 120.0 else "ok"},
+                ],
+            }
+        )
+
+    evap_stats = sample_daily_raster_stats(directory_map["evap"], above_thresholds=(15.0, 25.0), below_thresholds=(-0.5,))
+    if not evap_stats["ok"]:
+        checks.append(build_data_unavailable("潜在蒸散发合理性检查", "当前还没有足够的潜在蒸散发运行栅格，暂不做数值检查。"))
+    else:
+        evap_status = "ok"
+        evap_summary = "潜在蒸散发范围基本正常。"
+        negative_ratio = ratio_percent(int(evap_stats["negative_pixels"]), int(evap_stats["valid_pixels"]))
+        if float(evap_stats["min"] or 0.0) < -0.5 or negative_ratio > 1.0 or float(evap_stats["max"] or 0.0) > 25.0:
+            evap_status = "fail"
+            evap_summary = "潜在蒸散发存在明显异常值，建议优先检查计算结果。"
+        elif float(evap_stats["p95"] or 0.0) > 10.0 or float(evap_stats["max"] or 0.0) > 15.0:
+            evap_status = "warn"
+            evap_summary = "潜在蒸散发整体可用，但高值偏大，建议抽样复核。"
+        checks.append(
+            {
+                "title": "潜在蒸散发合理性检查",
+                "summary": evap_summary,
+                "status": evap_status,
+                "items": [
+                    {"label": "最小值", "value": fmt_num(evap_stats["min"], 2, " mm/d"), "status": "fail" if float(evap_stats["min"] or 0.0) < -0.5 else "ok"},
+                    {"label": "最大值", "value": fmt_num(evap_stats["max"], 2, " mm/d"), "status": "fail" if float(evap_stats["max"] or 0.0) > 25.0 else ("warn" if float(evap_stats["max"] or 0.0) > 15.0 else "ok")},
+                    {"label": "P95", "value": fmt_num(evap_stats["p95"], 2, " mm/d"), "status": "warn" if float(evap_stats["p95"] or 0.0) > 10.0 else "ok"},
+                    {"label": "负值比例", "value": fmt_num(negative_ratio, 3, "%"), "status": "fail" if negative_ratio > 1.0 or float(evap_stats["min"] or 0.0) < -0.5 else "ok"},
+                    {"label": "零值比例", "value": fmt_num(ratio_percent(int(evap_stats["zero_pixels"]), int(evap_stats["valid_pixels"])), 2, "%"), "status": "ok"},
+                ],
+            }
+        )
+
+    dem_info = dem_stats or {}
+    dem_valid = int(dem_info.get("valid_pixels", 0) or 0)
+    if dem_valid <= 0:
+        checks.append(build_data_unavailable("DEM 合理性检查", "当前还没有可用 DEM，暂不做数值检查。"))
+    else:
+        dem_status = "ok"
+        dem_summary = "DEM 范围基本正常。"
+        dem_min = float(dem_info.get("min", 0.0) or 0.0)
+        dem_max = float(dem_info.get("max", 0.0) or 0.0)
+        dem_median = float(dem_info.get("median", 0.0) or 0.0)
+        if dem_min < -500.0 or dem_max > 9000.0:
+            dem_status = "fail"
+            dem_summary = "DEM 极值明显异常，建议检查输入栅格。"
+        elif dem_median < 1500.0:
+            dem_status = "warn"
+            dem_summary = "DEM 中位高程偏低，和当前高原项目认知不一致时要重点复查。"
+        checks.append(
+            {
+                "title": "DEM 合理性检查",
+                "summary": dem_summary,
+                "status": dem_status,
+                "items": [
+                    {"label": "最小值", "value": fmt_num(dem_min, 0, " m"), "status": "fail" if dem_min < -500.0 else "ok"},
+                    {"label": "最大值", "value": fmt_num(dem_max, 0, " m"), "status": "fail" if dem_max > 9000.0 else "ok"},
+                    {"label": "中位高程", "value": fmt_num(dem_median, 0, " m"), "status": "warn" if dem_median < 1500.0 else "ok"},
+                    {"label": "分辨率", "value": str(dem_info.get("resolution_text", "—")), "status": "ok"},
+                    {"label": "有效像元数", "value": str(dem_valid), "status": "ok"},
+                ],
+            }
+        )
+
+    glacier_shp = str(config.get("冰川边界_shp", "")).strip()
+    if not glacier_shp:
+        checks.append(
+            {
+                "title": "冰川合理性检查",
+                "summary": "当前未启用冰川输入。",
+                "status": "ok",
+                "items": [{"label": "状态", "value": "未启用", "status": "ok"}],
+            }
+        )
+    else:
+        glacier_mode = str((glacier_mask_summary or {}).get("glacier_mode", "") or "").strip().lower()
+        glacier_pixels = int((glacier_mask_summary or {}).get("glacier_pixels", 0) or 0)
+        glacier_area = float((glacier_mask_summary or {}).get("glacier_area_km2", 0.0) or 0.0)
+        true_glacier_area = float((glacier_mask_summary or {}).get("true_glacier_area_km2", 0.0) or 0.0)
+        represented_area = float((glacier_mask_summary or {}).get("represented_area_km2", glacier_area) or glacier_area or 0.0)
+        area_bias_ratio = float((glacier_mask_summary or {}).get("area_bias_ratio", 0.0) or 0.0)
+        nonzero_fraction_pixels = int((glacier_mask_summary or {}).get("nonzero_fraction_pixels", 0) or 0)
+        glacier_ratio = ratio_percent(glacier_pixels, dem_valid) if dem_valid > 0 else 0.0
+        glacier_status = "ok"
+        glacier_mode_label = "0.1° 分数法" if glacier_mode == "fractional_subgrid" else "1km 二值法"
+        glacier_summary = "冰川范围表达基本正常。"
+        glacier_reference_count = context.count_matching(context.build_profile_paths(config, profile)["glacier_melt_dir"])
+        if objective_mode == context.objective_mode_multi and glacier_reference_count > 0:
+            glacier_constraint_value = "已纳入综合水文过程评价（径流过程特征 + 冰川面积占比复核；另有冰融水参考序列可供复核）"
+            glacier_constraint_status = "ok"
+        elif objective_mode == context.objective_mode_multi:
+            glacier_constraint_value = "已纳入综合水文过程评价（径流过程特征 + 冰川面积占比复核）"
+            glacier_constraint_status = "ok"
+        else:
+            if glacier_reference_count > 0:
+                glacier_constraint_value = "仅采用径流拟合评价；冰融水参考序列仅作过程复核"
+            else:
+                glacier_constraint_value = "仅采用径流拟合评价"
+            glacier_constraint_status = "warn"
+        if not glacier_mask_exists:
+            glacier_status = "fail"
+            glacier_summary = "已经配置冰川 shp，但当前还没有生成冰川掩膜。"
+        elif glacier_mode == "fractional_subgrid" and nonzero_fraction_pixels <= 0:
+            glacier_status = "fail"
+            glacier_summary = "当前是 0.1° 分数法，但没有有效冰川分数像元，建议先复核流域范围和冰川 shp。"
+        elif glacier_mode == "fractional_subgrid" and represented_area <= 0.0 and true_glacier_area > 0.0:
+            glacier_status = "fail"
+            glacier_summary = "当前存在真实冰川面积，但分数化后的表达面积为 0，建议检查 DEM 与冰川 shp 的空间关系。"
+        elif glacier_mode == "fractional_subgrid" and area_bias_ratio > 1.5:
+            glacier_status = "warn"
+            glacier_summary = "0.1° 分数法已经可用，但表达面积偏大，建议复核空间叠加结果。"
+        elif glacier_mode == "fractional_subgrid" and 0.0 < area_bias_ratio < 0.5:
+            glacier_status = "warn"
+            glacier_summary = "0.1° 分数法已经可用，但表达面积偏小，建议结合流域位置再核一下。"
+        elif glacier_ratio > 70.0:
+            glacier_status = "fail"
+            glacier_summary = "冰川面积占比异常偏大，建议检查冰川 shp 或流域范围。"
+        elif glacier_ratio == 0.0 or glacier_ratio > 40.0:
+            glacier_status = "warn"
+            glacier_summary = "冰川面积占比需要复核，建议结合流域位置再确认一次。"
+        elif glacier_constraint_status == "warn":
+            glacier_status = "warn"
+            glacier_summary = "冰川空间表达已生成，但当前评价口径较简化；裸冰融化分量应作为模型水源分解结果解读。"
+        glacier_elev_summary_local = {}
+        glacier_elev_summary_path_local = (Path(gis_dir) / "glacier_elev_summary.json") if gis_dir else None
+        if glacier_elev_summary_path_local is not None and glacier_elev_summary_path_local.exists():
+            try:
+                glacier_elev_summary_local = context.read_json_file(glacier_elev_summary_path_local)
+            except Exception:
+                glacier_elev_summary_local = {}
+        elev_status_val = str(glacier_elev_summary_local.get("status", "unknown")).strip().lower()
+        if glacier_mode == "fractional_subgrid":
+            if elev_status_val == "ok":
+                mean_elev = glacier_elev_summary_local.get("area_weighted_elev_mean") or glacier_elev_summary_local.get("elev_mean")
+                try:
+                    elev_value_text = f"已启用（面积加权均值 {float(mean_elev):.0f} m）" if mean_elev is not None else "已启用"
+                except Exception:
+                    elev_value_text = "已启用"
+                elev_item_status = "ok"
+            elif elev_status_val == "no_high_res_dem":
+                elev_value_text = "未找到 1km 高分辨率 DEM"
+                elev_item_status = "fail"
+            elif elev_status_val == "no_intersection":
+                elev_value_text = "无有效高程像元"
+                elev_item_status = "fail"
+            else:
+                elev_value_text = "未启用（结果会被标 degraded）"
+                elev_item_status = "fail"
+        else:
+            elev_value_text = "1km 无需此步"
+            elev_item_status = "ok"
+        checks.append(
+            {
+                "title": "冰川合理性检查",
+                "summary": glacier_summary,
+                "status": glacier_status,
+                "items": [
+                    {"label": "冰川表达模式", "value": glacier_mode_label, "status": "ok" if glacier_mask_exists else "fail"},
+                    {"label": "冰川像元数", "value": str(glacier_pixels), "status": "fail" if not glacier_mask_exists else ("warn" if glacier_ratio == 0.0 else "ok")},
+                    {"label": "真实冰川面积", "value": fmt_num(true_glacier_area, 3, " km²"), "status": "ok" if glacier_mask_exists else "fail"},
+                    {"label": "表达冰川面积", "value": fmt_num(represented_area, 3, " km²"), "status": "ok" if glacier_mask_exists else "fail"},
+                    {"label": "面积偏差倍率", "value": fmt_num(area_bias_ratio, 3, ""), "status": "warn" if glacier_mode == "fractional_subgrid" and (area_bias_ratio > 1.5 or (0.0 < area_bias_ratio < 0.5)) else "ok"},
+                    {"label": "面积占比", "value": fmt_num(glacier_ratio, 2, "%"), "status": "fail" if glacier_ratio > 70.0 else ("warn" if glacier_ratio == 0.0 or glacier_ratio > 40.0 else "ok")},
+                    {"label": "分数像元数", "value": str(nonzero_fraction_pixels), "status": "warn" if glacier_mode == "fractional_subgrid" and nonzero_fraction_pixels <= 0 else "ok"},
+                    {"label": "掩膜状态", "value": "已生成" if glacier_mask_exists else "未生成", "status": "ok" if glacier_mask_exists else "fail"},
+                    {"label": "冰川分量约束", "value": glacier_constraint_value, "status": glacier_constraint_status},
+                    {"label": "冰川高程修正", "value": elev_value_text, "status": elev_item_status},
+                ],
+            }
+        )
+
+    return checks
 
 
 def workspace_detailed_check(
@@ -148,11 +489,11 @@ def workspace_detailed_check(
         represented_area = glacier_mask_summary.get("represented_area_km2")
         area_bias_ratio = glacier_mask_summary.get("area_bias_ratio")
         if true_glacier_area is not None:
-            summary.append({"group": "地理数据", "label": "真实冰川面积", "value": context.fmt_num(true_glacier_area, 3, " km²"), "ok": None})
+            summary.append({"group": "地理数据", "label": "真实冰川面积", "value": fmt_num(true_glacier_area, 3, " km²"), "ok": None})
         if represented_area is not None:
-            summary.append({"group": "地理数据", "label": "表达冰川面积", "value": context.fmt_num(represented_area, 3, " km²"), "ok": None})
+            summary.append({"group": "地理数据", "label": "表达冰川面积", "value": fmt_num(represented_area, 3, " km²"), "ok": None})
         if area_bias_ratio is not None:
-            summary.append({"group": "地理数据", "label": "面积偏差倍率", "value": context.fmt_num(area_bias_ratio, 3, ""), "ok": None})
+            summary.append({"group": "地理数据", "label": "面积偏差倍率", "value": fmt_num(area_bias_ratio, 3, ""), "ok": None})
         glacier_elev_summary = {}
         glacier_elev_summary_path = Path(paths["gis_dir"]) / "glacier_elev_summary.json"
         if glacier_elev_summary_path.exists():
@@ -300,9 +641,10 @@ def workspace_detailed_check(
         summary.append({"group": "输入文件", "label": "上游边界入流 csv", "value": ("已配置" if boundary_csv and boundary_path is not None and boundary_path.exists() else "缺失"), "ok": bool(boundary_csv and boundary_path is not None and boundary_path.exists())})
 
     all_ok = all(item.get("ok") is not False for item in summary)
-    reasonableness_checks = context.build_reasonableness_checks(
+    reasonableness_checks = build_reasonableness_checks(
         config,
         forcing,
+        context,
         dem_stats=dem_stats,
         glacier_mask_summary=glacier_mask_summary,
         glacier_mask_exists=glacier_mask.exists(),
