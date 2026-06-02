@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList"]) {
+            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -138,12 +138,37 @@ class FrontendTaskViewTests(unittest.TestCase):
             if (!taskView.renderTaskList([], helpers).includes("当前筛选下暂无任务")) {
               throw new Error("empty task hint missing");
             }
+
+            if (taskView.taskProgressChartData([{ gen: 1 }]) !== null) {
+              throw new Error("single progress row should not create a chart");
+            }
+            const chart = taskView.taskProgressChartData([
+              { gen: 1, nse_cal: 0.5, nse_val: 0.4, obj: 1.2 },
+              { gen: 2, nse_cal: "bad", nse_val: 0.45, obj: null },
+              { gen: "skip", nse_cal: 0.9, nse_val: 0.9, obj: 0.2 },
+              { gen: 3, nse_cal: 0.7, nse_val: undefined, obj: 0.8 },
+            ], "精细搜索", {
+              colors: { qSim: "#111111", qRain: "#222222", residual: "#333333" },
+            });
+            if (!chart || chart.traces.length !== 3) throw new Error(`unexpected chart payload: ${JSON.stringify(chart)}`);
+            if (chart.traces[0].x.join(",") !== "1,2,3") throw new Error(`unexpected chart x values: ${chart.traces[0].x}`);
+            if (chart.traces[0].y[1] !== null || chart.traces[1].y[2] !== null || chart.traces[2].y[1] !== 0) {
+              throw new Error(`unexpected metric coercion in chart data: ${JSON.stringify(chart.traces)}`);
+            }
+            if (chart.traces[0].line.color !== "#111111" || chart.traces[1].line.color !== "#222222" || chart.traces[2].line.color !== "#333333") {
+              throw new Error(`chart colors were not applied: ${JSON.stringify(chart.traces.map(trace => trace.line))}`);
+            }
+            if (chart.layout.title.text !== "精细搜索" || chart.layout.yaxis2.overlaying !== "y") {
+              throw new Error(`unexpected chart layout: ${JSON.stringify(chart.layout)}`);
+            }
             """
         )
         result = subprocess.run(
             ["node", "-e", script],
             cwd=STUDIO_DIR,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=20,
         )

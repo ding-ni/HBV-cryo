@@ -248,6 +248,7 @@ const frontendModuleContracts = [
       "taskDebugDetails",
       "taskLastMeaningfulLog",
       "taskPrimaryTitle",
+      "taskProgressChartData",
       "taskStageLabel",
       "taskStatusClass",
       "taskStatusLabel",
@@ -5332,33 +5333,6 @@ async function compareSelectedManualPresetSimulation() {
 //  TASKS
 // ===============================================================
 
-function taskProgressChartData(history, stageLabel = "") {
-  const rows = (history || []).filter(row => Number.isFinite(Number(row?.gen)));
-  if (rows.length < 2) return null;
-  const gens = rows.map(row => Number(row.gen));
-  const nseCal = rows.map(row => Number.isFinite(Number(row.nse_cal)) ? Number(row.nse_cal) : null);
-  const nseVal = rows.map(row => Number.isFinite(Number(row.nse_val)) ? Number(row.nse_val) : null);
-  const obj = rows.map(row => Number.isFinite(Number(row.obj)) ? Number(row.obj) : null);
-  return {
-    traces: [
-      { x: gens, y: nseCal, name: "率定纳什效率系数", mode: "lines", line: { color: colors.qSim, width: 2 } },
-      { x: gens, y: nseVal, name: "验证纳什效率系数", mode: "lines", line: { color: colors.qRain, width: 1.6, dash: "dot" } },
-      { x: gens, y: obj, name: "综合评分值", mode: "lines", yaxis: "y2", line: { color: colors.residual, width: 1.6 } },
-    ],
-    layout: {
-      margin: { t: 8, r: 38, b: 28, l: 36 },
-      height: 180,
-      paper_bgcolor: "transparent",
-      plot_bgcolor: "transparent",
-      legend: { orientation: "h", y: 1.18, x: 0, font: { size: 10 } },
-      title: stageLabel ? { text: stageLabel, font: { size: 11 } } : undefined,
-      xaxis: { title: "迭代 / 样本", tickfont: { size: 10 }, titlefont: { size: 10 } },
-      yaxis: { title: "纳什效率系数", tickfont: { size: 10 }, titlefont: { size: 10 } },
-      yaxis2: { title: "综合评分值", overlaying: "y", side: "right", tickfont: { size: 10 }, titlefont: { size: 10 } },
-    },
-  };
-}
-
 function renderTaskProgressCharts() {
   if (typeof Plotly === "undefined") return;
   document.querySelectorAll("[data-task-progress-chart]").forEach(host => {
@@ -5367,7 +5341,7 @@ function renderTaskProgressCharts() {
     const task = state.tasks.find(item => item.id === taskId);
     const histories = task?.progress?.stages || {};
     const stageHistory = histories?.[stage]?.history || task?.progress?.history || [];
-    const chart = taskProgressChartData(stageHistory, taskStageLabel(stage));
+    const chart = window.HBVStudioTaskView.taskProgressChartData(stageHistory, taskStageLabel(stage), { colors });
     if (!chart) return;
     try {
       const plot = Plotly.newPlot(host, chart.traces, chart.layout, {
