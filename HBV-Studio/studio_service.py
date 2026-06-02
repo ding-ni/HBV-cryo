@@ -173,10 +173,9 @@ from services.manual_presets import load_manual_preset_store as build_load_manua
 from services.manual_presets import manual_preset_store_path as build_manual_preset_store_path
 from services.manual_presets import save_manual_preset as build_save_manual_preset
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
-from services.json_utils import json_dumps_safe as build_json_dumps_safe
-from services.json_utils import json_safe_value as build_json_safe_value
-from services.json_utils import read_json_file as build_read_json_file
-from services.json_utils import write_json_file as build_write_json_file
+from services.json_utils import json_dumps_safe
+from services.json_utils import read_json_file
+from services.json_utils import write_json_file
 from services.meteo_import import MeteoImportStartContext
 from services.meteo_import import MeteoImportWorkerContext
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
@@ -878,10 +877,6 @@ def normalize_legacy_project_paths(
     )
 
 
-def read_json_file(path: Path) -> dict[str, Any]:
-    return build_read_json_file(path)
-
-
 def read_runtime_config(path: Path) -> dict[str, Any]:
     data = read_json_file(path)
     project_root, gui_root = _placeholder_roots_for_config_path(path)
@@ -929,18 +924,6 @@ def _config_text_value(config: dict[str, Any], key: str) -> str:
 def _append_unique_message(items: list[str], text: str) -> None:
     if text and text not in items:
         items.append(text)
-
-
-def _json_safe_value(value: Any) -> Any:
-    return build_json_safe_value(value)
-
-
-def json_dumps_safe(payload: Any, *, indent: int | None = None) -> str:
-    return build_json_dumps_safe(payload, indent=indent)
-
-
-def write_json_file(path: Path, data: dict[str, Any]) -> None:
-    build_write_json_file(path, data)
 
 
 def detect_time_column(frame: pd.DataFrame, preferred: str | None = None) -> str | None:
