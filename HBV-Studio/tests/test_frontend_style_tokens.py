@@ -50,6 +50,7 @@ class FrontendStyleTokenTests(unittest.TestCase):
             "--radius-sm": "6px",
             "--control-height": "32px",
             "--control-height-primary": "36px",
+            "--field-height": "36px",
         }
 
         for name, value in expected.items():
@@ -127,6 +128,29 @@ class FrontendStyleTokenTests(unittest.TestCase):
             body = rule_body(styles, selector)
             for declaration in declarations:
                 self.assertIn(declaration, body, selector)
+
+    def test_form_fields_use_data_entry_height_tokens(self) -> None:
+        styles = STYLES_PATH.read_text(encoding="utf-8")
+        tokens = root_tokens(styles)
+
+        self.assertEqual(tokens.get("--field-height"), "36px")
+
+        field_selector = (
+            'input[type="text"], input[type="number"], input[type="date"], '
+            'input[type="datetime-local"], select'
+        )
+        field_body = rule_body(styles, field_selector)
+        self.assertIn("min-height: var(--field-height);", field_body)
+        self.assertIn("padding: 7px 12px;", field_body)
+        self.assertIn("font-size: 14px;", field_body)
+
+        textarea_body = rule_body(styles, "textarea")
+        self.assertIn("min-height: calc(var(--field-height) * 2);", textarea_body)
+        self.assertIn("resize: vertical;", textarea_body)
+
+        browse_button_body = rule_body(styles, ".path-input .browse-button")
+        self.assertIn("min-height: var(--field-height);", browse_button_body)
+        self.assertIn("padding: 7px 12px;", browse_button_body)
 
 
 if __name__ == "__main__":
