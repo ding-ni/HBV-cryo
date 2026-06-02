@@ -62,6 +62,12 @@ class ForcingDownloadStatusContext:
     configured_precip_source: Callable[[dict[str, Any]], str]
 
 
+@dataclass(frozen=True)
+class HourlyForcingReadyContext:
+    build_workspace_paths: Callable[[dict[str, Any]], dict[str, Any]]
+    validate_forcing_bundle: Callable[..., dict[str, Any]]
+
+
 def series_group_status(
     entries: list[tuple[str, Path]],
     step_hours: float,
@@ -177,6 +183,26 @@ def check_hourly_era5_download_status(
         patterns.append(Path(paths["raw_prec_era5_dir"]).glob("era5_tp_hourly_*.nc"))
     count = sum(len(list(items)) for items in patterns)
     return count > 0, f"小时 ERA5 原始 NetCDF 文件数：{count}", count
+
+
+def hourly_forcing_ready_status(
+    config: dict[str, Any],
+    context: HourlyForcingReadyContext,
+    *,
+    profile: str,
+    precip_source: Any = None,
+) -> tuple[bool, str, int]:
+    base_paths = context.build_workspace_paths(config)
+    forcing = context.validate_forcing_bundle(config, profile, precip_source=precip_source)
+    counts = {key: forcing["directories"][key]["valid_time_steps"] for key in ("prec", "temp", "evap")}
+    detail = ""
+    if forcing["errors"]:
+        detail = f"；问题：{'；'.join(forcing['errors'][:2])}"
+    return (
+        forcing["ok"],
+        f"小时气象驱动：降水={counts['prec']} 气温={counts['temp']} 蒸散={counts['evap']}（工程目录={base_paths['workspace_root']}）{detail}",
+        forcing["total_valid_steps"],
+    )
 
 
 def check_daily_temp_evap_status(

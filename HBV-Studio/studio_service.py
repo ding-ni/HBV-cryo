@@ -116,6 +116,7 @@ from services.forcing_validation import ForcingDownloadStatusContext
 from services.forcing_validation import ForcingInputsReadyContext
 from services.forcing_validation import ForcingPreprocessStatusContext
 from services.forcing_validation import ForcingValidationContext
+from services.forcing_validation import HourlyForcingReadyContext
 from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
 from services.forcing_validation import check_daily_era5_download_status as build_check_daily_era5_download_status
 from services.forcing_validation import check_daily_era5_processed_status as build_check_daily_era5_processed_status
@@ -126,6 +127,7 @@ from services.forcing_validation import check_hourly_era5_download_status as bui
 from services.forcing_validation import check_hourly_prec_status as build_check_hourly_prec_status
 from services.forcing_validation import check_hourly_temp_evap_status as build_check_hourly_temp_evap_status
 from services.forcing_validation import configured_daily_meteo_sources as build_configured_daily_meteo_sources
+from services.forcing_validation import hourly_forcing_ready_status as build_hourly_forcing_ready_status
 from services.forcing_validation import prefer_raw_or_aligned_group_status as build_prefer_raw_or_aligned_group_status
 from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
@@ -1276,6 +1278,13 @@ def _forcing_download_status_context() -> ForcingDownloadStatusContext:
     )
 
 
+def _hourly_forcing_ready_context() -> HourlyForcingReadyContext:
+    return HourlyForcingReadyContext(
+        build_workspace_paths=build_workspace_paths,
+        validate_forcing_bundle=validate_forcing_bundle,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -1825,16 +1834,11 @@ def _configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
 
 
 def hourly_forcing_ready(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
-    base_paths = build_workspace_paths(config)
-    forcing = validate_forcing_bundle(config, PROFILE_HOURLY, precip_source=precip_source)
-    counts = {key: forcing["directories"][key]["valid_time_steps"] for key in ("prec", "temp", "evap")}
-    detail = ""
-    if forcing["errors"]:
-        detail = f"；问题：{'；'.join(forcing['errors'][:2])}"
-    return (
-        forcing["ok"],
-        f"小时气象驱动：降水={counts['prec']} 气温={counts['temp']} 蒸散={counts['evap']}（工程目录={base_paths['workspace_root']}）{detail}",
-        forcing["total_valid_steps"],
+    return build_hourly_forcing_ready_status(
+        config,
+        _hourly_forcing_ready_context(),
+        profile=PROFILE_HOURLY,
+        precip_source=precip_source,
     )
 
 

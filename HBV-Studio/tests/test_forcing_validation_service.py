@@ -19,6 +19,7 @@ from services.forcing_validation import (  # noqa: E402
     ForcingInputsReadyContext,
     ForcingPreprocessStatusContext,
     ForcingValidationContext,
+    HourlyForcingReadyContext,
     check_aligned_forcing_status,
     check_daily_era5_download_status,
     check_daily_era5_processed_status,
@@ -29,6 +30,7 @@ from services.forcing_validation import (  # noqa: E402
     check_hourly_prec_status,
     check_hourly_temp_evap_status,
     configured_daily_meteo_sources,
+    hourly_forcing_ready_status,
     prefer_raw_or_aligned_group_status,
     summarize_nc_download_status,
     validate_forcing_bundle,
@@ -179,6 +181,27 @@ class ForcingValidationServiceTests(unittest.TestCase):
         return ForcingDownloadStatusContext(
             build_workspace_paths=lambda config: paths,
             configured_precip_source=lambda config: precip_source,
+        )
+
+    def _hourly_ready_context(
+        self,
+        *,
+        forcing: dict[str, Any],
+        calls: list[tuple[Any, ...]] | None = None,
+    ) -> HourlyForcingReadyContext:
+        call_log = calls if calls is not None else []
+
+        def build_workspace_paths(config: dict[str, Any]) -> dict[str, Any]:
+            call_log.append(("workspace_paths",))
+            return {"workspace_root": "workspace"}
+
+        def validate_forcing(config: dict[str, Any], profile: str, **kwargs: Any) -> dict[str, Any]:
+            call_log.append(("forcing", profile, kwargs.get("precip_source")))
+            return forcing
+
+        return HourlyForcingReadyContext(
+            build_workspace_paths=build_workspace_paths,
+            validate_forcing_bundle=validate_forcing,
         )
 
     def _preprocess_context(
@@ -424,6 +447,54 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(message, "小时 ERA5 原始 NetCDF 文件数：6")
         self.assertEqual(count, 6)
+
+    def test_hourly_forcing_ready_status_formats_directory_counts(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        context = self._hourly_ready_context(
+            forcing={
+                "ok": True,
+                "errors": [],
+                "directories": {
+                    "prec": {"valid_time_steps": 2},
+                    "temp": {"valid_time_steps": 3},
+                    "evap": {"valid_time_steps": 4},
+                },
+                "total_valid_steps": 9,
+            },
+            calls=calls,
+        )
+
+        ready, message, count = hourly_forcing_ready_status(
+            {},
+            context,
+            profile="hourly",
+            precip_source="custom_tif",
+        )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "小时气象驱动：降水=2 气温=3 蒸散=4（工程目录=workspace）")
+        self.assertEqual(count, 9)
+        self.assertEqual(calls, [("workspace_paths",), ("forcing", "hourly", "custom_tif")])
+
+    def test_hourly_forcing_ready_status_appends_first_two_errors(self) -> None:
+        context = self._hourly_ready_context(
+            forcing={
+                "ok": False,
+                "errors": ["降水缺少时间步", "气温缺少时间步", "蒸散发缺少时间步"],
+                "directories": {
+                    "prec": {"valid_time_steps": 1},
+                    "temp": {"valid_time_steps": 0},
+                    "evap": {"valid_time_steps": 0},
+                },
+                "total_valid_steps": 1,
+            }
+        )
+
+        ready, message, count = hourly_forcing_ready_status({}, context, profile="hourly")
+
+        self.assertFalse(ready)
+        self.assertEqual(message, "小时气象驱动：降水=1 气温=0 蒸散=0（工程目录=workspace）；问题：降水缺少时间步；气温缺少时间步")
+        self.assertEqual(count, 1)
 
     def test_prefer_raw_or_aligned_group_status_prefers_ready_raw_series(self) -> None:
         context = self._preprocess_context(
