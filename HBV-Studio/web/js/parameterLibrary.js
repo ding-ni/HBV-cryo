@@ -172,6 +172,112 @@
     };
   }
 
+  function manualGroupParamNames(group = "all", names = [], groupParams = {}) {
+    const paramNames = Array.isArray(names) ? names : [];
+    if (normalizeKey(group) === "all") return paramNames.slice();
+    const allowed = new Set(groupParams?.[group] || []);
+    return paramNames.filter(name => allowed.has(name));
+  }
+
+  function manualPhaseGuide(group = "all", paramNames = [], groupMeta = {}, groupParams = {}) {
+    const meta = groupMeta?.[group] || groupMeta?.all || { title: "参数", guide: "" };
+    const shown = manualGroupParamNames(group, paramNames, groupParams);
+    const suffix = shown.length ? ` 当前显示 ${shown.length} 个参数。` : " 当前结果中没有这一组参数。";
+    return {
+      text: `${meta.title}：${meta.guide}${suffix}`,
+      className: `hint-box ${shown.length ? "" : "status-warn"}`.trim(),
+      shownParamNames: shown,
+    };
+  }
+
+  function manualChangeSummary(currentParams = null, originalParams = null, group = "all", groupParams = {}) {
+    if (!currentParams || !originalParams) {
+      return { visible: false, className: "", text: "", changed: [], visibleChanged: [] };
+    }
+    const changed = Object.keys(currentParams).filter(name =>
+      Math.abs(Number(currentParams[name]) - Number(originalParams[name])) > 1e-8
+    );
+    if (!changed.length) {
+      return { visible: false, className: "", text: "", changed: [], visibleChanged: [] };
+    }
+    const visibleChanged = manualGroupParamNames(group, changed, groupParams);
+    return {
+      visible: true,
+      className: "hint-box status-warn",
+      text: `已修改 ${changed.length} 个参数。${visibleChanged.length ? `当前分组中已改动：${visibleChanged.join("、")}` : "当前分组内暂无改动参数。"}`,
+      changed,
+      visibleChanged,
+    };
+  }
+
+  function normalizeBoundPair(value) {
+    if (!Array.isArray(value) || value.length < 2) return [0, 1];
+    const lo = Number(value[0]);
+    const hi = Number(value[1]);
+    return [
+      Number.isFinite(lo) ? lo : 0,
+      Number.isFinite(hi) ? hi : 1,
+    ];
+  }
+
+  function renderParamSliders(options = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const editable = Boolean(options.editable);
+    const params = options.params && typeof options.params === "object" ? options.params : {};
+    const bounds = options.bounds && typeof options.bounds === "object" ? options.bounds : {};
+    const labels = options.labels && typeof options.labels === "object" ? options.labels : {};
+    const group = options.group || "all";
+    const groupParams = options.groupParams || {};
+    if (!editable) {
+      return {
+        status: "readonly",
+        html: '<div class="hint-box status-warn">该结果缺少继续手调所需的参数边界信息，暂时只能查看，不能手动调参。</div>',
+        paramNames: [],
+        shownParamNames: [],
+      };
+    }
+    const paramNames = Object.keys(params);
+    if (!paramNames.length) {
+      return {
+        status: "empty",
+        html: '<div class="hint-box">无参数信息。</div>',
+        paramNames,
+        shownParamNames: [],
+      };
+    }
+    const shownParamNames = manualGroupParamNames(group, paramNames, groupParams);
+    if (!shownParamNames.length) {
+      return {
+        status: "group-empty",
+        html: '<div class="hint-box status-warn">当前分组没有可调参数，请切换到其他参数组。</div>',
+        paramNames,
+        shownParamNames,
+      };
+    }
+    const html = shownParamNames.map(name => {
+      const val = params[name];
+      const [lo, hi] = normalizeBoundPair(bounds[name]);
+      const step = Math.max((hi - lo) / 1000, 1e-6);
+      const label = labels[name] || name;
+      return `
+        <div class="param-slider-item" data-param="${escapeHtml(name)}">
+          <div class="param-slider-head">
+            <strong>${escapeHtml(name)}</strong>
+            <span style="flex:1;margin-left:6px;font-size:11px;color:var(--muted)">${escapeHtml(label)}</span>
+            <input class="param-value" type="number" step="${step}" min="${lo}" max="${hi}" value="${escapeHtml(val)}" data-param-input="${escapeHtml(name)}">
+          </div>
+          <input type="range" min="${lo}" max="${hi}" step="${step}" value="${escapeHtml(val)}" data-param-slider="${escapeHtml(name)}">
+          <div class="param-slider-bounds"><span>${lo}</span><span>${hi}</span></div>
+        </div>`;
+    }).join("");
+    return {
+      status: "ready",
+      html,
+      paramNames,
+      shownParamNames,
+    };
+  }
+
   function manualContextWarning(preset, current = {}, helpers = {}) {
     if (!preset) return "";
     const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
@@ -346,6 +452,10 @@
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,
+    manualGroupParamNames,
+    manualPhaseGuide,
+    manualChangeSummary,
+    renderParamSliders,
     manualContextWarning,
     taskContextWarnings,
     renderTaskContextHint,

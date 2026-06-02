@@ -131,6 +131,10 @@ const frontendModuleContracts = [
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
+      "manualGroupParamNames",
+      "manualPhaseGuide",
+      "manualChangeSummary",
+      "renderParamSliders",
       "manualContextWarning",
       "taskContextWarnings",
       "renderTaskContextHint",
@@ -1345,9 +1349,7 @@ function formatDurationSeconds(v) {
 }
 
 function manualGroupParamNames(group, names) {
-  if (group === "all") return names;
-  const allowed = new Set(MANUAL_GROUP_PARAMS[group] || []);
-  return names.filter(name => allowed.has(name));
+  return window.HBVStudioParameterLibrary.manualGroupParamNames(group, names, MANUAL_GROUP_PARAMS);
 }
 
 function updateManualGroupToolbar() {
@@ -1359,31 +1361,32 @@ function updateManualGroupToolbar() {
 function updateManualPhaseGuide(paramNames = []) {
   const host = $("#manual-phase-guide");
   if (!host) return;
-  const meta = MANUAL_GROUP_META[state.manualParamGroup] || MANUAL_GROUP_META.all;
-  const shown = manualGroupParamNames(state.manualParamGroup, paramNames);
-  const suffix = shown.length ? ` 当前显示 ${shown.length} 个参数。` : " 当前结果中没有这一组参数。";
-  host.textContent = `${meta.title}：${meta.guide}${suffix}`;
-  host.className = `hint-box ${shown.length ? "" : "status-warn"}`.trim();
+  const guide = window.HBVStudioParameterLibrary.manualPhaseGuide(
+    state.manualParamGroup,
+    paramNames,
+    MANUAL_GROUP_META,
+    MANUAL_GROUP_PARAMS,
+  );
+  host.textContent = guide.text;
+  host.className = guide.className;
 }
 
 function updateManualChangeSummary() {
   const host = $("#manual-change-summary");
   if (!host) return;
-  if (!state._runParams || !state._runOrigParams) {
-    host.style.display = "none";
-    return;
-  }
-  const changed = Object.keys(state._runParams).filter(name =>
-    Math.abs(Number(state._runParams[name]) - Number(state._runOrigParams[name])) > 1e-8
+  const summary = window.HBVStudioParameterLibrary.manualChangeSummary(
+    state._runParams,
+    state._runOrigParams,
+    state.manualParamGroup,
+    MANUAL_GROUP_PARAMS,
   );
-  if (!changed.length) {
+  if (!summary.visible) {
     host.style.display = "none";
     return;
   }
-  const visibleChanged = manualGroupParamNames(state.manualParamGroup, changed);
   host.style.display = "";
-  host.className = "hint-box status-warn";
-  host.textContent = `已修改 ${changed.length} 个参数。${visibleChanged.length ? `当前分组中已改动：${visibleChanged.join("、")}` : "当前分组内暂无改动参数。"}`
+  host.className = summary.className;
+  host.textContent = summary.text;
 }
 
 function renderManualPresetDiff() {
@@ -5270,45 +5273,22 @@ function renderCharts(data) {
 
 function renderParamSliders(data) {
   const meta = data.metadata || {};
-  if (!isStudioEditableRun(data)) {
-    $("#param-sliders").innerHTML = '<div class="hint-box status-warn">该结果缺少继续手调所需的参数边界信息，暂时只能查看，不能手动调参。</div>';
-    updateManualPhaseGuide([]);
-    updateManualChangeSummary();
-    return;
-  }
   const params = meta.optimized_params || {};
   const bounds = meta.parameter_profile?.bounds || {};
-  const paramNames = Object.keys(params);
-  if (!paramNames.length) {
-    $("#param-sliders").innerHTML = '<div class="hint-box">无参数信息。</div>';
-    updateManualPhaseGuide([]);
+  const rendered = window.HBVStudioParameterLibrary.renderParamSliders({
+    editable: isStudioEditableRun(data),
+    params,
+    bounds,
+    group: state.manualParamGroup,
+    groupParams: MANUAL_GROUP_PARAMS,
+    labels: PARAM_LABELS,
+  }, { escapeHtml });
+  $("#param-sliders").innerHTML = rendered.html;
+  updateManualPhaseGuide(rendered.paramNames || []);
+  if (rendered.status !== "ready") {
     updateManualChangeSummary();
     return;
   }
-  updateManualPhaseGuide(paramNames);
-  const shownParamNames = manualGroupParamNames(state.manualParamGroup, paramNames);
-  if (!shownParamNames.length) {
-    $("#param-sliders").innerHTML = '<div class="hint-box status-warn">当前分组没有可调参数，请切换到其他参数组。</div>';
-    updateManualChangeSummary();
-    return;
-  }
-  const html = shownParamNames.map(name => {
-    const val = params[name];
-    const [lo, hi] = bounds[name] || [0, 1];
-    const step = Math.max((hi - lo) / 1000, 1e-6);
-    const label = PARAM_LABELS[name] || name;
-    return `
-      <div class="param-slider-item" data-param="${escapeHtml(name)}">
-        <div class="param-slider-head">
-          <strong>${escapeHtml(name)}</strong>
-          <span style="flex:1;margin-left:6px;font-size:11px;color:var(--muted)">${escapeHtml(label)}</span>
-          <input class="param-value" type="number" step="${step}" min="${lo}" max="${hi}" value="${val}" data-param-input="${escapeHtml(name)}">
-        </div>
-        <input type="range" min="${lo}" max="${hi}" step="${step}" value="${val}" data-param-slider="${escapeHtml(name)}">
-        <div class="param-slider-bounds"><span>${lo}</span><span>${hi}</span></div>
-      </div>`;
-  }).join("");
-  $("#param-sliders").innerHTML = html;
 
   // Bind slider ↔ input sync
   $all("[data-param-slider]").forEach(slider => {

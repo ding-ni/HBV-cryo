@@ -306,6 +306,108 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_group_helpers_and_param_slider_rendering(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            for (const name of ["manualGroupParamNames", "manualPhaseGuide", "manualChangeSummary", "renderParamSliders"]) {
+              if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
+            }
+            const groupParams = {
+              all: [],
+              snow: ["TT", "SFCF"],
+              soil: ["FC"],
+              glacier: ["ICE_FACTOR"],
+            };
+            const groupMeta = {
+              all: { title: "全部参数", guide: "先看整体。" },
+              snow: { title: "雪过程", guide: "再看融雪。" },
+              glacier: { title: "冰川过程", guide: "最后看冰川。" },
+            };
+            const helpers = {
+              escapeHtml(value) {
+                return String(value ?? "").replace(/[&<>"']/g, ch => ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  "\"": "&quot;",
+                  "'": "&#39;",
+                }[ch]));
+              },
+            };
+
+            const snowNames = library.manualGroupParamNames("snow", ["TT", "FC", "SFCF"], groupParams);
+            if (snowNames.join(",") !== "TT,SFCF") throw new Error(`unexpected snow names: ${snowNames}`);
+            const allNames = library.manualGroupParamNames("all", ["TT", "FC"], groupParams);
+            if (allNames.join(",") !== "TT,FC") throw new Error(`unexpected all names: ${allNames}`);
+
+            const guide = library.manualPhaseGuide("snow", ["TT", "FC"], groupMeta, groupParams);
+            if (guide.className !== "hint-box" || !guide.text.includes("雪过程：再看融雪。 当前显示 1 个参数。")) {
+              throw new Error(`unexpected guide: ${JSON.stringify(guide)}`);
+            }
+            const emptyGuide = library.manualPhaseGuide("glacier", ["TT", "FC"], groupMeta, groupParams);
+            if (emptyGuide.className !== "hint-box status-warn" || !emptyGuide.text.includes("当前结果中没有这一组参数")) {
+              throw new Error(`unexpected empty guide: ${JSON.stringify(emptyGuide)}`);
+            }
+
+            const changed = library.manualChangeSummary({ TT: 0.2, FC: 100 }, { TT: 0.1, FC: 100 }, "snow", groupParams);
+            if (!changed.visible || changed.text !== "已修改 1 个参数。当前分组中已改动：TT") {
+              throw new Error(`unexpected changed summary: ${JSON.stringify(changed)}`);
+            }
+            const hidden = library.manualChangeSummary({ TT: 0.1 }, { TT: 0.1 }, "snow", groupParams);
+            if (hidden.visible || hidden.text) throw new Error("unchanged params should hide summary");
+
+            const readonly = library.renderParamSliders({ editable: false }, helpers);
+            if (readonly.status !== "readonly" || !readonly.html.includes("不能手动调参")) {
+              throw new Error(`unexpected readonly sliders: ${JSON.stringify(readonly)}`);
+            }
+            const groupEmpty = library.renderParamSliders({
+              editable: true,
+              params: { TT: 0.5 },
+              bounds: { TT: [0, 1] },
+              group: "glacier",
+              groupParams,
+              labels: { TT: "温度阈值" },
+            }, helpers);
+            if (groupEmpty.status !== "group-empty" || !groupEmpty.html.includes("当前分组没有可调参数")) {
+              throw new Error(`unexpected group-empty sliders: ${JSON.stringify(groupEmpty)}`);
+            }
+            const rendered = library.renderParamSliders({
+              editable: true,
+              params: { "TT<bad>": 0.5, FC: 130 },
+              bounds: { "TT<bad>": [0, 1], FC: [100, 200] },
+              group: "all",
+              groupParams,
+              labels: { "TT<bad>": "温度<阈值>", FC: "土壤蓄水" },
+            }, helpers);
+            if (rendered.status !== "ready" || rendered.paramNames.length !== 2 || rendered.shownParamNames.length !== 2) {
+              throw new Error(`unexpected rendered status: ${JSON.stringify(rendered)}`);
+            }
+            if (!rendered.html.includes('data-param="TT&lt;bad&gt;"') || !rendered.html.includes("温度&lt;阈值&gt;")) {
+              throw new Error(`slider html should escape names and labels: ${rendered.html}`);
+            }
+            if (!rendered.html.includes('step="0.001"') || !rendered.html.includes('min="100"') || !rendered.html.includes('max="200"')) {
+              throw new Error(`slider bounds or step missing: ${rendered.html}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
