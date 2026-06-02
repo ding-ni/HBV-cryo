@@ -203,7 +203,12 @@ from services.meteo_config import (
     effective_precip_source as build_effective_precip_source,
     resolve_precip_source as build_resolve_precip_source,
 )
+from services.meteo_status import MeteoStateContext
 from services.meteo_status import cdsapi_status as build_cdsapi_status
+from services.meteo_status import clear_meteo_state as build_clear_meteo_state
+from services.meteo_status import meteo_state_path as build_meteo_state_path
+from services.meteo_status import read_meteo_state as build_read_meteo_state
+from services.meteo_status import write_meteo_state as build_write_meteo_state
 from services.observed import ObservedInfoContext, ObservedWindowContext
 from services.observed import observed_info as build_observed_info
 from services.observed import observed_window_messages as build_observed_window_messages
@@ -467,7 +472,6 @@ SELF_CHECK = PROJECT_ROOT / "系统自检.py"
 TUOTUOHE_SYNC_SCRIPT = GUI_ROOT / "sync_tuotuohe_data.py"
 FORWARD_SIM_TIMEOUT_SEC = 900
 DEFAULT_WORKSPACE_PATH = WORKSPACE_DIR / "新流域工作区.json"
-METEO_STATE_FILENAME = "_meteo_state.json"
 RUN_PY_FILE_ROLE = "__run_py_file__"
 DIR_BROWSER_FILE_PREVIEW_ITEMS = 12
 FORCING_PIPELINE_STEP_IDS = frozenset({
@@ -779,38 +783,29 @@ def stage_observed_runoff_file(config: dict[str, Any], raw_path: Any, *, config_
     return dst
 
 
+def _meteo_state_context() -> MeteoStateContext:
+    return MeteoStateContext(
+        current_profile=current_profile,
+        build_profile_paths=build_profile_paths,
+        read_json_file=read_json_file,
+        write_json_file=write_json_file,
+    )
+
+
 def meteo_state_path(config: dict[str, Any], profile: str | None = None) -> Path:
-    active_profile = profile or current_profile(config)
-    paths = build_profile_paths(config, active_profile)
-    return Path(paths["aligned_dir"]) / METEO_STATE_FILENAME
+    return build_meteo_state_path(config, _meteo_state_context(), profile)
 
 
 def read_meteo_state(config: dict[str, Any], profile: str | None = None) -> dict[str, Any]:
-    path = meteo_state_path(config, profile)
-    if not path.exists():
-        return {}
-    try:
-        data = read_json_file(path)
-    except Exception:
-        return {}
-    if isinstance(data, dict):
-        data["_state_path"] = str(path)
-        return data
-    return {}
+    return build_read_meteo_state(config, _meteo_state_context(), profile)
 
 
 def write_meteo_state(config: dict[str, Any], data: dict[str, Any], profile: str | None = None) -> Path:
-    path = meteo_state_path(config, profile)
-    payload = dict(data)
-    payload.pop("_state_path", None)
-    write_json_file(path, payload)
-    return path
+    return build_write_meteo_state(config, data, _meteo_state_context(), profile)
 
 
 def clear_meteo_state(config: dict[str, Any], profile: str | None = None) -> None:
-    path = meteo_state_path(config, profile)
-    if path.exists():
-        path.unlink()
+    build_clear_meteo_state(config, _meteo_state_context(), profile)
 
 
 def task_progress_snapshot(task: TaskRecord) -> dict[str, Any] | None:
