@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderPrepStepList"],
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderInputCheckResults", "renderPrepStepList"],
   },
   {
     script: "./js/taskView.js",
@@ -4343,70 +4343,24 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
       refreshCalibrationControls();
     }
 
-    let html = "";
-    html += window.HBVStudioEventMode.renderValidationEventSections(validation, {
+    const html = window.HBVStudioDataPrepView.renderInputCheckResults({
+      validation,
+      comp,
+      detail,
+      stage,
+      detailData,
+      advice,
+    }, {
       escapeHtml,
-      statusClass: focusStatusClass,
-      shortPath,
+      inferIssueTarget,
+      renderEngineeringFocusChecks,
+      renderIssueJumpButton,
+      renderValidationEventSections: value => window.HBVStudioEventMode.renderValidationEventSections(value, {
+        escapeHtml,
+        statusClass: focusStatusClass,
+        shortPath,
+      }),
     });
-    const readyHeadline = stage === "calibration"
-      ? "所有率定所需数据已就位，可以进入率定！"
-      : stage === "quick_test"
-    ? "输入预核算所需数据已就位，可以进行限定时段前向计算。"
-        : "所有手调/重算所需运行时数据已就位，可以继续前向重算。";
-
-    // overall status
-    if (comp.ready) {
-      html += `<div class="hint-box status-ok" style="margin-bottom:12px"><strong>${readyHeadline}</strong></div>`;
-    } else {
-      const missingItems = (comp.missing || []).map(m => `<li>${escapeHtml(m)}${renderIssueJumpButton(m, 7)}</li>`).join("");
-      html += `<div class="hint-box status-fail" style="margin-bottom:12px"><strong>以下数据缺失或配置不完整：</strong><ul>${missingItems || "<li>请完成前序步骤</li>"}</ul></div>`;
-    }
-
-    if (comp.warnings && comp.warnings.length > 0) {
-      const warnItems = comp.warnings.map(w => `<li>${escapeHtml(w)}${renderIssueJumpButton(w, 7)}</li>`).join("");
-      html += `<div class="hint-box status-warn" style="margin-bottom:12px"><strong>注意事项：</strong><ul>${warnItems}</ul></div>`;
-    }
-
-    if (validation.focus_checks?.length) {
-      html += `<div style="margin-bottom:12px"><strong style="display:block;margin-bottom:8px">专项工程检查</strong>${renderEngineeringFocusChecks(validation.focus_checks, { title: "专项工程检查" })}</div>`;
-    }
-
-    if (detail && stage === "calibration" && detailData?.reasonableness_checks?.length) {
-      html += `<div style="margin-bottom:12px"><strong style="display:block;margin-bottom:8px">数值合理性检查</strong>${renderEngineeringFocusChecks(detailData.reasonableness_checks, { title: "数值合理性检查", emptyText: "暂无数值合理性检查。" })}</div>`;
-    }
-
-    if (detail && stage === "calibration" && advice?.recommendations?.length) {
-      const items = advice.recommendations.slice(0, 4).map(item => {
-        const target = inferIssueTarget(item.detail, item.target_step || 7);
-        const stepBtn = target ? ` <button class="ghost-button" data-go-step="${escapeHtml(target.step)}" data-go-selector="${escapeHtml(target.selector || "")}" style="padding:4px 10px;font-size:12px">定位</button>` : "";
-        return `<li><strong>${escapeHtml(item.title)}</strong>：${escapeHtml(item.detail)}${stepBtn}</li>`;
-      }).join("");
-      html += `<div class="hint-box ${comp.ready ? "status-ok" : "status-warn"}" style="margin-bottom:12px"><strong>智能建议：</strong><ul>${items}</ul></div>`;
-    }
-
-    if (detail && detailData) {
-      const groups = {};
-      for (const item of (detailData.summary || [])) {
-        const g = item.group || "其他";
-        if (!groups[g]) groups[g] = [];
-        groups[g].push(item);
-      }
-      html += '<div class="check-detail-table">';
-      for (const [groupName, items] of Object.entries(groups)) {
-        html += `<div class="check-group-title">${escapeHtml(groupName)}</div>`;
-        for (const item of items) {
-          const okClass = item.ok === true ? "status-ok" : item.ok === false ? "status-fail" : "";
-          html += `<div class="check-row ${okClass}">
-            <span class="check-label">${escapeHtml(item.label)}</span>
-            <span class="check-value">${escapeHtml(String(item.value))}</span>
-          </div>`;
-        }
-      }
-      html += '</div>';
-    } else {
-      html += '<div class="hint-box">当前显示的是输入检查概览。需要逐项明细时，再点击“运行检查”。</div>';
-    }
 
     host.innerHTML = html;
     state.lastInputCheck = {

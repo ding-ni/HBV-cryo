@@ -97,10 +97,113 @@
     }).join("");
   }
 
+  function inputCheckReadyHeadline(stage = "calibration") {
+    if (stage === "calibration") return "所有率定所需数据已就位，可以进入率定！";
+    if (stage === "quick_test") return "输入预核算所需数据已就位，可以进行限定时段前向计算。";
+    return "所有手调/重算所需运行时数据已就位，可以继续前向重算。";
+  }
+
+  function renderInputCheckItems(items = [], helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const renderIssueJumpButton = helpers.renderIssueJumpButton || (() => "");
+    return (Array.isArray(items) ? items : []).map(item => (
+      `<li>${escapeHtml(item)}${renderIssueJumpButton(item, 7)}</li>`
+    )).join("");
+  }
+
+  function renderInputCheckRecommendations(advice = {}, ready = false, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const inferIssueTarget = helpers.inferIssueTarget || (() => null);
+    const recommendations = Array.isArray(advice?.recommendations) ? advice.recommendations : [];
+    if (!recommendations.length) return "";
+    const items = recommendations.slice(0, 4).map(item => {
+      const target = inferIssueTarget(item.detail, item.target_step || 7);
+      const stepBtn = target
+        ? ` <button class="ghost-button" data-go-step="${escapeHtml(target.step)}" data-go-selector="${escapeHtml(target.selector || "")}" style="padding:4px 10px;font-size:12px">定位</button>`
+        : "";
+      return `<li><strong>${escapeHtml(item.title)}</strong>：${escapeHtml(item.detail)}${stepBtn}</li>`;
+    }).join("");
+    return `<div class="hint-box ${ready ? "status-ok" : "status-warn"}" style="margin-bottom:12px"><strong>智能建议：</strong><ul>${items}</ul></div>`;
+  }
+
+  function renderInputCheckDetailTable(detailData = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const groups = {};
+    for (const item of (Array.isArray(detailData?.summary) ? detailData.summary : [])) {
+      const groupName = item.group || "其他";
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push(item);
+    }
+    let html = '<div class="check-detail-table">';
+    for (const [groupName, items] of Object.entries(groups)) {
+      html += `<div class="check-group-title">${escapeHtml(groupName)}</div>`;
+      for (const item of items) {
+        const okClass = item.ok === true ? "status-ok" : item.ok === false ? "status-fail" : "";
+        html += `<div class="check-row ${okClass}">
+          <span class="check-label">${escapeHtml(item.label)}</span>
+          <span class="check-value">${escapeHtml(String(item.value))}</span>
+        </div>`;
+      }
+    }
+    html += "</div>";
+    return html;
+  }
+
+  function renderInputCheckResults(model = {}, helpers = {}) {
+    const renderValidationEventSections = helpers.renderValidationEventSections || (() => "");
+    const renderEngineeringFocusChecks = helpers.renderEngineeringFocusChecks || (() => "");
+    const validation = model.validation || {};
+    const comp = model.comp || {
+      ready: Boolean(validation.valid),
+      missing: validation.missing || [],
+      warnings: validation.warnings || [],
+    };
+    const stage = String(model.stage || "calibration");
+    const detail = Boolean(model.detail);
+    const detailData = model.detailData || null;
+    const advice = model.advice || null;
+
+    let html = "";
+    html += renderValidationEventSections(validation);
+
+    if (comp.ready) {
+      html += `<div class="hint-box status-ok" style="margin-bottom:12px"><strong>${inputCheckReadyHeadline(stage)}</strong></div>`;
+    } else {
+      const missingItems = renderInputCheckItems(comp.missing || [], helpers);
+      html += `<div class="hint-box status-fail" style="margin-bottom:12px"><strong>以下数据缺失或配置不完整：</strong><ul>${missingItems || "<li>请完成前序步骤</li>"}</ul></div>`;
+    }
+
+    if (Array.isArray(comp.warnings) && comp.warnings.length > 0) {
+      const warnItems = renderInputCheckItems(comp.warnings, helpers);
+      html += `<div class="hint-box status-warn" style="margin-bottom:12px"><strong>注意事项：</strong><ul>${warnItems}</ul></div>`;
+    }
+
+    if (Array.isArray(validation.focus_checks) && validation.focus_checks.length) {
+      html += `<div style="margin-bottom:12px"><strong style="display:block;margin-bottom:8px">专项工程检查</strong>${renderEngineeringFocusChecks(validation.focus_checks, { title: "专项工程检查" })}</div>`;
+    }
+
+    if (detail && stage === "calibration" && Array.isArray(detailData?.reasonableness_checks) && detailData.reasonableness_checks.length) {
+      html += `<div style="margin-bottom:12px"><strong style="display:block;margin-bottom:8px">数值合理性检查</strong>${renderEngineeringFocusChecks(detailData.reasonableness_checks, { title: "数值合理性检查", emptyText: "暂无数值合理性检查。" })}</div>`;
+    }
+
+    if (detail && stage === "calibration") {
+      html += renderInputCheckRecommendations(advice, comp.ready, helpers);
+    }
+
+    if (detail && detailData) {
+      html += renderInputCheckDetailTable(detailData, helpers);
+    } else {
+      html += '<div class="hint-box">当前显示的是输入检查概览。需要逐项明细时，再点击“运行检查”。</div>';
+    }
+
+    return html;
+  }
+
   window.HBVStudioDataPrepView = {
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
     renderBootstrapStatus,
+    renderInputCheckResults,
     renderPrepStepList,
   };
 })();

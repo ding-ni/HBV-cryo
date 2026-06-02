@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -115,6 +115,88 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
+
+            const checkHelpers = {
+              ...helpers,
+              inferIssueTarget(detail, targetStep) {
+                return String(detail || "").includes("第 3 步")
+                  ? { step: targetStep, selector: "#wz-boundary <bad>" }
+                  : null;
+              },
+              renderEngineeringFocusChecks(checks, options) {
+                return `<div class="focus-checks">${escapeHtml(options.title)}:${checks.length}</div>`;
+              },
+              renderIssueJumpButton(item, step) {
+                return `<button data-jump="${escapeHtml(item)}" data-step="${escapeHtml(step)}">定位</button>`;
+              },
+              renderValidationEventSections(validation) {
+                return `<section class="event-section">${escapeHtml(validation.eventName || "事件 <x>")}</section>`;
+              },
+            };
+            const checkHtml = view.renderInputCheckResults({
+              validation: { valid: false, eventName: "洪水 <A>", focus_checks: [{ id: "range" }] },
+              comp: {
+                ready: false,
+                missing: ["缺少 DEM <tif>"],
+                warnings: ["站点偏少 & 待确认"],
+              },
+              detail: true,
+              stage: "calibration",
+              detailData: {
+                reasonableness_checks: [{ id: "flow" }],
+                summary: [
+                  { group: "水文 <组>", label: "流量 & 单位", value: "m3/s <bad>", ok: true },
+                  { group: "水文 <组>", label: "缺项", value: "空", ok: false },
+                ],
+              },
+              advice: {
+                recommendations: [
+                  { title: "补充资料 <A>", detail: "回到第 3 步 & 导入", target_step: 3 },
+                  { title: "检查站点", detail: "核对雨量站" },
+                  { title: "检查边界", detail: "核对边界" },
+                  { title: "检查气象", detail: "核对气象" },
+                  { title: "第五条不显示", detail: "不应渲染" },
+                ],
+              },
+            }, checkHelpers);
+            if (!checkHtml.includes("洪水 &lt;A&gt;") || checkHtml.includes("洪水 <A>")) {
+              throw new Error(`event section should be escaped: ${checkHtml}`);
+            }
+            if (!checkHtml.includes("以下数据缺失或配置不完整") || !checkHtml.includes("缺少 DEM &lt;tif&gt;")) {
+              throw new Error(`missing item section failed: ${checkHtml}`);
+            }
+            if (!checkHtml.includes("站点偏少 &amp; 待确认") || !checkHtml.includes('data-jump="站点偏少 &amp; 待确认"')) {
+              throw new Error(`warning section failed: ${checkHtml}`);
+            }
+            if (!checkHtml.includes("专项工程检查") || !checkHtml.includes("专项工程检查:1")) {
+              throw new Error("focus checks should be rendered");
+            }
+            if (!checkHtml.includes("数值合理性检查") || !checkHtml.includes("数值合理性检查:1")) {
+              throw new Error("reasonableness checks should be rendered");
+            }
+            if (!checkHtml.includes("智能建议") || !checkHtml.includes("补充资料 &lt;A&gt;") || !checkHtml.includes('data-go-step="3"')) {
+              throw new Error(`recommendations failed: ${checkHtml}`);
+            }
+            if (!checkHtml.includes('data-go-selector="#wz-boundary &lt;bad&gt;"')) {
+              throw new Error("recommendation selector should be escaped");
+            }
+            if (checkHtml.includes("第五条不显示")) throw new Error("recommendations should be limited to four items");
+            if (!checkHtml.includes("水文 &lt;组&gt;") || !checkHtml.includes("流量 &amp; 单位") || !checkHtml.includes("m3/s &lt;bad&gt;")) {
+              throw new Error(`detail table should be escaped: ${checkHtml}`);
+            }
+            if (!checkHtml.includes("check-row status-ok") || !checkHtml.includes("check-row status-fail")) {
+              throw new Error("detail table status classes missing");
+            }
+
+            const overviewHtml = view.renderInputCheckResults({
+              validation: { valid: true },
+              comp: { ready: true, missing: [], warnings: [] },
+              detail: false,
+              stage: "quick_test",
+            }, checkHelpers);
+            if (!overviewHtml.includes("输入预核算所需数据已就位") || !overviewHtml.includes("当前显示的是输入检查概览")) {
+              throw new Error(`overview input check state failed: ${overviewHtml}`);
+            }
             """
         )
         result = subprocess.run(
