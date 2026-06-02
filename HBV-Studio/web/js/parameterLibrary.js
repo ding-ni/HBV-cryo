@@ -363,6 +363,32 @@
     };
   }
 
+  function manualPresetApplyState(currentParams = null, originalParams = null, preset = null, options = {}) {
+    if (!preset || !currentParams || !originalParams) {
+      return {
+        applied: false,
+        params: currentParams,
+        paramUpdates: [],
+        hint: { visible: false, className: "", text: "" },
+        presetName: "",
+      };
+    }
+    const presetName = String(preset?.name || "参数集").trim() || "参数集";
+    const result = manualPresetAppliedParams(currentParams, originalParams, preset);
+    const contextWarning = String(options.contextWarning || "").trim();
+    return {
+      applied: true,
+      params: result.params,
+      paramUpdates: result.applied,
+      hint: {
+        visible: true,
+        className: `hint-box ${contextWarning ? "status-warn" : "status-ok"}`.trim(),
+        text: `已载入参数集：${presetName}${preset.params_adjusted ? "（已按约束自动修正）" : ""}${contextWarning ? `。${contextWarning}` : ""}`,
+      },
+      presetName,
+    };
+  }
+
   function manualGroupParamNames(group = "all", names = [], groupParams = {}) {
     const paramNames = Array.isArray(names) ? names : [];
     if (normalizeKey(group) === "all") return paramNames.slice();
@@ -706,6 +732,7 @@
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,
+    manualPresetApplyState,
     manualGroupParamNames,
     manualPhaseGuide,
     manualChangeSummary,

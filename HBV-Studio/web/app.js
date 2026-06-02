@@ -149,6 +149,7 @@ const frontendModuleContracts = [
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
+      "manualPresetApplyState",
       "manualGroupParamNames",
       "manualPhaseGuide",
       "manualChangeSummary",
@@ -4722,10 +4723,15 @@ function selectedManualPreset() {
 }
 
 function applyManualPresetToCurrentRun(preset) {
-  if (!preset || !state._runParams || !state._runOrigParams) return;
-  const applied = window.HBVStudioParameterLibrary.manualPresetAppliedParams(state._runParams, state._runOrigParams, preset);
+  const applied = window.HBVStudioParameterLibrary.manualPresetApplyState(
+    state._runParams,
+    state._runOrigParams,
+    preset,
+    { contextWarning: manualPresetContextWarning(preset) },
+  );
+  if (!applied.applied) return;
   state._runParams = applied.params;
-  applied.applied.forEach(({ name, value, changed }) => {
+  applied.paramUpdates.forEach(({ name, value, changed }) => {
     const slider = $(`[data-param-slider="${name}"]`);
     const input = $(`[data-param-input="${name}"]`);
     if (slider) slider.value = value;
@@ -4734,10 +4740,11 @@ function applyManualPresetToCurrentRun(preset) {
     if (item) item.classList.toggle("changed", changed);
   });
   const hint = $("#resim-hint");
-  hint.style.display = "";
-  const mismatchText = manualPresetContextWarning(preset);
-  hint.textContent = `已载入参数集：${preset.name}${preset.params_adjusted ? "（已按约束自动修正）" : ""}${mismatchText ? `。${mismatchText}` : ""}`;
-  hint.className = `hint-box ${mismatchText ? "status-warn" : "status-ok"}`;
+  if (hint) {
+    hint.style.display = applied.hint.visible ? "" : "none";
+    hint.textContent = applied.hint.text;
+    hint.className = applied.hint.className;
+  }
   updateManualChangeSummary();
 }
 

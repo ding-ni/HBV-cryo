@@ -348,7 +348,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
-    def test_manual_preset_applied_params_merges_and_marks_changes(self) -> None:
+    def test_manual_preset_apply_state_merges_marks_changes_and_builds_hint(self) -> None:
         script = textwrap.dedent(
             r"""
             const fs = require("fs");
@@ -359,8 +359,8 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            if (typeof library.manualPresetAppliedParams !== "function") {
-              throw new Error("manualPresetAppliedParams was not exported");
+            for (const name of ["manualPresetAppliedParams", "manualPresetApplyState"]) {
+              if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const result = library.manualPresetAppliedParams(
               { TT: 0.1, FC: 110, K0: 0.3 },
@@ -375,6 +375,40 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (byName.TT.changed) throw new Error("unchanged parameter should not be marked changed");
             if (!byName.FC.changed) throw new Error("changed parameter should be marked changed");
             if ("K0" in byName) throw new Error("unapplied existing params should not be listed as applied");
+
+            const state = library.manualPresetApplyState(
+              { TT: 0.1, FC: 110, K0: 0.3 },
+              { TT: 0.1, FC: 120, K0: 0.3 },
+              { name: " Trial A ", params_adjusted: true, params: { TT: 0.1, FC: 130 } },
+              { contextWarning: "注意：降水驱动不同。" },
+            );
+            if (!state.applied || state.presetName !== "Trial A") {
+              throw new Error(`apply state should carry fallback-safe preset name: ${JSON.stringify(state)}`);
+            }
+            if (state.params.FC !== 130 || state.params.K0 !== 0.3 || state.paramUpdates.length !== 2) {
+              throw new Error(`apply state params or updates wrong: ${JSON.stringify(state)}`);
+            }
+            const stateUpdates = Object.fromEntries(state.paramUpdates.map(item => [item.name, item]));
+            if (stateUpdates.TT.changed || !stateUpdates.FC.changed) {
+              throw new Error(`apply state changed flags wrong: ${JSON.stringify(state.paramUpdates)}`);
+            }
+            if (!state.hint.visible || state.hint.className !== "hint-box status-warn" ||
+                state.hint.text !== "已载入参数集：Trial A（已按约束自动修正）。注意：降水驱动不同。") {
+              throw new Error(`apply state hint wrong: ${JSON.stringify(state.hint)}`);
+            }
+            const okHint = library.manualPresetApplyState(
+              { TT: 0.1 },
+              { TT: 0.1 },
+              { name: " ", params: { TT: 0.2 } },
+            );
+            if (!okHint.applied || okHint.presetName !== "参数集" || okHint.hint.className !== "hint-box status-ok" ||
+                okHint.hint.text !== "已载入参数集：参数集") {
+              throw new Error(`apply state default hint wrong: ${JSON.stringify(okHint)}`);
+            }
+            const missing = library.manualPresetApplyState(null, { TT: 0.1 }, { name: "Trial", params: { TT: 0.2 } });
+            if (missing.applied || missing.paramUpdates.length || missing.hint.visible || missing.presetName) {
+              throw new Error(`missing context should not apply preset: ${JSON.stringify(missing)}`);
+            }
             """
         )
         result = subprocess.run(
