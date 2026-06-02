@@ -5011,16 +5011,8 @@ async function runForwardSimulation() {
     showToast(preflight.message, true);
     return;
   }
-  const hint = $("#resim-hint");
-  const logBox = $("#resim-log");
   const startState = window.HBVStudioResultsView.forwardSimulationStartState();
-  hint.style.display = startState.hint.visible ? "" : "none";
-  hint.textContent = startState.hint.text;
-  hint.className = startState.hint.className;
-  if (logBox) {
-    logBox.textContent = startState.log.text;
-    logBox.style.display = startState.log.visible ? "" : "none";
-  }
+  applyDomUpdates(startState.domUpdates);
   const requestContext = window.HBVStudioResultsView.forwardSimulationRequestContext(state._runData, state._runParams);
   try {
     const payload = await apiPost("/api/simulate/forward/start", requestContext.payload);
@@ -5032,10 +5024,7 @@ async function runForwardSimulation() {
     }
   } catch (err) {
     const errorState = window.HBVStudioResultsView.forwardSimulationErrorState(err);
-    hint.style.display = errorState.hint.visible ? "" : "none";
-    hint.textContent = errorState.hint.text;
-    hint.className = errorState.hint.className;
-    if (logBox) logBox.style.display = errorState.log.visible ? "" : "none";
+    applyDomUpdates(errorState.domUpdates);
   }
 }
 

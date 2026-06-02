@@ -479,10 +479,25 @@ class FrontendResultsViewTests(unittest.TestCase):
                 !forwardStart.log.visible || forwardStart.log.text !== "") {
               throw new Error(`forward start state wrong: ${JSON.stringify(forwardStart)}`);
             }
+            const forwardStartDom = Object.fromEntries(forwardStart.domUpdates.map(update => [update.selector, update]));
+            if (forwardStartDom["#resim-hint"].visible !== true ||
+                forwardStartDom["#resim-hint"].text !== "正在创建保存并重算任务..." ||
+                forwardStartDom["#resim-hint"].className !== "hint-box status-warn" ||
+                forwardStartDom["#resim-log"].visible !== true ||
+                forwardStartDom["#resim-log"].text !== "") {
+              throw new Error(`forward start DOM updates wrong: ${JSON.stringify(forwardStartDom)}`);
+            }
             const forwardError = results.forwardSimulationErrorState(new Error("接口超时"));
             if (!forwardError.hint.visible || forwardError.hint.className !== "hint-box status-fail" ||
                 forwardError.hint.text !== "模拟失败：接口超时" || forwardError.log.visible) {
               throw new Error(`forward error state wrong: ${JSON.stringify(forwardError)}`);
+            }
+            const forwardErrorDom = Object.fromEntries(forwardError.domUpdates.map(update => [update.selector, update]));
+            if (forwardErrorDom["#resim-hint"].visible !== true ||
+                forwardErrorDom["#resim-hint"].text !== "模拟失败：接口超时" ||
+                forwardErrorDom["#resim-hint"].className !== "hint-box status-fail" ||
+                forwardErrorDom["#resim-log"].visible !== false) {
+              throw new Error(`forward error DOM updates wrong: ${JSON.stringify(forwardErrorDom)}`);
             }
             const forwardRequest = results.forwardSimulationRequestContext(
               { run: { path: " C:/runs/A " } },

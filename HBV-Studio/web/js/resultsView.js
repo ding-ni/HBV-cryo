@@ -422,30 +422,42 @@
   }
 
   function forwardSimulationStartState() {
+    const hint = {
+      visible: true,
+      text: "正在创建保存并重算任务...",
+      className: "hint-box status-warn",
+    };
+    const log = {
+      visible: true,
+      text: "",
+    };
     return {
-      hint: {
-        visible: true,
-        text: "正在创建保存并重算任务...",
-        className: "hint-box status-warn",
-      },
-      log: {
-        visible: true,
-        text: "",
-      },
+      hint,
+      log,
+      domUpdates: [
+        { selector: "#resim-hint", visible: hint.visible, text: hint.text, className: hint.className },
+        { selector: "#resim-log", visible: log.visible, text: log.text },
+      ],
     };
   }
 
   function forwardSimulationErrorState(error = {}) {
     const message = error?.message || String(error || "未知错误");
+    const hint = {
+      visible: true,
+      text: `模拟失败：${message}`,
+      className: "hint-box status-fail",
+    };
+    const log = {
+      visible: false,
+    };
     return {
-      hint: {
-        visible: true,
-        text: `模拟失败：${message}`,
-        className: "hint-box status-fail",
-      },
-      log: {
-        visible: false,
-      },
+      hint,
+      log,
+      domUpdates: [
+        { selector: "#resim-hint", visible: hint.visible, text: hint.text, className: hint.className },
+        { selector: "#resim-log", visible: log.visible },
+      ],
     };
   }
 
