@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint || !results?.resultMetricItems) {
+            if (!results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runStepHours) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -95,6 +95,71 @@ class FrontendResultsViewTests(unittest.TestCase):
             const fields = results.renderRunExportFields([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
             if (!fields.includes('data-run-export-field="q&lt;sim&gt;"') || !fields.includes("checked")) {
               throw new Error("export fields should keep keys and checked state");
+            }
+
+            const dailyExport = results.runExportPanelState({
+              run: { path: "C:/runs/daily" },
+              metadata: {
+                time_config: {
+                  time_step_hours: 24,
+                  warmup_start: "2019-10-01",
+                  calib_start: "2020-01-01",
+                  valid_end: "2021-12-31",
+                },
+              },
+              series: { dates: ["2020-01-02", "2021-12-30"] },
+            }, {
+              lastExportPath: "",
+            }, {
+              formatInputTime(value, hourly) {
+                return `${hourly ? "H" : "D"}:${value}`;
+              },
+            });
+            if (dailyExport.stepHours !== 24 || dailyExport.hourly) {
+              throw new Error(`unexpected daily export timescale: ${JSON.stringify(dailyExport)}`);
+            }
+            if (dailyExport.start.type !== "date" || dailyExport.start.step !== "" || dailyExport.start.value !== "D:2019-10-01") {
+              throw new Error(`unexpected daily export start: ${JSON.stringify(dailyExport.start)}`);
+            }
+            if (dailyExport.end.type !== "date" || dailyExport.end.step !== "" || dailyExport.end.value !== "D:2021-12-31") {
+              throw new Error(`unexpected daily export end: ${JSON.stringify(dailyExport.end)}`);
+            }
+            if (dailyExport.exportDisabled || !dailyExport.openDisabled || dailyExport.hintClassName !== "hint-box" || !dailyExport.hintText.includes("日尺度结果")) {
+              throw new Error(`unexpected daily export panel state: ${JSON.stringify(dailyExport)}`);
+            }
+
+            const hourlyExport = results.runExportPanelState({
+              run: { path: "C:/runs/hourly" },
+              metadata: {
+                time_config: {
+                  time_step_hours: 1,
+                  calib_start: "2020-01-01 00:00",
+                },
+              },
+              series: { dates: ["2020-01-01 01:00", "2020-01-03 23:00"] },
+            }, {
+              lastExportPath: "C:/runs/hourly/导出/result.xlsx",
+            }, {
+              formatInputTime(value, hourly) {
+                return `${hourly ? "H" : "D"}:${value}`;
+              },
+            });
+            if (hourlyExport.stepHours !== 1 || !hourlyExport.hourly) {
+              throw new Error(`unexpected hourly export timescale: ${JSON.stringify(hourlyExport)}`);
+            }
+            if (hourlyExport.start.type !== "datetime-local" || hourlyExport.start.step !== "60" || hourlyExport.start.value !== "H:2020-01-01 00:00") {
+              throw new Error(`unexpected hourly export start: ${JSON.stringify(hourlyExport.start)}`);
+            }
+            if (hourlyExport.end.type !== "datetime-local" || hourlyExport.end.step !== "60" || hourlyExport.end.value !== "H:2020-01-03 23:00") {
+              throw new Error(`unexpected hourly export end: ${JSON.stringify(hourlyExport.end)}`);
+            }
+            if (hourlyExport.exportDisabled || hourlyExport.openDisabled || !hourlyExport.hintText.includes("小时结果") || !hourlyExport.hintText.includes("分钟精度")) {
+              throw new Error(`unexpected hourly export panel state: ${JSON.stringify(hourlyExport)}`);
+            }
+
+            const emptyExport = results.runExportPanelState(null);
+            if (!emptyExport.exportDisabled || !emptyExport.openDisabled || emptyExport.start.value !== "" || emptyExport.hintText !== "选择一个结果后，可按时间范围导出 Excel。") {
+              throw new Error(`unexpected empty export panel state: ${JSON.stringify(emptyExport)}`);
             }
 
             const cards = results.renderRunCards([

@@ -205,6 +205,11 @@
     return data?.hydrology_summary || data?.run?.hydrology_summary || metadata?.hydrology_summary || {};
   }
 
+  function runStepHours(data = {}) {
+    const hours = Number(data?.metadata?.time_config?.time_step_hours || data?.run?.time_step_hours || 24);
+    return hours <= 1.5 ? 1 : 24;
+  }
+
   function renderEngineeringCards(cards = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (cards || []).map(card => `
@@ -305,10 +310,7 @@
     const shortPath = helpers.shortPath || (value => String(value || "").replace(/\\/g, "/").split("/").pop() || "—");
     const runMetricsText = helpers.runMetricsText || (() => "");
     const compactTimeText = helpers.compactTimeText || (value => String(value || ""));
-    const currentRunStepHours = helpers.currentRunStepHours || (() => {
-      const hours = Number(meta?.time_config?.time_step_hours || run?.time_step_hours || 24);
-      return hours <= 1.5 ? 1 : 24;
-    });
+    const currentRunStepHours = helpers.currentRunStepHours || runStepHours;
     const editable = isStudioEditableRun(data);
     const manual = Boolean(meta?.manual_result?.enabled);
     const starter = Boolean(meta?.starter_result?.enabled);
@@ -380,6 +382,40 @@
     `).join("");
   }
 
+  function runExportPanelState(data = {}, options = {}, helpers = {}) {
+    const formatInputTime = helpers.formatInputTime || (value => String(value || "").trim());
+    const stepHours = runStepHours(data);
+    const hourly = stepHours <= 1.5;
+    const timeCfg = data?.metadata?.time_config || {};
+    const dates = Array.isArray(data?.series?.dates) ? data.series.dates : [];
+    const startValue = timeCfg.warmup_start || timeCfg.calib_start || dates[0] || "";
+    const endValue = timeCfg.valid_end || dates[dates.length - 1] || "";
+    const hasRunPath = Boolean(data?.run?.path);
+    const hasExportPath = Boolean(options.lastExportPath);
+    return {
+      stepHours,
+      hourly,
+      start: {
+        type: hourly ? "datetime-local" : "date",
+        step: hourly ? "60" : "",
+        value: formatInputTime(startValue, hourly),
+      },
+      end: {
+        type: hourly ? "datetime-local" : "date",
+        step: hourly ? "60" : "",
+        value: formatInputTime(endValue, hourly),
+      },
+      exportDisabled: !hasRunPath,
+      openDisabled: !hasExportPath,
+      hintText: hasRunPath
+        ? hourly
+          ? "当前结果已保存预热至验证全时段。默认已带入全时段，小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
+          : "当前结果已保存预热至验证全时段。默认已带入全时段，日尺度结果会导出到当前结果目录下的“导出”子目录。"
+        : "选择一个结果后，可按时间范围导出 Excel。",
+      hintClassName: "hint-box",
+    };
+  }
+
   window.HBVStudioResultsView = {
     resultMetricItems,
     renderFilterToolbar,
@@ -390,5 +426,7 @@
     renderRunEngineeringSummary,
     renderRunExportFields,
     resultsFilterHint,
+    runExportPanelState,
+    runStepHours,
   };
 })();

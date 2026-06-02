@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint"],
+    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint", "runExportPanelState", "runStepHours"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5015,8 +5015,7 @@ function renderRunExportFields() {
 }
 
 function currentRunStepHours(data = state.currentRun) {
-  const hours = Number(data?.metadata?.time_config?.time_step_hours || data?.run?.time_step_hours || 24);
-  return hours <= 1.5 ? 1 : 24;
+  return window.HBVStudioResultsView.runStepHours(data);
 }
 
 function configureRunExportPanel(data) {
@@ -5026,26 +5025,26 @@ function configureRunExportPanel(data) {
   const hint = $("#run-export-hint");
   const startInput = $("#run-export-start");
   const endInput = $("#run-export-end");
-  const hourly = currentRunStepHours(data) <= 1.5;
-  const startValue = data?.metadata?.time_config?.warmup_start || data?.metadata?.time_config?.calib_start || data?.series?.dates?.[0] || "";
-  const endValue = data?.metadata?.time_config?.valid_end || (data?.series?.dates || []).slice(-1)[0] || "";
+  const panel = window.HBVStudioResultsView.runExportPanelState(data, {
+    lastExportPath: state.lastRunExportPath,
+  }, {
+    formatInputTime: toWizardInputTimeValue,
+  });
   if (startInput) {
-    startInput.type = hourly ? "datetime-local" : "date";
-    startInput.step = hourly ? "60" : "";
-    startInput.value = toWizardInputTimeValue(startValue, hourly);
+    startInput.type = panel.start.type;
+    startInput.step = panel.start.step;
+    startInput.value = panel.start.value;
   }
   if (endInput) {
-    endInput.type = hourly ? "datetime-local" : "date";
-    endInput.step = hourly ? "60" : "";
-    endInput.value = toWizardInputTimeValue(endValue, hourly);
+    endInput.type = panel.end.type;
+    endInput.step = panel.end.step;
+    endInput.value = panel.end.value;
   }
-  if (exportBtn) exportBtn.disabled = !data?.run?.path;
-  if (openBtn) openBtn.disabled = !state.lastRunExportPath;
+  if (exportBtn) exportBtn.disabled = panel.exportDisabled;
+  if (openBtn) openBtn.disabled = panel.openDisabled;
   if (hint) {
-    hint.textContent = hourly
-      ? "当前结果已保存预热至验证全时段。默认已带入全时段，小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
-      : "当前结果已保存预热至验证全时段。默认已带入全时段，日尺度结果会导出到当前结果目录下的“导出”子目录。";
-    hint.className = "hint-box";
+    hint.textContent = panel.hintText;
+    hint.className = panel.hintClassName;
   }
 }
 
