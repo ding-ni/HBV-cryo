@@ -19,7 +19,6 @@ import sys
 import threading
 import time
 import traceback
-import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -204,6 +203,7 @@ from services.tasks import (
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
 from services.workspace_catalog import (
     WorkspaceCatalogContext,
+    build_empty_workspace as build_empty_workspace_config,
     create_workspace_from_import as build_create_workspace_from_import,
     delete_workspace as build_delete_workspace,
     find_template as build_find_template,
@@ -211,6 +211,8 @@ from services.workspace_catalog import (
     list_templates as build_list_templates,
     list_workspaces as build_list_workspaces,
     load_workspace_config as build_load_workspace_config,
+    runtime_root_for_workspace as build_runtime_root_for_workspace,
+    slugify_workspace_name as build_slugify_workspace_name,
     template_files as build_template_files,
 )
 from services.workspace_completeness import (
@@ -2429,23 +2431,11 @@ def workspace_station_geojson(config_path_raw: str) -> dict[str, Any]:
 
 
 def slugify_workspace_name(name: str) -> str:
-    raw = str(name or "").strip()
-    if not raw:
-        return "新工作区"
-    normalized = unicodedata.normalize("NFKC", raw)
-    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
-    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", normalized)
-    safe = re.sub(r"\s+", "_", safe)
-    safe = re.sub(r"_+", "_", safe).strip(" ._")[:48].strip(" ._")
-    if not safe:
-        return f"workspace_{digest}"
-    if re.fullmatch(r"(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])", safe):
-        return f"{safe}_{digest[:4]}"
-    return safe
+    return build_slugify_workspace_name(name)
 
 
 def runtime_root_for_workspace(name: str) -> Path:
-    return PROJECT_RUNTIME_DIR / slugify_workspace_name(name)
+    return build_runtime_root_for_workspace(name, PROJECT_RUNTIME_DIR)
 
 
 def detect_profile_from_payload(data: dict[str, Any]) -> str:
@@ -2796,73 +2786,7 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path) -> dict[
 
 
 def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFILE_DAILY) -> dict[str, Any]:
-    glacier_default = str(BUILTIN_GLACIER_SHP.resolve()) if BUILTIN_GLACIER_SHP.exists() else ""
-    return {
-        "_说明": [
-            "HBV-Studio 生成的工作区配置。",
-            "导入 shp + 观测径流后，系统会自动补齐范围、时间和默认 DEM。",
-        ],
-        "项目对象": OBJECT_FULL_UPSTREAM,
-        "率定模式": profile,
-        "目标函数模式": "auto",
-        "任务时段模式": TIME_BASIS_CONTINUOUS,
-        "运行目录": str(runtime_root_for_workspace(name)),
-        "流域名称": name,
-        "流域编号": slugify_workspace_name(name),
-        "流域边界_shp": "",
-        "DEM_tif": str(BUILTIN_DEM.resolve()),
-        OBSERVED_FLOW_KEY: "",
-        "观测口径模式": "full_year",
-        "事件资料模式": {
-            "启用": False,
-            "事件窗口资料": False,
-            "事件表路径": "",
-            "允许事件间断": True,
-            "初始条件策略": "event_warmup",
-        },
-        "洪水事件率定": {
-            "启用": False,
-            "事件窗口资料": False,
-            "事件表路径": "",
-            "模式": "diagnostic",
-        },
-        "边界条件": {
-            "上游边界入流_csv": "",
-            "时间字段": "date",
-            "流量字段": "inflow_m3s",
-            "缺失填补": "zero",
-        },
-        "气象策略": {
-            "降水方案": "grid_only",
-            "降水来源": "era5",
-            "降水源": "era5",
-            "站点降水_csv": "",
-            "站点信息_csv": "",
-            "原始小时降水目录": "",
-            "自带降水tif目录": "",
-            "温度来源": "era5",
-            "自带温度tif目录": "",
-            "潜在蒸散发来源": "era5_fao56",
-            "自带蒸散发tif目录": "",
-        },
-        "冰川边界_shp": glacier_default,
-        "范围_bbox": {"北": None, "西": None, "南": None, "东": None},
-        "时间": {
-            "开始年份": 2006,
-            "结束年份": 2020,
-            "预热开始": "",
-            "预热结束": "",
-            "率定开始": "",
-            "率定结束": "",
-            "验证开始": "",
-            "验证结束": "",
-        },
-        "时间步长_小时": 24.0 if profile == PROFILE_DAILY else 1.0,
-        "初始状态": dict(profile_runner.DEFAULT_INIT_STATE),
-        "FAO56平均海拔_m": 4500.0,
-        "默认降水源": "era5",
-        "CFMAX分区阈值_m": 5000.0,
-    }
+    return build_empty_workspace_config(name, profile, _workspace_catalog_context())
 
 
 def suggest_time_windows(start_date: pd.Timestamp, end_date: pd.Timestamp, profile: str) -> dict[str, str]:
@@ -2938,11 +2862,13 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
     return WorkspaceCatalogContext(
         template_dir=TEMPLATE_DIR,
         workspace_dir=WORKSPACE_DIR,
+        project_runtime_dir=PROJECT_RUNTIME_DIR,
         default_workspace_path=DEFAULT_WORKSPACE_PATH,
         builtin_glacier_shp=BUILTIN_GLACIER_SHP,
         builtin_dem=BUILTIN_DEM,
         profile_daily=PROFILE_DAILY,
         profile_hourly=PROFILE_HOURLY,
+        time_basis_continuous=TIME_BASIS_CONTINUOUS,
         object_regression=OBJECT_REGRESSION,
         object_interbasin=OBJECT_INTERBASIN,
         object_full_upstream=OBJECT_FULL_UPSTREAM,
@@ -2957,8 +2883,7 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         resolve_profile=resolve_profile,
         normalize_config_before_save=normalize_config_before_save,
         detect_object_type=detect_object_type,
-        slugify_workspace_name=slugify_workspace_name,
-        runtime_root_for_workspace=runtime_root_for_workspace,
+        default_initial_state=profile_runner.DEFAULT_INIT_STATE,
         write_json_file=write_json_file,
         to_display_path=to_display_path,
         workspace_workflow_summary=workspace_workflow_summary,
@@ -2968,7 +2893,6 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         fill_bbox_from_shp=fill_bbox_from_shp,
         suggest_time_windows=suggest_time_windows,
         suggest_cfmax_threshold=suggest_cfmax_threshold,
-        build_empty_workspace=build_empty_workspace,
         stage_vector_shapefile=stage_vector_shapefile,
         stage_observed_runoff_file=stage_observed_runoff_file,
     )

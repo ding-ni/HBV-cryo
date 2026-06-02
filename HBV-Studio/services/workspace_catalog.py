@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import hashlib
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -13,11 +16,13 @@ import pandas as pd
 class WorkspaceCatalogContext:
     template_dir: Path
     workspace_dir: Path
+    project_runtime_dir: Path
     default_workspace_path: Path
     builtin_glacier_shp: Path
     builtin_dem: Path
     profile_daily: str
     profile_hourly: str
+    time_basis_continuous: str
     object_regression: str
     object_interbasin: str
     object_full_upstream: str
@@ -32,8 +37,7 @@ class WorkspaceCatalogContext:
     resolve_profile: Callable[[dict[str, Any], str | None], str]
     normalize_config_before_save: Callable[[dict[str, Any], Path], dict[str, Any]]
     detect_object_type: Callable[[dict[str, Any]], str]
-    slugify_workspace_name: Callable[[str], str]
-    runtime_root_for_workspace: Callable[[str], Path]
+    default_initial_state: dict[str, Any]
     write_json_file: Callable[[Path, Any], None]
     to_display_path: Callable[[Path], str]
     workspace_workflow_summary: Callable[..., dict[str, Any]]
@@ -43,9 +47,101 @@ class WorkspaceCatalogContext:
     fill_bbox_from_shp: Callable[[str], dict[str, float] | None]
     suggest_time_windows: Callable[[pd.Timestamp, pd.Timestamp, str], dict[str, str]]
     suggest_cfmax_threshold: Callable[[str, str], dict[str, Any]]
-    build_empty_workspace: Callable[[str, str], dict[str, Any]]
     stage_vector_shapefile: Callable[..., Path]
     stage_observed_runoff_file: Callable[..., Path]
+
+
+def slugify_workspace_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return "新工作区"
+    normalized = unicodedata.normalize("NFKC", raw)
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", normalized)
+    safe = re.sub(r"\s+", "_", safe)
+    safe = re.sub(r"_+", "_", safe).strip(" ._")[:48].strip(" ._")
+    if not safe:
+        return f"workspace_{digest}"
+    if re.fullmatch(r"(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])", safe):
+        return f"{safe}_{digest[:4]}"
+    return safe
+
+
+def runtime_root_for_workspace(name: str, project_runtime_dir: Path) -> Path:
+    return project_runtime_dir / slugify_workspace_name(name)
+
+
+def build_empty_workspace(name: str = "新流域工作区", profile: str = "", context: WorkspaceCatalogContext | None = None) -> dict[str, Any]:
+    if context is None:
+        raise ValueError("build_empty_workspace requires a WorkspaceCatalogContext.")
+    selected_profile = profile or context.profile_daily
+    glacier_default = str(context.builtin_glacier_shp.resolve()) if context.builtin_glacier_shp.exists() else ""
+    return {
+        "_说明": [
+            "HBV-Studio 生成的工作区配置。",
+            "导入 shp + 观测径流后，系统会自动补齐范围、时间和默认 DEM。",
+        ],
+        "项目对象": context.object_full_upstream,
+        "率定模式": selected_profile,
+        "目标函数模式": "auto",
+        "任务时段模式": context.time_basis_continuous,
+        "运行目录": str(runtime_root_for_workspace(name, context.project_runtime_dir)),
+        "流域名称": name,
+        "流域编号": slugify_workspace_name(name),
+        "流域边界_shp": "",
+        "DEM_tif": str(context.builtin_dem.resolve()),
+        context.observed_flow_key: "",
+        "观测口径模式": "full_year",
+        "事件资料模式": {
+            "启用": False,
+            "事件窗口资料": False,
+            "事件表路径": "",
+            "允许事件间断": True,
+            "初始条件策略": "event_warmup",
+        },
+        "洪水事件率定": {
+            "启用": False,
+            "事件窗口资料": False,
+            "事件表路径": "",
+            "模式": "diagnostic",
+        },
+        "边界条件": {
+            "上游边界入流_csv": "",
+            "时间字段": "date",
+            "流量字段": "inflow_m3s",
+            "缺失填补": "zero",
+        },
+        "气象策略": {
+            "降水方案": "grid_only",
+            "降水来源": "era5",
+            "降水源": "era5",
+            "站点降水_csv": "",
+            "站点信息_csv": "",
+            "原始小时降水目录": "",
+            "自带降水tif目录": "",
+            "温度来源": "era5",
+            "自带温度tif目录": "",
+            "潜在蒸散发来源": "era5_fao56",
+            "自带蒸散发tif目录": "",
+        },
+        "冰川边界_shp": glacier_default,
+        "范围_bbox": {"北": None, "西": None, "南": None, "东": None},
+        "时间": {
+            "开始年份": 2006,
+            "结束年份": 2020,
+            "预热开始": "",
+            "预热结束": "",
+            "率定开始": "",
+            "率定结束": "",
+            "验证开始": "",
+            "验证结束": "",
+        },
+        "时间步长_小时": 24.0 if selected_profile == context.profile_daily else 1.0,
+        "初始状态": dict(context.default_initial_state),
+        "FAO56平均海拔_m": 4500.0,
+        "默认降水源": "era5",
+        "CFMAX分区阈值_m": 5000.0,
+    }
 
 
 def template_files(context: WorkspaceCatalogContext) -> list[Path]:
@@ -120,10 +216,10 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
         config["冰川边界_shp"] = str(context.builtin_glacier_shp.resolve())
     if context.detect_object_type(config) != context.object_regression:
         config["流域名称"] = target_name
-        config["流域编号"] = context.slugify_workspace_name(target_name)
+        config["流域编号"] = slugify_workspace_name(target_name)
     if template_id == "blank-workspace":
-        config["运行目录"] = str(context.runtime_root_for_workspace(target_name))
-    workspace_path = context.workspace_dir / f"{context.slugify_workspace_name(target_name)}.json"
+        config["运行目录"] = str(runtime_root_for_workspace(target_name, context.project_runtime_dir))
+    workspace_path = context.workspace_dir / f"{slugify_workspace_name(target_name)}.json"
     context.write_json_file(workspace_path, context.normalize_config_before_save(config, workspace_path))
     return {
         "workspace_path": str(workspace_path.resolve()),
@@ -211,7 +307,7 @@ def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCata
         except Exception:
             pass
 
-    config = context.build_empty_workspace(workspace_name, profile)
+    config = build_empty_workspace(workspace_name, profile, context)
     config.update(
         {
             "_说明": [
@@ -220,9 +316,9 @@ def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCata
             ],
             "项目对象": object_type,
             "率定模式": profile,
-            "运行目录": str(context.runtime_root_for_workspace(workspace_name)),
+            "运行目录": str(runtime_root_for_workspace(workspace_name, context.project_runtime_dir)),
             "流域名称": workspace_name,
-            "流域编号": context.slugify_workspace_name(workspace_name),
+            "流域编号": slugify_workspace_name(workspace_name),
             "流域边界_shp": str(shp_path),
             context.observed_flow_key: str(obs_path),
             "时间步长_小时": 24.0 if profile == context.profile_daily else 1.0,
@@ -241,7 +337,7 @@ def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCata
     meteo[context.meteo_precip_source_key] = prec_source
     meteo[context.meteo_precip_source_legacy_key] = prec_source
     config[context.meteo_key] = meteo
-    workspace_path = context.workspace_dir / f"{context.slugify_workspace_name(workspace_name)}.json"
+    workspace_path = context.workspace_dir / f"{slugify_workspace_name(workspace_name)}.json"
     config["流域边界_shp"] = str(context.stage_vector_shapefile(config, shp_path, role="basin", config_path=workspace_path))
     if str(config.get("冰川边界_shp", "")).strip():
         config["冰川边界_shp"] = str(
