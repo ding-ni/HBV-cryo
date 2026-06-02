@@ -107,7 +107,7 @@ from services.meteo_import import meteo_import_start_plan as build_meteo_import_
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
-from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
+from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
@@ -142,21 +142,17 @@ from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
-from services.runs import resolve_run_config_objective_mode as build_resolve_run_config_objective_mode
 from services.runs import resolve_run_objective_metadata as build_resolve_run_objective_metadata
 from services.runs import resolve_run_workspace_config as build_resolve_run_workspace_config
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
-from services.runs import rebase_run_data_cache_paths as build_rebase_run_data_cache_paths
 from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
-from services.runs import sync_run_config_boundary_condition as build_sync_run_config_boundary_condition
-from services.runs import sync_run_config_data_sources as build_sync_run_config_data_sources
-from services.runs import sync_run_config_identity_metadata as build_sync_run_config_identity_metadata
+from services.runs import sync_resolved_run_config_metadata as build_sync_resolved_run_config_metadata
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2684,6 +2680,17 @@ def _run_config_identity_context() -> RunConfigIdentityContext:
     return RunConfigIdentityContext(resolve_metadata_object_type=_resolve_metadata_object_type)
 
 
+def _run_config_sync_context() -> RunConfigSyncContext:
+    return RunConfigSyncContext(
+        read_runtime_config=read_runtime_config,
+        resolve_profile=resolve_profile,
+        build_profile_paths=build_profile_paths,
+        data_source_context=_run_config_data_source_context(),
+        identity_context=_run_config_identity_context(),
+        boundary_context=_run_config_boundary_context(),
+    )
+
+
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
@@ -2726,43 +2733,17 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
     cache = sections.cache
     effective_objective_mode = sections.effective_objective_mode
 
-    if resolved_config is not None:
-        try:
-            config = read_runtime_config(resolved_config)
-            profile = resolve_profile(
-                config,
-                str(normalized.get("calibration_profile", normalized.get("rate_mode", ""))).strip().lower() or None,
-            )
-            objective_mode = build_resolve_run_config_objective_mode(normalized, optimization, config, profile)
-            paths = build_profile_paths(config, profile)
-            build_sync_run_config_data_sources(
-                data_sources,
-                config,
-                profile,
-                paths,
-                _run_config_data_source_context(),
-            )
-            resolved_object_type, effective_objective_mode = build_sync_run_config_identity_metadata(
-                normalized,
-                optimization,
-                config,
-                resolved_config,
-                profile=profile,
-                objective_mode=objective_mode,
-                resolved_object_type=resolved_object_type,
-                effective_objective_mode=effective_objective_mode,
-                context=_run_config_identity_context(),
-            )
-
-            build_sync_run_config_boundary_condition(
-                boundary_condition,
-                normalized,
-                config,
-                _run_config_boundary_context(),
-            )
-            build_rebase_run_data_cache_paths(cache, paths, data_sources)
-        except Exception:
-            pass
+    resolved_object_type, effective_objective_mode = build_sync_resolved_run_config_metadata(
+        normalized,
+        data_sources,
+        boundary_condition,
+        optimization,
+        cache,
+        resolved_config,
+        resolved_object_type=resolved_object_type,
+        effective_objective_mode=effective_objective_mode,
+        context=_run_config_sync_context(),
+    )
 
     effective_objective_mode = build_resolve_run_objective_metadata(
         normalized,

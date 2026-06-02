@@ -20,6 +20,7 @@ from services.runs import (  # noqa: E402
     RunConfigBoundaryContext,
     RunConfigDataSourceContext,
     RunConfigIdentityContext,
+    RunConfigSyncContext,
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
     RunMetadataObjectTypeContext,
@@ -85,6 +86,7 @@ from services.runs import (  # noqa: E402
     sync_run_config_identity_metadata,
     sync_run_config_profile_metadata,
     sync_run_data_source_paths,
+    sync_resolved_run_config_metadata,
     sync_source_run_reference,
     workspace_name_for_summary,
 )
@@ -685,6 +687,134 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(metadata["workspace_label"], "\u901a\u5929\u6cb3")
         self.assertEqual(metadata["objective_profile"]["type"], profile_runner.OBJECTIVE_MODE_SINGLE)
         self.assertEqual(optimization["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_SINGLE)
+
+    def test_sync_resolved_run_config_metadata_updates_all_config_backed_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "workspace.json"
+            prec_dir = root / "prec"
+            temp_dir = root / "temp"
+            evap_dir = root / "evap"
+            glacier_melt_dir = root / "glacier_melt"
+            gis_dir = root / "gis"
+            cache_dir = root / "cache"
+            boundary_file = root / "boundary.csv"
+            obs_file = root / "obs.csv"
+            for path in (prec_dir, temp_dir, evap_dir, glacier_melt_dir, gis_dir, cache_dir):
+                path.mkdir()
+            (gis_dir / "glacier_mask.tif").write_text("mask", encoding="utf-8")
+            boundary_file.write_text("date,q\n2026-06-01,1\n", encoding="utf-8")
+            obs_file.write_text("date,q\n2026-06-01,2\n", encoding="utf-8")
+            metadata = {"\u76ee\u6807\u51fd\u6570\u6a21\u5f0f": profile_runner.OBJECTIVE_MODE_SINGLE}
+            data_sources = {"runtime_prec_source": "era5"}
+            boundary_condition = {}
+            optimization = {}
+            cache = {"prec": {"cache_path": "old/prec.nc"}}
+            config = {
+                "\u6d41\u57df\u540d\u79f0": "  \u901a\u5929\u6cb3  ",
+                "observed": str(obs_file),
+                "\u8fb9\u754c\u6761\u4ef6": {"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41_csv": str(boundary_file)},
+            }
+            paths = {
+                "aligned_prec_era5_dir": prec_dir,
+                "aligned_prec_era5_base_dir": root / "prec_base",
+                "aligned_temp_dir": temp_dir,
+                "aligned_evap_dir": evap_dir,
+                "glacier_melt_dir": glacier_melt_dir,
+                "gis_dir": gis_dir,
+                "cache_dir": cache_dir,
+            }
+            context = RunConfigSyncContext(
+                read_runtime_config=lambda path: config,
+                resolve_profile=lambda cfg, hint: hint or profile_runner.PROFILE_DAILY,
+                build_profile_paths=lambda cfg, profile: paths,
+                data_source_context=RunConfigDataSourceContext(
+                    configured_precip_source=lambda cfg: "era5",
+                    resolve_precip_source=lambda cfg, source: str(source),
+                    effective_precip_paths=lambda cfg, profile, **kwargs: (None, prec_dir, None),
+                    resolve_any_path=lambda raw, **kwargs: Path(raw),
+                    first_existing_path=first_existing_path,
+                    resolve_config_related_path=lambda cfg, raw: Path(raw) if raw else None,
+                    observed_flow_key="observed",
+                ),
+                identity_context=RunConfigIdentityContext(
+                    resolve_metadata_object_type=lambda meta, cfg: "interbasin_with_boundary",
+                ),
+                boundary_context=RunConfigBoundaryContext(
+                    resolve_config_related_path=lambda cfg, raw: Path(raw) if raw else None,
+                    resolve_any_path=lambda raw, **kwargs: Path(raw),
+                    first_existing_path=first_existing_path,
+                    boundary_inflow_key="\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41_csv",
+                ),
+            )
+
+            object_type, effective = sync_resolved_run_config_metadata(
+                metadata,
+                data_sources,
+                boundary_condition,
+                optimization,
+                cache,
+                config_path,
+                resolved_object_type="",
+                effective_objective_mode="",
+                context=context,
+            )
+
+            self.assertEqual(object_type, "interbasin_with_boundary")
+            self.assertEqual(effective, profile_runner.OBJECTIVE_MODE_MULTI)
+            self.assertEqual(metadata["workspace_label"], "\u901a\u5929\u6cb3")
+            self.assertEqual(data_sources["prec_dir"], str(prec_dir.resolve(strict=False)))
+            self.assertEqual(data_sources["obs_file"], str(obs_file.resolve(strict=False)))
+            self.assertEqual(boundary_condition["boundary_inflow_file"], str(boundary_file.resolve(strict=False)))
+            self.assertEqual(cache["prec"]["source_dir"], str(prec_dir.resolve(strict=False)))
+            self.assertEqual(cache["prec"]["cache_path"], str((cache_dir / "prec.nc").resolve(strict=False)))
+
+    def test_sync_resolved_run_config_metadata_preserves_state_when_config_sync_fails(self) -> None:
+        metadata = {"workspace_label": "\u65e7\u6d41\u57df"}
+        data_sources = {"prec_dir": "old"}
+        boundary_condition = {"boundary_inflow_file": "old.csv"}
+        optimization = {}
+        cache = {"prec": {"cache_path": "old.nc"}}
+        context = RunConfigSyncContext(
+            read_runtime_config=lambda path: (_ for _ in ()).throw(RuntimeError("bad config")),
+            resolve_profile=lambda cfg, hint: profile_runner.PROFILE_DAILY,
+            build_profile_paths=lambda cfg, profile: {},
+            data_source_context=RunConfigDataSourceContext(
+                configured_precip_source=lambda cfg: "era5",
+                resolve_precip_source=lambda cfg, source: str(source),
+                effective_precip_paths=lambda cfg, profile, **kwargs: (None, None, None),
+                resolve_any_path=lambda raw, **kwargs: Path(raw),
+                first_existing_path=first_existing_path,
+                resolve_config_related_path=lambda cfg, raw: None,
+                observed_flow_key="observed",
+            ),
+            identity_context=RunConfigIdentityContext(resolve_metadata_object_type=lambda meta, cfg: ""),
+            boundary_context=RunConfigBoundaryContext(
+                resolve_config_related_path=lambda cfg, raw: None,
+                resolve_any_path=lambda raw, **kwargs: Path(raw),
+                first_existing_path=first_existing_path,
+                boundary_inflow_key="\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41_csv",
+            ),
+        )
+
+        object_type, effective = sync_resolved_run_config_metadata(
+            metadata,
+            data_sources,
+            boundary_condition,
+            optimization,
+            cache,
+            Path("C:/missing/config.json"),
+            resolved_object_type="full_upstream_basin",
+            effective_objective_mode=profile_runner.OBJECTIVE_MODE_SINGLE,
+            context=context,
+        )
+
+        self.assertEqual(object_type, "full_upstream_basin")
+        self.assertEqual(effective, profile_runner.OBJECTIVE_MODE_SINGLE)
+        self.assertEqual(metadata, {"workspace_label": "\u65e7\u6d41\u57df"})
+        self.assertEqual(data_sources, {"prec_dir": "old"})
+        self.assertEqual(boundary_condition, {"boundary_inflow_file": "old.csv"})
+        self.assertEqual(cache, {"prec": {"cache_path": "old.nc"}})
 
     def test_effective_objective_mode_helpers_normalize_and_apply_to_metadata(self) -> None:
         metadata = {

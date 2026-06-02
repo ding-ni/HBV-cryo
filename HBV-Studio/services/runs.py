@@ -120,6 +120,16 @@ class RunConfigIdentityContext:
 
 
 @dataclass(frozen=True)
+class RunConfigSyncContext:
+    read_runtime_config: Callable[[Path], dict[str, Any]]
+    resolve_profile: Callable[[dict[str, Any], Any], str]
+    build_profile_paths: Callable[[dict[str, Any], str], dict[str, Any]]
+    data_source_context: RunConfigDataSourceContext
+    identity_context: RunConfigIdentityContext
+    boundary_context: RunConfigBoundaryContext
+
+
+@dataclass(frozen=True)
 class RunMetadataSections:
     data_sources: dict[str, Any]
     boundary_condition: dict[str, Any]
@@ -1245,6 +1255,58 @@ def rebase_run_data_cache_paths(cache: dict[str, Any], paths: dict[str, Any], da
         if cache_name:
             current["cache_path"] = str((cache_dir / cache_name).resolve(strict=False))
         cache[key] = current
+
+
+def sync_resolved_run_config_metadata(
+    metadata: dict[str, Any],
+    data_sources: dict[str, Any],
+    boundary_condition: dict[str, Any],
+    optimization: dict[str, Any],
+    cache: dict[str, Any],
+    resolved_config: Path | None,
+    *,
+    resolved_object_type: str,
+    effective_objective_mode: str,
+    context: RunConfigSyncContext,
+) -> tuple[str, str]:
+    if resolved_config is None:
+        return resolved_object_type, effective_objective_mode
+    object_type = resolved_object_type
+    objective_mode_effective = effective_objective_mode
+    try:
+        config = context.read_runtime_config(resolved_config)
+        profile_hint = str(metadata.get("calibration_profile", metadata.get("rate_mode", ""))).strip().lower() or None
+        profile = context.resolve_profile(config, profile_hint)
+        objective_mode = resolve_run_config_objective_mode(metadata, optimization, config, profile)
+        paths = context.build_profile_paths(config, profile)
+        sync_run_config_data_sources(
+            data_sources,
+            config,
+            profile,
+            paths,
+            context.data_source_context,
+        )
+        object_type, objective_mode_effective = sync_run_config_identity_metadata(
+            metadata,
+            optimization,
+            config,
+            resolved_config,
+            profile=profile,
+            objective_mode=objective_mode,
+            resolved_object_type=object_type,
+            effective_objective_mode=objective_mode_effective,
+            context=context.identity_context,
+        )
+        sync_run_config_boundary_condition(
+            boundary_condition,
+            metadata,
+            config,
+            context.boundary_context,
+        )
+        rebase_run_data_cache_paths(cache, paths, data_sources)
+    except Exception:
+        pass
+    return object_type, objective_mode_effective
 
 
 def workspace_name_for_summary(
