@@ -2355,14 +2355,6 @@ function renderFloodEventChart(meta = {}, plotCfg = {}) {
   }
 }
 
-function forecastArchiveManifest(archive = {}) {
-  return window.HBVStudioForecastView.forecastArchiveManifest(archive);
-}
-
-function forecastArchiveVariables(archive = {}) {
-  return window.HBVStudioForecastView.forecastArchiveVariables(archive);
-}
-
 function forecastArchiveVariableItems(archive = {}) {
   return window.HBVStudioForecastView.forecastArchiveVariableItems(archive, { timeRangeText, shortPath });
 }
