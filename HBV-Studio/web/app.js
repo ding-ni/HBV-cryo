@@ -166,6 +166,7 @@ const frontendModuleContracts = [
       "forecastResultLoadStartState",
       "forecastResultLoadSuccessState",
       "forecastResultPanelState",
+      "forecastResultSelectionState",
       "forecastRestartPreflight",
       "forecastRestartPayload",
       "forecastResultRuns",
@@ -6808,10 +6809,8 @@ function bindEvents() {
     if (run?.path) openLocalPath(run.path, "源结果目录").catch(err => showToast(err.message, true));
   });
   $("#forecast-result-run")?.addEventListener("change", () => {
-    state.forecastResultRunPath = $("#forecast-result-run")?.value || "";
-    state.forecastResultData = null;
-    state.forecastResultLoadingPath = "";
-    state.lastForecastExportPath = "";
+    const selectionState = window.HBVStudioForecastView.forecastResultSelectionState($("#forecast-result-run")?.value || "");
+    Object.assign(state, selectionState.statePatch);
     renderForecastResultPanel();
   });
   $("#forecast-open-result")?.addEventListener("click", () => {

@@ -215,6 +215,17 @@
     };
   }
 
+  function forecastResultSelectionState(path = "") {
+    return {
+      statePatch: {
+        forecastResultRunPath: String(path || "").trim(),
+        forecastResultData: null,
+        forecastResultLoadingPath: "",
+        lastForecastExportPath: "",
+      },
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1105,6 +1116,7 @@
     forecastResultLoadStartState,
     forecastResultLoadSuccessState,
     forecastResultPanelState,
+    forecastResultSelectionState,
     forecastRestartPreflight,
     forecastRestartPayload,
     forecastResultRuns,

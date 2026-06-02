@@ -149,6 +149,7 @@ class FrontendForecastViewTests(unittest.TestCase):
               "forecastResultLoadStartState",
               "forecastResultLoadSuccessState",
               "forecastResultPanelState",
+              "forecastResultSelectionState",
               "renderForecastResultOptions",
             ]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
@@ -251,6 +252,22 @@ class FrontendForecastViewTests(unittest.TestCase):
                 loadError.statePatch.forecastResultLoadingPath !== "" ||
                 loadError.buttonRun !== null) {
               throw new Error(`load error state wrong: ${JSON.stringify(loadError)}`);
+            }
+
+            const selectionState = view.forecastResultSelectionState(" C:/runs/forecast-mid ");
+            if (selectionState.statePatch.forecastResultRunPath !== "C:/runs/forecast-mid" ||
+                selectionState.statePatch.forecastResultData !== null ||
+                selectionState.statePatch.forecastResultLoadingPath !== "" ||
+                selectionState.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`selection state wrong: ${JSON.stringify(selectionState)}`);
+            }
+
+            const emptySelectionState = view.forecastResultSelectionState(null);
+            if (emptySelectionState.statePatch.forecastResultRunPath !== "" ||
+                emptySelectionState.statePatch.forecastResultData !== null ||
+                emptySelectionState.statePatch.forecastResultLoadingPath !== "" ||
+                emptySelectionState.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`empty selection state wrong: ${JSON.stringify(emptySelectionState)}`);
             }
 
             const rendered = view.renderForecastResultOptions([
