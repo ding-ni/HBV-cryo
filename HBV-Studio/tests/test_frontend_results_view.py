@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationStartState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -353,6 +353,67 @@ class FrontendResultsViewTests(unittest.TestCase):
             );
             if (transientForwardRequest.payload.save_run !== false) {
               throw new Error(`forward request should support transient simulation: ${JSON.stringify(transientForwardRequest)}`);
+            }
+            const runningForwardUi = results.forwardSimulationTaskUiState(
+              {
+                status: "running",
+                created_at: 100,
+                output: Array.from({ length: 45 }, (_, i) => `line-${i + 1}`),
+                ui_progress: { stage: "写出重算结果" },
+              },
+              { nowSeconds: 165 },
+              { formatDurationSeconds(value) { return `${value}s`; } },
+            );
+            if (!runningForwardUi.shouldRender || !runningForwardUi.button.disabled ||
+                !runningForwardUi.hint.update || runningForwardUi.hint.className !== "hint-box status-warn" ||
+                runningForwardUi.hint.text !== "写出重算结果 · 已耗时 65s" ||
+                !runningForwardUi.log.visible || runningForwardUi.log.lines.length !== 40 ||
+                runningForwardUi.log.lines[0] !== "line-6" || runningForwardUi.log.lines[39] !== "line-45") {
+              throw new Error(`running forward UI state wrong: ${JSON.stringify(runningForwardUi)}`);
+            }
+            const runningFallbackUi = results.forwardSimulationTaskUiState({ status: "running", output: [] }, { nowSeconds: 165 });
+            if (!runningFallbackUi.hint.text.includes("正在保存并重算当前结果") || runningFallbackUi.hint.text.includes("已耗时") || runningFallbackUi.log.visible) {
+              throw new Error(`running fallback forward UI state wrong: ${JSON.stringify(runningFallbackUi)}`);
+            }
+            const savedForwardUi = results.forwardSimulationTaskUiState(
+              {
+                status: "completed",
+                output: ["done"],
+                result: { run_path: "C:/runs/new", metrics: { nse_cal: 0.81234, nse_val: 0.70123 } },
+              },
+              {},
+              { formatNumber(value, digits) { return Number(value).toFixed(digits); } },
+            );
+            if (savedForwardUi.button.disabled || !savedForwardUi.hint.update ||
+                savedForwardUi.hint.className !== "hint-box status-ok" ||
+                savedForwardUi.hint.text !== "保存完成：已生成新结果，率定纳什效率系数=0.8123，验证纳什效率系数=0.7012" ||
+                !savedForwardUi.log.visible || savedForwardUi.log.lines[0] !== "done") {
+              throw new Error(`saved forward UI state wrong: ${JSON.stringify(savedForwardUi)}`);
+            }
+            const transientForwardUi = results.forwardSimulationTaskUiState(
+              { status: "completed", result: { metrics: { nse_cal: 0.81234, nse_val: 0.70123 } } },
+              {},
+              { formatNumber(value, digits) { return Number(value).toFixed(digits); } },
+            );
+            if (transientForwardUi.hint.text !== "模拟完成：率定纳什效率系数=0.8123，验证纳什效率系数=0.7012") {
+              throw new Error(`transient forward UI state wrong: ${JSON.stringify(transientForwardUi)}`);
+            }
+            const failedForwardUi = results.forwardSimulationTaskUiState({ status: "failed", output: ["first", "last"] });
+            if (failedForwardUi.button.disabled || failedForwardUi.hint.className !== "hint-box status-fail" ||
+                failedForwardUi.hint.text !== "last") {
+              throw new Error(`failed forward UI state wrong: ${JSON.stringify(failedForwardUi)}`);
+            }
+            const failedFallbackForwardUi = results.forwardSimulationTaskUiState({ status: "failed", output: [] });
+            if (failedFallbackForwardUi.hint.text !== "保存并重算失败。") {
+              throw new Error(`failed fallback forward UI state wrong: ${JSON.stringify(failedFallbackForwardUi)}`);
+            }
+            const unknownForwardUi = results.forwardSimulationTaskUiState({ status: "queued", output: [] });
+            if (!unknownForwardUi.shouldRender || unknownForwardUi.button.disabled || unknownForwardUi.hint.update || unknownForwardUi.log.visible) {
+              throw new Error(`unknown forward UI state wrong: ${JSON.stringify(unknownForwardUi)}`);
+            }
+            const missingForwardUi = results.forwardSimulationTaskUiState(null);
+            if (missingForwardUi.shouldRender || missingForwardUi.hint.update || missingForwardUi.log.visible) {
+              throw new Error(`missing forward UI state wrong: ${JSON.stringify(missingForwardUi)}`);
             }
             const emptyPresetLoad = results.runManualPresetLoadStartState(" ", "C:/ws/A", helpers);
             if (emptyPresetLoad.path !== "" || emptyPresetLoad.shouldRequest || !emptyPresetLoad.shouldRender ||

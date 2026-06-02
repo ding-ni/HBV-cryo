@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationStartState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -3695,31 +3695,19 @@ function updateForwardSimUi(task) {
   const logBox = $("#resim-log");
   const btn = $("#btn-resimulate");
   if (!hint || !logBox || !btn || !task) return;
-  const logs = task.output || [];
-  const elapsed = task.created_at ? Math.max(0, Math.round(Date.now() / 1000 - Number(task.created_at))) : null;
-  logBox.style.display = logs.length ? "" : "none";
-  setLogBoxContent(logBox, logs.slice(-40), "results:resim-log");
-  if (task.status === "running") {
-    const stage = task.ui_progress?.stage || "正在保存并重算当前结果";
-    hint.style.display = "";
-    hint.textContent = `${stage}${elapsed !== null ? ` · 已耗时 ${formatDurationSeconds(elapsed)}` : ""}`;
-    hint.className = "hint-box status-warn";
-    btn.disabled = true;
-    return;
-  }
-  btn.disabled = false;
-  if (task.status === "completed" && task.result) {
-    const m = task.result.metrics || {};
-    hint.style.display = "";
-    hint.textContent = task.result.run_path
-      ? `保存完成：已生成新结果，率定纳什效率系数=${formatNumber(m.nse_cal, 4)}，验证纳什效率系数=${formatNumber(m.nse_val, 4)}`
-      : `模拟完成：率定纳什效率系数=${formatNumber(m.nse_cal, 4)}，验证纳什效率系数=${formatNumber(m.nse_val, 4)}`;
-    hint.className = "hint-box status-ok";
-  } else if (task.status === "failed") {
-    const lastLine = logs.length ? logs[logs.length - 1] : "保存并重算失败。";
-    hint.style.display = "";
-    hint.textContent = lastLine;
-    hint.className = "hint-box status-fail";
+  const uiState = window.HBVStudioResultsView.forwardSimulationTaskUiState(
+    task,
+    { nowSeconds: Date.now() / 1000 },
+    { formatDurationSeconds, formatNumber },
+  );
+  if (!uiState.shouldRender) return;
+  logBox.style.display = uiState.log.visible ? "" : "none";
+  setLogBoxContent(logBox, uiState.log.lines, "results:resim-log");
+  btn.disabled = uiState.button.disabled;
+  if (uiState.hint.update) {
+    hint.style.display = uiState.hint.visible ? "" : "none";
+    hint.textContent = uiState.hint.text;
+    hint.className = uiState.hint.className;
   }
 }
 

@@ -360,6 +360,73 @@
     };
   }
 
+  function forwardSimulationTaskUiState(task = null, options = {}, helpers = {}) {
+    const formatDurationSeconds = helpers.formatDurationSeconds || (value => `${Math.max(0, Math.round(Number(value) || 0))}s`);
+    const formatNumber = helpers.formatNumber || ((value, digits = 4) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(digits) : "—";
+    });
+    if (!task) {
+      return {
+        shouldRender: false,
+        log: { visible: false, lines: [] },
+        button: { disabled: false },
+        hint: { update: false, visible: false, text: "", className: "" },
+      };
+    }
+    const logs = Array.isArray(task.output) ? task.output : [];
+    const createdAt = Number(task.created_at);
+    const nowSeconds = Number.isFinite(Number(options.nowSeconds)) ? Number(options.nowSeconds) : Date.now() / 1000;
+    const elapsed = Number.isFinite(createdAt) && createdAt > 0
+      ? Math.max(0, Math.round(nowSeconds - createdAt))
+      : null;
+    const base = {
+      shouldRender: true,
+      log: { visible: logs.length > 0, lines: logs.slice(-40) },
+      button: { disabled: false },
+      hint: { update: false, visible: false, text: "", className: "" },
+    };
+    if (task.status === "running") {
+      const stage = task.ui_progress?.stage || "正在保存并重算当前结果";
+      return {
+        ...base,
+        button: { disabled: true },
+        hint: {
+          update: true,
+          visible: true,
+          text: `${stage}${elapsed !== null ? ` · 已耗时 ${formatDurationSeconds(elapsed)}` : ""}`,
+          className: "hint-box status-warn",
+        },
+      };
+    }
+    if (task.status === "completed" && task.result) {
+      const m = task.result.metrics || {};
+      return {
+        ...base,
+        hint: {
+          update: true,
+          visible: true,
+          text: task.result.run_path
+            ? `保存完成：已生成新结果，率定纳什效率系数=${formatNumber(m.nse_cal, 4)}，验证纳什效率系数=${formatNumber(m.nse_val, 4)}`
+            : `模拟完成：率定纳什效率系数=${formatNumber(m.nse_cal, 4)}，验证纳什效率系数=${formatNumber(m.nse_val, 4)}`,
+          className: "hint-box status-ok",
+        },
+      };
+    }
+    if (task.status === "failed") {
+      return {
+        ...base,
+        hint: {
+          update: true,
+          visible: true,
+          text: logs.length ? logs[logs.length - 1] : "保存并重算失败。",
+          className: "hint-box status-fail",
+        },
+      };
+    }
+    return base;
+  }
+
   function runManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
     const samePath = helpers.samePath || defaultSamePath;
     const targetPath = String(path || "").trim();
@@ -971,6 +1038,7 @@
     forwardSimulationPreflight,
     forwardSimulationRequestContext,
     forwardSimulationStartState,
+    forwardSimulationTaskUiState,
     latestEditableRunPath,
     manualStarterControlState,
     resultMetricItems,
