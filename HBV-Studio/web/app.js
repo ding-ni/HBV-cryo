@@ -144,6 +144,8 @@ const frontendModuleContracts = [
       "shouldClearManualPresetComparison",
       "manualPresetControlState",
       "manualPresetSavePreflight",
+      "manualPresetLoadPreflight",
+      "manualPresetDeletePreflight",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
       "manualPresetAppliedParams",
@@ -4784,40 +4786,41 @@ async function saveCurrentManualPreset() {
 
 async function loadSelectedManualPreset() {
   const preset = selectedManualPreset();
-  if (!preset) {
-    showToast("请先选择一个参数集。", true);
+  const preflight = window.HBVStudioParameterLibrary.manualPresetLoadPreflight(preset);
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
-  $("#manual-preset-name").value = preset.name || "";
-  applyManualPresetToCurrentRun(preset);
+  $("#manual-preset-name").value = preflight.presetName;
+  applyManualPresetToCurrentRun(preflight.preset);
   renderManualPresetDiff();
-  showToast(`已载入参数集：${preset.name}${preset.params_adjusted ? "（已按约束自动修正）" : ""}`);
+  showToast(`已载入参数集：${preflight.presetName}${preflight.preset.params_adjusted ? "（已按约束自动修正）" : ""}`);
 }
 
 async function deleteSelectedManualPreset() {
   const preset = selectedManualPreset();
   const configPath = getRunManualPresetConfigPath();
-  if (!preset || !configPath) {
-    showToast("请先选择一个参数集。", true);
+  const preflight = window.HBVStudioParameterLibrary.manualPresetDeletePreflight(configPath, preset);
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
-  if (!window.confirm(`确定删除参数集“${preset.name}”吗？`)) return;
-  await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(configPath, preset));
-  const deletedPresetId = String(preset.id || preset.parameter_set_id || "").trim();
-  await loadRunManualPresets(configPath, { silent: true });
-  if (samePath(configPath, getTaskManualPresetConfigPath())) {
-    await loadTaskManualPresets(configPath, {
+  if (!window.confirm(`确定删除参数集“${preflight.presetName}”吗？`)) return;
+  await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(preflight.configPath, preflight.preset));
+  await loadRunManualPresets(preflight.configPath, { silent: true });
+  if (samePath(preflight.configPath, getTaskManualPresetConfigPath())) {
+    await loadTaskManualPresets(preflight.configPath, {
       silent: true,
       calibrationProfile: state.currentWorkspace?.率定模式 || state._runData?.metadata?.calibration_profile || "daily",
     });
   }
-  if (deletedPresetId && deletedPresetId === String(state.comparePresetId || "").trim()) {
+  if (preflight.presetId && preflight.presetId === String(state.comparePresetId || "").trim()) {
     clearManualPresetComparison({ silent: true });
   }
   if ($("#manual-preset-name")) $("#manual-preset-name").value = "";
   refreshCalibrationControls();
   renderManualPresetDiff();
-  showToast(`已删除参数集：${preset.name}`);
+  showToast(`已删除参数集：${preflight.presetName}`);
 }
 
 function renderRunList() {

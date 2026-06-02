@@ -232,8 +232,8 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (library.findPresetById(presets, "missing") !== null) {
               throw new Error("missing preset should return null");
             }
-            if (typeof library.manualPresetSavePreflight !== "function") {
-              throw new Error("manualPresetSavePreflight was not exported");
+            for (const name of ["manualPresetSavePreflight", "manualPresetLoadPreflight", "manualPresetDeletePreflight"]) {
+              if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
 
             const unsupportedSave = library.manualPresetSavePreflight({
@@ -276,6 +276,33 @@ class FrontendParameterLibraryTests(unittest.TestCase):
                 readySave.configPath !== "C:/workspaces/A/workspace.json" ||
                 readySave.name !== "Trial set") {
               throw new Error(`ready save preflight wrong: ${JSON.stringify(readySave)}`);
+            }
+            const missingLoad = library.manualPresetLoadPreflight(null);
+            if (missingLoad.ok || missingLoad.reason !== "missing-preset" || !missingLoad.message.includes("参数集") ||
+                missingLoad.preset !== null || missingLoad.presetName !== "") {
+              throw new Error(`missing load preflight wrong: ${JSON.stringify(missingLoad)}`);
+            }
+            const readyLoad = library.manualPresetLoadPreflight({ id: "p1", name: " Trial A ", params_adjusted: true });
+            if (!readyLoad.ok || readyLoad.reason || readyLoad.message || readyLoad.preset.id !== "p1" || readyLoad.presetName !== "Trial A") {
+              throw new Error(`ready load preflight wrong: ${JSON.stringify(readyLoad)}`);
+            }
+            const unnamedLoad = library.manualPresetLoadPreflight({ id: "p2", name: " " });
+            if (!unnamedLoad.ok || unnamedLoad.presetName !== "参数集") {
+              throw new Error(`unnamed load should use fallback name: ${JSON.stringify(unnamedLoad)}`);
+            }
+            const missingDeletePreset = library.manualPresetDeletePreflight("C:/workspaces/A/workspace.json", null);
+            if (missingDeletePreset.ok || missingDeletePreset.reason !== "missing-preset" || !missingDeletePreset.message.includes("参数集")) {
+              throw new Error(`missing delete preset preflight wrong: ${JSON.stringify(missingDeletePreset)}`);
+            }
+            const missingDeleteConfig = library.manualPresetDeletePreflight(" ", presets[0]);
+            if (missingDeleteConfig.ok || missingDeleteConfig.reason !== "missing-config" ||
+                missingDeleteConfig.configPath !== "" || missingDeleteConfig.presetId !== "") {
+              throw new Error(`missing delete config preflight wrong: ${JSON.stringify(missingDeleteConfig)}`);
+            }
+            const readyDelete = library.manualPresetDeletePreflight(" C:/workspaces/A/workspace.json ", presets[1]);
+            if (!readyDelete.ok || readyDelete.configPath !== "C:/workspaces/A/workspace.json" ||
+                readyDelete.presetId !== "global-1" || readyDelete.presetName !== "Global" || readyDelete.preset !== presets[1]) {
+              throw new Error(`ready delete preflight wrong: ${JSON.stringify(readyDelete)}`);
             }
 
             const savePayload = library.manualPresetSavePayload({

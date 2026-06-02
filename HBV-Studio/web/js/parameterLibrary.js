@@ -270,6 +270,49 @@
     };
   }
 
+  function manualPresetLoadPreflight(preset = null) {
+    if (!preset) {
+      return {
+        ok: false,
+        reason: "missing-preset",
+        message: "请先选择一个参数集。",
+        preset: null,
+        presetName: "",
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+      preset,
+      presetName: String(preset?.name || "参数集").trim() || "参数集",
+    };
+  }
+
+  function manualPresetDeletePreflight(configPath = "", preset = null) {
+    const path = String(configPath || "").trim();
+    if (!preset || !path) {
+      return {
+        ok: false,
+        reason: !preset ? "missing-preset" : "missing-config",
+        message: "请先选择一个参数集。",
+        configPath: path,
+        preset: preset || null,
+        presetId: "",
+        presetName: "",
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+      configPath: path,
+      preset,
+      presetId: String(preset?.id || preset?.parameter_set_id || "").trim(),
+      presetName: String(preset?.name || "参数集").trim() || "参数集",
+    };
+  }
+
   function manualPresetSavePayload(options = {}) {
     const runData = options.runData || {};
     const metadata = runData.metadata || {};
@@ -658,6 +701,8 @@
     shouldClearManualPresetComparison,
     manualPresetControlState,
     manualPresetSavePreflight,
+    manualPresetLoadPreflight,
+    manualPresetDeletePreflight,
     manualPresetSavePayload,
     manualPresetDeletePayload,
     manualPresetAppliedParams,
