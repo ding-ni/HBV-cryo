@@ -153,6 +153,7 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastCandidateRuns",
+      "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
       "forecastResultRuns",
@@ -5561,16 +5562,13 @@ function renderForecastSourceSummary() {
 }
 
 function forecastInputPayload(run = selectedForecastRun()) {
-  return {
-    source_run: run?.path || "",
-    config_path: run?.workspace_config || state.wizardWorkspacePath || "",
-    forecast_start: $("#forecast-start")?.value.trim() || "",
-    forecast_end: $("#forecast-end")?.value.trim() || "",
-    forecast_prec_dir: $("#forecast-prec-dir")?.value.trim() || "",
-    forecast_temp_dir: $("#forecast-temp-dir")?.value.trim() || "",
-    forecast_evap_dir: $("#forecast-evap-dir")?.value.trim() || "",
-    time_step_hours: run?.time_step_hours || run?.time_config?.time_step_hours || 24,
-  };
+  return window.HBVStudioForecastView.forecastInputPayload(run, {
+    forecast_start: $("#forecast-start")?.value,
+    forecast_end: $("#forecast-end")?.value,
+    forecast_prec_dir: $("#forecast-prec-dir")?.value,
+    forecast_temp_dir: $("#forecast-temp-dir")?.value,
+    forecast_evap_dir: $("#forecast-evap-dir")?.value,
+  }, { fallbackConfigPath: state.wizardWorkspacePath });
 }
 
 function renderForecastInputSummary(check = null, stateLabel = "") {

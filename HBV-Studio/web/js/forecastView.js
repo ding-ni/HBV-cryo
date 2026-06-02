@@ -122,6 +122,20 @@
     return items[0] || null;
   }
 
+  function forecastInputPayload(run = {}, fields = {}, options = {}) {
+    const text = value => String(value || "").trim();
+    return {
+      source_run: text(run?.path),
+      config_path: text(run?.workspace_config || options.fallbackConfigPath || ""),
+      forecast_start: text(fields.forecast_start),
+      forecast_end: text(fields.forecast_end),
+      forecast_prec_dir: text(fields.forecast_prec_dir),
+      forecast_temp_dir: text(fields.forecast_temp_dir),
+      forecast_evap_dir: text(fields.forecast_evap_dir),
+      time_step_hours: forecastStepHours(run),
+    };
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -829,6 +843,7 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastCandidateRuns,
+    forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
     forecastResultRuns,

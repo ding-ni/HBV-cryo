@@ -168,6 +168,67 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_input_payload_normalizes_form_fields(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastInputPayload !== "function") {
+              throw new Error("missing forecast input payload export");
+            }
+
+            const payload = view.forecastInputPayload({
+              path: " C:/runs/source ",
+              workspace_config: " C:/workspaces/source.json ",
+              time_config: { time_step_hours: 1 },
+            }, {
+              forecast_start: " 2026-02-01T00:00 ",
+              forecast_end: " 2026-02-02T00:00 ",
+              forecast_prec_dir: " C:/meteo/prec ",
+              forecast_temp_dir: " C:/meteo/temp ",
+              forecast_evap_dir: " C:/meteo/evap ",
+            }, { fallbackConfigPath: "C:/workspaces/fallback.json" });
+
+            const expected = {
+              source_run: "C:/runs/source",
+              config_path: "C:/workspaces/source.json",
+              forecast_start: "2026-02-01T00:00",
+              forecast_end: "2026-02-02T00:00",
+              forecast_prec_dir: "C:/meteo/prec",
+              forecast_temp_dir: "C:/meteo/temp",
+              forecast_evap_dir: "C:/meteo/evap",
+              time_step_hours: 1,
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (payload[key] !== value) throw new Error(`${key} mismatch: ${payload[key]} !== ${value}`);
+            }
+
+            const fallback = view.forecastInputPayload({
+              path: "C:/runs/no-workspace",
+            }, {}, { fallbackConfigPath: " C:/workspaces/fallback.json " });
+            if (fallback.config_path !== "C:/workspaces/fallback.json") throw new Error(`fallback config wrong: ${fallback.config_path}`);
+            if (fallback.time_step_hours !== 24) throw new Error(`default step hours wrong: ${fallback.time_step_hours}`);
+            if (fallback.forecast_prec_dir !== "" || fallback.forecast_temp_dir !== "" || fallback.forecast_evap_dir !== "") {
+              throw new Error("missing directory fields should normalize to empty strings");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""
