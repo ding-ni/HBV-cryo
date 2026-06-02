@@ -53,6 +53,20 @@ from services.boundary import BoundaryPreviewContext, boundary_preview as build_
 from services.calibration import CalibrationStartContext
 from services.calibration import calibration_start_plan as build_calibration_start_plan
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
+from services.event_config import (
+    EVENT_INITIAL_STATE_POLICY_ALIASES,
+    EVENT_INITIAL_STATE_POLICY_SUMMARIES,
+    EVENT_PURPOSE_ALIASES,
+    TIME_BASIS_CONTINUOUS,
+    TIME_BASIS_EVENT_WINDOWS,
+    TIME_BASIS_FORECAST_WINDOW,
+    TIME_BASIS_LABELS,
+    event_initial_state_policy_summary as build_event_initial_state_policy_summary,
+    flood_event_raw_config as build_flood_event_raw_config,
+    normalize_event_initial_state_policy as build_normalize_event_initial_state_policy,
+    task_time_basis as build_task_time_basis,
+    truthy_config as build_truthy_config,
+)
 from services.filesystem import (
     FilesystemContext,
     FilesystemPathContext,
@@ -320,87 +334,6 @@ DEFAULT_MANUAL_START_VECTOR = [
     0.05, 0.05, 3.5, 5.5, 0.25, 0.05,
     0.005, 30.0, 1.8, 2.0, 1.2, 0.05,
 ]
-TIME_BASIS_CONTINUOUS = "continuous"
-TIME_BASIS_EVENT_WINDOWS = "event_windows"
-TIME_BASIS_FORECAST_WINDOW = "forecast_window"
-TIME_BASIS_LABELS = {
-    TIME_BASIS_CONTINUOUS: "连续时段",
-    TIME_BASIS_EVENT_WINDOWS: "洪水事件窗口",
-    TIME_BASIS_FORECAST_WINDOW: "预报窗口",
-}
-EVENT_PURPOSE_ALIASES = {
-    "calibration": "calibration",
-    "calib": "calibration",
-    "train": "calibration",
-    "training": "calibration",
-    "率定": "calibration",
-    "训练": "calibration",
-    "validation": "validation",
-    "valid": "validation",
-    "val": "validation",
-    "verify": "validation",
-    "验证": "validation",
-    "diagnostic": "diagnostic",
-    "diag": "diagnostic",
-    "诊断": "diagnostic",
-    "复核": "diagnostic",
-}
-EVENT_INITIAL_STATE_POLICY_ALIASES = {
-    "event_warmup": "event_warmup",
-    "event-preheat": "event_warmup",
-    "event_preheat": "event_warmup",
-    "independent_warmup": "event_warmup",
-    "warmup_each_event": "event_warmup",
-    "warmup": "event_warmup",
-    "事件预热": "event_warmup",
-    "逐场预热": "event_warmup",
-    "fixed_initial": "fixed_initial",
-    "fixed": "fixed_initial",
-    "default_initial": "fixed_initial",
-    "constant": "fixed_initial",
-    "固定初值": "fixed_initial",
-    "固定初始状态": "fixed_initial",
-    "默认初值": "fixed_initial",
-    "source_state": "source_state",
-    "restart_state": "source_state",
-    "snapshot": "source_state",
-    "hot_start": "source_state",
-    "来源状态": "source_state",
-    "状态快照": "source_state",
-    "起报状态": "source_state",
-    "continuous_state": "continuous_state",
-    "continuous": "continuous_state",
-    "carryover": "continuous_state",
-    "carry_over": "continuous_state",
-    "连续状态": "continuous_state",
-    "事件间连续": "continuous_state",
-}
-EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
-    "event_warmup": {
-        "label": "事件预热",
-        "state_continuity_between_events": False,
-        "note": "每场洪水独立确定初始状态，事件之间不传递状态。",
-        "warning": "",
-    },
-    "fixed_initial": {
-        "label": "固定初值",
-        "state_continuity_between_events": False,
-        "note": "每场事件使用默认或指定初始状态，事件之间不传递状态。",
-        "warning": "固定初值对前期含水量、积雪和汇流记忆的不确定性较高，宜仅用于资料极短的次洪复核。",
-    },
-    "source_state": {
-        "label": "来源状态",
-        "state_continuity_between_events": False,
-        "note": "每场洪水使用外部连续模拟状态作为初值。",
-        "warning": "",
-    },
-    "continuous_state": {
-        "label": "连续状态",
-        "state_continuity_between_events": True,
-        "note": "事件间按连续过程传递状态，要求事件之间强迫资料连续。",
-        "warning": "连续状态策略不适合事件之间存在资料缺口的事件窗口集合。",
-    },
-}
 def default_run_export_fields(metadata: dict[str, Any] | None) -> list[str]:
     return build_default_run_export_fields(metadata)
 
@@ -1154,16 +1087,7 @@ def time_sequence_messages(time_values: dict[str, pd.Timestamp], step_hours: flo
 
 
 def _truthy_config(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    raw = str(value).strip().lower()
-    if raw in {"1", "true", "yes", "y", "on", "启用", "是"}:
-        return True
-    if raw in {"0", "false", "no", "n", "off", "禁用", "否"}:
-        return False
-    return default
+    return build_truthy_config(value, default)
 
 
 def _read_csv_flexible(path: Path) -> pd.DataFrame:
@@ -1198,43 +1122,15 @@ def _read_event_table_file(path: Path) -> list[dict[str, Any]]:
 
 
 def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
-    raw = config.get("洪水事件率定", {})
-    if isinstance(raw, list):
-        return {"启用": bool(raw), "事件表": raw}
-    if isinstance(raw, dict):
-        cfg = dict(raw)
-    else:
-        cfg = {}
-    event_mode = config.get("事件资料模式", {})
-    if isinstance(event_mode, dict):
-        for key, value in event_mode.items():
-            cfg.setdefault(key, value)
-    for key in ("事件表", "events"):
-        if key in config and key not in cfg:
-            cfg[key] = config.get(key)
-    return cfg
+    return build_flood_event_raw_config(config)
 
 
 def normalize_event_initial_state_policy(value: Any) -> str:
-    raw = str(value or "event_warmup").strip()
-    if not raw:
-        return "event_warmup"
-    key = raw.lower()
-    return EVENT_INITIAL_STATE_POLICY_ALIASES.get(key, EVENT_INITIAL_STATE_POLICY_ALIASES.get(raw, key))
+    return build_normalize_event_initial_state_policy(value)
 
 
 def event_initial_state_policy_summary(value: Any) -> dict[str, Any]:
-    policy = normalize_event_initial_state_policy(value)
-    summary = dict(EVENT_INITIAL_STATE_POLICY_SUMMARIES.get(policy, {}))
-    if not summary:
-        summary = {
-            "label": str(value or policy or "未记录"),
-            "state_continuity_between_events": False,
-            "note": "按配置的事件初始条件策略处理。",
-            "warning": "",
-        }
-    summary["policy"] = policy
-    return summary
+    return build_event_initial_state_policy_summary(value)
 
 
 def _event_field(event: dict[str, Any], *names: str) -> Any:
@@ -1265,36 +1161,7 @@ def _event_date_range(start: pd.Timestamp, end: pd.Timestamp, step_hours: float)
 
 
 def task_time_basis(config: dict[str, Any], *, context: str = "calibration") -> str:
-    if context == "forecast":
-        return TIME_BASIS_FORECAST_WINDOW
-    raw = str(
-        config.get("任务时段模式")
-        or config.get("time_basis")
-        or config.get("资料时段模式")
-        or ""
-    ).strip().lower()
-    if raw in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
-        return TIME_BASIS_EVENT_WINDOWS
-    if raw in {"forecast", "forecast_window", "预报", "预报窗口"}:
-        return TIME_BASIS_FORECAST_WINDOW
-    event_cfg = _flood_event_raw_config(config)
-    event_mode = config.get("事件资料模式", {})
-    event_enabled = _truthy_config(event_cfg.get("启用", event_cfg.get("enabled")), default=False)
-    event_data_enabled = _truthy_config(
-        event_cfg.get("事件窗口资料", event_cfg.get("event_windows_enabled")),
-        default=False,
-    )
-    if isinstance(event_mode, dict):
-        event_data_enabled = _truthy_config(
-            event_mode.get("启用", event_mode.get("enabled")),
-            default=event_data_enabled,
-        )
-    has_events = bool(event_cfg.get("事件表") or event_cfg.get("events") or event_cfg.get("事件表路径") or event_cfg.get("events_file"))
-    if event_enabled and (event_data_enabled or raw in {"event_segments", "事件资料模式"}):
-        return TIME_BASIS_EVENT_WINDOWS
-    if raw in {"continuous", "full", "连续", "连续时段", ""}:
-        return TIME_BASIS_CONTINUOUS
-    return TIME_BASIS_EVENT_WINDOWS if event_data_enabled and has_events else TIME_BASIS_CONTINUOUS
+    return build_task_time_basis(config, context=context)
 
 
 def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None = None) -> dict[str, Any]:
