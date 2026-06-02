@@ -143,6 +143,7 @@ const frontendModuleContracts = [
       "manualChangeSummary",
       "renderParamSliders",
       "manualContextWarning",
+      "taskPresetContext",
       "taskContextWarnings",
       "renderTaskContextHint",
       "forecastParameterContext",
@@ -1448,22 +1449,16 @@ function selectedTaskManualPreset() {
 
 function currentTaskPresetContext() {
   const profile = normalizeCalibrationProfile(state.currentWorkspace?.率定模式, "daily");
-  const meteo = state.currentWorkspace?.气象策略 || {};
-  const timeStepHours = Number(state.currentWorkspace?.时间步长_小时 || (profile === "hourly" ? 1 : 24));
-  const precipitationMode = getSelectedRadio("wz-precip-mode")
-    || meteo.降水方案
-    || meteo.precipitation_mode
-    || "grid_only";
-  return {
+  return window.HBVStudioParameterLibrary.taskPresetContext({
+    workspace: state.currentWorkspace,
     profile,
-    time_step_hours: Number.isFinite(timeStepHours) ? timeStepHours : (profile === "hourly" ? 1 : 24),
-    objective_mode: $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY,
-    prec_source: getTaskRuntimePrecipSource(),
-    glacier_mode: $("#task-glacier-mode")?.value || "inline",
-    param_bounds_profile: profile === "daily" ? ($("#task-param-bounds-profile")?.value || "qtp_alpine_default") : "hourly_step",
-    precipitation_mode: precipitationMode,
-    task_time_basis: $("#wz-time-basis")?.value || state.currentWorkspace?.任务时段模式 || state.currentWorkspace?.time_basis || "continuous",
-  };
+    objectiveMode: $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY,
+    precSource: getTaskRuntimePrecipSource(),
+    glacierMode: $("#task-glacier-mode")?.value || "inline",
+    paramBoundsProfile: $("#task-param-bounds-profile")?.value || "qtp_alpine_default",
+    precipitationMode: getSelectedRadio("wz-precip-mode"),
+    taskTimeBasis: $("#wz-time-basis")?.value,
+  });
 }
 
 function taskPresetContextWarnings(preset, current = currentTaskPresetContext()) {

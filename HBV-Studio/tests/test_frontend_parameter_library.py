@@ -307,6 +307,90 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_task_preset_context_merges_workspace_and_form_values(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            if (typeof library.taskPresetContext !== "function") {
+              throw new Error("taskPresetContext was not exported");
+            }
+
+            const daily = library.taskPresetContext({
+              workspace: {
+                率定模式: "daily",
+                时间步长_小时: 24,
+                任务时段模式: "event_windows",
+                气象策略: {
+                  降水方案: "grid_plus_station_bias",
+                },
+              },
+              profile: "daily",
+              objectiveMode: "daily_unified_professional_v1",
+              precSource: "era5",
+              glacierMode: "inline",
+              paramBoundsProfile: "qtp_alpine_default",
+            });
+            if (daily.profile !== "daily" || daily.time_step_hours !== 24) {
+              throw new Error(`daily profile or step mismatch: ${JSON.stringify(daily)}`);
+            }
+            if (daily.precipitation_mode !== "grid_plus_station_bias") {
+              throw new Error(`daily precipitation mode should come from workspace: ${JSON.stringify(daily)}`);
+            }
+            if (daily.task_time_basis !== "event_windows") {
+              throw new Error(`daily time basis should come from workspace: ${JSON.stringify(daily)}`);
+            }
+            if (daily.param_bounds_profile !== "qtp_alpine_default") {
+              throw new Error(`daily bounds profile mismatch: ${JSON.stringify(daily)}`);
+            }
+
+            const hourly = library.taskPresetContext({
+              workspace: {
+                率定模式: "daily",
+                time_step_hours: "bad",
+                time_basis: "continuous",
+                气象策略: {
+                  precipitation_mode: "thiessen_station_only",
+                },
+              },
+              profile: "hourly",
+              objectiveMode: "flood_event",
+              precSource: "custom_tif",
+              glacierMode: "off",
+              paramBoundsProfile: "should_be_ignored",
+              precipitationMode: "grid_only",
+              taskTimeBasis: "forecast_window",
+            });
+            if (hourly.profile !== "hourly" || hourly.time_step_hours !== 1) {
+              throw new Error(`hourly profile or default step mismatch: ${JSON.stringify(hourly)}`);
+            }
+            if (hourly.param_bounds_profile !== "hourly_step") {
+              throw new Error(`hourly bounds profile should be forced: ${JSON.stringify(hourly)}`);
+            }
+            if (hourly.precipitation_mode !== "grid_only" || hourly.task_time_basis !== "forecast_window") {
+              throw new Error(`explicit form values should win: ${JSON.stringify(hourly)}`);
+            }
+            if (hourly.objective_mode !== "flood_event" || hourly.prec_source !== "custom_tif" || hourly.glacier_mode !== "off") {
+              throw new Error(`task context core fields mismatch: ${JSON.stringify(hourly)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_manual_group_helpers_and_param_slider_rendering(self) -> None:
         script = textwrap.dedent(
             r"""

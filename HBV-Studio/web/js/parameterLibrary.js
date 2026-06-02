@@ -354,6 +354,33 @@
     return warnings;
   }
 
+  function taskPresetContext(options = {}) {
+    const workspace = options.workspace || {};
+    const profile = String(options.profile || workspace.率定模式 || "daily").trim() || "daily";
+    const meteo = workspace.气象策略 || {};
+    const defaultStep = normalizeKey(profile) === "hourly" ? 1 : 24;
+    const timeStepHours = Number(workspace.时间步长_小时 || workspace.time_step_hours || defaultStep);
+    const precipitationMode = options.precipitationMode
+      || meteo.降水方案
+      || meteo.precipitation_mode
+      || "grid_only";
+    return {
+      profile,
+      time_step_hours: Number.isFinite(timeStepHours) ? timeStepHours : defaultStep,
+      objective_mode: options.objectiveMode || options.defaultObjectiveMode || "",
+      prec_source: options.precSource || "",
+      glacier_mode: options.glacierMode || "inline",
+      param_bounds_profile: normalizeKey(profile) === "daily"
+        ? (options.paramBoundsProfile || "qtp_alpine_default")
+        : "hourly_step",
+      precipitation_mode: precipitationMode,
+      task_time_basis: options.taskTimeBasis
+        || workspace.任务时段模式
+        || workspace.time_basis
+        || "continuous",
+    };
+  }
+
   function renderTaskContextHint(host, preset, current = {}, helpers = {}) {
     if (!host) return;
     if (!preset) {
@@ -457,6 +484,7 @@
     manualChangeSummary,
     renderParamSliders,
     manualContextWarning,
+    taskPresetContext,
     taskContextWarnings,
     renderTaskContextHint,
     forecastParameterContext,
