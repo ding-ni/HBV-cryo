@@ -132,9 +132,16 @@
   function forecastSourceButtonState(run = null, helpers = {}) {
     const isReady = helpers.forecastRunReady || forecastRunReady;
     const hasRun = Boolean(run?.path);
-    return {
+    const state = {
       openSourceDisabled: !hasRun,
       startDisabled: !hasRun || !isReady(run),
+    };
+    return {
+      ...state,
+      domUpdates: [
+        { selector: "#forecast-open-source", disabled: state.openSourceDisabled },
+        { selector: "#forecast-start-button", disabled: state.startDisabled },
+      ],
     };
   }
 

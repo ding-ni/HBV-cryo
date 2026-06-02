@@ -5134,13 +5134,10 @@ function renderForecastSourceOptions() {
 
 function renderForecastSourceSummary() {
   const host = $("#forecast-source-summary");
-  const openBtn = $("#forecast-open-source");
-  const startBtn = $("#forecast-start-button");
   if (!host) return;
   const run = selectedForecastRun();
   const buttons = window.HBVStudioForecastView.forecastSourceButtonState(run, { forecastRunReady });
-  if (openBtn) openBtn.disabled = buttons.openSourceDisabled;
-  if (startBtn) startBtn.disabled = buttons.startDisabled;
+  applyDomUpdates(buttons.domUpdates);
   const rendered = window.HBVStudioForecastView.renderForecastSourceSummary(run, {
     escapeHtml,
     forecastArchiveDetailText,

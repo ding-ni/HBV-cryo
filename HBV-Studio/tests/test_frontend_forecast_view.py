@@ -156,13 +156,28 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (!emptyButtons.openSourceDisabled || !emptyButtons.startDisabled) {
               throw new Error(`empty source buttons wrong: ${JSON.stringify(emptyButtons)}`);
             }
+            const emptyButtonDom = Object.fromEntries(emptyButtons.domUpdates.map(update => [update.selector, update]));
+            if (emptyButtonDom["#forecast-open-source"].disabled !== true ||
+                emptyButtonDom["#forecast-start-button"].disabled !== true) {
+              throw new Error(`empty source button DOM updates wrong: ${JSON.stringify(emptyButtonDom)}`);
+            }
             const readyButtons = view.forecastSourceButtonState(runs[1]);
             if (readyButtons.openSourceDisabled || readyButtons.startDisabled) {
               throw new Error(`ready source buttons wrong: ${JSON.stringify(readyButtons)}`);
             }
+            const readyButtonDom = Object.fromEntries(readyButtons.domUpdates.map(update => [update.selector, update]));
+            if (readyButtonDom["#forecast-open-source"].disabled !== false ||
+                readyButtonDom["#forecast-start-button"].disabled !== false) {
+              throw new Error(`ready source button DOM updates wrong: ${JSON.stringify(readyButtonDom)}`);
+            }
             const blockedButtons = view.forecastSourceButtonState(runs[3]);
             if (blockedButtons.openSourceDisabled || !blockedButtons.startDisabled) {
               throw new Error(`blocked source buttons wrong: ${JSON.stringify(blockedButtons)}`);
+            }
+            const blockedButtonDom = Object.fromEntries(blockedButtons.domUpdates.map(update => [update.selector, update]));
+            if (blockedButtonDom["#forecast-open-source"].disabled !== false ||
+                blockedButtonDom["#forecast-start-button"].disabled !== true) {
+              throw new Error(`blocked source button DOM updates wrong: ${JSON.stringify(blockedButtonDom)}`);
             }
             const preferred = view.pickForecastSourceRun(candidates, "c:/RUNS/manual", { samePath });
             if (preferred?.id !== "manual-ready") throw new Error(`preferred source mismatch: ${preferred?.id}`);
