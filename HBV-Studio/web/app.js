@@ -162,6 +162,7 @@ const frontendModuleContracts = [
       "forecastResultButtonState",
       "forecastResultDetailState",
       "forecastResultExportPayload",
+      "forecastResultExportState",
       "forecastResultExportSuccess",
       "forecastResultLoadErrorState",
       "forecastResultLoadStartState",
@@ -5780,11 +5781,12 @@ async function exportForecastResultExcel() {
     return;
   }
   const payload = await apiPost("/api/run/export-excel", exportPayload);
-  state.lastForecastExportPath = payload.data?.path || "";
+  const exportState = window.HBVStudioForecastView.forecastResultExportState(payload.data || {});
+  Object.assign(state, exportState.statePatch);
   setForecastResultButtons(run || data?.run);
   const exportSuccess = window.HBVStudioForecastView.forecastResultExportSuccess(
     payload.data || {},
-    state.lastForecastExportPath,
+    exportState.exportPath,
     { shortPath },
   );
   const hint = $("#forecast-result-hint");

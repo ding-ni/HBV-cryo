@@ -738,6 +738,20 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (typeof view?.forecastResultExportSuccess !== "function") {
               throw new Error("missing forecast result export success helper");
             }
+            if (typeof view?.forecastResultExportState !== "function") {
+              throw new Error("missing forecast result export state helper");
+            }
+
+            const exportState = view.forecastResultExportState({ path: "C:/exports/forecast.xlsx" });
+            if (exportState.exportPath !== "C:/exports/forecast.xlsx" ||
+                exportState.statePatch.lastForecastExportPath !== "C:/exports/forecast.xlsx") {
+              throw new Error(`export state wrong: ${JSON.stringify(exportState)}`);
+            }
+
+            const emptyExportState = view.forecastResultExportState({});
+            if (emptyExportState.exportPath !== "" || emptyExportState.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`empty export state wrong: ${JSON.stringify(emptyExportState)}`);
+            }
 
             const explicit = view.forecastResultExportSuccess({
               row_count: 12,

@@ -392,6 +392,16 @@
     };
   }
 
+  function forecastResultExportState(responseData = {}) {
+    const exportPath = String(responseData?.path || "");
+    return {
+      exportPath,
+      statePatch: {
+        lastForecastExportPath: exportPath,
+      },
+    };
+  }
+
   function forecastResultButtonState(run = null, lastExportPath = "") {
     const hasRun = Boolean(run?.path);
     const hasExportPath = Boolean(lastExportPath);
@@ -1147,6 +1157,7 @@
     forecastResultButtonState,
     forecastResultDetailState,
     forecastResultExportPayload,
+    forecastResultExportState,
     forecastResultExportSuccess,
     forecastResultLoadErrorState,
     forecastResultLoadStartState,
