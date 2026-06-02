@@ -108,7 +108,7 @@ from services.meteo_import import meteo_import_worker_run as build_meteo_import_
 from services.meteo_status import cdsapi_status as build_cdsapi_status
 from services.observed import ObservedInfoContext, observed_info as build_observed_info
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
-from services.runs import RunMetadataObjectTypeContext
+from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
 from services.runs import RunReplayConfigContext, RunSourceReferenceContext, RunSummaryContext, RunWorkspaceNameContext
 from services.runs import apply_run_replay_config_overrides as build_apply_run_replay_config_overrides
 from services.runs import build_calibration_task_result as build_run_calibration_task_result
@@ -117,7 +117,6 @@ from services.runs import delete_run as build_delete_run
 from services.runs import discover_run_entries as build_discover_run_entries
 from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
-from services.runs import finalize_run_metadata_normalization as build_finalize_run_metadata_normalization
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
@@ -131,18 +130,17 @@ from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import metadata_boundary_enabled as build_metadata_boundary_enabled
 from services.runs import normalize_result_title as build_normalize_result_title
 from services.runs import normalize_metadata_object_type as build_normalize_metadata_object_type
+from services.runs import normalize_run_metadata_payload as build_normalize_run_metadata_payload
 from services.runs import normalized_method_label as build_normalized_method_label
 from services.runs import normalized_selected_result_label as build_normalized_selected_result_label
 from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
 from services.runs import optimization_stage_payload as build_optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
-from services.runs import prepare_run_metadata_sections as build_prepare_run_metadata_sections
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
 from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
-from services.runs import resolve_run_workspace_config as build_resolve_run_workspace_config
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
@@ -151,7 +149,6 @@ from services.runs import run_parameter_context as build_run_parameter_context
 from services.runs import default_run_export_fields as build_default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
-from services.runs import sync_resolved_run_config_metadata as build_sync_resolved_run_config_metadata
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
 from services.runs import run_time_label as build_run_time_label
 from services.runs import run_update_timestamps as build_run_update_timestamps
@@ -2690,6 +2687,15 @@ def _run_config_sync_context() -> RunConfigSyncContext:
     )
 
 
+def _run_metadata_normalization_context() -> RunMetadataNormalizationContext:
+    return RunMetadataNormalizationContext(
+        metadata_compatibility_context=_run_metadata_compatibility_context(),
+        resolve_metadata_object_type=_resolve_metadata_object_type,
+        config_sync_context=_run_config_sync_context(),
+        resolve_source_run_reference=_resolve_source_run_reference,
+    )
+
+
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
 
@@ -2715,41 +2721,11 @@ def _normalized_method_label(optimization: dict[str, Any]) -> str:
 
 
 def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = None) -> tuple[dict[str, Any], Path | None]:
-    normalized = copy.deepcopy(metadata or {})
-    resolved_config = build_resolve_run_workspace_config(
-        normalized,
+    return build_normalize_run_metadata_payload(
+        metadata,
         run_path=run_path,
-        context=_run_metadata_compatibility_context(),
+        context=_run_metadata_normalization_context(),
     )
-    resolved_object_type = _resolve_metadata_object_type(normalized)
-
-    sections = build_prepare_run_metadata_sections(normalized)
-    data_sources = sections.data_sources
-    boundary_condition = sections.boundary_condition
-    optimization = sections.optimization
-    cache = sections.cache
-    effective_objective_mode = sections.effective_objective_mode
-
-    resolved_object_type, effective_objective_mode = build_sync_resolved_run_config_metadata(
-        normalized,
-        data_sources,
-        boundary_condition,
-        optimization,
-        cache,
-        resolved_config,
-        resolved_object_type=resolved_object_type,
-        effective_objective_mode=effective_objective_mode,
-        context=_run_config_sync_context(),
-    )
-
-    build_finalize_run_metadata_normalization(
-        normalized,
-        sections,
-        resolved_object_type=resolved_object_type,
-        effective_objective_mode=effective_objective_mode,
-        resolve_source_run_reference=_resolve_source_run_reference,
-    )
-    return normalized, resolved_config
 
 
 PATH_FIELDS = ("运行目录", "流域边界_shp", "DEM_tif", OBSERVED_FLOW_KEY, "冰川边界_shp")

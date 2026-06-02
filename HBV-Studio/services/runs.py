@@ -130,6 +130,14 @@ class RunConfigSyncContext:
 
 
 @dataclass(frozen=True)
+class RunMetadataNormalizationContext:
+    metadata_compatibility_context: RunMetadataCompatibilityContext
+    resolve_metadata_object_type: Callable[[dict[str, Any], dict[str, Any] | None], str]
+    config_sync_context: RunConfigSyncContext
+    resolve_source_run_reference: Callable[[Any, Any], str]
+
+
+@dataclass(frozen=True)
 class RunMetadataSections:
     data_sources: dict[str, Any]
     boundary_condition: dict[str, Any]
@@ -1116,6 +1124,41 @@ def finalize_run_metadata_normalization(
         resolve_source_run_reference=resolve_source_run_reference,
     )
     return effective_mode
+
+
+def normalize_run_metadata_payload(
+    metadata: dict[str, Any],
+    *,
+    run_path: Path | None = None,
+    context: RunMetadataNormalizationContext,
+) -> tuple[dict[str, Any], Path | None]:
+    normalized = copy.deepcopy(metadata or {})
+    resolved_config = resolve_run_workspace_config(
+        normalized,
+        run_path=run_path,
+        context=context.metadata_compatibility_context,
+    )
+    resolved_object_type = context.resolve_metadata_object_type(normalized, None)
+    sections = prepare_run_metadata_sections(normalized)
+    resolved_object_type, effective_objective_mode = sync_resolved_run_config_metadata(
+        normalized,
+        sections.data_sources,
+        sections.boundary_condition,
+        sections.optimization,
+        sections.cache,
+        resolved_config,
+        resolved_object_type=resolved_object_type,
+        effective_objective_mode=sections.effective_objective_mode,
+        context=context.config_sync_context,
+    )
+    finalize_run_metadata_normalization(
+        normalized,
+        sections,
+        resolved_object_type=resolved_object_type,
+        effective_objective_mode=effective_objective_mode,
+        resolve_source_run_reference=context.resolve_source_run_reference,
+    )
+    return normalized, resolved_config
 
 
 def run_precip_dir_candidates(
