@@ -61,6 +61,31 @@
     return { visible: true, diffs, preview };
   }
 
+  function manualPresetDiffView(preset, baseline = {}, options = {}, helpers = {}) {
+    const summary = manualPresetDiffSummary(preset, baseline, helpers);
+    if (!summary.visible) {
+      return { visible: false, className: "", text: "", diffCount: 0 };
+    }
+    const name = preset?.name || "未命名参数集";
+    const contextWarning = String(options.contextWarning || "").trim();
+    const className = `hint-box ${contextWarning ? "status-warn" : ""}`.trim();
+    if (!summary.diffs.length) {
+      return {
+        visible: true,
+        className,
+        text: `参数集“${name}”与当前率定参数一致。${contextWarning ? ` ${contextWarning}` : ""}`,
+        diffCount: 0,
+      };
+    }
+    const preview = summary.preview.split(" -> ").join(" → ").split("; ").join("；");
+    return {
+      visible: true,
+      className,
+      text: `参数集“${name}”与当前率定值相比有 ${summary.diffs.length} 个参数不同。${preview}${contextWarning ? ` ${contextWarning}` : ""}`,
+      diffCount: summary.diffs.length,
+    };
+  }
+
   function manualPresetCompareSummary(options = {}, helpers = {}) {
     const label = String(options.label || "").trim();
     const compareMetrics = options.compareMetrics || null;
@@ -496,6 +521,7 @@
     scopeLabel,
     renderPresetOptions,
     manualPresetDiffSummary,
+    manualPresetDiffView,
     manualPresetCompareSummary,
     findPresetById,
     manualPresetListPath,

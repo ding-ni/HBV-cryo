@@ -25,6 +25,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetDiffSummary !== "function") {
               throw new Error("manualPresetDiffSummary was not exported");
             }
+            if (typeof library.manualPresetDiffView !== "function") {
+              throw new Error("manualPresetDiffView was not exported");
+            }
 
             const summary = library.manualPresetDiffSummary(
               { params: { TT: 0.5, FC: 130, K0: 0.11, unchanged: 7 } },
@@ -43,6 +46,38 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const empty = library.manualPresetDiffSummary(null, { TT: 0.1 });
             if (empty.visible || empty.diffs.length || empty.preview) {
               throw new Error("missing preset should produce a hidden empty summary");
+            }
+
+            const hiddenView = library.manualPresetDiffView(null, { TT: 0.1 });
+            if (hiddenView.visible || hiddenView.text || hiddenView.className || hiddenView.diffCount !== 0) {
+              throw new Error(`unexpected hidden view: ${JSON.stringify(hiddenView)}`);
+            }
+            const sameView = library.manualPresetDiffView(
+              { name: "Base", params: { TT: 0.1 } },
+              { TT: 0.1 },
+              { contextWarning: "注意：降水驱动不同。" },
+              { formatNumber: (value, digits) => Number(value).toFixed(digits) },
+            );
+            if (!sameView.visible || sameView.diffCount !== 0 || sameView.className !== "hint-box status-warn") {
+              throw new Error(`unexpected same view state: ${JSON.stringify(sameView)}`);
+            }
+            if (sameView.text !== "参数集“Base”与当前率定参数一致。 注意：降水驱动不同。") {
+              throw new Error(`unexpected same view text: ${sameView.text}`);
+            }
+            const changedView = library.manualPresetDiffView(
+              { name: "Trial", params: { TT: 0.5, FC: 130 } },
+              { TT: 0.1, FC: 120 },
+              {},
+              { formatNumber: (value, digits) => Number(value).toFixed(digits) },
+            );
+            if (!changedView.visible || changedView.diffCount !== 2 || changedView.className !== "hint-box") {
+              throw new Error(`unexpected changed view state: ${JSON.stringify(changedView)}`);
+            }
+            if (!changedView.text.includes("参数集“Trial”与当前率定值相比有 2 个参数不同。")) {
+              throw new Error(`changed view intro missing: ${changedView.text}`);
+            }
+            if (!changedView.text.includes("FC: 120.0000 → 130.0000 (+10.0000)")) {
+              throw new Error(`changed view should format arrows and separators: ${changedView.text}`);
             }
             """
         )

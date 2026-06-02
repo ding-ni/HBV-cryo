@@ -130,6 +130,7 @@ const frontendModuleContracts = [
       "scopeLabel",
       "renderPresetOptions",
       "manualPresetDiffSummary",
+      "manualPresetDiffView",
       "manualPresetCompareSummary",
       "findPresetById",
       "manualPresetListPath",
@@ -1398,23 +1399,19 @@ function renderManualPresetDiff() {
   if (!host) return;
   const preset = selectedManualPreset();
   const baseline = state._runOrigParams || {};
-  if (!preset || !Object.keys(baseline).length) {
+  const view = window.HBVStudioParameterLibrary.manualPresetDiffView(
+    preset,
+    baseline,
+    { contextWarning: manualPresetContextWarning(preset) },
+    { formatNumber },
+  );
+  if (!view.visible) {
     host.style.display = "none";
     return;
   }
-  const summary = window.HBVStudioParameterLibrary.manualPresetDiffSummary(preset, baseline, { formatNumber });
-  if (!summary.diffs.length) {
-    host.style.display = "";
-    const mismatchText = manualPresetContextWarning(preset);
-    host.className = `hint-box ${mismatchText ? "status-warn" : ""}`.trim();
-    host.textContent = `参数集“${preset.name}”与当前率定参数一致。${mismatchText ? ` ${mismatchText}` : ""}`;
-    return;
-  }
-  const preview = summary.preview.split(" -> ").join(" → ").split("; ").join("；");
   host.style.display = "";
-  const mismatchText = manualPresetContextWarning(preset);
-  host.className = `hint-box ${mismatchText ? "status-warn" : ""}`.trim();
-  host.textContent = `参数集“${preset.name}”与当前率定值相比有 ${summary.diffs.length} 个参数不同。${preview}${mismatchText ? ` ${mismatchText}` : ""}`;
+  host.className = view.className;
+  host.textContent = view.text;
 }
 
 function manualPresetContextWarning(preset, data = state._runData) {
