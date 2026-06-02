@@ -2,9 +2,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+
+_PATH_ENTRY_COUNT_CACHE_LOCK = threading.Lock()
+_PATH_ENTRY_COUNT_CACHE: dict[str, dict[str, Any]] = {}
 
 
 @dataclass(frozen=True)
@@ -18,6 +23,60 @@ class WorkspaceLayoutContext:
     to_display_path: Callable[[Path], str]
     detect_object_type: Callable[[dict[str, Any]], str]
     profile_labels: dict[str, str]
+
+
+def _path_entry_count_signature(path: Path) -> tuple[Any, ...] | None:
+    try:
+        root_stat = path.stat()
+    except Exception:
+        return None
+    return (int(getattr(root_stat, "st_mtime_ns", int(root_stat.st_mtime * 1e9))),)
+
+
+def count_path_entries(
+    path: Path,
+    *,
+    pattern: str = "*",
+    recursive: bool = False,
+    only_dirs: bool = False,
+    limit: int | None = None,
+) -> tuple[int, bool]:
+    if not path.exists() or not path.is_dir():
+        return 0, False
+    cache_key = ""
+    signature = None
+    if recursive:
+        signature = _path_entry_count_signature(path)
+        if signature is not None:
+            cache_key = f"{path.resolve(strict=False)}|{pattern}|{int(recursive)}|{int(only_dirs)}|{limit or 0}"
+            with _PATH_ENTRY_COUNT_CACHE_LOCK:
+                cached = _PATH_ENTRY_COUNT_CACHE.get(cache_key)
+                if cached and cached.get("signature") == signature:
+                    return int(cached.get("count", 0)), bool(cached.get("truncated", False))
+    try:
+        iterator = path.rglob(pattern) if recursive else (path.iterdir() if pattern == "*" else path.glob(pattern))
+        total = 0
+        truncated = False
+        for item in iterator:
+            if only_dirs:
+                if item.is_dir():
+                    total += 1
+            else:
+                if item.is_file():
+                    total += 1
+            if limit is not None and total >= limit:
+                truncated = True
+                break
+        if cache_key and signature is not None:
+            with _PATH_ENTRY_COUNT_CACHE_LOCK:
+                _PATH_ENTRY_COUNT_CACHE[cache_key] = {
+                    "signature": signature,
+                    "count": int(total),
+                    "truncated": bool(truncated),
+                }
+        return total, truncated
+    except Exception:
+        return 0, False
 
 
 def _workspace_relative_path(root: Path, path: Path, context: WorkspaceLayoutContext) -> str:

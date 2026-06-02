@@ -340,7 +340,11 @@ from services.workspace_detailed_check import (
     build_reasonableness_checks as build_workspace_reasonableness_checks,
     workspace_detailed_check as build_workspace_detailed_check,
 )
-from services.workspace_layout import WorkspaceLayoutContext, workspace_layout_summary as build_workspace_layout_summary
+from services.workspace_layout import (
+    WorkspaceLayoutContext,
+    count_path_entries as build_workspace_layout_count_path_entries,
+    workspace_layout_summary as build_workspace_layout_summary,
+)
 from services.workspace_validation import WorkspaceValidationContext
 from services.workspace_validation import build_engineering_focus_checks as build_workspace_engineering_focus_checks
 from services.workspace_validation import validate_workspace_fields as build_validate_workspace_fields
@@ -594,8 +598,6 @@ def monitor_server_lifecycle(server: ThreadingHTTPServer) -> None:
 
 TASKS: dict[str, TaskRecord] = {}
 TASK_LOCK = threading.Lock()
-PATH_ENTRY_COUNT_CACHE_LOCK = threading.Lock()
-PATH_ENTRY_COUNT_CACHE: dict[str, dict[str, Any]] = {}
 MAX_BROWSER_FILE_ITEMS = 300
 
 
@@ -1721,56 +1723,6 @@ def load_workspace_config(path_value: str) -> tuple[Path, dict[str, Any]]:
     return build_load_workspace_config(path_value, _workspace_catalog_context())
 
 
-def _path_entry_count_signature(path: Path) -> tuple[Any, ...] | None:
-    try:
-        root_stat = path.stat()
-    except Exception:
-        return None
-    return (int(getattr(root_stat, "st_mtime_ns", int(root_stat.st_mtime * 1e9))),)
-
-
-def _count_path_entries(
-    path: Path,
-    *,
-    pattern: str = "*",
-    recursive: bool = False,
-    only_dirs: bool = False,
-    limit: int | None = None,
-) -> tuple[int, bool]:
-    if not path.exists() or not path.is_dir():
-        return 0, False
-    cache_key = ""
-    signature = None
-    if recursive:
-        signature = _path_entry_count_signature(path)
-        if signature is not None:
-            cache_key = f"{path.resolve(strict=False)}|{pattern}|{int(recursive)}|{int(only_dirs)}|{limit or 0}"
-            with PATH_ENTRY_COUNT_CACHE_LOCK:
-                cached = PATH_ENTRY_COUNT_CACHE.get(cache_key)
-                if cached and cached.get("signature") == signature:
-                    return int(cached.get("count", 0)), bool(cached.get("truncated", False))
-    try:
-        iterator = path.rglob(pattern) if recursive else (path.iterdir() if pattern == "*" else path.glob(pattern))
-        total = 0
-        truncated = False
-        for item in iterator:
-            if only_dirs:
-                if item.is_dir():
-                    total += 1
-            else:
-                if item.is_file():
-                    total += 1
-            if limit is not None and total >= limit:
-                truncated = True
-                break
-        if cache_key and signature is not None:
-            with PATH_ENTRY_COUNT_CACHE_LOCK:
-                PATH_ENTRY_COUNT_CACHE[cache_key] = {"signature": signature, "count": int(total), "truncated": bool(truncated)}
-        return total, truncated
-    except Exception:
-        return 0, False
-
-
 def workspace_layout_summary(config_path_raw: str) -> dict[str, Any]:
     return build_workspace_layout_summary(
         config_path_raw,
@@ -1780,7 +1732,7 @@ def workspace_layout_summary(config_path_raw: str) -> dict[str, Any]:
             build_profile_paths=build_profile_paths,
             effective_precip_paths=effective_precip_paths,
             display_runtime_precip_label=display_runtime_precip_label,
-            count_path_entries=_count_path_entries,
+            count_path_entries=build_workspace_layout_count_path_entries,
             to_display_path=to_display_path,
             detect_object_type=detect_object_type,
             profile_labels=PROFILE_LABELS,
