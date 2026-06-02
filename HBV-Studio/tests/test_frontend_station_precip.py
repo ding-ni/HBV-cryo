@@ -79,6 +79,9 @@ class FrontendStationPrecipTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/stationPrecip.js", "utf8"), context);
 
             const station = context.window.HBVStudioStationPrecip;
+            if (typeof station?.precipStrategyStatusState !== "function") {
+              throw new Error("missing precip strategy status state export");
+            }
             const gridHtml = station.renderPrecipStrategyStatusCards({ mode: "grid_only" });
             if (!gridHtml.includes("格点直接使用")) throw new Error("grid mode label missing");
             if (!gridHtml.includes("未启用站点资料")) throw new Error("grid mode status missing");
@@ -102,6 +105,20 @@ class FrontendStationPrecipTests(unittest.TestCase):
             if (!stationHtml.includes(">meta.csv<")) throw new Error("station metadata short path missing");
             if ((stationHtml.match(/status-ok/g) || []).length < 3) {
               throw new Error(`station-ready mode should render all cards as ok: ${stationHtml}`);
+            }
+            const statusState = station.precipStrategyStatusState(
+              {
+                mode: "grid_plus_station_bias",
+                stationPrec: "C:/input/prec.csv",
+                stationMeta: "C:/input/meta.csv",
+              },
+              {
+                shortPath: value => String(value).split("/").pop(),
+              },
+            );
+            const statusDom = Object.fromEntries(statusState.domUpdates.map(update => [update.selector, update]));
+            if (statusState.html !== stationHtml || statusDom["#wz-precip-strategy-status"].html !== stationHtml) {
+              throw new Error(`unexpected precip strategy DOM updates: ${JSON.stringify(statusState)}`);
             }
             """
         )

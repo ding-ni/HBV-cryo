@@ -95,6 +95,7 @@ const frontendModuleContracts = [
       "stationPrecipCheckFromValidation",
       "stationPrecipModeDescription",
       "stationPrecipModeLabel",
+      "precipStrategyStatusState",
       "renderPrecipStrategyStatusCards",
       "stationPrecipFallbackCheck",
       "renderTaskScopeSummary",
@@ -1853,10 +1854,11 @@ function renderPrecipStrategyStatus() {
   const mode = getSelectedRadio("wz-precip-mode") || "grid_only";
   const stationPrec = $("#wz-station-prec")?.value.trim() || "";
   const stationMeta = $("#wz-station-meta")?.value.trim() || "";
-  host.innerHTML = window.HBVStudioStationPrecip.renderPrecipStrategyStatusCards(
+  const status = window.HBVStudioStationPrecip.precipStrategyStatusState(
     { mode, stationPrec, stationMeta },
     { escapeHtml, shortPath },
   );
+  applyDomUpdates(status.domUpdates);
 }
 
 function renderStationPrecipCheckOverview(validation = null) {

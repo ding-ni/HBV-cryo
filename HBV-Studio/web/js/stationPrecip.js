@@ -87,6 +87,14 @@
     `;
   }
 
+  function precipStrategyStatusState(options = {}, helpers = {}) {
+    const html = renderPrecipStrategyStatusCards(options, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#wz-precip-strategy-status", html }],
+    };
+  }
+
   function stationPrecipFallbackCheck(options = {}, helpers = {}) {
     const shortPath = helpers.shortPath || (value => value || "");
     const mode = options.mode || "grid_only";
@@ -216,6 +224,7 @@
     stationPrecipCheckFromValidation,
     stationPrecipModeDescription,
     stationPrecipModeLabel,
+    precipStrategyStatusState,
     renderPrecipStrategyStatusCards,
     stationPrecipFallbackCheck,
     renderTaskScopeSummary,
