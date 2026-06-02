@@ -23,6 +23,7 @@ from services.filesystem import (  # noqa: E402
     placeholder_roots_for_config_path,
     remap_legacy_project_path,
     replace_placeholders,
+    resolve_config_related_path,
     resolve_any_path,
     same_path,
     to_display_path,
@@ -187,6 +188,23 @@ class FilesystemServiceTests(unittest.TestCase):
 
             self.assertTrue(same_path(nested, root / "nested" / ".." / "nested"))
             self.assertFalse(same_path(nested, root / "other"))
+
+    def test_resolve_config_related_path_uses_config_parent_or_default_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "workspaces" / "demo.json"
+            config_path.parent.mkdir()
+            absolute = root / "absolute.csv"
+
+            relative = resolve_config_related_path({"_config_path": str(config_path)}, "inputs/obs.csv", default_root=root)
+            fallback = resolve_config_related_path({}, "inputs/obs.csv", default_root=root)
+            resolved_absolute = resolve_config_related_path({}, str(absolute), default_root=root)
+            blank = resolve_config_related_path({}, "", default_root=root)
+
+        self.assertEqual(relative, (config_path.parent / "inputs" / "obs.csv").resolve(strict=False))
+        self.assertEqual(fallback, (root / "inputs" / "obs.csv").resolve(strict=False))
+        self.assertEqual(resolved_absolute, absolute.resolve(strict=False))
+        self.assertIsNone(blank)
 
 
 if __name__ == "__main__":

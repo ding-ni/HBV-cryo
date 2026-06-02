@@ -97,6 +97,7 @@ from services.filesystem import (
     open_path_in_explorer as build_open_path_in_explorer,
     placeholder_roots_for_config_path as build_placeholder_roots_for_config_path,
     remap_legacy_project_path as build_remap_legacy_project_path,
+    resolve_config_related_path as build_resolve_config_related_path,
     replace_placeholders as build_replace_placeholders,
     resolve_any_path as build_resolve_any_path,
     safe_iterdir as build_safe_iterdir,
@@ -137,6 +138,7 @@ from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import ForwardSimulationWorkerContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
 from services.forward_simulation import forward_simulation_worker_run as build_forward_simulation_worker_run
+from services.forward_simulation import path_state as build_forward_path_state
 from services.geo_suggestions import GeoSuggestionContext
 from services.geo_suggestions import fill_bbox_from_shp as build_bbox_from_shp
 from services.geo_suggestions import suggest_cfmax_threshold as build_suggest_cfmax_threshold
@@ -3425,32 +3427,7 @@ def start_meteo_import(payload: dict[str, Any]) -> TaskRecord:
 
 
 def _resolve_config_related_path(config: dict[str, Any], raw_value: Any) -> Path | None:
-    text = str(raw_value or "").strip()
-    if not text:
-        return None
-    candidate = Path(text).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve(strict=False)
-    config_path_raw = str(config.get("_config_path", "")).strip()
-    base_dir = Path(config_path_raw).resolve().parent if config_path_raw else GUI_ROOT
-    return (base_dir / candidate).resolve(strict=False)
-
-
-def _path_state(path: Path | None) -> dict[str, Any]:
-    if path is None:
-        return {"exists": False, "path": ""}
-    resolved = path.resolve(strict=False)
-    try:
-        stat = resolved.stat()
-    except Exception:
-        return {"exists": False, "path": str(resolved)}
-    return {
-        "exists": True,
-        "path": str(resolved),
-        "mtime_ns": int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))),
-        "size": int(stat.st_size),
-        "is_dir": resolved.is_dir(),
-    }
+    return build_resolve_config_related_path(config, raw_value, default_root=GUI_ROOT)
 
 
 def _forward_runtime_signature(
@@ -3476,15 +3453,15 @@ def _forward_runtime_signature(
         "prec_source": prec_source,
         "configured_precip_source": configured_source,
         "glacier_mode": glacier_mode,
-        "prec_dir": _path_state(prec_dir),
-        "temp_dir": _path_state(paths["aligned_temp_dir"]),
-        "evap_dir": _path_state(paths["aligned_evap_dir"]),
-        "glacier_melt_dir": _path_state(paths["glacier_melt_dir"]),
-        "flow_acc": _path_state(Path(paths["gis_dir"]) / "flow_accumulation_masked.tif"),
-        "glacier_mask": _path_state(Path(paths["gis_dir"]) / "glacier_mask.tif"),
-        "glacier_fraction": _path_state(Path(paths["gis_dir"]) / "glacier_fraction.tif"),
-        "obs_file": _path_state(_resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))),
-        "boundary_inflow": _path_state(_resolve_config_related_path(config, boundary.get("上游边界入流_csv"))),
+        "prec_dir": build_forward_path_state(prec_dir),
+        "temp_dir": build_forward_path_state(paths["aligned_temp_dir"]),
+        "evap_dir": build_forward_path_state(paths["aligned_evap_dir"]),
+        "glacier_melt_dir": build_forward_path_state(paths["glacier_melt_dir"]),
+        "flow_acc": build_forward_path_state(Path(paths["gis_dir"]) / "flow_accumulation_masked.tif"),
+        "glacier_mask": build_forward_path_state(Path(paths["gis_dir"]) / "glacier_mask.tif"),
+        "glacier_fraction": build_forward_path_state(Path(paths["gis_dir"]) / "glacier_fraction.tif"),
+        "obs_file": build_forward_path_state(_resolve_config_related_path(config, config.get(OBSERVED_FLOW_KEY))),
+        "boundary_inflow": build_forward_path_state(_resolve_config_related_path(config, boundary.get("上游边界入流_csv"))),
         "boundary_config": {
             "date_field": str(boundary.get("时间字段", "") or ""),
             "flow_field": str(boundary.get("流量字段", "") or ""),

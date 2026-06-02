@@ -97,6 +97,18 @@ def same_path(a: Path, b: Path) -> bool:
         return str(a) == str(b)
 
 
+def resolve_config_related_path(config: dict[str, Any], raw_value: Any, *, default_root: Path) -> Path | None:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve(strict=False)
+    config_path_raw = str(config.get("_config_path", "")).strip()
+    base_dir = Path(config_path_raw).resolve().parent if config_path_raw else default_root
+    return (base_dir / candidate).resolve(strict=False)
+
+
 def placeholder_roots_for_config_path(
     config_path: Path | str | None,
     context: FilesystemPlaceholderContext,

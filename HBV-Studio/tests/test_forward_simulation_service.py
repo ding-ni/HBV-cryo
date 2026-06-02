@@ -14,6 +14,7 @@ from services.forward_simulation import (  # noqa: E402
     ForwardSimulationWorkerContext,
     forward_simulation_start_plan,
     forward_simulation_worker_run,
+    path_state,
 )
 
 
@@ -100,6 +101,30 @@ class ForwardSimulationServiceTests(unittest.TestCase):
         self.assertIn(("exception", "task-1", "forward failed"), events)
         self.assertIn(("finished", "task-1", {"ok": False, "return_code": -1}), events)
         self.assertFalse(any(event[0] == "detected" for event in events))
+
+    def test_path_state_reports_missing_none_file_and_directory(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            file_path = root / "forcing.tif"
+            dir_path = root / "aligned"
+            file_path.write_text("data", encoding="utf-8")
+            dir_path.mkdir()
+
+            none_state = path_state(None)
+            missing_state = path_state(root / "missing.tif")
+            file_state = path_state(file_path)
+            dir_state = path_state(dir_path)
+
+        self.assertEqual(none_state, {"exists": False, "path": ""})
+        self.assertFalse(missing_state["exists"])
+        self.assertEqual(missing_state["path"], str((root / "missing.tif").resolve(strict=False)))
+        self.assertTrue(file_state["exists"])
+        self.assertEqual(file_state["size"], 4)
+        self.assertFalse(file_state["is_dir"])
+        self.assertTrue(dir_state["exists"])
+        self.assertTrue(dir_state["is_dir"])
 
 
 if __name__ == "__main__":

@@ -80,3 +80,20 @@ def forward_simulation_worker_run(
             context.set_task_metadata(task_id, ui_progress={"stage": last_stage, "label": "保存并重算"})
         context.add_task_exception_output(task_id, exc)
         context.mark_task_finished(task_id, ok=False, return_code=-1)
+
+
+def path_state(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {"exists": False, "path": ""}
+    resolved = path.resolve(strict=False)
+    try:
+        stat = resolved.stat()
+    except Exception:
+        return {"exists": False, "path": str(resolved)}
+    return {
+        "exists": True,
+        "path": str(resolved),
+        "mtime_ns": int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))),
+        "size": int(stat.st_size),
+        "is_dir": resolved.is_dir(),
+    }
