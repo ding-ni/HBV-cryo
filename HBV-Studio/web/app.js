@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderInputCheckResults", "renderPrepStepList"],
+    exports: ["formatPrepBlockedMessage", "formatPrepDisplayTitle", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList"],
   },
   {
     script: "./js/taskView.js",
@@ -4250,23 +4250,7 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
   const host = $("#wz-check-results");
   const runningImport = findCurrentMeteoImportTask({ runningOnly: true });
   if (runningImport) {
-    const progress = runningImport.ui_progress || {};
-    const stage = progress.stage || "气象驱动导入";
-    const current = Number(progress.current || 0);
-    const total = Number(progress.total || 0);
-    const label = progress.label || "";
-    const itemCurrent = Number(progress.item_current || 0);
-    const itemTotal = Number(progress.item_total || 0);
-    const ts = progress.timestamp ? ` 当前时间：${escapeHtml(progress.timestamp)}。` : "";
-    const logs = (runningImport.output || []).slice(-20).join("\n");
-    host.innerHTML = `
-      <div class="hint-box status-warn" style="margin-bottom:12px">
-        <strong>当前正在导入气象驱动，暂不执行输入检查。</strong><br>
-        ${escapeHtml(stage)}${total > 0 ? `：总进度 ${current}/${total}` : ""}${label ? `；${escapeHtml(label)} ${itemCurrent}/${itemTotal}` : ""}。${ts}
-        导入完成后会自动重新检查。
-      </div>
-      ${logs ? `<div class="task-output-box">${escapeHtml(logs)}</div>` : ""}
-    `;
+    host.innerHTML = window.HBVStudioDataPrepView.renderInputCheckImportBlock(runningImport, { escapeHtml });
     return null;
   }
   if (!force && hasRecentInputCheck({ stage })) {
@@ -4278,13 +4262,7 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
   let checkTimer = null;
   const renderChecking = () => {
     const elapsed = Math.max(0, Math.floor((Date.now() - checkStartedAt) / 1000));
-    const longDetail = checkStage === "详细输入检查" && elapsed >= 30;
-    host.innerHTML = `
-      <div class="hint-box input-check-progress ${longDetail ? "status-warn" : ""}">
-        <div class="input-check-stage"><strong>${escapeHtml(checkStage)}</strong><span>已用时 ${elapsed} 秒</span></div>
-        <div>${longDetail ? "正在执行详细输入检查，系统正在读取气象栅格、流域边界和可选冰川数据。数据量较大时可能需要数分钟，请勿关闭页面。" : "正在检查当前工作区输入，请稍候。"}</div>
-      </div>
-    `;
+    host.innerHTML = window.HBVStudioDataPrepView.renderInputCheckProgress({ stage: checkStage, elapsed }, { escapeHtml });
   };
   renderChecking();
   try {
@@ -4376,7 +4354,11 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
   } catch (err) {
     if (checkTimer) clearInterval(checkTimer);
     const elapsed = Math.max(0, Math.floor((Date.now() - checkStartedAt) / 1000));
-    host.innerHTML = `<div class="hint-box status-fail">检查失败：${escapeHtml(err.message)}<br>失败阶段：${escapeHtml(checkStage)}；已用时 ${elapsed} 秒。</div>`;
+    host.innerHTML = window.HBVStudioDataPrepView.renderInputCheckError({
+      message: err.message,
+      stage: checkStage,
+      elapsed,
+    }, { escapeHtml });
     return null;
   }
 }

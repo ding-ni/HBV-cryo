@@ -103,6 +103,48 @@
     return "所有手调/重算所需运行时数据已就位，可以继续前向重算。";
   }
 
+  function renderInputCheckImportBlock(task = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const progress = task?.ui_progress || {};
+    const stage = progress.stage || "气象驱动导入";
+    const current = Number(progress.current || 0);
+    const total = Number(progress.total || 0);
+    const label = progress.label || "";
+    const itemCurrent = Number(progress.item_current || 0);
+    const itemTotal = Number(progress.item_total || 0);
+    const ts = progress.timestamp ? ` 当前时间：${escapeHtml(progress.timestamp)}。` : "";
+    const logs = (Array.isArray(task?.output) ? task.output : []).slice(-20).join("\n");
+    return `
+      <div class="hint-box status-warn" style="margin-bottom:12px">
+        <strong>当前正在导入气象驱动，暂不执行输入检查。</strong><br>
+        ${escapeHtml(stage)}${total > 0 ? `：总进度 ${current}/${total}` : ""}${label ? `；${escapeHtml(label)} ${itemCurrent}/${itemTotal}` : ""}。${ts}
+        导入完成后会自动重新检查。
+      </div>
+      ${logs ? `<div class="task-output-box">${escapeHtml(logs)}</div>` : ""}
+    `;
+  }
+
+  function renderInputCheckProgress(model = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const stage = String(model.stage || "基础配置检查");
+    const elapsed = Math.max(0, Math.floor(Number(model.elapsed || 0)));
+    const longDetail = stage === "详细输入检查" && elapsed >= 30;
+    return `
+      <div class="hint-box input-check-progress ${longDetail ? "status-warn" : ""}">
+        <div class="input-check-stage"><strong>${escapeHtml(stage)}</strong><span>已用时 ${elapsed} 秒</span></div>
+        <div>${longDetail ? "正在执行详细输入检查，系统正在读取气象栅格、流域边界和可选冰川数据。数据量较大时可能需要数分钟，请勿关闭页面。" : "正在检查当前工作区输入，请稍候。"}</div>
+      </div>
+    `;
+  }
+
+  function renderInputCheckError(model = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const message = String(model.message || "");
+    const stage = String(model.stage || "输入检查");
+    const elapsed = Math.max(0, Math.floor(Number(model.elapsed || 0)));
+    return `<div class="hint-box status-fail">检查失败：${escapeHtml(message)}<br>失败阶段：${escapeHtml(stage)}；已用时 ${elapsed} 秒。</div>`;
+  }
+
   function renderInputCheckItems(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const renderIssueJumpButton = helpers.renderIssueJumpButton || (() => "");
@@ -203,6 +245,9 @@
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
     renderBootstrapStatus,
+    renderInputCheckError,
+    renderInputCheckImportBlock,
+    renderInputCheckProgress,
     renderInputCheckResults,
     renderPrepStepList,
   };

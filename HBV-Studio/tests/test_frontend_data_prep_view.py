@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -115,6 +115,41 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
+
+            const importBlock = view.renderInputCheckImportBlock({
+              ui_progress: {
+                stage: "导入 ERA5 <daily>",
+                current: 2,
+                total: 5,
+                label: "降水 & 气温",
+                item_current: 3,
+                item_total: 8,
+                timestamp: "2026-06-03 <09:00>",
+              },
+              output: Array.from({ length: 22 }, (_, index) => `日志 ${index} <raw>`),
+            }, helpers);
+            if (!importBlock.includes("当前正在导入气象驱动") || !importBlock.includes("导入 ERA5 &lt;daily&gt;：总进度 2/5")) {
+              throw new Error(`import block progress missing: ${importBlock}`);
+            }
+            if (!importBlock.includes("降水 &amp; 气温 3/8") || !importBlock.includes("2026-06-03 &lt;09:00&gt;")) {
+              throw new Error("import block detail should be escaped");
+            }
+            if (!importBlock.includes("task-output-box") || !importBlock.includes("日志 21 &lt;raw&gt;") || importBlock.includes("日志 1 &lt;raw&gt;")) {
+              throw new Error("import block should show only the latest escaped logs");
+            }
+
+            const progressHtml = view.renderInputCheckProgress({ stage: "基础配置检查 <A>", elapsed: 4 }, helpers);
+            if (!progressHtml.includes("基础配置检查 &lt;A&gt;") || !progressHtml.includes("已用时 4 秒") || progressHtml.includes("status-warn")) {
+              throw new Error(`short input check progress failed: ${progressHtml}`);
+            }
+            const longProgressHtml = view.renderInputCheckProgress({ stage: "详细输入检查", elapsed: 31 }, helpers);
+            if (!longProgressHtml.includes("status-warn") || !longProgressHtml.includes("数据量较大时可能需要数分钟")) {
+              throw new Error(`long input check progress failed: ${longProgressHtml}`);
+            }
+            const errorHtml = view.renderInputCheckError({ message: "缺少文件 <dem>", stage: "详细输入检查 <B>", elapsed: 9 }, helpers);
+            if (!errorHtml.includes("检查失败：缺少文件 &lt;dem&gt;") || !errorHtml.includes("失败阶段：详细输入检查 &lt;B&gt;；已用时 9 秒")) {
+              throw new Error(`input check error should be escaped: ${errorHtml}`);
+            }
 
             const checkHelpers = {
               ...helpers,
