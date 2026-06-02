@@ -304,6 +304,40 @@
     return !(requestPresetId && currentPresetId && requestPresetId !== currentPresetId);
   }
 
+  function runManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const targetPath = String(path || "").trim();
+    const changed = !samePath(targetPath, currentConfigPath);
+    const statePatch = { runManualPresetConfigPath: targetPath };
+    if (!targetPath || changed) statePatch.runManualPresets = [];
+    return {
+      path: targetPath,
+      changed,
+      shouldRequest: Boolean(targetPath),
+      shouldRender: !targetPath || changed,
+      statePatch,
+    };
+  }
+
+  function runManualPresetLoadSuccessState(responseData = {}) {
+    const presets = Array.isArray(responseData?.presets) ? responseData.presets : [];
+    return {
+      presets,
+      statePatch: {
+        runManualPresets: presets,
+      },
+    };
+  }
+
+  function runManualPresetLoadErrorState() {
+    return {
+      presets: [],
+      statePatch: {
+        runManualPresets: [],
+      },
+    };
+  }
+
   function workspaceHasEditableRun(runs = [], path = "", helpers = {}) {
     return runsForWorkspace(runs, path, helpers).some(run => run?.studio_compatible);
   }
@@ -900,6 +934,9 @@
     runComparisonSuccessState,
     runDetailState,
     runListState,
+    runManualPresetLoadErrorState,
+    runManualPresetLoadStartState,
+    runManualPresetLoadSuccessState,
     runProfileValue,
     runsForWorkspace,
     selectedRunExportFields,

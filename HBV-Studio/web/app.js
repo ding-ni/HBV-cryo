@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -2588,17 +2588,15 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
   const path = String(configPath || "").trim();
   const resolvedProfile = resolveManualPresetProfile(path, calibrationProfile);
   const requestToken = runManualPresetRequestGuard.next();
-  const pathChanged = !samePath(path, state.runManualPresetConfigPath);
-  state.runManualPresetConfigPath = path;
-  if (!path) {
-    state.runManualPresets = [];
+  const loadStart = window.HBVStudioResultsView.runManualPresetLoadStartState(path, state.runManualPresetConfigPath, { samePath });
+  Object.assign(state, loadStart.statePatch);
+  if (!loadStart.shouldRequest) {
     renderManualPresetOptions();
     updateManualPresetControls();
     renderManualPresetDiff();
     return [];
   }
-  if (pathChanged) {
-    state.runManualPresets = [];
+  if (loadStart.shouldRender) {
     renderManualPresetOptions();
     updateManualPresetControls();
     renderManualPresetDiff();
@@ -2608,23 +2606,25 @@ async function loadRunManualPresets(configPath = getRunManualPresetConfigPath(),
     if (!runManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.runManualPresetConfigPath)) {
       return p.data?.presets || [];
     }
-    state.runManualPresets = p.data?.presets || [];
+    const loadSuccess = window.HBVStudioResultsView.runManualPresetLoadSuccessState(p.data || {});
+    Object.assign(state, loadSuccess.statePatch);
     renderManualPresetOptions();
     updateManualPresetControls();
     renderManualPresetDiff();
     clearStaleManualPresetComparison({ silent: true });
-    return state.runManualPresets;
+    return loadSuccess.presets;
   } catch (err) {
     if (!runManualPresetRequestGuard.isActive(requestToken) || !samePath(path, state.runManualPresetConfigPath)) {
       return [];
     }
-    state.runManualPresets = [];
+    const loadError = window.HBVStudioResultsView.runManualPresetLoadErrorState();
+    Object.assign(state, loadError.statePatch);
     renderManualPresetOptions();
     updateManualPresetControls();
     renderManualPresetDiff();
     clearStaleManualPresetComparison({ silent: true });
     if (!silent) showToast(err.message, true);
-    return [];
+    return loadError.presets;
   }
 }
 

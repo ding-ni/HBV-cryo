@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -302,6 +302,39 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/A" } }, null, { samePath })) {
               throw new Error("missing current preset should keep original behavior and remain current");
+            }
+            const emptyPresetLoad = results.runManualPresetLoadStartState(" ", "C:/ws/A", helpers);
+            if (emptyPresetLoad.path !== "" || emptyPresetLoad.shouldRequest || !emptyPresetLoad.shouldRender ||
+                emptyPresetLoad.statePatch.runManualPresetConfigPath !== "" ||
+                emptyPresetLoad.statePatch.runManualPresets.length !== 0) {
+              throw new Error(`empty preset load start wrong: ${JSON.stringify(emptyPresetLoad)}`);
+            }
+            const samePresetLoad = results.runManualPresetLoadStartState("C:/ws/A", "C:\\ws\\A", helpers);
+            if (samePresetLoad.changed || !samePresetLoad.shouldRequest || samePresetLoad.shouldRender ||
+                samePresetLoad.statePatch.runManualPresetConfigPath !== "C:/ws/A" ||
+                Object.prototype.hasOwnProperty.call(samePresetLoad.statePatch, "runManualPresets")) {
+              throw new Error(`same preset load start wrong: ${JSON.stringify(samePresetLoad)}`);
+            }
+            const changedPresetLoad = results.runManualPresetLoadStartState(" C:/ws/B ", "C:/ws/A", helpers);
+            if (!changedPresetLoad.changed || !changedPresetLoad.shouldRequest || !changedPresetLoad.shouldRender ||
+                changedPresetLoad.path !== "C:/ws/B" ||
+                changedPresetLoad.statePatch.runManualPresetConfigPath !== "C:/ws/B" ||
+                changedPresetLoad.statePatch.runManualPresets.length !== 0) {
+              throw new Error(`changed preset load start wrong: ${JSON.stringify(changedPresetLoad)}`);
+            }
+            const loadSuccess = results.runManualPresetLoadSuccessState({
+              presets: [{ id: "A" }, { id: "B" }],
+            });
+            if (loadSuccess.presets.length !== 2 || loadSuccess.statePatch.runManualPresets[1].id !== "B") {
+              throw new Error(`manual preset load success wrong: ${JSON.stringify(loadSuccess)}`);
+            }
+            const loadSuccessFallback = results.runManualPresetLoadSuccessState({});
+            if (loadSuccessFallback.presets.length !== 0 || loadSuccessFallback.statePatch.runManualPresets.length !== 0) {
+              throw new Error(`manual preset load success fallback wrong: ${JSON.stringify(loadSuccessFallback)}`);
+            }
+            const loadError = results.runManualPresetLoadErrorState();
+            if (loadError.presets.length !== 0 || loadError.statePatch.runManualPresets.length !== 0) {
+              throw new Error(`manual preset load error wrong: ${JSON.stringify(loadError)}`);
             }
             if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
               throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");
