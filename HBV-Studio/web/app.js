@@ -268,7 +268,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -2932,19 +2932,18 @@ async function saveCurrentWizardStep() {
 
 function enforceWizardValidation(validation, step = state.wizardStep) {
   if (!validation || validation.valid) return true;
-  if (step === 2) {
-    renderWizardEventSummary(validation.event_windows || null, validation.event_observation_coverage || null);
-    const issues = (validation.missing || []).slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("");
-    const warns = (validation.warnings || []).slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join("");
-    $("#wz-obs-hint").innerHTML = `<strong>第 2 步未通过。</strong>${issues ? `<ul>${issues}</ul>` : ""}${warns ? `<div style="margin-top:6px">提示：</div><ul>${warns}</ul>` : ""}`;
-    $("#wz-obs-hint").className = "hint-box status-fail";
-  } else if (step === 3) {
-    const issues = (validation.missing || []).slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("");
-    const warns = (validation.warnings || []).slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join("");
-    $("#wz-boundary-preview").innerHTML = `<div class="hint-box status-fail"><strong>第 3 步未通过。</strong>${issues ? `<ul>${issues}</ul>` : ""}${warns ? `<div style="margin-top:6px">提示：</div><ul>${warns}</ul>` : ""}</div>`;
+  const failure = window.HBVStudioDataPrepView.wizardValidationFailureState(validation, step, { escapeHtml });
+  if (failure.eventSummary) {
+    renderWizardEventSummary(failure.eventSummary.eventWindows, failure.eventSummary.observationCoverage);
   }
-  const preview = (validation.missing || []).slice(0, 3).join("；");
-  showToast(`第 ${step} 步未完成：${preview || "请补全必填项"}`, true);
+  if (failure.hint?.targetId) {
+    const target = document.getElementById(failure.hint.targetId);
+    if (target) {
+      target.innerHTML = failure.hint.html;
+      if (failure.hint.className) target.className = failure.hint.className;
+    }
+  }
+  showToast(failure.toastText, true);
   return false;
 }
 

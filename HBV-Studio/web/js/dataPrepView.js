@@ -350,6 +350,42 @@
     };
   }
 
+  function wizardValidationFailureState(validation = {}, step = 0, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const data = validation || {};
+    const stepNumber = Number(step) || step;
+    const missing = Array.isArray(data.missing) ? data.missing : [];
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const issueItems = missing.slice(0, 4).map(item => `<li>${escapeHtml(item)}</li>`).join("");
+    const warningItems = warnings.slice(0, 2).map(item => `<li>${escapeHtml(item)}</li>`).join("");
+    const bodyHtml = `<strong>第 ${escapeHtml(stepNumber)} 步未通过。</strong>${issueItems ? `<ul>${issueItems}</ul>` : ""}${warningItems ? `<div style="margin-top:6px">提示：</div><ul>${warningItems}</ul>` : ""}`;
+    const preview = missing.slice(0, 3).join("；");
+    const result = {
+      eventSummary: null,
+      hint: null,
+      toastText: `第 ${stepNumber} 步未完成：${preview || "请补全必填项"}`,
+    };
+
+    if (Number(stepNumber) === 2) {
+      result.eventSummary = {
+        eventWindows: data.event_windows || null,
+        observationCoverage: data.event_observation_coverage || null,
+      };
+      result.hint = {
+        targetId: "wz-obs-hint",
+        html: bodyHtml,
+        className: "hint-box status-fail",
+      };
+    } else if (Number(stepNumber) === 3) {
+      result.hint = {
+        targetId: "wz-boundary-preview",
+        html: `<div class="hint-box status-fail">${bodyHtml}</div>`,
+      };
+    }
+
+    return result;
+  }
+
   function parseObservationComparableTime(text) {
     const value = String(text || "").trim();
     if (!value) return null;
@@ -1042,5 +1078,6 @@
     renderInputCheckResults,
     renderPrepStepList,
     visiblePrepSteps,
+    wizardValidationFailureState,
   };
 })();

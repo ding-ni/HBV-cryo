@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -169,6 +169,35 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const boundaryError = view.boundaryPreviewErrorState({ message: "CSV <bad>" }, helpers);
             if (boundaryError.className !== "hint-box status-fail" || !boundaryError.html.includes("CSV &lt;bad&gt;") || boundaryError.html.includes("CSV <bad>")) {
               throw new Error(`boundary preview error mismatch: ${JSON.stringify(boundaryError)}`);
+            }
+            const wizardStep2Failure = view.wizardValidationFailureState({
+              missing: ["观测 <CSV>", "流域范围", "率定期", "验证期", "额外缺项"],
+              warnings: ["警告 <一>", "警告二", "警告三"],
+              event_windows: { count: 2 },
+              event_observation_coverage: { ok: false },
+            }, 2, helpers);
+            if (wizardStep2Failure.hint?.targetId !== "wz-obs-hint" || wizardStep2Failure.hint.className !== "hint-box status-fail") {
+              throw new Error(`step 2 validation hint target mismatch: ${JSON.stringify(wizardStep2Failure)}`);
+            }
+            if (!wizardStep2Failure.hint.html.includes("<strong>第 2 步未通过。</strong>") || !wizardStep2Failure.hint.html.includes("观测 &lt;CSV&gt;") || wizardStep2Failure.hint.html.includes("观测 <CSV>")) {
+              throw new Error(`step 2 validation html mismatch: ${wizardStep2Failure.hint.html}`);
+            }
+            if ((wizardStep2Failure.hint.html.match(/<li>/g) || []).length !== 6 || wizardStep2Failure.hint.html.includes("额外缺项") || wizardStep2Failure.hint.html.includes("警告三")) {
+              throw new Error(`step 2 validation list limits mismatch: ${wizardStep2Failure.hint.html}`);
+            }
+            if (wizardStep2Failure.toastText !== "第 2 步未完成：观测 <CSV>；流域范围；率定期") {
+              throw new Error(`step 2 validation toast mismatch: ${wizardStep2Failure.toastText}`);
+            }
+            if (wizardStep2Failure.eventSummary?.eventWindows?.count !== 2 || wizardStep2Failure.eventSummary?.observationCoverage?.ok !== false) {
+              throw new Error(`step 2 event summary mismatch: ${JSON.stringify(wizardStep2Failure.eventSummary)}`);
+            }
+            const wizardStep3Failure = view.wizardValidationFailureState({ missing: ["边界入流"], warnings: [] }, 3, helpers);
+            if (wizardStep3Failure.hint?.targetId !== "wz-boundary-preview" || !wizardStep3Failure.hint.html.startsWith('<div class="hint-box status-fail"><strong>第 3 步未通过。</strong>')) {
+              throw new Error(`step 3 validation hint mismatch: ${JSON.stringify(wizardStep3Failure)}`);
+            }
+            const wizardStep5Failure = view.wizardValidationFailureState({}, 5, helpers);
+            if (wizardStep5Failure.hint !== null || wizardStep5Failure.eventSummary !== null || wizardStep5Failure.toastText !== "第 5 步未完成：请补全必填项") {
+              throw new Error(`generic validation failure mismatch: ${JSON.stringify(wizardStep5Failure)}`);
             }
             const emptyObsHint = view.observationHintState(null, helpers);
             if (emptyObsHint.text !== "选择观测径流文件后将自动推断时间范围。" || emptyObsHint.className !== "hint-box" || emptyObsHint.html !== "") {
