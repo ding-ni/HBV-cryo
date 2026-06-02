@@ -5129,8 +5129,7 @@ function renderForecastSourceOptions() {
     sourceOptionsState.selectedPath,
     { escapeHtml, forecastFriendlyRunName, forecastRunReadinessText, samePath },
   );
-  select.disabled = rendered.disabled;
-  select.innerHTML = rendered.html;
+  applyDomUpdates(rendered.domUpdates);
 }
 
 function renderForecastSourceSummary() {

@@ -559,14 +559,17 @@
     const readinessText = helpers.forecastRunReadinessText || forecastRunReadinessText;
     const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
     const items = Array.isArray(candidates) ? candidates : [];
+    const disabled = !items.length;
+    const html = items.length
+      ? items.map(run => {
+        const label = `${forecastFriendlyRunName(run)} · ${readinessText(run)}`;
+        return `<option value="${escapeHtml(run?.path || "")}" ${samePath(run?.path, selectedPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      }).join("")
+      : '<option value="">暂无可选源结果</option>';
     return {
-      disabled: !items.length,
-      html: items.length
-        ? items.map(run => {
-          const label = `${forecastFriendlyRunName(run)} · ${readinessText(run)}`;
-          return `<option value="${escapeHtml(run?.path || "")}" ${samePath(run?.path, selectedPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
-        }).join("")
-        : '<option value="">暂无可选源结果</option>',
+      disabled,
+      html,
+      domUpdates: [{ selector: "#forecast-source-run", disabled, html }],
     };
   }
 

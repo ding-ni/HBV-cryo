@@ -1048,9 +1048,19 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (!options.html.includes("友好名&lt;A&gt; · 缺少起报状态")) {
               throw new Error(`option label should be escaped: ${options.html}`);
             }
+            const optionsDom = Object.fromEntries(options.domUpdates.map(update => [update.selector, update]));
+            if (optionsDom["#forecast-source-run"].disabled !== false ||
+                optionsDom["#forecast-source-run"].html !== options.html) {
+              throw new Error(`source option DOM updates wrong: ${JSON.stringify(optionsDom)}`);
+            }
             const emptyOptions = view.renderForecastSourceOptions([], "", helpers);
             if (!emptyOptions.disabled || !emptyOptions.html.includes("暂无可选源结果")) {
               throw new Error(`empty options wrong: ${JSON.stringify(emptyOptions)}`);
+            }
+            const emptyOptionsDom = Object.fromEntries(emptyOptions.domUpdates.map(update => [update.selector, update]));
+            if (emptyOptionsDom["#forecast-source-run"].disabled !== true ||
+                emptyOptionsDom["#forecast-source-run"].html !== emptyOptions.html) {
+              throw new Error(`empty source option DOM updates wrong: ${JSON.stringify(emptyOptionsDom)}`);
             }
 
             const emptySummary = view.renderForecastSourceSummary(null, helpers);
