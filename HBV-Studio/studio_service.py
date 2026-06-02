@@ -284,6 +284,7 @@ from services.workspace_catalog import (
     list_templates as build_list_templates,
     list_workspaces as build_list_workspaces,
     load_workspace_config as build_load_workspace_config,
+    normalize_config_before_save as build_normalize_config_before_save,
     runtime_root_for_workspace as build_runtime_root_for_workspace,
     slugify_workspace_name as build_slugify_workspace_name,
     suggest_time_windows as build_suggest_time_windows,
@@ -1808,166 +1809,8 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
     )
 
 
-PATH_FIELDS = ("运行目录", "流域边界_shp", "DEM_tif", OBSERVED_FLOW_KEY, "冰川边界_shp")
-METEO_PATH_FIELDS = ("站点降水_csv", "站点信息_csv", "原始小时降水目录", "自带温度tif目录", "自带降水tif目录", "自带蒸散发tif目录")
-BOUNDARY_PATH_FIELDS = ("上游边界入流_csv",)
-EVENT_PATH_FIELDS = ("事件表路径", "events_file", "event_file")
-WIZARD_STALE_KEYS = frozenset({
-    "name", "timescale", "object", "basin_shp", "obs_csv", "dem_tif", "glacier_shp",
-    "warmup_start", "warmup_end", "calib_start", "calib_end", "valid_start", "valid_end",
-    "cfmax", "fao_elev", "boundary_csv", "gap_fill", "boundary_date", "boundary_flow",
-    "time_basis", "event_file",
-})
-
-
 def normalize_config_before_save(data: dict[str, Any], save_path: Path) -> dict[str, Any]:
-    config = dict(data)
-    config.pop("_config_path", None)
-    # Expand any existing placeholders so downstream logic works with real paths
-    config = replace_placeholders(config)
-    profile = detect_profile_from_payload(config)
-    object_type = detect_object_type(config)
-    config["项目对象"] = object_type
-    config["率定模式"] = profile
-    config["时间步长_小时"] = 1.0 if profile == PROFILE_HOURLY else 24.0
-    config["目标函数模式"] = profile_runner.normalize_objective_mode(config.get("目标函数模式", "auto"))
-    config["观测口径模式"] = config.get("观测口径模式", "full_year") or "full_year"
-    raw_time_basis = str(
-        config.get("任务时段模式")
-        or config.get("资料时段模式")
-        or config.get("time_basis")
-        or ""
-    ).strip().lower()
-    if raw_time_basis in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
-        config["任务时段模式"] = TIME_BASIS_EVENT_WINDOWS
-    else:
-        config["任务时段模式"] = TIME_BASIS_CONTINUOUS
-    if not config.get("DEM_tif"):
-        config["DEM_tif"] = str(BUILTIN_DEM.resolve())
-    if (not str(config.get("冰川边界_shp", "")).strip()) and BUILTIN_GLACIER_SHP.exists():
-        config["冰川边界_shp"] = str(BUILTIN_GLACIER_SHP.resolve())
-
-    time_cfg = dict(config.get("时间", {}))
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    if time_cfg.get("预热开始") and time_cfg.get("率定开始") and (not time_cfg.get("预热结束")):
-        try:
-            time_values = {
-                "预热开始": pd.to_datetime(time_cfg["预热开始"]),
-                "率定开始": pd.to_datetime(time_cfg["率定开始"]),
-            }
-            warmup_end = expected_warmup_end(time_values, step_hours)
-            if warmup_end is not None and time_values["预热开始"] <= warmup_end:
-                time_cfg["预热结束"] = format_timestamp_for_display(warmup_end, step_hours)
-        except Exception:
-            pass
-    parsed_starts = [pd.to_datetime(value) for value in [time_cfg.get("预热开始"), time_cfg.get("率定开始")] if value]
-    parsed_ends = [pd.to_datetime(value) for value in [time_cfg.get("验证结束"), time_cfg.get("率定结束")] if value]
-    if parsed_starts:
-        time_cfg["开始年份"] = int(min(parsed_starts).year)
-    if parsed_ends:
-        time_cfg["结束年份"] = int(max(parsed_ends).year)
-    config["时间"] = time_cfg
-
-    bbox = fill_bbox_from_shp(config.get("流域边界_shp", ""))
-    if bbox is not None:
-        config["范围_bbox"] = bbox
-
-    if not config.get("流域编号"):
-        config["流域编号"] = save_path.stem
-    if not config.get("流域名称"):
-        config["流域名称"] = save_path.stem
-
-    init_state = dict(config.get("初始状态", {}) or {})
-    for key, value in profile_runner.DEFAULT_INIT_STATE.items():
-        init_state.setdefault(key, value)
-    config["初始状态"] = init_state
-
-    boundary = dict(config.get("边界条件", {}))
-    boundary.setdefault("上游边界入流_csv", "")
-    boundary.setdefault("时间字段", "date")
-    boundary.setdefault("流量字段", "inflow_m3s")
-    boundary.setdefault("缺失填补", "zero")
-    config["边界条件"] = boundary
-
-    event_mode = dict(config.get("事件资料模式", {}) or {})
-    flood_events = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
-    event_file = str(
-        event_mode.get("事件表路径")
-        or event_mode.get("events_file")
-        or flood_events.get("事件表路径")
-        or flood_events.get("events_file")
-        or ""
-    ).strip()
-    if event_file:
-        event_mode["事件表路径"] = event_file
-        flood_events["事件表路径"] = event_file
-    if config["任务时段模式"] == TIME_BASIS_EVENT_WINDOWS:
-        event_mode["启用"] = True
-        event_mode["事件窗口资料"] = True
-        event_mode.setdefault("允许事件间断", True)
-        event_mode.setdefault("初始条件策略", "event_warmup")
-        flood_events.setdefault("启用", True)
-        flood_events["事件窗口资料"] = True
-        flood_events.setdefault("模式", "diagnostic")
-    else:
-        event_mode.setdefault("启用", False)
-        event_mode.setdefault("事件窗口资料", False)
-    config["事件资料模式"] = event_mode
-    config["洪水事件率定"] = flood_events
-
-    meteo = dict(config.get(METEO_KEY, {}))
-    meteo.setdefault(METEO_PRECIP_MODE_KEY, "grid_only")
-    source_value = configured_precip_source(config)
-    meteo[METEO_PRECIP_SOURCE_KEY] = source_value
-    meteo[METEO_PRECIP_SOURCE_LEGACY_KEY] = source_value
-    config["默认降水源"] = source_value
-    meteo.setdefault(METEO_STATION_PREC_KEY, "")
-    meteo.setdefault(METEO_STATION_META_KEY, "")
-    meteo.setdefault(METEO_HOURLY_PREC_DIR_KEY, "")
-    meteo.setdefault(METEO_TEMP_SOURCE_KEY, "era5")
-    meteo.setdefault(METEO_CUSTOM_TEMP_DIR_KEY, "")
-    meteo.setdefault(METEO_CUSTOM_PREC_DIR_KEY, "")
-    meteo.setdefault(METEO_PET_SOURCE_KEY, "era5_fao56")
-    meteo.setdefault(METEO_CUSTOM_PET_DIR_KEY, "")
-    # Migrate legacy values
-    legacy_temp = {"era5_land": "era5", "local_or_era5_hourly": "era5"}
-    legacy_pet = {"era5_land_fao56": "era5_fao56", "hourly_era5_or_external": "era5_fao56"}
-    if meteo[METEO_TEMP_SOURCE_KEY] in legacy_temp:
-        meteo[METEO_TEMP_SOURCE_KEY] = legacy_temp[meteo[METEO_TEMP_SOURCE_KEY]]
-    if meteo[METEO_PET_SOURCE_KEY] in legacy_pet:
-        meteo[METEO_PET_SOURCE_KEY] = legacy_pet[meteo[METEO_PET_SOURCE_KEY]]
-    config[METEO_KEY] = meteo
-
-    # --- Portability: convert absolute paths to placeholders ---
-    for key in PATH_FIELDS:
-        if config.get(key):
-            config[key] = to_portable_path(config[key])
-    boundary = dict(config.get("边界条件", {}))
-    for key in BOUNDARY_PATH_FIELDS:
-        if boundary.get(key):
-            boundary[key] = to_portable_path(boundary[key])
-    config["边界条件"] = boundary
-    event_mode = dict(config.get("事件资料模式", {}))
-    for key in EVENT_PATH_FIELDS:
-        if event_mode.get(key):
-            event_mode[key] = to_portable_path(event_mode[key])
-    config["事件资料模式"] = event_mode
-    flood_events = dict(config.get("洪水事件率定", {})) if isinstance(config.get("洪水事件率定", {}), dict) else {}
-    for key in EVENT_PATH_FIELDS:
-        if flood_events.get(key):
-            flood_events[key] = to_portable_path(flood_events[key])
-    config["洪水事件率定"] = flood_events
-    meteo = dict(config.get(METEO_KEY, {}))
-    for key in METEO_PATH_FIELDS:
-        if meteo.get(key):
-            meteo[key] = to_portable_path(meteo[key])
-    config[METEO_KEY] = meteo
-
-    # --- Remove stale wizard keys ---
-    for key in WIZARD_STALE_KEYS:
-        config.pop(key, None)
-
-    return config
+    return build_normalize_config_before_save(data, save_path, _workspace_catalog_context())
 
 
 def build_empty_workspace(name: str = "新流域工作区", profile: str = PROFILE_DAILY) -> dict[str, Any]:
@@ -1995,6 +1838,7 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         profile_daily=PROFILE_DAILY,
         profile_hourly=PROFILE_HOURLY,
         time_basis_continuous=TIME_BASIS_CONTINUOUS,
+        time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
         object_regression=OBJECT_REGRESSION,
         object_interbasin=OBJECT_INTERBASIN,
         object_full_upstream=OBJECT_FULL_UPSTREAM,
@@ -2007,10 +1851,11 @@ def _workspace_catalog_context() -> WorkspaceCatalogContext:
         replace_placeholders=replace_placeholders,
         resolve_any_path=resolve_any_path,
         resolve_profile=resolve_profile,
-        normalize_config_before_save=normalize_config_before_save,
+        normalize_objective_mode=profile_runner.normalize_objective_mode,
         default_initial_state=profile_runner.DEFAULT_INIT_STATE,
         write_json_file=write_json_file,
         to_display_path=to_display_path,
+        to_portable_path=to_portable_path,
         workspace_workflow_summary=workspace_workflow_summary,
         normalize_time_step_hours=normalize_time_step_hours,
         ensure_within=ensure_within,

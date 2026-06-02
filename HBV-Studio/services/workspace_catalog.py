@@ -11,6 +11,56 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.meteo_config import (
+    METEO_CUSTOM_PET_DIR_KEY,
+    METEO_CUSTOM_PREC_DIR_KEY,
+    METEO_CUSTOM_TEMP_DIR_KEY,
+    METEO_HOURLY_PREC_DIR_KEY,
+    METEO_PET_SOURCE_KEY,
+    METEO_PRECIP_MODE_KEY,
+    METEO_STATION_META_KEY,
+    METEO_STATION_PREC_KEY,
+    METEO_TEMP_SOURCE_KEY,
+    configured_precip_source,
+)
+from services.time_utils import expected_warmup_end, format_timestamp_for_display
+
+
+CONFIG_PATH_FIELDS = ("运行目录", "流域边界_shp", "DEM_tif", "冰川边界_shp")
+METEO_PATH_FIELDS = (
+    METEO_STATION_PREC_KEY,
+    METEO_STATION_META_KEY,
+    METEO_HOURLY_PREC_DIR_KEY,
+    METEO_CUSTOM_TEMP_DIR_KEY,
+    METEO_CUSTOM_PREC_DIR_KEY,
+    METEO_CUSTOM_PET_DIR_KEY,
+)
+BOUNDARY_PATH_FIELDS = ("上游边界入流_csv",)
+EVENT_PATH_FIELDS = ("事件表路径", "events_file", "event_file")
+WIZARD_STALE_KEYS = frozenset({
+    "name",
+    "timescale",
+    "object",
+    "basin_shp",
+    "obs_csv",
+    "dem_tif",
+    "glacier_shp",
+    "warmup_start",
+    "warmup_end",
+    "calib_start",
+    "calib_end",
+    "valid_start",
+    "valid_end",
+    "cfmax",
+    "fao_elev",
+    "boundary_csv",
+    "gap_fill",
+    "boundary_date",
+    "boundary_flow",
+    "time_basis",
+    "event_file",
+})
+
 
 @dataclass(frozen=True)
 class WorkspaceCatalogContext:
@@ -23,6 +73,7 @@ class WorkspaceCatalogContext:
     profile_daily: str
     profile_hourly: str
     time_basis_continuous: str
+    time_basis_event_windows: str
     object_regression: str
     object_interbasin: str
     object_full_upstream: str
@@ -35,10 +86,11 @@ class WorkspaceCatalogContext:
     replace_placeholders: Callable[[Any], Any]
     resolve_any_path: Callable[..., Path]
     resolve_profile: Callable[[dict[str, Any], str | None], str]
-    normalize_config_before_save: Callable[[dict[str, Any], Path], dict[str, Any]]
+    normalize_objective_mode: Callable[[Any], str]
     default_initial_state: dict[str, Any]
     write_json_file: Callable[[Path, Any], None]
     to_display_path: Callable[[Path], str]
+    to_portable_path: Callable[[str], str]
     workspace_workflow_summary: Callable[..., dict[str, Any]]
     normalize_time_step_hours: Callable[[Any], float]
     ensure_within: Callable[[Path, Path], Path]
@@ -172,6 +224,162 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
         "默认降水源": "era5",
         "CFMAX分区阈值_m": 5000.0,
     }
+
+
+def normalize_config_before_save(data: dict[str, Any], save_path: Path, context: WorkspaceCatalogContext) -> dict[str, Any]:
+    config = dict(data)
+    config.pop("_config_path", None)
+    config = context.replace_placeholders(config)
+    profile = detect_profile_from_payload(
+        config,
+        profile_daily=context.profile_daily,
+        profile_hourly=context.profile_hourly,
+    )
+    object_type = detect_object_type(
+        config,
+        object_regression=context.object_regression,
+        object_interbasin=context.object_interbasin,
+        object_full_upstream=context.object_full_upstream,
+    )
+    config["项目对象"] = object_type
+    config["率定模式"] = profile
+    config["时间步长_小时"] = 1.0 if profile == context.profile_hourly else 24.0
+    config["目标函数模式"] = context.normalize_objective_mode(config.get("目标函数模式", "auto"))
+    config["观测口径模式"] = config.get("观测口径模式", "full_year") or "full_year"
+
+    raw_time_basis = str(
+        config.get("任务时段模式")
+        or config.get("资料时段模式")
+        or config.get("time_basis")
+        or ""
+    ).strip().lower()
+    if raw_time_basis in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}:
+        config["任务时段模式"] = context.time_basis_event_windows
+    else:
+        config["任务时段模式"] = context.time_basis_continuous
+    if not config.get("DEM_tif"):
+        config["DEM_tif"] = str(context.builtin_dem.resolve())
+    if (not str(config.get("冰川边界_shp", "")).strip()) and context.builtin_glacier_shp.exists():
+        config["冰川边界_shp"] = str(context.builtin_glacier_shp.resolve())
+
+    time_cfg = dict(config.get("时间", {}))
+    step_hours = context.normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    if time_cfg.get("预热开始") and time_cfg.get("率定开始") and (not time_cfg.get("预热结束")):
+        try:
+            time_values = {
+                "预热开始": pd.to_datetime(time_cfg["预热开始"]),
+                "率定开始": pd.to_datetime(time_cfg["率定开始"]),
+            }
+            warmup_end = expected_warmup_end(time_values, step_hours)
+            if warmup_end is not None and time_values["预热开始"] <= warmup_end:
+                time_cfg["预热结束"] = format_timestamp_for_display(warmup_end, step_hours)
+        except Exception:
+            pass
+    parsed_starts = [pd.to_datetime(value) for value in [time_cfg.get("预热开始"), time_cfg.get("率定开始")] if value]
+    parsed_ends = [pd.to_datetime(value) for value in [time_cfg.get("验证结束"), time_cfg.get("率定结束")] if value]
+    if parsed_starts:
+        time_cfg["开始年份"] = int(min(parsed_starts).year)
+    if parsed_ends:
+        time_cfg["结束年份"] = int(max(parsed_ends).year)
+    config["时间"] = time_cfg
+
+    bbox = context.fill_bbox_from_shp(config.get("流域边界_shp", ""))
+    if bbox is not None:
+        config["范围_bbox"] = bbox
+
+    if not config.get("流域编号"):
+        config["流域编号"] = save_path.stem
+    if not config.get("流域名称"):
+        config["流域名称"] = save_path.stem
+
+    init_state = dict(config.get("初始状态", {}) or {})
+    for key, value in context.default_initial_state.items():
+        init_state.setdefault(key, value)
+    config["初始状态"] = init_state
+
+    boundary = dict(config.get("边界条件", {}))
+    boundary.setdefault("上游边界入流_csv", "")
+    boundary.setdefault("时间字段", "date")
+    boundary.setdefault("流量字段", "inflow_m3s")
+    boundary.setdefault("缺失填补", "zero")
+    config["边界条件"] = boundary
+
+    event_mode = dict(config.get("事件资料模式", {}) or {})
+    flood_events = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+    event_file = str(
+        event_mode.get("事件表路径")
+        or event_mode.get("events_file")
+        or flood_events.get("事件表路径")
+        or flood_events.get("events_file")
+        or ""
+    ).strip()
+    if event_file:
+        event_mode["事件表路径"] = event_file
+        flood_events["事件表路径"] = event_file
+    if config["任务时段模式"] == context.time_basis_event_windows:
+        event_mode["启用"] = True
+        event_mode["事件窗口资料"] = True
+        event_mode.setdefault("允许事件间断", True)
+        event_mode.setdefault("初始条件策略", "event_warmup")
+        flood_events.setdefault("启用", True)
+        flood_events["事件窗口资料"] = True
+        flood_events.setdefault("模式", "diagnostic")
+    else:
+        event_mode.setdefault("启用", False)
+        event_mode.setdefault("事件窗口资料", False)
+    config["事件资料模式"] = event_mode
+    config["洪水事件率定"] = flood_events
+
+    meteo = dict(config.get(context.meteo_key, {}))
+    meteo.setdefault(METEO_PRECIP_MODE_KEY, "grid_only")
+    source_value = configured_precip_source(config)
+    meteo[context.meteo_precip_source_key] = source_value
+    meteo[context.meteo_precip_source_legacy_key] = source_value
+    config["默认降水源"] = source_value
+    meteo.setdefault(METEO_STATION_PREC_KEY, "")
+    meteo.setdefault(METEO_STATION_META_KEY, "")
+    meteo.setdefault(METEO_HOURLY_PREC_DIR_KEY, "")
+    meteo.setdefault(METEO_TEMP_SOURCE_KEY, "era5")
+    meteo.setdefault(METEO_CUSTOM_TEMP_DIR_KEY, "")
+    meteo.setdefault(METEO_CUSTOM_PREC_DIR_KEY, "")
+    meteo.setdefault(METEO_PET_SOURCE_KEY, "era5_fao56")
+    meteo.setdefault(METEO_CUSTOM_PET_DIR_KEY, "")
+    legacy_temp = {"era5_land": "era5", "local_or_era5_hourly": "era5"}
+    legacy_pet = {"era5_land_fao56": "era5_fao56", "hourly_era5_or_external": "era5_fao56"}
+    if meteo[METEO_TEMP_SOURCE_KEY] in legacy_temp:
+        meteo[METEO_TEMP_SOURCE_KEY] = legacy_temp[meteo[METEO_TEMP_SOURCE_KEY]]
+    if meteo[METEO_PET_SOURCE_KEY] in legacy_pet:
+        meteo[METEO_PET_SOURCE_KEY] = legacy_pet[meteo[METEO_PET_SOURCE_KEY]]
+    config[context.meteo_key] = meteo
+
+    for key in (*CONFIG_PATH_FIELDS, context.observed_flow_key):
+        if config.get(key):
+            config[key] = context.to_portable_path(config[key])
+    boundary = dict(config.get("边界条件", {}))
+    for key in BOUNDARY_PATH_FIELDS:
+        if boundary.get(key):
+            boundary[key] = context.to_portable_path(boundary[key])
+    config["边界条件"] = boundary
+    event_mode = dict(config.get("事件资料模式", {}))
+    for key in EVENT_PATH_FIELDS:
+        if event_mode.get(key):
+            event_mode[key] = context.to_portable_path(event_mode[key])
+    config["事件资料模式"] = event_mode
+    flood_events = dict(config.get("洪水事件率定", {})) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+    for key in EVENT_PATH_FIELDS:
+        if flood_events.get(key):
+            flood_events[key] = context.to_portable_path(flood_events[key])
+    config["洪水事件率定"] = flood_events
+    meteo = dict(config.get(context.meteo_key, {}))
+    for key in METEO_PATH_FIELDS:
+        if meteo.get(key):
+            meteo[key] = context.to_portable_path(meteo[key])
+    config[context.meteo_key] = meteo
+
+    for key in WIZARD_STALE_KEYS:
+        config.pop(key, None)
+
+    return config
 
 
 def suggest_time_windows(
@@ -322,7 +530,7 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
     template_path = find_template(template_id, context)
     raw = context.replace_placeholders(context.read_json_file(template_path))
     profile = context.resolve_profile(raw, None)
-    config = context.normalize_config_before_save(raw, context.default_workspace_path)
+    config = normalize_config_before_save(raw, context.default_workspace_path, context)
     if (not str(config.get("冰川边界_shp", "")).strip()) and context.builtin_glacier_shp.exists():
         config["冰川边界_shp"] = str(context.builtin_glacier_shp.resolve())
     if detect_object_type(
@@ -336,7 +544,7 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
     if template_id == "blank-workspace":
         config["运行目录"] = str(runtime_root_for_workspace(target_name, context.project_runtime_dir))
     workspace_path = context.workspace_dir / f"{slugify_workspace_name(target_name)}.json"
-    context.write_json_file(workspace_path, context.normalize_config_before_save(config, workspace_path))
+    context.write_json_file(workspace_path, normalize_config_before_save(config, workspace_path, context))
     return {
         "workspace_path": str(workspace_path.resolve()),
         "config": context.read_json_file(workspace_path),
@@ -471,7 +679,7 @@ def create_workspace_from_import(payload: dict[str, Any], context: WorkspaceCata
             context.stage_vector_shapefile(config, config["冰川边界_shp"], role="glacier", config_path=workspace_path)
         )
     config[context.observed_flow_key] = str(context.stage_observed_runoff_file(config, obs_path, config_path=workspace_path))
-    context.write_json_file(workspace_path, context.normalize_config_before_save(config, workspace_path))
+    context.write_json_file(workspace_path, normalize_config_before_save(config, workspace_path, context))
     return {
         "workspace_path": str(workspace_path.resolve()),
         "config": context.read_json_file(workspace_path),
