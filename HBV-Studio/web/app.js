@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -763,56 +763,32 @@ function clearRunDetail(message = "请先从左侧选择一个结果。") {
   runDetailRequestGuard.cancel();
   runManualPresetRequestGuard.cancel();
   compareRequestGuard.cancel();
-  Object.assign(state, window.HBVStudioResultsView.clearRunDetailState().statePatch);
-  $("#results-metric-strip").innerHTML = "";
-  $("#run-engineering-summary").innerHTML = "";
-  $("#run-engineering-actions").innerHTML = "";
-  $("#run-engineering-note").textContent = "";
-  $("#run-engineering-note").className = "hint-box";
-  if ($("#run-export-fields")) {
-    renderRunExportFields();
-  }
-  if ($("#run-export-start")) $("#run-export-start").value = "";
-  if ($("#run-export-end")) $("#run-export-end").value = "";
-  if ($("#btn-run-export")) $("#btn-run-export").disabled = true;
-  if ($("#btn-open-export-file")) $("#btn-open-export-file").disabled = true;
-  if ($("#run-export-hint")) {
-    $("#run-export-hint").textContent = "选择一个结果后，可按时间范围导出 Excel。";
-    $("#run-export-hint").className = "hint-box";
-  }
-  $("#metadata-grid").innerHTML = "";
-  $("#param-sliders").innerHTML = '<div class="hint-box">当前尚未选择结果。</div>';
-  $("#btn-resimulate").disabled = true;
-  $("#btn-reset-params").disabled = true;
-  $("#resim-hint").style.display = "";
-  $("#resim-hint").textContent = "请选择一个可调结果后再进行保存并重算。";
-  $("#resim-hint").className = "hint-box status-warn";
-  if ($("#manual-preset-name")) $("#manual-preset-name").value = "";
-  if ($("#manual-preset-select")) $("#manual-preset-select").value = "";
-  renderManualPresetOptions();
-  updateManualPresetControls();
-  renderManualPresetDiff();
-  updateCompareSummary();
-  if ($("#resim-log")) {
-    $("#resim-log").textContent = "";
-    $("#resim-log").style.display = "none";
-  }
-  const eventChartPanel = document.getElementById("flood-event-chart-panel");
-  if (eventChartPanel) eventChartPanel.style.display = "none";
-  ["hydrograph-chart", "component-chart", "residual-chart", "flood-event-chart"].forEach(id => {
+  const viewState = window.HBVStudioResultsView.clearRunDetailViewState(message);
+  Object.assign(state, viewState.statePatch);
+  viewState.domUpdates.forEach(update => {
+    const el = $(update.selector);
+    if (!el) return;
+    if (Object.prototype.hasOwnProperty.call(update, "html")) el.innerHTML = update.html;
+    if (Object.prototype.hasOwnProperty.call(update, "text")) el.textContent = update.text;
+    if (Object.prototype.hasOwnProperty.call(update, "className")) el.className = update.className;
+    if (Object.prototype.hasOwnProperty.call(update, "value")) el.value = update.value;
+    if (Object.prototype.hasOwnProperty.call(update, "disabled")) el.disabled = update.disabled;
+    if (Object.prototype.hasOwnProperty.call(update, "visible")) el.style.display = update.visible ? "" : "none";
+  });
+  if (viewState.shouldRenderRunExportFields && $("#run-export-fields")) renderRunExportFields();
+  if (viewState.shouldRenderManualPresetOptions) renderManualPresetOptions();
+  if (viewState.shouldUpdateManualPresetControls) updateManualPresetControls();
+  if (viewState.shouldRenderManualPresetDiff) renderManualPresetDiff();
+  if (viewState.shouldUpdateCompareSummary) updateCompareSummary();
+  viewState.chartIds.forEach(id => {
     if (window.Plotly) {
       try { window.Plotly.purge(id); } catch {}
     }
     const el = document.getElementById(id);
-    if (el) el.innerHTML = '<div class="hint-box">当前没有可显示的结果图表。</div>';
+    if (el) el.innerHTML = viewState.chartFallbackHtml;
   });
-  const entryHint = $("#results-entry-hint");
-  if (entryHint) {
-    entryHint.textContent = message;
-    entryHint.className = "hint-box status-warn";
-  }
-  updateManualStarterButtons();
-  updateSidebar();
+  if (viewState.shouldUpdateManualStarterButtons) updateManualStarterButtons();
+  if (viewState.shouldUpdateSidebar) updateSidebar();
 }
 
 function manualStarterWorkspacePath() {

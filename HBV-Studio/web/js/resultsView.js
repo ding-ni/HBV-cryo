@@ -227,6 +227,43 @@
     };
   }
 
+  function clearRunDetailViewState(message = "请先从左侧选择一个结果。") {
+    const entryMessage = String(message || "请先从左侧选择一个结果。").trim() || "请先从左侧选择一个结果。";
+    return {
+      statePatch: clearRunDetailState().statePatch,
+      domUpdates: [
+        { selector: "#results-metric-strip", html: "" },
+        { selector: "#run-engineering-summary", html: "" },
+        { selector: "#run-engineering-actions", html: "" },
+        { selector: "#run-engineering-note", text: "", className: "hint-box" },
+        { selector: "#run-export-start", value: "" },
+        { selector: "#run-export-end", value: "" },
+        { selector: "#btn-run-export", disabled: true },
+        { selector: "#btn-open-export-file", disabled: true },
+        { selector: "#run-export-hint", text: "选择一个结果后，可按时间范围导出 Excel。", className: "hint-box" },
+        { selector: "#metadata-grid", html: "" },
+        { selector: "#param-sliders", html: '<div class="hint-box">当前尚未选择结果。</div>' },
+        { selector: "#btn-resimulate", disabled: true },
+        { selector: "#btn-reset-params", disabled: true },
+        { selector: "#resim-hint", visible: true, text: "请选择一个可调结果后再进行保存并重算。", className: "hint-box status-warn" },
+        { selector: "#manual-preset-name", value: "" },
+        { selector: "#manual-preset-select", value: "" },
+        { selector: "#resim-log", visible: false, text: "" },
+        { selector: "#flood-event-chart-panel", visible: false },
+        { selector: "#results-entry-hint", text: entryMessage, className: "hint-box status-warn" },
+      ],
+      chartIds: ["hydrograph-chart", "component-chart", "residual-chart", "flood-event-chart"],
+      chartFallbackHtml: '<div class="hint-box">当前没有可显示的结果图表。</div>',
+      shouldRenderRunExportFields: true,
+      shouldRenderManualPresetOptions: true,
+      shouldUpdateManualPresetControls: true,
+      shouldRenderManualPresetDiff: true,
+      shouldUpdateCompareSummary: true,
+      shouldUpdateManualStarterButtons: true,
+      shouldUpdateSidebar: true,
+    };
+  }
+
   function runDetailState(data = null, context = {}, helpers = {}) {
     const isStudioEditableRun = helpers.isStudioEditableRun || (() => false);
     const detailData = data || null;
@@ -1111,6 +1148,7 @@
     alignedRunFiltersForSelection,
     clearRunComparisonState,
     clearRunDetailState,
+    clearRunDetailViewState,
     filterRuns,
     forwardSimulationErrorState,
     forwardSimulationPreflight,

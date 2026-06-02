@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -191,6 +191,41 @@ class FrontendResultsViewTests(unittest.TestCase):
                 clearedDetail.compareAdjusted !== false || clearedDetail.runManualPresets.length !== 0 ||
                 clearedDetail.runManualPresetConfigPath !== "") {
               throw new Error(`clear run detail state wrong: ${JSON.stringify(clearedDetail)}`);
+            }
+            const clearedView = results.clearRunDetailViewState(" 请选择新的结果 ");
+            const updatesBySelector = Object.fromEntries(clearedView.domUpdates.map(update => [update.selector, update]));
+            if (clearedView.statePatch.currentRun !== null ||
+                clearedView.statePatch.compareSeries !== null ||
+                clearedView.statePatch.runManualPresets.length !== 0) {
+              throw new Error(`clear run detail view should carry clear state patch: ${JSON.stringify(clearedView.statePatch)}`);
+            }
+            if (updatesBySelector["#param-sliders"].html !== '<div class="hint-box">当前尚未选择结果。</div>' ||
+                updatesBySelector["#btn-resimulate"].disabled !== true ||
+                updatesBySelector["#btn-reset-params"].disabled !== true ||
+                updatesBySelector["#resim-hint"].visible !== true ||
+                updatesBySelector["#resim-hint"].className !== "hint-box status-warn" ||
+                updatesBySelector["#manual-preset-name"].value !== "" ||
+                updatesBySelector["#manual-preset-select"].value !== "" ||
+                updatesBySelector["#resim-log"].visible !== false ||
+                updatesBySelector["#results-entry-hint"].text !== "请选择新的结果" ||
+                updatesBySelector["#results-entry-hint"].className !== "hint-box status-warn") {
+              throw new Error(`clear run detail DOM updates wrong: ${JSON.stringify(updatesBySelector)}`);
+            }
+            if (clearedView.chartIds.join("|") !== "hydrograph-chart|component-chart|residual-chart|flood-event-chart" ||
+                clearedView.chartFallbackHtml !== '<div class="hint-box">当前没有可显示的结果图表。</div>' ||
+                !clearedView.shouldRenderRunExportFields ||
+                !clearedView.shouldRenderManualPresetOptions ||
+                !clearedView.shouldUpdateManualPresetControls ||
+                !clearedView.shouldRenderManualPresetDiff ||
+                !clearedView.shouldUpdateCompareSummary ||
+                !clearedView.shouldUpdateManualStarterButtons ||
+                !clearedView.shouldUpdateSidebar) {
+              throw new Error(`clear run detail view flags wrong: ${JSON.stringify(clearedView)}`);
+            }
+            const defaultClearedView = results.clearRunDetailViewState("");
+            const defaultEntry = defaultClearedView.domUpdates.find(update => update.selector === "#results-entry-hint");
+            if (defaultEntry.text !== "请先从左侧选择一个结果。") {
+              throw new Error(`empty clear message should use fallback: ${JSON.stringify(defaultEntry)}`);
             }
             const editableDetail = results.runDetailState({
               run: { path: "C:/runs/detail" },
