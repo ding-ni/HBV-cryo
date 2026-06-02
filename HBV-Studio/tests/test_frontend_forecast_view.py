@@ -126,6 +126,97 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_source_options_and_summary_rendering(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            for (const name of ["renderForecastSourceOptions", "renderForecastSourceSummary"]) {
+              if (typeof view?.[name] !== "function") throw new Error(`missing forecast source export: ${name}`);
+            }
+            const helpers = {
+              escapeHtml(value) {
+                return String(value ?? "").replace(/[&<>"']/g, ch => ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  "\"": "&quot;",
+                  "'": "&#39;",
+                }[ch]));
+              },
+              forecastArchiveDetailText() { return "窗口：2026-01-11 至 2026-01-20"; },
+              forecastArchiveSummaryText() { return "待本次预报生成"; },
+              forecastFriendlyRunName(run) { return `友好名<${run.name}>`; },
+              forecastParameterContextHtml() { return '<div class="forecast-parameter-context">参数上下文</div>'; },
+              forecastParameterSourceSummary() { return { value: "源结果参数（15 项）", detail: "读取源结果保存参数" }; },
+              forecastRunReady(run) { return Boolean(run.ready); },
+              forecastRunReadinessText(run) { return run.ready ? "可起报" : "缺少起报状态"; },
+              forecastSuggestedStart() { return "2026-01-11"; },
+              objectiveLabel(value) { return `目标-${value}`; },
+              profileLabel(value) { return value === "daily" ? "日尺度" : value; },
+              runDisplayName(run) { return `结果<${run.name}>`; },
+              runProfileValue(run) { return run.profile; },
+              runTypeLabel(value) { return value === "calibration" ? "率定结果" : value; },
+              runTypeValue(run) { return run.kind; },
+              runWorkspaceName() { return "工作区<A>"; },
+              samePath(a, b) { return String(a || "").toLowerCase() === String(b || "").toLowerCase(); },
+            };
+
+            const options = view.renderForecastSourceOptions([
+              { path: "C:/runs/A", name: "A" },
+              { path: "C:/runs/B", name: "B" },
+            ], "c:/RUNS/b", helpers);
+            if (options.disabled || !options.html.includes('value="C:/runs/B" selected')) {
+              throw new Error(`selected forecast option missing: ${options.html}`);
+            }
+            if (!options.html.includes("友好名&lt;A&gt; · 缺少起报状态")) {
+              throw new Error(`option label should be escaped: ${options.html}`);
+            }
+            const emptyOptions = view.renderForecastSourceOptions([], "", helpers);
+            if (!emptyOptions.disabled || !emptyOptions.html.includes("暂无可选源结果")) {
+              throw new Error(`empty options wrong: ${JSON.stringify(emptyOptions)}`);
+            }
+
+            const emptySummary = view.renderForecastSourceSummary(null, helpers);
+            if (emptySummary.ready || emptySummary.hintClassName !== "hint-box status-warn" || !emptySummary.html.includes("当前没有可作为预报起点")) {
+              throw new Error(`empty summary wrong: ${JSON.stringify(emptySummary)}`);
+            }
+
+            const summary = view.renderForecastSourceSummary({
+              path: "C:/runs/A",
+              name: "A",
+              ready: true,
+              kind: "calibration",
+              profile: "daily",
+              state_snapshot_time: "2026-01-10",
+              source_state_snapshot_time: "2026-01-09",
+              effective_objective_mode: "daily_unified_professional_v1",
+              workspace_name: "",
+            }, helpers);
+            if (!summary.ready || summary.hintClassName !== "hint-box status-ok" || !summary.hintText.includes("建议从 2026-01-11 起报")) {
+              throw new Error(`summary hint wrong: ${summary.hintClassName} ${summary.hintText}`);
+            }
+            for (const text of ["友好名&lt;A&gt;", "结果类型", "率定结果", "日尺度", "目标-daily_unified_professional_v1", "源结果参数（15 项）", "参数上下文", "工作区&lt;A&gt;"]) {
+              if (!summary.html.includes(text)) throw new Error(`summary missing ${text}: ${summary.html}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_task_list_filters_sorts_and_renders_cards(self) -> None:
         script = textwrap.dedent(
             r"""

@@ -104,6 +104,89 @@
     };
   }
 
+  function renderForecastSourceOptions(candidates = [], selectedPath = "", helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const forecastFriendlyRunName = helpers.forecastFriendlyRunName || (run => run?.display_name || run?.name || "未命名结果");
+    const forecastRunReadinessText = helpers.forecastRunReadinessText || (() => "可起报");
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const items = Array.isArray(candidates) ? candidates : [];
+    return {
+      disabled: !items.length,
+      html: items.length
+        ? items.map(run => {
+          const label = `${forecastFriendlyRunName(run)} · ${forecastRunReadinessText(run)}`;
+          return `<option value="${escapeHtml(run?.path || "")}" ${samePath(run?.path, selectedPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+        }).join("")
+        : '<option value="">暂无可选源结果</option>',
+    };
+  }
+
+  function renderForecastSourceSummary(run = null, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const forecastRunReady = helpers.forecastRunReady || (item => Boolean(item?.path));
+    const forecastRunReadinessText = helpers.forecastRunReadinessText || (() => "可起报");
+    const runTypeValue = helpers.runTypeValue || (item => item?.run_type || "");
+    const runTypeLabel = helpers.runTypeLabel || (value => value || "结果");
+    const profileLabel = helpers.profileLabel || (value => value || "—");
+    const runProfileValue = helpers.runProfileValue || (item => item?.calibration_profile || "");
+    const objectiveLabel = helpers.objectiveLabel || (value => value || "—");
+    const runDisplayName = helpers.runDisplayName || (item => item?.display_name || item?.name || "未命名结果");
+    const forecastFriendlyRunName = helpers.forecastFriendlyRunName || runDisplayName;
+    const forecastSuggestedStart = helpers.forecastSuggestedStart || (() => "");
+    const forecastArchiveSummaryTextHelper = helpers.forecastArchiveSummaryText || forecastArchiveSummaryText;
+    const forecastArchiveDetailTextHelper = helpers.forecastArchiveDetailText || forecastArchiveDetailText;
+    const forecastParameterSourceSummaryHelper = helpers.forecastParameterSourceSummary || forecastParameterSourceSummary;
+    const forecastParameterContextHtml = helpers.forecastParameterContextHtml || (() => "");
+    const runWorkspaceName = helpers.runWorkspaceName || (() => "");
+    if (!run) {
+      return {
+        html: '<div class="hint-box status-warn" style="margin-top:12px">当前没有可作为预报起点的率定或手调结果。</div>',
+        hintText: "完成一次新版率定或手调重算后，可在这里直接接入未来气象驱动。",
+        hintClassName: "hint-box status-warn",
+        ready: false,
+        suggestedStart: "",
+      };
+    }
+    const ready = forecastRunReady(run);
+    const stateTime = run.state_snapshot_time || run.time_config?.forecast_end || run.time_config?.valid_end || run.time_config?.calib_end || "";
+    const sourceStateTime = run.source_state_snapshot_time || "";
+    const sourceType = runTypeLabel(runTypeValue(run));
+    const objective = objectiveLabel(run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "");
+    const archive = run.forecast_input_archive || {};
+    const parameterSource = forecastParameterSourceSummaryHelper(run.source_parameter_summary || {}, run);
+    const archiveText = forecastArchiveSummaryTextHelper(archive, runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成");
+    const archiveDetail = forecastArchiveDetailTextHelper(archive);
+    const suggestedStart = forecastSuggestedStart(run);
+    return {
+      html: `
+        <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
+          <div class="forecast-source-card-head">
+            <strong title="${escapeHtml(runDisplayName(run))}">${escapeHtml(forecastFriendlyRunName(run))}</strong>
+            <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(forecastRunReadinessText(run))}</span>
+          </div>
+          <div class="forecast-source-meta">
+            <span>结果类型</span><strong>${escapeHtml(sourceType)}</strong>
+            <span>计算尺度</span><strong>${escapeHtml(profileLabel(runProfileValue(run)))}</strong>
+            <span>状态时间</span><strong>${escapeHtml(stateTime || "未记录")}</strong>
+            ${suggestedStart ? `<span>建议起报</span><strong>${escapeHtml(suggestedStart.replace("T", " "))}</strong>` : ""}
+            ${sourceStateTime ? `<span>来源状态</span><strong>${escapeHtml(sourceStateTime)}</strong>` : ""}
+            <span>目标函数</span><strong>${escapeHtml(objective)}</strong>
+            <span>参数来源</span><strong title="${escapeHtml(parameterSource.detail)}">${escapeHtml(parameterSource.value)}</strong>
+            <span>预报气象</span><strong title="${escapeHtml(archiveDetail)}">${escapeHtml(archiveText)}</strong>
+          </div>
+          ${forecastParameterContextHtml(run)}
+          <small>${escapeHtml(run.workspace_name || runWorkspaceName(run) || "未关联工作区")}</small>
+        </div>
+      `,
+      hintText: ready
+        ? `预报运行将读取源结果的参数与末端状态，不重新率定；建议从 ${suggestedStart ? suggestedStart.replace("T", " ") : "源结果状态后一时间步"} 起报。若要从更晚时间起报，需要先补充历史气象强迫滚动更新状态。`
+        : "该源结果不能直接用于预报，请优先使用新版率定、手调结果或已保存起报状态的预报结果。",
+      hintClassName: `hint-box ${ready ? "status-ok" : "status-warn"}`,
+      ready,
+      suggestedStart,
+    };
+  }
+
   function restartStateRows(meta = {}, helpers = {}) {
     const shortPath = helpers.shortPath || defaultShortPath;
     const timeRangeText = helpers.timeRangeText || ((start, end) => [start, end].filter(Boolean).join(" ~ ") || "—");
@@ -646,6 +729,8 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastParameterSourceSummary,
+    renderForecastSourceOptions,
+    renderForecastSourceSummary,
     forecastRestartTasks,
     renderForecastTaskCard,
     renderForecastResultEmpty,

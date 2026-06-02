@@ -151,6 +151,8 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastParameterSourceSummary",
+      "renderForecastSourceOptions",
+      "renderForecastSourceSummary",
       "forecastRestartTasks",
       "renderForecastTaskCard",
       "renderForecastResultEmpty",
@@ -5558,13 +5560,13 @@ function renderForecastSourceOptions() {
   let selected = candidates.find(run => samePath(run.path, current));
   if (!selected) selected = candidates.find(forecastRunReady) || candidates[0] || null;
   state.forecastSourceRunPath = selected?.path || "";
-  select.disabled = !candidates.length;
-  select.innerHTML = candidates.length
-    ? candidates.map(run => {
-      const label = `${forecastFriendlyRunName(run)} · ${forecastRunReadinessText(run)}`;
-      return `<option value="${escapeHtml(run.path)}" ${samePath(run.path, state.forecastSourceRunPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
-    }).join("")
-    : '<option value="">暂无可选源结果</option>';
+  const rendered = window.HBVStudioForecastView.renderForecastSourceOptions(
+    candidates,
+    state.forecastSourceRunPath,
+    { escapeHtml, forecastFriendlyRunName, forecastRunReadinessText, samePath },
+  );
+  select.disabled = rendered.disabled;
+  select.innerHTML = rendered.html;
 }
 
 function renderForecastSourceSummary() {
@@ -5576,56 +5578,37 @@ function renderForecastSourceSummary() {
   const run = selectedForecastRun();
   if (openBtn) openBtn.disabled = !run?.path;
   if (startBtn) startBtn.disabled = !run?.path || !forecastRunReady(run);
-  if (!run) {
-    host.innerHTML = '<div class="hint-box status-warn" style="margin-top:12px">当前没有可作为预报起点的率定或手调结果。</div>';
-    if (hint) {
-      hint.textContent = "完成一次新版率定或手调重算后，可在这里直接接入未来气象驱动。";
-      hint.className = "hint-box status-warn";
-    }
-    return;
-  }
-  const ready = forecastRunReady(run);
-  const stateTime = run.state_snapshot_time || run.time_config?.forecast_end || run.time_config?.valid_end || run.time_config?.calib_end || "";
-  const sourceStateTime = run.source_state_snapshot_time || "";
-  const sourceType = runTypeLabel(runTypeValue(run));
-  const objective = objectiveLabel(run.effective_objective_mode || run.objective_family || run.recorded_objective_family || "");
-  const archive = run.forecast_input_archive || {};
-  const parameterSource = forecastParameterSourceSummary(run.source_parameter_summary || {}, run);
-  const archiveText = forecastArchiveSummaryText(archive, runTypeValue(run) === "forecast_restart" ? "未记录气象归档" : "待本次预报生成");
-  const archiveDetail = forecastArchiveDetailText(archive);
-  const suggestedStart = forecastSuggestedStart(run);
-  host.innerHTML = `
-    <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
-      <div class="forecast-source-card-head">
-        <strong title="${escapeHtml(runDisplayName(run))}">${escapeHtml(forecastFriendlyRunName(run))}</strong>
-        <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(forecastRunReadinessText(run))}</span>
-      </div>
-      <div class="forecast-source-meta">
-        <span>结果类型</span><strong>${escapeHtml(sourceType)}</strong>
-        <span>计算尺度</span><strong>${escapeHtml(profileLabel(runProfileValue(run)))}</strong>
-        <span>状态时间</span><strong>${escapeHtml(stateTime || "未记录")}</strong>
-        ${suggestedStart ? `<span>建议起报</span><strong>${escapeHtml(suggestedStart.replace("T", " "))}</strong>` : ""}
-        ${sourceStateTime ? `<span>来源状态</span><strong>${escapeHtml(sourceStateTime)}</strong>` : ""}
-        <span>目标函数</span><strong>${escapeHtml(objective)}</strong>
-        <span>参数来源</span><strong title="${escapeHtml(parameterSource.detail)}">${escapeHtml(parameterSource.value)}</strong>
-        <span>预报气象</span><strong title="${escapeHtml(archiveDetail)}">${escapeHtml(archiveText)}</strong>
-      </div>
-      ${forecastParameterContextHtml(run)}
-      <small>${escapeHtml(run.workspace_name || runWorkspaceName(run) || "未关联工作区")}</small>
-    </div>
-  `;
-  const inputType = forecastInputType(run);
-  ["forecast-start", "forecast-end"].forEach(id => {
-    const input = document.getElementById(id);
-    if (input && input.type !== inputType) input.type = inputType;
+  const rendered = window.HBVStudioForecastView.renderForecastSourceSummary(run, {
+    escapeHtml,
+    forecastArchiveDetailText,
+    forecastArchiveSummaryText,
+    forecastFriendlyRunName,
+    forecastParameterContextHtml,
+    forecastParameterSourceSummary,
+    forecastRunReady,
+    forecastRunReadinessText,
+    forecastSuggestedStart,
+    objectiveLabel,
+    profileLabel,
+    runDisplayName,
+    runProfileValue,
+    runTypeLabel,
+    runTypeValue,
+    runWorkspaceName,
   });
+  host.innerHTML = rendered.html;
+  if (run) {
+    const inputType = forecastInputType(run);
+    ["forecast-start", "forecast-end"].forEach(id => {
+      const input = document.getElementById(id);
+      if (input && input.type !== inputType) input.type = inputType;
+    });
+  }
   const startInput = $("#forecast-start");
-  if (startInput && suggestedStart && !startInput.value) startInput.value = suggestedStart;
+  if (startInput && rendered.suggestedStart && !startInput.value) startInput.value = rendered.suggestedStart;
   if (hint) {
-    hint.textContent = ready
-      ? `预报运行将读取源结果的参数与末端状态，不重新率定；建议从 ${suggestedStart ? suggestedStart.replace("T", " ") : "源结果状态后一时间步"} 起报。若要从更晚时间起报，需要先补充历史气象强迫滚动更新状态。`
-      : "该源结果不能直接用于预报，请优先使用新版率定、手调结果或已保存起报状态的预报结果。";
-    hint.className = `hint-box ${ready ? "status-ok" : "status-warn"}`;
+    hint.textContent = rendered.hintText;
+    hint.className = rendered.hintClassName;
   }
 }
 
