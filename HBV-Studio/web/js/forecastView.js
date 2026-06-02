@@ -206,6 +206,34 @@
     };
   }
 
+  function renderForecastResultOptions(runs = [], selectedPath = "", helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
+    const timeRangeText = helpers.timeRangeText || ((start, end) => [start, end].filter(Boolean).join(" ~ ") || "—");
+    const forecastFriendlyRunName = helpers.forecastFriendlyRunName || (run => run?.display_name || run?.name || "连续状态预报结果");
+    const items = Array.isArray(runs) ? runs : [];
+    const selected = forecastSelectedResultRun(items, selectedPath, { samePath });
+    return {
+      selected,
+      html: items.length
+        ? items.map(run => {
+          const range = timeRangeText(
+            run?.time_config?.forecast_start,
+            run?.time_config?.forecast_end,
+            run?.time_step_hours || run?.time_config?.time_step_hours || 24,
+          );
+          const friendly = forecastFriendlyRunName(run);
+          const label = range && range !== "—" && !friendly.includes(range) ? `${friendly} · ${range}` : friendly;
+          return `
+            <option value="${escapeHtml(run?.path || "")}" ${selected && samePath(run?.path, selected.path) ? "selected" : ""}>
+              ${escapeHtml(label)}
+            </option>
+          `;
+        }).join("")
+        : '<option value="">暂无连续状态预报结果</option>',
+    };
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -930,6 +958,7 @@
     pickForecastSourceRun,
     renderForecastSourceOptions,
     renderForecastSourceSummary,
+    renderForecastResultOptions,
     forecastRestartTasks,
     renderForecastTaskCard,
     renderForecastResultEmpty,

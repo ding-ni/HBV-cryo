@@ -133,7 +133,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastResultRuns", "forecastSelectedResultRun"]) {
+            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "renderForecastResultOptions"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
             }
 
@@ -156,6 +156,46 @@ class FrontendForecastViewTests(unittest.TestCase):
             const fallback = view.forecastSelectedResultRun(forecastRuns, "C:/runs/missing", { samePath });
             if (fallback?.id !== "forecast-new") throw new Error(`fallback result mismatch: ${fallback?.id}`);
             if (view.forecastSelectedResultRun([], "", { samePath }) !== null) throw new Error("empty result list should return null");
+
+            const rendered = view.renderForecastResultOptions([
+              {
+                path: "C:/runs/forecast<A>",
+                display_name: "预报<A>",
+                time_config: { forecast_start: "2026-06-01", forecast_end: "2026-06-03", time_step_hours: 24 },
+              },
+              {
+                path: "C:/runs/forecast-b",
+                display_name: "预报B · 2026-06-04 至 2026-06-05",
+                time_config: { forecast_start: "2026-06-04", forecast_end: "2026-06-05", time_step_hours: 24 },
+              },
+            ], "c:/RUNS/forecast<a>", {
+              escapeHtml(value) {
+                return String(value ?? "").replace(/[&<>"']/g, ch => ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  "\"": "&quot;",
+                  "'": "&#39;",
+                }[ch]));
+              },
+              forecastFriendlyRunName(run) { return run.display_name || "结果"; },
+              samePath,
+              timeRangeText(start, end) { return start && end ? `${start} 至 ${end}` : "—"; },
+            });
+            if (rendered.selected?.path !== "C:/runs/forecast<A>") throw new Error(`rendered selected mismatch: ${rendered.selected?.path}`);
+            if (!rendered.html.includes('value="C:/runs/forecast&lt;A&gt;" selected')) {
+              throw new Error(`selected escaped option missing: ${rendered.html}`);
+            }
+            if (!rendered.html.includes("预报&lt;A&gt; · 2026-06-01 至 2026-06-03")) {
+              throw new Error(`range label missing or not escaped: ${rendered.html}`);
+            }
+            if ((rendered.html.match(/2026-06-04 至 2026-06-05/g) || []).length !== 1) {
+              throw new Error(`range should not be duplicated when friendly name already contains it: ${rendered.html}`);
+            }
+            const emptyRendered = view.renderForecastResultOptions([], "", { samePath });
+            if (emptyRendered.selected !== null || !emptyRendered.html.includes("暂无连续状态预报结果")) {
+              throw new Error(`empty result options wrong: ${JSON.stringify(emptyRendered)}`);
+            }
             """
         )
         result = subprocess.run(

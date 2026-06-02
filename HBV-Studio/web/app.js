@@ -170,6 +170,7 @@ const frontendModuleContracts = [
       "pickForecastSourceRun",
       "renderForecastSourceOptions",
       "renderForecastSourceSummary",
+      "renderForecastResultOptions",
       "forecastRestartTasks",
       "renderForecastTaskCard",
       "renderForecastResultEmpty",
@@ -5731,19 +5732,15 @@ function renderForecastResultPanel() {
     }
     return;
   }
-  let selected = runs.find(run => samePath(run.path, state.forecastResultRunPath)) || runs[0];
+  const rendered = window.HBVStudioForecastView.renderForecastResultOptions(
+    runs,
+    state.forecastResultRunPath,
+    { escapeHtml, forecastFriendlyRunName, samePath, timeRangeText },
+  );
+  const selected = rendered.selected || runs[0];
   state.forecastResultRunPath = selected.path;
   select.disabled = false;
-  select.innerHTML = runs.map(run => {
-    const range = timeRangeText(run.time_config?.forecast_start, run.time_config?.forecast_end, run.time_step_hours || run.time_config?.time_step_hours || 24);
-    const friendly = forecastFriendlyRunName(run);
-    const label = range && range !== "—" && !friendly.includes(range) ? `${friendly} · ${range}` : friendly;
-    return `
-      <option value="${escapeHtml(run.path)}" ${samePath(run.path, selected.path) ? "selected" : ""}>
-        ${escapeHtml(label)}
-      </option>
-    `;
-  }).join("");
+  select.innerHTML = rendered.html;
   setForecastResultButtons(selected);
   if (state.forecastResultData?.run?.path && samePath(state.forecastResultData.run.path, selected.path)) {
     renderForecastResultDetail(state.forecastResultData);
