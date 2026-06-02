@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -1438,11 +1438,7 @@ function renderTaskPresetContextHint() {
 
 function clearManualPresetComparison({ silent = false } = {}) {
   compareRequestGuard.cancel();
-  state.compareSeries = null;
-  state.compareMetrics = null;
-  state.compareLabel = "";
-  state.comparePresetId = "";
-  state.compareAdjusted = false;
+  Object.assign(state, window.HBVStudioResultsView.clearRunComparisonState().statePatch);
   const host = $("#manual-compare-summary");
   if (host) {
     host.style.display = "none";
@@ -5162,27 +5158,14 @@ async function compareSelectedManualPresetSimulation() {
     if (!samePath(runPath, state._runData?.run?.path || "")) return;
     const currentPresetId = String(selectedManualPreset()?.id || "").trim();
     if (presetId && currentPresetId && presetId !== currentPresetId) return;
-    const d = payload.data;
-    state.compareLabel = preset.name || "参数集";
-    state.comparePresetId = presetId;
-    state.compareMetrics = d.metrics || {};
-    state.compareAdjusted = Boolean(d.runtime?.params_adjusted);
-    state.compareSeries = {
-      dates: d.dates || [],
-      q_sim: d.q_sim || [],
-      residuals: (d.q_sim || []).map((s, i) => (s != null && d.q_obs[i] != null) ? s - d.q_obs[i] : null),
-    };
+    Object.assign(state, window.HBVStudioResultsView.runComparisonSuccessState(preset, payload.data || {}).statePatch);
     renderCharts(state._runData);
     updateCompareSummary();
     updateManualPresetControls();
     showToast(`已生成参数集“${preset.name}”的对比曲线。`);
   } catch (err) {
     if (!compareRequestGuard.isActive(requestToken)) return;
-    state.compareSeries = null;
-    state.compareMetrics = null;
-    state.compareLabel = "";
-    state.comparePresetId = "";
-    state.compareAdjusted = false;
+    Object.assign(state, window.HBVStudioResultsView.clearRunComparisonState().statePatch);
     if (state._runData) {
       renderCharts(state._runData);
       const meta = state._runData?.metadata || {};

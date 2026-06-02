@@ -178,7 +178,20 @@
     return String(model.selectedRunPath || model.currentRun?.run?.path || model.currentRun?.path || "").trim();
   }
 
+  function clearRunComparisonState() {
+    return {
+      statePatch: {
+        compareSeries: null,
+        compareMetrics: null,
+        compareLabel: "",
+        comparePresetId: "",
+        compareAdjusted: false,
+      },
+    };
+  }
+
   function clearRunDetailState() {
+    const comparison = clearRunComparisonState().statePatch;
     return {
       statePatch: {
         currentRun: null,
@@ -186,11 +199,7 @@
         _runData: null,
         _runParams: null,
         _runOrigParams: null,
-        compareSeries: null,
-        compareMetrics: null,
-        compareLabel: "",
-        comparePresetId: "",
-        compareAdjusted: false,
+        ...comparison,
         lastRunExportPath: "",
         runManualPresets: [],
         runManualPresetConfigPath: "",
@@ -223,14 +232,28 @@
         _runData: detailData,
         _runParams: editable ? { ...params } : null,
         _runOrigParams: editable ? { ...params } : null,
-        compareSeries: null,
-        compareMetrics: null,
-        compareLabel: "",
-        comparePresetId: "",
-        compareAdjusted: false,
+        ...clearRunComparisonState().statePatch,
         selectedRunPath: resolvedRunPath,
         currentRun: detailData,
         lastRunExportPath: "",
+      },
+    };
+  }
+
+  function runComparisonSuccessState(preset = {}, resultData = {}) {
+    const qSim = Array.isArray(resultData?.q_sim) ? resultData.q_sim : [];
+    const qObs = Array.isArray(resultData?.q_obs) ? resultData.q_obs : [];
+    return {
+      statePatch: {
+        compareLabel: String(preset?.name || "参数集"),
+        comparePresetId: String(preset?.id || "").trim(),
+        compareMetrics: resultData?.metrics || {},
+        compareAdjusted: Boolean(resultData?.runtime?.params_adjusted),
+        compareSeries: {
+          dates: Array.isArray(resultData?.dates) ? resultData.dates : [],
+          q_sim: qSim,
+          residuals: qSim.map((s, i) => (s != null && qObs[i] != null) ? s - qObs[i] : null),
+        },
       },
     };
   }
@@ -805,6 +828,7 @@
 
   window.HBVStudioResultsView = {
     alignedRunFiltersForSelection,
+    clearRunComparisonState,
     clearRunDetailState,
     filterRuns,
     latestEditableRunPath,
@@ -824,6 +848,7 @@
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
+    runComparisonSuccessState,
     runDetailState,
     runListState,
     runProfileValue,

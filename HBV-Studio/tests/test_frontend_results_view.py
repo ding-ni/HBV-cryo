@@ -8,6 +8,21 @@ from pathlib import Path
 STUDIO_DIR = Path(__file__).resolve().parents[1]
 
 
+def run_node_script(script: str) -> subprocess.CompletedProcess[str]:
+    script_path = STUDIO_DIR / ".tmp_frontend_results_view_test.js"
+    try:
+        script_path.write_text(script, encoding="utf-8")
+        return subprocess.run(
+            ["node", str(script_path)],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+    finally:
+        script_path.unlink(missing_ok=True)
+
+
 class FrontendResultsViewTests(unittest.TestCase):
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_results_view_renders_filters_hints_and_compact_widgets(self) -> None:
@@ -21,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -215,6 +230,39 @@ class FrontendResultsViewTests(unittest.TestCase):
                 readonlyDetail.statePatch._runParams !== null || readonlyDetail.statePatch._runOrigParams !== null ||
                 readonlyDetail.statePatch.currentRun?.path !== "C:/runs/readonly") {
               throw new Error(`readonly run detail state wrong: ${JSON.stringify(readonlyDetail)}`);
+            }
+            const clearedComparison = results.clearRunComparisonState().statePatch;
+            if (clearedComparison.compareSeries !== null || clearedComparison.compareMetrics !== null ||
+                clearedComparison.compareLabel !== "" || clearedComparison.comparePresetId !== "" ||
+                clearedComparison.compareAdjusted !== false) {
+              throw new Error(`clear comparison state wrong: ${JSON.stringify(clearedComparison)}`);
+            }
+            const comparisonSuccess = results.runComparisonSuccessState({
+              id: "preset-A",
+              name: "参数集A",
+            }, {
+              dates: ["2020-01-01", "2020-01-02", "2020-01-03"],
+              q_sim: [10, 12, null],
+              q_obs: [9, null, 13],
+              metrics: { calibration: { nse: 0.86 } },
+              runtime: { params_adjusted: true },
+            }).statePatch;
+            if (comparisonSuccess.compareLabel !== "参数集A" ||
+                comparisonSuccess.comparePresetId !== "preset-A" ||
+                comparisonSuccess.compareAdjusted !== true ||
+                comparisonSuccess.compareMetrics.calibration.nse !== 0.86 ||
+                comparisonSuccess.compareSeries.dates.length !== 3 ||
+                comparisonSuccess.compareSeries.q_sim[1] !== 12 ||
+                comparisonSuccess.compareSeries.residuals.join("|") !== "1||") {
+              throw new Error(`comparison success state wrong: ${JSON.stringify(comparisonSuccess)}`);
+            }
+            const fallbackComparison = results.runComparisonSuccessState({}, {
+              q_sim: [1, 2],
+            }).statePatch;
+            if (fallbackComparison.compareLabel !== "参数集" ||
+                fallbackComparison.comparePresetId !== "" ||
+                fallbackComparison.compareSeries.residuals.join("|") !== "|") {
+              throw new Error(`fallback comparison state wrong: ${JSON.stringify(fallbackComparison)}`);
             }
             if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
               throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");
@@ -696,13 +744,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             """
         )
-        result = subprocess.run(
-            ["node", "-e", script],
-            cwd=STUDIO_DIR,
-            text=True,
-            capture_output=True,
-            timeout=20,
-        )
+        result = run_node_script(script)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
