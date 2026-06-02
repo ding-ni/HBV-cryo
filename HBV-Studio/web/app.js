@@ -125,6 +125,11 @@ const frontendModuleContracts = [
     ],
   },
   {
+    script: "./js/engineeringFocusView.js",
+    global: "HBVStudioEngineeringFocusView",
+    exports: ["engineeringFocusChecksState", "renderEngineeringFocusChecks"],
+  },
+  {
     script: "./js/parameterLibrary.js",
     global: "HBVStudioParameterLibrary",
     exports: [
@@ -1811,38 +1816,22 @@ function focusStatusClass(status) {
   return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
 }
 
-function renderEngineeringFocusChecks(checks = [], { title = "专项检查", emptyText = "暂无专项检查。" } = {}) {
-  if (!checks.length) {
-    return `<div class="hint-box">${escapeHtml(emptyText)}</div>`;
-  }
-  const stationPrecipHelpers = {
+function engineeringFocusHelpers() {
+  return {
     escapeHtml,
     focusStatusClass,
     focusStatusLabel,
     formatNumber,
+    renderStationEventCoverage: (check, helpers) => window.HBVStudioStationPrecip.renderStationEventCoverage(check, helpers),
   };
-  return `
-    <div class="focus-check-grid">
-      ${checks.map(check => `
-        <section class="focus-check-card">
-          <div class="focus-check-head">
-            <strong>${escapeHtml(check.title || title)}</strong>
-            <span class="status-badge ${focusStatusClass(check.status)}">${escapeHtml(focusStatusLabel(check.status))}</span>
-          </div>
-          <div class="focus-check-summary">${escapeHtml(check.summary || "")}</div>
-          <div class="focus-check-items">
-            ${(check.items || []).map(item => `
-              <div class="focus-check-item">
-                <span class="focus-check-label">${escapeHtml(item.label || "")}</span>
-                <span class="focus-check-value ${focusStatusClass(item.status)}">${escapeHtml(item.value || "—")}</span>
-              </div>
-            `).join("")}
-          </div>
-          ${window.HBVStudioStationPrecip.renderStationEventCoverage(check, stationPrecipHelpers)}
-        </section>
-      `).join("")}
-    </div>
-  `;
+}
+
+function renderEngineeringFocusChecks(checks = [], options = {}) {
+  return window.HBVStudioEngineeringFocusView.renderEngineeringFocusChecks(checks, options, engineeringFocusHelpers());
+}
+
+function engineeringFocusChecksState(selector, checks = [], options = {}) {
+  return window.HBVStudioEngineeringFocusView.engineeringFocusChecksState(selector, checks, options, engineeringFocusHelpers());
 }
 
 function stationPrecipModeLabel(mode) {
@@ -1868,7 +1857,7 @@ function renderStationPrecipCheckOverview(validation = null) {
   const mode = getSelectedRadio("wz-precip-mode") || state.currentWorkspace?.气象策略?.降水方案 || "grid_only";
   const check = window.HBVStudioStationPrecip.stationPrecipCheckFromValidation(validation);
   if (check) {
-    host.innerHTML = renderEngineeringFocusChecks([check], { title: "站点降水专项检查" });
+    applyDomUpdates(engineeringFocusChecksState("#wz-station-check-overview", [check], { title: "站点降水专项检查" }).domUpdates);
     return;
   }
   const stationPrec = $("#wz-station-prec")?.value.trim() || state.currentWorkspace?.气象策略?.站点降水_csv || "";
@@ -1877,7 +1866,7 @@ function renderStationPrecipCheckOverview(validation = null) {
     { mode, stationPrec, stationMeta },
     { shortPath },
   );
-  host.innerHTML = renderEngineeringFocusChecks([fallback], { title: "站点降水专项检查" });
+  applyDomUpdates(engineeringFocusChecksState("#wz-station-check-overview", [fallback], { title: "站点降水专项检查" }).domUpdates);
 }
 
 function updateProjectFocusHint() {
