@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3717,14 +3717,24 @@ async function pollMeteoImportTask(taskId) {
 
 // --- GIS import ---
 
+function applyGisImportUiState(uiState = {}) {
+  const hint = $("#wz-import-gis-hint");
+  if (!hint || !uiState.hint) return;
+  if (Object.prototype.hasOwnProperty.call(uiState.hint, "text")) {
+    hint.textContent = uiState.hint.text;
+  }
+  if (Object.prototype.hasOwnProperty.call(uiState.hint, "className")) {
+    hint.className = uiState.hint.className;
+  }
+}
+
 async function importGisFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
   const demPath = $("#wz-import-dem").value.trim();
   const flowaccPath = $("#wz-import-flowacc").value.trim();
   if (!demPath || !flowaccPath) { showToast("请至少选择裁剪后 DEM 和流量累积掩膜文件。", true); return; }
-  const hint = $("#wz-import-gis-hint");
-  hint.textContent = "正在导入...";
+  applyGisImportUiState(window.HBVStudioDataPrepView.gisImportStartingUiState());
   try {
     const payload = await apiPost("/api/gis/import", {
       config_path: state.wizardWorkspacePath,
@@ -3733,15 +3743,13 @@ async function importGisFiles() {
       flowdir_path: $("#wz-import-flowdir").value.trim() || "",
       glacier_mask_path: $("#wz-import-glacier").value.trim() || "",
     });
-    hint.textContent = payload.data?.message || "导入完成！";
-    hint.className = "hint-box status-ok";
+    applyGisImportUiState(window.HBVStudioDataPrepView.gisImportSuccessUiState(payload.data));
     await loadBootstrapStatus();
     await loadPrepSteps();
     await Promise.allSettled([refreshCurrentWorkspaceWorkflow(), refreshCurrentWorkspaceAdvice()]);
     showToast("GIS 文件导入成功");
   } catch (err) {
-    hint.textContent = err.message;
-    hint.className = "hint-box status-fail";
+    applyGisImportUiState(window.HBVStudioDataPrepView.gisImportErrorUiState(err));
   }
 }
 

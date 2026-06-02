@@ -201,6 +201,32 @@
     }).join("");
   }
 
+  function gisImportStartingUiState() {
+    return {
+      hint: {
+        text: "正在导入...",
+      },
+    };
+  }
+
+  function gisImportSuccessUiState(result = {}) {
+    return {
+      hint: {
+        text: result?.message || "导入完成！",
+        className: "hint-box status-ok",
+      },
+    };
+  }
+
+  function gisImportErrorUiState(error = {}) {
+    return {
+      hint: {
+        text: String(error?.message || error || "GIS 文件导入失败"),
+        className: "hint-box status-fail",
+      },
+    };
+  }
+
   function describeEra5Need(sources = {}) {
     if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
       return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
@@ -763,6 +789,9 @@
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    gisImportErrorUiState,
+    gisImportStartingUiState,
+    gisImportSuccessUiState,
     emptyInputCheckCache,
     hasRecentInputCheckCache,
     inputCheckCompletionState,
