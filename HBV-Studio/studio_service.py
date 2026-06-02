@@ -205,7 +205,7 @@ from services.meteo_config import (
     resolve_precip_source,
 )
 from services.meteo_status import MeteoStateContext
-from services.meteo_status import cdsapi_status as build_cdsapi_status
+from services.meteo_status import cdsapi_status
 from services.meteo_status import clear_meteo_state as build_clear_meteo_state
 from services.meteo_status import meteo_state_path as build_meteo_state_path
 from services.meteo_status import read_meteo_state as build_read_meteo_state
@@ -328,7 +328,7 @@ from services.tasks import (
     start_process_task as build_start_process_task,
     subprocess_task_env as build_subprocess_task_env,
     task_monitor_context as build_task_monitor_context,
-    task_progress_snapshot as build_task_progress_snapshot,
+    task_progress_snapshot,
     update_task_metadata as build_update_task_metadata,
 )
 from services.workspace_advice import WorkspaceAdviceContext, workspace_advice as build_workspace_advice
@@ -730,10 +730,6 @@ def write_meteo_state(config: dict[str, Any], data: dict[str, Any], profile: str
 
 def clear_meteo_state(config: dict[str, Any], profile: str | None = None) -> None:
     build_clear_meteo_state(config, _meteo_state_context(), profile)
-
-
-def task_progress_snapshot(task: TaskRecord) -> dict[str, Any] | None:
-    return build_task_progress_snapshot(task)
 
 
 def _manual_preset_context() -> ManualPresetContext:
@@ -2355,10 +2351,6 @@ def dashboard_payload() -> dict[str, Any]:
             project_runtime_dir=PROJECT_RUNTIME_DIR,
         )
     )
-
-
-def cdsapi_status() -> dict[str, Any]:
-    return build_cdsapi_status()
 
 
 # ---------------------------------------------------------------------------
