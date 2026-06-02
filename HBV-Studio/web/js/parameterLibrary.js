@@ -559,21 +559,24 @@
         paramUpdates: [],
         hint: { visible: false, className: "", text: "" },
         presetName: "",
+        domUpdates: [],
       };
     }
     const presetName = String(preset?.name || "参数集").trim() || "参数集";
     const result = manualPresetAppliedParams(currentParams, originalParams, preset);
     const contextWarning = String(options.contextWarning || "").trim();
+    const hint = {
+      visible: true,
+      className: `hint-box ${contextWarning ? "status-warn" : "status-ok"}`.trim(),
+      text: `已载入参数集：${presetName}${preset.params_adjusted ? "（已按约束自动修正）" : ""}${contextWarning ? `。${contextWarning}` : ""}`,
+    };
     return {
       applied: true,
       params: result.params,
       paramUpdates: result.applied,
-      hint: {
-        visible: true,
-        className: `hint-box ${contextWarning ? "status-warn" : "status-ok"}`.trim(),
-        text: `已载入参数集：${presetName}${preset.params_adjusted ? "（已按约束自动修正）" : ""}${contextWarning ? `。${contextWarning}` : ""}`,
-      },
+      hint,
       presetName,
+      domUpdates: [{ selector: "#resim-hint", visible: hint.visible, text: hint.text, className: hint.className }],
     };
   }
 
@@ -607,14 +610,17 @@
         params: originalParams,
         paramUpdates: [],
         hint: { visible: false, className: "", text: "" },
+        domUpdates: [],
       };
     }
     const params = { ...originalParams };
+    const hint = { visible: false, className: "hint-box", text: "" };
     return {
       reset: true,
       params,
       paramUpdates: Object.entries(params).map(([name, value]) => ({ name, value, changed: false })),
-      hint: { visible: false, className: "hint-box", text: "" },
+      hint,
+      domUpdates: [{ selector: "#resim-hint", visible: hint.visible, text: hint.text, className: hint.className }],
     };
   }
 

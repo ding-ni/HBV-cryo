@@ -522,6 +522,12 @@ class FrontendParameterLibraryTests(unittest.TestCase):
                 state.hint.text !== "已载入参数集：Trial A（已按约束自动修正）。注意：降水驱动不同。") {
               throw new Error(`apply state hint wrong: ${JSON.stringify(state.hint)}`);
             }
+            const applyDom = Object.fromEntries(state.domUpdates.map(update => [update.selector, update]));
+            if (applyDom["#resim-hint"].visible !== true ||
+                applyDom["#resim-hint"].text !== "已载入参数集：Trial A（已按约束自动修正）。注意：降水驱动不同。" ||
+                applyDom["#resim-hint"].className !== "hint-box status-warn") {
+              throw new Error(`apply state DOM updates wrong: ${JSON.stringify(applyDom)}`);
+            }
             const okHint = library.manualPresetApplyState(
               { TT: 0.1 },
               { TT: 0.1 },
@@ -532,7 +538,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
               throw new Error(`apply state default hint wrong: ${JSON.stringify(okHint)}`);
             }
             const missing = library.manualPresetApplyState(null, { TT: 0.1 }, { name: "Trial", params: { TT: 0.2 } });
-            if (missing.applied || missing.paramUpdates.length || missing.hint.visible || missing.presetName) {
+            if (missing.applied || missing.paramUpdates.length || missing.hint.visible || missing.presetName || missing.domUpdates.length) {
               throw new Error(`missing context should not apply preset: ${JSON.stringify(missing)}`);
             }
 
@@ -565,12 +571,18 @@ class FrontendParameterLibraryTests(unittest.TestCase):
                 reset.hint.visible || reset.hint.className !== "hint-box") {
               throw new Error(`manual param reset state wrong: ${JSON.stringify(reset)}`);
             }
+            const resetDom = Object.fromEntries(reset.domUpdates.map(update => [update.selector, update]));
+            if (resetDom["#resim-hint"].visible !== false ||
+                resetDom["#resim-hint"].text !== "" ||
+                resetDom["#resim-hint"].className !== "hint-box") {
+              throw new Error(`manual param reset DOM updates wrong: ${JSON.stringify(resetDom)}`);
+            }
             reset.params.TT = 9;
             if (reset.paramUpdates.find(item => item.name === "TT").value !== 0.1) {
               throw new Error("manual param reset updates should not track later params mutation");
             }
             const missingReset = library.manualParamResetState(null);
-            if (missingReset.reset || missingReset.paramUpdates.length || missingReset.hint.visible) {
+            if (missingReset.reset || missingReset.paramUpdates.length || missingReset.hint.visible || missingReset.domUpdates.length) {
               throw new Error(`missing manual param reset should not reset: ${JSON.stringify(missingReset)}`);
             }
             const resetView = library.manualParamResetViewState(

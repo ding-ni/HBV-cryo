@@ -4642,12 +4642,7 @@ function applyManualPresetToCurrentRun(preset) {
     const item = slider?.closest(".param-slider-item");
     if (item) item.classList.toggle("changed", changed);
   });
-  const hint = $("#resim-hint");
-  if (hint) {
-    hint.style.display = applied.hint.visible ? "" : "none";
-    hint.textContent = applied.hint.text;
-    hint.className = applied.hint.className;
-  }
+  applyDomUpdates(applied.domUpdates);
   updateManualChangeSummary();
 }
 
@@ -4977,12 +4972,7 @@ function resetParamsToOriginal() {
   });
   if (reset.shouldRestoreRun) renderCharts(reset.chartData);
   if (reset.shouldUpdateMetrics) updateMetricsStrip(reset.calibrationMetrics, reset.validationMetrics, reset.metricMetadata);
-  const hint = $("#resim-hint");
-  if (hint) {
-    hint.style.display = reset.hint.visible ? "" : "none";
-    hint.textContent = reset.hint.text;
-    hint.className = reset.hint.className;
-  }
+  applyDomUpdates(reset.domUpdates);
   updateManualChangeSummary();
   updateCompareSummary();
 }
