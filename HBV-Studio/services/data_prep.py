@@ -21,6 +21,32 @@ class DataPrepContext:
 
 
 @dataclass(frozen=True)
+class DataPrepStepCatalogContext:
+    data_prep_dir: Path
+    gui_root: Path
+    profile_daily: str
+    check_clip_dem: Callable[..., tuple[bool, str, int]]
+    check_flow_acc: Callable[..., tuple[bool, str, int]]
+    check_masked_flow: Callable[..., tuple[bool, str, int]]
+    check_elevation_zone: Callable[..., tuple[bool, str, int]]
+    check_daily_era5_download: Callable[..., tuple[bool, str, int]]
+    check_daily_era5_processed: Callable[..., tuple[bool, str, int]]
+    check_daily_prec: Callable[..., tuple[bool, str, int]]
+    check_station_precip_strategy: Callable[..., tuple[bool, str, int]]
+    check_daily_aligned: Callable[..., tuple[bool, str, int]]
+    check_precip_strategy_outputs: Callable[..., tuple[bool, str, int]]
+    check_glacier_mask: Callable[..., tuple[bool, str, int]]
+    check_glacier_elev: Callable[..., tuple[bool, str, int]]
+    check_glacier_reference: Callable[..., tuple[bool, str, int]]
+    check_daily_inputs_ready: Callable[..., tuple[bool, str, int]]
+    check_hourly_era5_download: Callable[..., tuple[bool, str, int]]
+    check_hourly_temp_evap: Callable[..., tuple[bool, str, int]]
+    check_hourly_prec: Callable[..., tuple[bool, str, int]]
+    check_hourly_aligned: Callable[..., tuple[bool, str, int]]
+    check_hourly_inputs_ready: Callable[..., tuple[bool, str, int]]
+
+
+@dataclass(frozen=True)
 class DataPrepTaskOutputContext:
     resolve_path: Callable[..., Path]
     read_runtime_config: Callable[[Path], dict[str, Any]]
@@ -121,6 +147,235 @@ def data_prep_steps_payload(config_path_raw: str, context: DataPrepContext) -> l
             for item in context.data_prep_steps(profile)
         )
     ]
+
+
+def data_prep_steps(profile: str, context: DataPrepStepCatalogContext) -> list[dict[str, Any]]:
+    common = [
+        {
+            "id": "clip_dem",
+            "title": "1. 裁剪 DEM",
+            "description": "根据流域边界 shp 把内置或外部 DEM 裁剪到当前运行目录。",
+            "script": context.data_prep_dir / "01_裁剪DEM.py",
+            "depends_on": [],
+            "check": context.check_clip_dem,
+        },
+        {
+            "id": "flow_acc",
+            "title": "2. 生成流向与流量累积",
+            "description": "为当前 DEM 生成流向与流量累积栅格。",
+            "script": context.data_prep_dir / "02_生成流向流量累积.py",
+            "depends_on": ["clip_dem"],
+            "check": context.check_flow_acc,
+        },
+        {
+            "id": "masked_flow",
+            "title": "3. 生成汇流与流域掩膜",
+            "description": "生成流域范围内的流量累积栅格与汇流掩膜。",
+            "script": context.data_prep_dir / "12_生成汇流与流域掩膜.py",
+            "depends_on": ["flow_acc"],
+            "check": context.check_masked_flow,
+        },
+        {
+            "id": "elevation_zone",
+            "title": "4. 生成高程分区",
+            "description": "基于 DEM 和阈值生成低/高高程区栅格。",
+            "script": context.data_prep_dir / "03_生成高程分区.py",
+            "depends_on": ["clip_dem"],
+            "check": context.check_elevation_zone,
+        },
+    ]
+    if profile == context.profile_daily:
+        common.extend(
+            [
+                {
+                    "id": "download_era5",
+                    "title": "5. 下载 ERA5 变量",
+                    "description": "按当前配置下载 ERA5 降水、气温或 FAO56 所需变量；MSWEP/CMFD 不在此步自动下载。",
+                    "script": context.data_prep_dir / "05_下载ERA5和FAO56变量.py",
+                    "depends_on": [],
+                    "check": context.check_daily_era5_download,
+                },
+                {
+                    "id": "process_era5",
+                    "title": "6. 生成日尺度结果",
+                    "description": "按当前配置生成日尺度气温或潜在蒸散发。",
+                    "script": context.data_prep_dir / "06_处理ERA5温度和蒸散发.py",
+                    "depends_on": ["download_era5"],
+                    "check": context.check_daily_era5_processed,
+                    "supports_overwrite": True,
+                },
+                {
+                    "id": "process_prec",
+                    "title": "7. 处理日尺度降水",
+                    "description": "处理 ERA5 自动下载降水，或处理已放入原始目录的 MSWEP/CMFD 降水数据。",
+                    "script": context.data_prep_dir / "07_处理降水数据.py",
+                    "depends_on": [],
+                    "check": context.check_daily_prec,
+                    "needs_prec_source": True,
+                    "supports_overwrite": True,
+                },
+                {
+                    "id": "station_precip_strategy",
+                    "title": "8. 站点降水资料分析（按方案）",
+                    "description": "当降水方案不是“格点直接使用”时，检查站点匹配、时间覆盖、缺测和异常值。",
+                    "depends_on": ["process_prec"],
+                    "check": context.check_station_precip_strategy,
+                    "manual": True,
+                },
+                {
+                    "id": "align_inputs",
+                    "title": "9. 对齐并裁剪日尺度气象",
+                    "description": "将降水、温度、蒸散统一到 DEM 网格并裁剪到流域内。",
+                    "script": context.data_prep_dir / "08_对齐并裁剪气象数据.py",
+                    "depends_on": ["clip_dem", "process_era5", "process_prec", "station_precip_strategy"],
+                    "check": context.check_daily_aligned,
+                    "needs_prec_source": True,
+                    "supports_overwrite": True,
+                },
+                {
+                    "id": "apply_precip_strategy",
+                    "title": "10. 执行降水方案（格点 / 订正 / 泰森）",
+                    "description": "根据气象策略生成最终用于率定的降水栅格目录。",
+                    "script": context.gui_root / "precipitation_strategy_runner.py",
+                    "depends_on": ["align_inputs", "station_precip_strategy"],
+                    "check": context.check_precip_strategy_outputs,
+                    "needs_prec_source": True,
+                },
+                {
+                    "id": "glacier_mask",
+                    "title": "11. 生成冰川掩膜（可选）",
+                    "description": "如配置了冰川边界 shp，则按 DEM 分辨率生成冰川表达结果：1km 生成二值掩膜，0.1° 生成分数栅格并附带兼容掩膜。",
+                    "script": context.data_prep_dir / "09_生成冰川掩膜.py",
+                    "depends_on": ["clip_dem"],
+                    "check": context.check_glacier_mask,
+                    "optional": True,
+                },
+                {
+                    "id": "glacier_elev",
+                    "title": "11.5 生成冰川高程栅格（0.1° 专用，可选）",
+                    "description": "从高分辨率 1km DEM 提取每个 0.1° 像元内冰川区的面积加权平均高程，用于率定时的冰川子格温度递减修正。1km 方案无需此步；0.1° 方案未做此步将在率定结果标记 reliability_flag=degraded。",
+                    "script": context.data_prep_dir / "11_生成冰川高程栅格.py",
+                    "depends_on": ["glacier_mask"],
+                    "check": context.check_glacier_elev,
+                    "optional": True,
+                },
+                {
+                    "id": "glacier_melt",
+                    "title": "12. 生成冰川工程先验序列（可选）",
+                    "description": "生成冰川参考栅格序列，用于与模拟冰融水过程进行对照复核。",
+                    "script": context.data_prep_dir / "10_生成冰川融水.py",
+                    "depends_on": ["glacier_mask"],
+                    "check": context.check_glacier_reference,
+                    "optional": True,
+                },
+                {
+                    "id": "check_inputs",
+                    "title": "13. 输入完整性检查",
+                    "description": "检查当前日尺度输入是否齐全，可用于率定前复核。",
+                    "script": context.data_prep_dir / "13_输入完整性检查.py",
+                    "depends_on": ["apply_precip_strategy"],
+                    "check": context.check_daily_inputs_ready,
+                    "needs_prec_source": True,
+                },
+            ]
+        )
+        return common
+
+    common.extend(
+        [
+                {
+                    "id": "download_hourly_era5",
+                    "title": "5. 下载小时 ERA5 变量",
+                    "description": "下载小时 ERA5 降水、温度与 FAO 变量（太阳辐射、风速、露点）。",
+                "depends_on": [],
+                "check": context.check_hourly_era5_download,
+                "script": context.data_prep_dir / "05b_下载ERA5小时变量.py",
+            },
+            {
+                "id": "process_hourly_era5",
+                "title": "6. 处理小时温度与蒸散",
+                "description": "生成小时温度栅格，并把 ERA5 驱动的日 ET0 分配到小时尺度。",
+                "depends_on": ["download_hourly_era5"],
+                "check": context.check_hourly_temp_evap,
+                "script": context.data_prep_dir / "06b_处理ERA5小时温度和蒸散发.py",
+                "supports_overwrite": True,
+            },
+            {
+                "id": "process_hourly_prec",
+                "title": "7. 处理小时降水",
+                "description": "处理 ERA5 小时降水，或把本地小时降水栅格标准化到工程原始降水目录。",
+                "depends_on": [],
+                "check": context.check_hourly_prec,
+                "needs_prec_source": True,
+                "script": context.data_prep_dir / "07b_处理小时降水数据.py",
+                "supports_overwrite": True,
+            },
+            {
+                "id": "station_precip_strategy",
+                "title": "8. 小时尺度站点降水资料分析（按方案）",
+                "description": "当降水方案不是“格点直接使用”时，检查小时项目的站点匹配、时间覆盖、缺测和异常值。",
+                "depends_on": ["process_hourly_prec"],
+                "check": context.check_station_precip_strategy,
+                "manual": True,
+            },
+            {
+                "id": "align_hourly_inputs",
+                "title": "9. 对齐并裁剪小时气象",
+                "description": "将小时降水、温度、蒸散对齐到 DEM 网格并裁剪到流域内。",
+                "depends_on": ["clip_dem", "process_hourly_era5", "process_hourly_prec"],
+                "check": context.check_hourly_aligned,
+                "needs_prec_source": True,
+                "script": context.data_prep_dir / "08b_对齐并裁剪小时气象数据.py",
+                "supports_overwrite": True,
+            },
+            {
+                "id": "apply_precip_strategy",
+                "title": "10. 执行小时降水方案（格点 / 订正 / 泰森）",
+                "description": "根据气象策略生成最终用于小时率定的降水栅格目录。",
+                "depends_on": ["align_hourly_inputs", "station_precip_strategy"],
+                "check": context.check_precip_strategy_outputs,
+                "needs_prec_source": True,
+                "script": context.gui_root / "precipitation_strategy_runner.py",
+            },
+            {
+                "id": "glacier_mask",
+                "title": "11. 生成冰川掩膜（可选）",
+                "description": "如配置了冰川边界 shp，则按 DEM 分辨率生成冰川表达结果：1km 生成二值掩膜，0.1° 生成分数栅格并附带兼容掩膜。",
+                "script": context.data_prep_dir / "09_生成冰川掩膜.py",
+                "depends_on": ["clip_dem"],
+                "check": context.check_glacier_mask,
+                "optional": True,
+            },
+            {
+                "id": "glacier_elev",
+                "title": "11.5 生成冰川高程栅格（0.1° 专用，可选）",
+                "description": "从高分辨率 1km DEM 提取每个 0.1° 像元内冰川区的面积加权平均高程，用于率定时的冰川子格温度递减修正。1km 方案无需此步；0.1° 方案未做此步将在率定结果标记 reliability_flag=degraded。",
+                "script": context.data_prep_dir / "11_生成冰川高程栅格.py",
+                "depends_on": ["glacier_mask"],
+                "check": context.check_glacier_elev,
+                "optional": True,
+            },
+            {
+                "id": "stage_hourly_glacier_reference",
+                "title": "12. 导入小时尺度冰川工程先验（可选）",
+                "description": "将小时尺度冰川参考栅格放入工程目录，用于与模拟冰融水过程进行对照复核。",
+                "depends_on": ["glacier_mask"],
+                "check": context.check_glacier_reference,
+                "optional": True,
+                "manual": True,
+            },
+            {
+                "id": "check_inputs",
+                "title": "13. 小时输入完整性检查",
+                "description": "检查小时尺度气象驱动与基础 GIS 是否齐全。",
+                "depends_on": ["apply_precip_strategy"],
+                "check": context.check_hourly_inputs_ready,
+                "script": context.data_prep_dir / "13b_小时输入完整性检查.py",
+                "needs_prec_source": True,
+            },
+        ]
+    )
+    return common
 
 
 def resolve_data_prep_step(

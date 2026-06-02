@@ -12,8 +12,10 @@ if str(STUDIO_DIR) not in sys.path:
 from services.data_prep import (  # noqa: E402
     DataPrepBootstrapContext,
     DataPrepStartContext,
+    DataPrepStepCatalogContext,
     DataPrepTaskOutputContext,
     DataPrepWorkflowWorkerContext,
+    data_prep_steps,
     data_prep_bootstrap_plan,
     data_prep_start_plan,
     data_prep_step_command,
@@ -103,6 +105,56 @@ class DataPrepServiceTests(unittest.TestCase):
             current_profile=lambda cfg: str(cfg.get("profile", "daily")),
             glacier_elev_required=lambda cfg: glacier_elev,
         )
+
+    def _step_catalog_context(self) -> DataPrepStepCatalogContext:
+        check = lambda *args, **kwargs: (True, "ok", 1)
+        return DataPrepStepCatalogContext(
+            data_prep_dir=Path("prep"),
+            gui_root=Path("gui"),
+            profile_daily="daily",
+            check_clip_dem=check,
+            check_flow_acc=check,
+            check_masked_flow=check,
+            check_elevation_zone=check,
+            check_daily_era5_download=check,
+            check_daily_era5_processed=check,
+            check_daily_prec=check,
+            check_station_precip_strategy=check,
+            check_daily_aligned=check,
+            check_precip_strategy_outputs=check,
+            check_glacier_mask=check,
+            check_glacier_elev=check,
+            check_glacier_reference=check,
+            check_daily_inputs_ready=check,
+            check_hourly_era5_download=check,
+            check_hourly_temp_evap=check,
+            check_hourly_prec=check,
+            check_hourly_aligned=check,
+            check_hourly_inputs_ready=check,
+        )
+
+    def test_data_prep_steps_builds_daily_catalog_from_context(self) -> None:
+        steps = data_prep_steps("daily", self._step_catalog_context())
+        by_id = {step["id"]: step for step in steps}
+
+        self.assertEqual(len(steps), 14)
+        self.assertEqual(steps[0]["id"], "clip_dem")
+        self.assertEqual(by_id["clip_dem"]["script"], Path("prep") / "01_裁剪DEM.py")
+        self.assertEqual(by_id["apply_precip_strategy"]["script"], Path("gui") / "precipitation_strategy_runner.py")
+        self.assertTrue(by_id["process_era5"]["supports_overwrite"])
+        self.assertTrue(by_id["station_precip_strategy"]["manual"])
+        self.assertIn("glacier_melt", by_id)
+
+    def test_data_prep_steps_builds_hourly_catalog_from_context(self) -> None:
+        steps = data_prep_steps("hourly", self._step_catalog_context())
+        by_id = {step["id"]: step for step in steps}
+
+        self.assertEqual(len(steps), 14)
+        self.assertIn("download_hourly_era5", by_id)
+        self.assertIn("process_hourly_prec", by_id)
+        self.assertEqual(by_id["process_hourly_era5"]["script"], Path("prep") / "06b_处理ERA5小时温度和蒸散发.py")
+        self.assertTrue(by_id["stage_hourly_glacier_reference"]["manual"])
+        self.assertNotIn("script", by_id["stage_hourly_glacier_reference"])
 
     def test_resolve_data_prep_step_requires_glacier_mask_when_glacier_shp_is_configured(self) -> None:
         step = {
