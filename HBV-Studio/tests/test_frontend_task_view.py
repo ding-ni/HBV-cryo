@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "renderTaskCard", "renderTaskList"]) {
+            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -99,6 +99,29 @@ class FrontendTaskViewTests(unittest.TestCase):
             }, helpers);
             if (failedForecasts.length !== 1 || failedForecasts[0].id !== "task-forecast") {
               throw new Error("failed simulate task filter did not match forecast task");
+            }
+
+            const toolbar = taskView.renderTaskFilterToolbar({
+              tasks,
+              workspaceMode: "all",
+              workspacePath: "C:/ws/A.json",
+              status: "failed",
+              type: "simulate",
+            }, {
+              ...helpers,
+              workspaceLabelByPath() { return "流域<A>"; },
+            });
+            for (const attr of ["data-task-filter-workspace", "data-task-filter-status", "data-task-filter-type"]) {
+              if (!toolbar.toolbarHtml.includes(attr)) throw new Error(`missing toolbar action ${attr}`);
+            }
+            if (!toolbar.toolbarHtml.includes("当前工作区：流域&lt;A&gt;")) {
+              throw new Error(`workspace label should be escaped: ${toolbar.toolbarHtml}`);
+            }
+            if ((toolbar.toolbarHtml.match(/class="phase-chip active"/g) || []).length !== 3) {
+              throw new Error(`expected three active chips: ${toolbar.toolbarHtml}`);
+            }
+            if (toolbar.hintText !== "当前显示 1/4 个任务 · 运行中 0 · 失败 1 · 范围：全部工作区" || toolbar.hintClassName !== "hint-box status-warn") {
+              throw new Error(`unexpected toolbar hint: ${toolbar.hintClassName} ${toolbar.hintText}`);
             }
 
             const html = taskView.renderTaskList(currentActive, helpers);

@@ -192,6 +192,7 @@ const frontendModuleContracts = [
       "optimizationMethodLabel",
       "renderTaskActions",
       "renderTaskCard",
+      "renderTaskFilterToolbar",
       "renderTaskList",
       "renderTaskMilestones",
       "taskContextSummary",
@@ -624,58 +625,16 @@ function renderTaskFilterToolbar() {
   const host = $("#task-filter-toolbar");
   const hint = $("#task-filter-hint");
   if (!host || !hint) return;
-  const workspaceOptions = [
-    { value: "current", label: state.wizardWorkspacePath ? `当前工作区：${workspaceLabelByPath(state.wizardWorkspacePath)}` : "当前工作区（未选择）", disabled: !state.wizardWorkspacePath },
-    { value: "all", label: "全部工作区任务", disabled: false },
-  ];
-  const statusOptions = [
-    { value: "active", label: "只看运行中" },
-    { value: "unfinished", label: "看未完成/失败" },
-    { value: "failed", label: "只看失败" },
-    { value: "all", label: "全部状态" },
-  ];
-  const typeOptions = [
-    { value: "all", label: "全部类型" },
-    { value: "calibration", label: "率定" },
-    { value: "prep", label: "数据准备" },
-    { value: "simulate", label: "手调/预报" },
-    { value: "support", label: "自检/辅助" },
-  ];
-  host.innerHTML = `
-    <div class="results-filter-group">
-      <span class="results-filter-label">范围</span>
-      ${workspaceOptions.map(item => `
-        <button class="phase-chip ${item.value === state.taskWorkspaceFilterMode ? "active" : ""}" data-task-filter-workspace="${escapeHtml(item.value)}" ${item.disabled ? "disabled" : ""}>
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-    <div class="results-filter-group">
-      <span class="results-filter-label">状态</span>
-      ${statusOptions.map(item => `
-        <button class="phase-chip ${item.value === state.taskStatusFilter ? "active" : ""}" data-task-filter-status="${escapeHtml(item.value)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-    <div class="results-filter-group">
-      <span class="results-filter-label">类型</span>
-      ${typeOptions.map(item => `
-        <button class="phase-chip ${item.value === state.taskTypeFilter ? "active" : ""}" data-task-filter-type="${escapeHtml(item.value)}">
-          ${escapeHtml(item.label)}
-        </button>
-      `).join("")}
-    </div>
-  `;
-  const shown = visibleTasks();
-  const running = shown.filter(task => task.status === "running").length;
-  const failed = shown.filter(task => task.status === "failed").length;
-  const total = state.tasks.length;
-  const scopeText = state.taskWorkspaceFilterMode === "current" && state.wizardWorkspacePath
-    ? `当前工作区“${workspaceLabelByPath(state.wizardWorkspacePath)}”`
-    : "全部工作区";
-  hint.textContent = `当前显示 ${shown.length}/${total} 个任务 · 运行中 ${running} · 失败 ${failed} · 范围：${scopeText}`;
-  hint.className = `hint-box ${failed > 0 && state.taskStatusFilter !== "active" ? "status-warn" : ""}`.trim();
+  const rendered = window.HBVStudioTaskView.renderTaskFilterToolbar({
+    tasks: state.tasks,
+    workspaceMode: state.taskWorkspaceFilterMode,
+    workspacePath: state.wizardWorkspacePath,
+    status: state.taskStatusFilter,
+    type: state.taskTypeFilter,
+  }, { escapeHtml, samePath, workspaceLabelByPath });
+  host.innerHTML = rendered.toolbarHtml;
+  hint.textContent = rendered.hintText;
+  hint.className = rendered.hintClassName;
 }
 
 function setTaskWorkspaceFilterMode(value = "current") {

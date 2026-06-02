@@ -69,6 +69,73 @@
     });
   }
 
+  function renderFilterGroup(label, options = [], attrName, selectedValue = "", helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    return `
+      <div class="results-filter-group">
+        <span class="results-filter-label">${escapeHtml(label)}</span>
+        ${options.map(item => `
+          <button class="phase-chip ${String(item.value || "") === String(selectedValue || "") ? "active" : ""}" ${attrName}="${escapeHtml(item.value)}" ${item.disabled ? "disabled" : ""}>
+            ${escapeHtml(item.label)}
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderTaskFilterToolbar(model = {}, helpers = {}) {
+    const workspaceLabelByPath = helpers.workspaceLabelByPath || (() => "未命名工作区");
+    const filters = normalizeTaskFilters({
+      workspaceMode: model.workspaceMode,
+      workspacePath: model.workspacePath,
+      status: model.status,
+      type: model.type,
+    });
+    const workspacePath = String(filters.workspacePath || "").trim();
+    const workspaceOptions = [
+      {
+        value: "current",
+        label: workspacePath ? `当前工作区：${workspaceLabelByPath(workspacePath)}` : "当前工作区（未选择）",
+        disabled: !workspacePath,
+      },
+      { value: "all", label: "全部工作区任务", disabled: false },
+    ];
+    const statusOptions = [
+      { value: "active", label: "只看运行中" },
+      { value: "unfinished", label: "看未完成/失败" },
+      { value: "failed", label: "只看失败" },
+      { value: "all", label: "全部状态" },
+    ];
+    const typeOptions = [
+      { value: "all", label: "全部类型" },
+      { value: "calibration", label: "率定" },
+      { value: "prep", label: "数据准备" },
+      { value: "simulate", label: "手调/预报" },
+      { value: "support", label: "自检/辅助" },
+    ];
+    const toolbarHtml = [
+      renderFilterGroup("范围", workspaceOptions, "data-task-filter-workspace", filters.workspaceMode, helpers),
+      renderFilterGroup("状态", statusOptions, "data-task-filter-status", filters.status, helpers),
+      renderFilterGroup("类型", typeOptions, "data-task-filter-type", filters.type, helpers),
+    ].join("");
+    const shown = filterTasks(model.tasks || [], filters, helpers);
+    const running = shown.filter(task => task?.status === "running").length;
+    const failed = shown.filter(task => task?.status === "failed").length;
+    const total = Array.isArray(model.tasks) ? model.tasks.length : 0;
+    const scopeText = filters.workspaceMode === "current" && workspacePath
+      ? `当前工作区“${workspaceLabelByPath(workspacePath)}”`
+      : "全部工作区";
+    return {
+      toolbarHtml,
+      hintText: `当前显示 ${shown.length}/${total} 个任务 · 运行中 ${running} · 失败 ${failed} · 范围：${scopeText}`,
+      hintClassName: `hint-box ${failed > 0 && filters.status !== "active" ? "status-warn" : ""}`.trim(),
+      shownCount: shown.length,
+      total,
+      running,
+      failed,
+    };
+  }
+
   function taskTypeLabel(taskType) {
     return ({
       calibration: "率定任务",
@@ -668,6 +735,7 @@
     optimizationMethodLabel,
     renderTaskCard,
     renderTaskActions,
+    renderTaskFilterToolbar,
     renderTaskList,
     renderTaskMilestones,
     taskContextSummary,
