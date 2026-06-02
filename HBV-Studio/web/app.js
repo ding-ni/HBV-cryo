@@ -142,6 +142,7 @@ const frontendModuleContracts = [
       "manualPhaseGuide",
       "manualChangeSummary",
       "renderParamSliders",
+      "manualContextFromRunData",
       "manualContextWarning",
       "taskPresetContext",
       "taskContextWarnings",
@@ -1418,15 +1419,9 @@ function renderManualPresetDiff() {
 
 function manualPresetContextWarning(preset, data = state._runData) {
   if (!preset || !data?.metadata) return "";
-  const meta = data.metadata || {};
   return window.HBVStudioParameterLibrary?.manualContextWarning(
     preset,
-    {
-      objective_mode: effectiveObjectiveMode(meta),
-      prec_source: String(meta.data_sources?.runtime_prec_source || meta.data_sources?.prec_source || meta.data_sources?.configured_precip_source || "").trim().toLowerCase(),
-      glacier_mode: String(meta.data_sources?.glacier_mode || "").trim().toLowerCase(),
-      param_bounds_profile: String(meta.param_bounds_profile || meta.parameter_profile?.bounds_profile || "").trim().toLowerCase(),
-    },
+    window.HBVStudioParameterLibrary.manualContextFromRunData(data, { effectiveObjectiveMode }),
     {
       objectiveLabel,
       precipSourceLabel: getConfiguredPrecipSourceLabel,

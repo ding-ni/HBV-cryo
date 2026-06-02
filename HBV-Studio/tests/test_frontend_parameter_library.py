@@ -391,6 +391,73 @@ class FrontendParameterLibraryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_manual_context_from_run_data_extracts_comparison_fields(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
+
+            const library = context.window.HBVStudioParameterLibrary;
+            if (typeof library.manualContextFromRunData !== "function") {
+              throw new Error("manualContextFromRunData was not exported");
+            }
+
+            const fromRun = library.manualContextFromRunData({
+              metadata: {
+                effective_objective_mode: "Daily_Unified_Professional_V1",
+                data_sources: {
+                  runtime_prec_source: "ERA5_GRID",
+                  glacier_mode: "INLINE",
+                },
+                parameter_profile: {
+                  bounds_profile: "QTP_ALPINE_DEFAULT",
+                },
+              },
+            });
+            if (fromRun.objective_mode !== "daily_unified_professional_v1") {
+              throw new Error(`objective mode not normalized: ${JSON.stringify(fromRun)}`);
+            }
+            if (fromRun.prec_source !== "era5_grid" || fromRun.glacier_mode !== "inline") {
+              throw new Error(`data source fields not normalized: ${JSON.stringify(fromRun)}`);
+            }
+            if (fromRun.param_bounds_profile !== "qtp_alpine_default") {
+              throw new Error(`bounds profile not normalized: ${JSON.stringify(fromRun)}`);
+            }
+
+            const fromMeta = library.manualContextFromRunData(
+              {
+                optimization: { objective_mode: "legacy_mode" },
+                data_sources: { configured_precip_source: "Custom_TIF" },
+                param_bounds_profile: "Hourly_Step",
+              },
+              {
+                effectiveObjectiveMode(meta) {
+                  return `custom:${meta.optimization.objective_mode}`;
+                },
+              },
+            );
+            if (fromMeta.objective_mode !== "custom:legacy_mode") {
+              throw new Error(`custom objective resolver not used: ${JSON.stringify(fromMeta)}`);
+            }
+            if (fromMeta.prec_source !== "custom_tif" || fromMeta.param_bounds_profile !== "hourly_step") {
+              throw new Error(`metadata fallback fields mismatch: ${JSON.stringify(fromMeta)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_manual_group_helpers_and_param_slider_rendering(self) -> None:
         script = textwrap.dedent(
             r"""

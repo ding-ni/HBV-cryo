@@ -278,6 +278,31 @@
     };
   }
 
+  function manualContextFromRunData(data = {}, helpers = {}) {
+    const meta = data?.metadata || data || {};
+    const dataSources = meta.data_sources || {};
+    const effectiveObjectiveMode = helpers.effectiveObjectiveMode || (value => {
+      const item = value || {};
+      return normalizeKey(
+        item.effective_objective_mode
+        || item.optimization?.effective_objective_mode
+        || item.objective_profile?.type
+        || item.objective?.type
+        || item.optimization?.objective_mode
+      );
+    });
+    return {
+      objective_mode: effectiveObjectiveMode(meta),
+      prec_source: normalizeKey(
+        dataSources.runtime_prec_source
+        || dataSources.prec_source
+        || dataSources.configured_precip_source
+      ),
+      glacier_mode: normalizeKey(dataSources.glacier_mode),
+      param_bounds_profile: normalizeKey(meta.param_bounds_profile || meta.parameter_profile?.bounds_profile),
+    };
+  }
+
   function manualContextWarning(preset, current = {}, helpers = {}) {
     if (!preset) return "";
     const objectiveLabel = helpers.objectiveLabel || (value => value || "未记录");
@@ -483,6 +508,7 @@
     manualPhaseGuide,
     manualChangeSummary,
     renderParamSliders,
+    manualContextFromRunData,
     manualContextWarning,
     taskPresetContext,
     taskContextWarnings,
