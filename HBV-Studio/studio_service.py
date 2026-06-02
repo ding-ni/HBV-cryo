@@ -54,25 +54,20 @@ from services.calibration import CalibrationStartContext
 from services.calibration import calibration_start_plan as build_calibration_start_plan
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
 from services.event_config import (
-    EVENT_INITIAL_STATE_POLICY_ALIASES,
-    EVENT_INITIAL_STATE_POLICY_SUMMARIES,
-    EVENT_PURPOSE_ALIASES,
     TIME_BASIS_CONTINUOUS,
     TIME_BASIS_EVENT_WINDOWS,
     TIME_BASIS_FORECAST_WINDOW,
     TIME_BASIS_LABELS,
     event_date_range as build_event_date_range,
-    event_field as build_event_field,
     event_initial_state_policy_summary as build_event_initial_state_policy_summary,
     event_window_index as build_event_window_index,
     flood_event_raw_config as build_flood_event_raw_config,
     normalize_event_initial_state_policy as build_normalize_event_initial_state_policy,
-    parse_event_timestamp as build_parse_event_timestamp,
     task_time_basis as build_task_time_basis,
     truthy_config as build_truthy_config,
 )
-from services.event_io import read_csv_flexible as build_read_csv_flexible
-from services.event_io import read_event_table_file as build_read_event_table_file
+from services.event_windows import EventWindowContext
+from services.event_windows import normalized_flood_events as build_normalized_flood_events
 from services.filesystem import (
     FilesystemContext,
     FilesystemPathContext,
@@ -1096,14 +1091,6 @@ def _truthy_config(value: Any, default: bool = False) -> bool:
     return build_truthy_config(value, default)
 
 
-def _read_csv_flexible(path: Path) -> pd.DataFrame:
-    return build_read_csv_flexible(path)
-
-
-def _read_event_table_file(path: Path) -> list[dict[str, Any]]:
-    return build_read_event_table_file(path)
-
-
 def _flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
     return build_flood_event_raw_config(config)
 
@@ -1116,14 +1103,6 @@ def event_initial_state_policy_summary(value: Any) -> dict[str, Any]:
     return build_event_initial_state_policy_summary(value)
 
 
-def _event_field(event: dict[str, Any], *names: str) -> Any:
-    return build_event_field(event, *names)
-
-
-def _parse_event_timestamp(value: Any, *, end: bool, step_hours: float) -> pd.Timestamp | None:
-    return build_parse_event_timestamp(value, end=end, step_hours=step_hours)
-
-
 def _event_date_range(start: pd.Timestamp, end: pd.Timestamp, step_hours: float) -> pd.DatetimeIndex:
     return build_event_date_range(start, end, step_hours)
 
@@ -1132,136 +1111,12 @@ def task_time_basis(config: dict[str, Any], *, context: str = "calibration") -> 
     return build_task_time_basis(config, context=context)
 
 
+def _event_window_context() -> EventWindowContext:
+    return EventWindowContext(resolve_config_related_path=_resolve_config_related_path)
+
+
 def normalized_flood_events(config: dict[str, Any], *, step_hours: float | None = None) -> dict[str, Any]:
-    step = normalize_time_step_hours(step_hours if step_hours is not None else config.get("时间步长_小时", 24.0))
-    cfg = _flood_event_raw_config(config)
-    raw_events = cfg.get("事件表", cfg.get("events", []))
-    warnings: list[str] = []
-    errors: list[str] = []
-    initial_state = event_initial_state_policy_summary(
-        cfg.get(
-            "初始条件策略",
-            cfg.get("initial_state_policy", cfg.get("event_initial_state_policy", "event_warmup")),
-        )
-    )
-    if initial_state.get("warning"):
-        warnings.append(str(initial_state["warning"]))
-    event_file_raw = str(cfg.get("事件表路径", cfg.get("events_file", cfg.get("event_file", ""))) or "").strip()
-    event_file = _resolve_config_related_path(config, event_file_raw) if event_file_raw else None
-    if event_file_raw:
-        if event_file is None or not event_file.exists():
-            errors.append(f"洪水事件表文件不存在：{event_file_raw}")
-            raw_events = []
-        else:
-            try:
-                raw_events = _read_event_table_file(event_file)
-            except Exception as exc:
-                errors.append(f"洪水事件表读取失败：{exc}")
-                raw_events = []
-    if isinstance(raw_events, dict):
-        raw_events = raw_events.get("events", raw_events.get("事件表", []))
-    if not isinstance(raw_events, list):
-        raw_events = []
-
-    events: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for index, raw_event in enumerate(raw_events, start=1):
-        if not isinstance(raw_event, dict):
-            warnings.append(f"第 {index} 条事件不是对象，已跳过。")
-            continue
-        event = dict(raw_event)
-        token = json.dumps(event, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-        event_id_raw = str(_event_field(event, "event_id", "id", "编号", "洪水编号", "事件编号") or "").strip()
-        event_id = event_id_raw
-        name = str(_event_field(event, "name", "名称", "事件名称", "洪水名称") or "").strip()
-        if not event_id:
-            event_id = name or f"event_{hashlib.sha1(token).hexdigest()[:8]}"
-            warnings.append(f"第 {index} 条事件未填写 event_id，已临时使用 {event_id}；正式工程建议填写唯一事件编号。")
-        purpose_raw = str(_event_field(event, "purpose", "用途", "类型", "type") or "calibration").strip()
-        purpose = EVENT_PURPOSE_ALIASES.get(purpose_raw.lower(), purpose_raw.lower() or "calibration")
-        if purpose not in {"calibration", "validation", "diagnostic"}:
-            warnings.append(f"事件 {event_id} 的用途 {purpose_raw} 未识别，按 diagnostic 处理。")
-            purpose = "diagnostic"
-        if event_id in seen_ids:
-            errors.append(f"洪水事件编号重复：{event_id}")
-        seen_ids.add(event_id)
-        score_start_raw = _event_field(event, "score_start", "评分开始", "事件开始", "洪水开始", "开始时间", "起始时间", "start")
-        score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "洪水结束", "结束时间", "终止时间", "end")
-        run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
-        run_end_value = _event_field(event, "run_end", "运行结束", "退水结束")
-        if run_end_value in (None, ""):
-            run_end_raw = score_end_raw
-        else:
-            run_end_raw = run_end_value
-        event_errors: list[str] = []
-        time_steps_run = 0
-        time_steps_score = 0
-        try:
-            run_start = _parse_event_timestamp(run_start_raw, end=False, step_hours=step)
-            score_start = _parse_event_timestamp(score_start_raw, end=False, step_hours=step)
-            score_end = _parse_event_timestamp(score_end_raw, end=True, step_hours=step)
-            run_end = _parse_event_timestamp(run_end_raw, end=True, step_hours=step)
-        except Exception as exc:
-            run_start = score_start = score_end = run_end = None
-            event_errors.append(f"事件时间无法解析：{exc}")
-        if run_start is None or score_start is None or score_end is None or run_end is None:
-            event_errors.append("事件缺少开始时间或结束时间。")
-        elif not (run_start <= score_start <= score_end <= run_end):
-            event_errors.append("事件时间顺序不正确：运行开始应不晚于开始时间，结束时间应不晚于运行结束。")
-        else:
-            time_steps_run = int(len(_event_date_range(run_start, run_end, step)))
-            time_steps_score = int(len(_event_date_range(score_start, score_end, step)))
-            min_score_steps = 3 if step >= 24.0 else 6
-            if time_steps_score < min_score_steps:
-                unit = "天" if step >= 24.0 else "小时"
-                event_errors.append(f"事件时段过短：当前 {time_steps_score} 步，至少需要 {min_score_steps} 步（{unit}尺度）。")
-        if event_errors:
-            errors.extend(f"{event_id}: {item}" for item in event_errors)
-        events.append(
-            {
-                "event_id": event_id,
-                "name": name or event_id,
-                "purpose": purpose,
-                "run_start": run_start,
-                "score_start": score_start,
-                "score_end": score_end,
-                "run_end": run_end,
-                "raw": event,
-                "valid": not event_errors,
-                "time_steps_run": time_steps_run,
-                "time_steps_score": time_steps_score,
-            }
-        )
-
-    valid_events = sorted(
-        [event for event in events if event.get("valid")],
-        key=lambda item: (pd.Timestamp(item["run_start"]), str(item.get("event_id", ""))),
-    )
-    for left, right in zip(valid_events, valid_events[1:]):
-        if left["run_end"] >= right["run_start"]:
-            warnings.append(f"事件时段可能重叠：{left['event_id']} 与 {right['event_id']}。")
-    purpose_counts = {
-        "calibration": sum(1 for event in valid_events if event.get("purpose") == "calibration"),
-        "validation": sum(1 for event in valid_events if event.get("purpose") == "validation"),
-        "diagnostic": sum(1 for event in valid_events if event.get("purpose") == "diagnostic"),
-    }
-    return {
-        "enabled": _truthy_config(cfg.get("启用", cfg.get("enabled")), default=bool(events)),
-        "source_file": str(event_file.resolve(strict=False)) if event_file is not None and event_file.exists() else "",
-        "events": events,
-        "valid_events": valid_events,
-        "event_count": len(events),
-        "valid_event_count": len(valid_events),
-        "purpose_counts": purpose_counts,
-        "warnings": warnings,
-        "errors": errors,
-        "time_basis": TIME_BASIS_EVENT_WINDOWS,
-        "initial_state_policy": initial_state.get("policy", "event_warmup"),
-        "initial_state_policy_label": initial_state.get("label", "事件预热"),
-        "state_continuity_between_events": bool(initial_state.get("state_continuity_between_events")),
-        "initial_state_note": initial_state.get("note", ""),
-        "initial_state_warning": initial_state.get("warning", ""),
-    }
+    return build_normalized_flood_events(config, _event_window_context(), step_hours=step_hours)
 
 
 def _event_window_index(events: list[dict[str, Any]], start_key: str, end_key: str, step_hours: float) -> pd.DatetimeIndex:
