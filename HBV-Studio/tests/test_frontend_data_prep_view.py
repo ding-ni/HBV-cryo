@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
+            if (!view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.prepPanelSummary || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -115,6 +115,23 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!bootstrapHtml.includes("status-badge \">未启用<")) throw new Error("bootstrap optional disabled item missing");
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
+
+            const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });
+            if (era5PrecipSummary.className !== "hint-box status-ok" || !era5PrecipSummary.text.includes("降水用ERA5 自动下载") || !era5PrecipSummary.text.includes("下面先下载 ERA5 降水")) {
+              throw new Error(`ERA5 precip summary mismatch: ${JSON.stringify(era5PrecipSummary)}`);
+            }
+            const localSummary = view.prepPanelSummary({ prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" });
+            if (!localSummary.text.includes("降水用本地栅格") || !localSummary.text.includes("气温用本地栅格") || !localSummary.text.includes("下面按顺序整理本项目需要的气象数据")) {
+              throw new Error(`local summary mismatch: ${JSON.stringify(localSummary)}`);
+            }
+            const petSummary = view.prepPanelSummary({ prec: "custom_tif", temp: "custom_tif", pet: "era5_fao56" });
+            if (!petSummary.text.includes("潜在蒸散发用ERA5+FAO56") || !petSummary.text.includes("下载计算潜在蒸散发要用的 ERA5 变量")) {
+              throw new Error(`PET summary mismatch: ${JSON.stringify(petSummary)}`);
+            }
+            const cmfdSummary = view.prepPanelSummary({ prec: "cmfd", temp: "era5", pet: "era5_fao56" });
+            if (!cmfdSummary.text.includes("降水用CMFD 本地原始文件") || !cmfdSummary.text.includes("下面按顺序完成 ERA5 下载和结果生成")) {
+              throw new Error(`CMFD summary mismatch: ${JSON.stringify(cmfdSummary)}`);
+            }
 
             const prepTaskState = view.prepTaskUiState({
               status: "running",

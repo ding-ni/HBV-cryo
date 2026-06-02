@@ -97,6 +97,36 @@
     }).join("");
   }
 
+  function describeEra5Need(sources = {}) {
+    if (sources.prec === "era5" && sources.pet === "custom_tif" && sources.temp === "custom_tif") {
+      return "下面先下载 ERA5 降水，再生成当前项目的降水输入。";
+    }
+    if (sources.pet !== "custom_tif" && sources.temp === "custom_tif") {
+      return "下面先下载计算潜在蒸散发要用的 ERA5 变量，再生成潜在蒸散发。";
+    }
+    if (sources.pet !== "custom_tif" || sources.temp !== "custom_tif") {
+      return "下面按顺序完成 ERA5 下载和结果生成。";
+    }
+    return "下面按顺序整理本项目需要的气象数据。";
+  }
+
+  function prepPanelSummary(sources = {}) {
+    const precText = sources.prec === "custom_tif"
+      ? "本地栅格"
+      : sources.prec === "era5"
+        ? "ERA5 自动下载"
+        : sources.prec === "cmfd"
+          ? "CMFD 本地原始文件"
+          : "MSWEP 本地原始文件";
+    return {
+      text: `当前流程：降水用${precText}，`
+        + `气温用${sources.temp === "custom_tif" ? "本地栅格" : "ERA5"}，`
+        + `潜在蒸散发用${sources.pet === "custom_tif" ? "本地栅格" : "ERA5+FAO56"}。`
+        + describeEra5Need(sources),
+      className: "hint-box status-ok",
+    };
+  }
+
   function prepTaskUiState(task = {}) {
     const progress = task?.ui_progress || {};
     const logs = Array.isArray(task?.output) ? task.output : [];
@@ -267,6 +297,7 @@
   window.HBVStudioDataPrepView = {
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    prepPanelSummary,
     prepTaskUiState,
     renderBootstrapStatus,
     renderInputCheckError,
