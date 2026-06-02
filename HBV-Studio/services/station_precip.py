@@ -20,6 +20,33 @@ class StationPrecipAnalysisContext:
     build_expected_forcing_index: Callable[..., pd.DatetimeIndex | None]
 
 
+@dataclass(frozen=True)
+class StationPrecipStrategyStatusContext:
+    normalize_time_step_hours: Callable[[Any], float]
+    analyze_station_precip_inputs: Callable[..., dict[str, Any]]
+
+
+def check_station_precip_strategy_status(
+    config: dict[str, Any],
+    context: StationPrecipStrategyStatusContext,
+) -> tuple[bool, str, int]:
+    analysis = context.analyze_station_precip_inputs(
+        config,
+        step_hours=context.normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
+    )
+    if not analysis.get("enabled"):
+        return True, str(analysis.get("summary", "当前为格点基线模式，未启用站点订正。")), 0
+    status = str(analysis.get("status", "fail"))
+    matched = int(analysis.get("matched_station_count", 0) or 0)
+    warnings = list(analysis.get("warnings", []) or [])
+    message = str(analysis.get("summary", "站点降水资料已检查。"))
+    if matched:
+        message += f" 站点匹配：{matched} 个。"
+    if warnings:
+        message += " " + "；".join(str(item) for item in warnings[:2])
+    return status != "fail", message, matched
+
+
 def detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
     lowered = {str(col).strip().lower(): str(col) for col in columns}
     for candidate in candidates:

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -14,7 +15,9 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.station_precip import (  # noqa: E402
     StationPrecipAnalysisContext,
+    StationPrecipStrategyStatusContext,
     analyze_station_precip_inputs,
+    check_station_precip_strategy_status,
     format_time_for_check,
     index_display_range,
     load_station_metadata_table,
@@ -33,6 +36,74 @@ from services.station_precip import (  # noqa: E402
 
 
 class StationPrecipServiceTests(unittest.TestCase):
+    def _strategy_status_context(
+        self,
+        analysis: dict[str, Any],
+        calls: list[tuple[Any, ...]] | None = None,
+    ) -> StationPrecipStrategyStatusContext:
+        call_log = calls if calls is not None else []
+
+        def normalize_time_step_hours(value: Any) -> float:
+            call_log.append(("step", value))
+            return 24.0
+
+        def analyze(config: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            call_log.append(("analyze", kwargs.get("step_hours")))
+            return analysis
+
+        return StationPrecipStrategyStatusContext(
+            normalize_time_step_hours=normalize_time_step_hours,
+            analyze_station_precip_inputs=analyze,
+        )
+
+    def test_check_station_precip_strategy_status_skips_disabled_mode(self) -> None:
+        context = self._strategy_status_context(
+            {"enabled": False, "summary": "当前为格点基线模式，未启用站点订正。"}
+        )
+
+        ready, message, count = check_station_precip_strategy_status({}, context)
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "当前为格点基线模式，未启用站点订正。")
+        self.assertEqual(count, 0)
+
+    def test_check_station_precip_strategy_status_reports_matched_station_count(self) -> None:
+        calls: list[tuple[Any, ...]] = []
+        context = self._strategy_status_context(
+            {
+                "enabled": True,
+                "status": "ok",
+                "summary": "站点降水资料已检查。",
+                "matched_station_count": 3,
+                "warnings": [],
+            },
+            calls,
+        )
+
+        ready, message, count = check_station_precip_strategy_status({"时间步长_小时": 6}, context)
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "站点降水资料已检查。 站点匹配：3 个。")
+        self.assertEqual(count, 3)
+        self.assertEqual(calls, [("step", 6), ("analyze", 24.0)])
+
+    def test_check_station_precip_strategy_status_fails_and_limits_warning_text(self) -> None:
+        context = self._strategy_status_context(
+            {
+                "enabled": True,
+                "status": "fail",
+                "summary": "站点降水方案仍有关键问题。",
+                "matched_station_count": 0,
+                "warnings": ["缺少站点 A", "缺少站点 B", "缺少站点 C"],
+            }
+        )
+
+        ready, message, count = check_station_precip_strategy_status({}, context)
+
+        self.assertFalse(ready)
+        self.assertEqual(message, "站点降水方案仍有关键问题。 缺少站点 A；缺少站点 B")
+        self.assertEqual(count, 0)
+
     def test_labels_time_formatting_and_counts(self) -> None:
         self.assertEqual(station_precip_mode_label("grid_plus_station_bias"), "\u683c\u70b9 + \u7ad9\u70b9\u504f\u5dee\u8ba2\u6b63")
         self.assertEqual(station_precip_mode_label("thiessen_station_only"), "\u7eaf\u7ad9\u70b9\u6cf0\u68ee\u5206\u914d")

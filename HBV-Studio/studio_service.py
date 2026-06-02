@@ -205,7 +205,9 @@ from services.raster_time_series import validate_tif_time_series as build_valida
 from services.precip_strategy_status import PrecipStrategyStatusContext
 from services.precip_strategy_status import check_precip_strategy_outputs as build_check_precip_strategy_outputs
 from services.station_precip import StationPrecipAnalysisContext
+from services.station_precip import StationPrecipStrategyStatusContext
 from services.station_precip import analyze_station_precip_inputs as build_analyze_station_precip_inputs
+from services.station_precip import check_station_precip_strategy_status as build_check_station_precip_strategy_status
 from services.station_precip import station_precip_mode_label as build_station_precip_mode_label
 from services.runs import RunCalibrationTaskContext, RunConfigBoundaryContext, RunConfigDataSourceContext, RunConfigIdentityContext, RunConfigSyncContext, RunDetailContext, RunDiscoveryContext, RunExportContext, RunListContext, RunMetadataCompatibilityContext, RunMutationContext
 from services.runs import RunMetadataNormalizationContext, RunMetadataObjectTypeContext
@@ -2005,22 +2007,18 @@ def analyze_station_precip_inputs(
     )
 
 
-def check_station_precip_strategy(config: dict[str, Any]) -> tuple[bool, str, int]:
-    analysis = analyze_station_precip_inputs(
-        config,
-        step_hours=normalize_time_step_hours(config.get("时间步长_小时", 24.0)),
+def _station_precip_strategy_status_context() -> StationPrecipStrategyStatusContext:
+    return StationPrecipStrategyStatusContext(
+        normalize_time_step_hours=normalize_time_step_hours,
+        analyze_station_precip_inputs=analyze_station_precip_inputs,
     )
-    if not analysis.get("enabled"):
-        return True, str(analysis.get("summary", "当前为格点基线模式，未启用站点订正。")), 0
-    status = str(analysis.get("status", "fail"))
-    matched = int(analysis.get("matched_station_count", 0) or 0)
-    warnings = list(analysis.get("warnings", []) or [])
-    message = str(analysis.get("summary", "站点降水资料已检查。"))
-    if matched:
-        message += f" 站点匹配：{matched} 个。"
-    if warnings:
-        message += " " + "；".join(str(item) for item in warnings[:2])
-    return status != "fail", message, matched
+
+
+def check_station_precip_strategy(config: dict[str, Any]) -> tuple[bool, str, int]:
+    return build_check_station_precip_strategy_status(
+        config,
+        _station_precip_strategy_status_context(),
+    )
 
 
 def _glacier_status_context() -> GlacierStatusContext:
