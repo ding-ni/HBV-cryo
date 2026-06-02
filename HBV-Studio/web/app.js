@@ -153,6 +153,7 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastCandidateRuns",
+      "forecastCompletedResultState",
       "forecastInputCheckDecision",
       "forecastInputCheckError",
       "forecastInputPayload",
@@ -6291,11 +6292,10 @@ async function loadTasks() {
       }
     }
     if (newlyCompletedForecast) {
-      const runPath = newlyCompletedForecast.result?.run_path || newlyCompletedForecast.run_path || newlyCompletedForecast.detected_runs?.[0] || "";
-      if (runPath) {
+      const completedResult = window.HBVStudioForecastView.forecastCompletedResultState(newlyCompletedForecast);
+      if (completedResult.ok) {
         await loadRuns().catch(() => {});
-        state.forecastResultRunPath = runPath;
-        state.forecastResultData = null;
+        Object.assign(state, completedResult.statePatch);
         renderForecastResultPanel();
         if (state.currentView === "forecast") {
           showToast("连续状态预报已完成，已更新预报结果。");

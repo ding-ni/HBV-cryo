@@ -144,6 +144,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             for (const name of [
               "forecastResultRuns",
               "forecastSelectedResultRun",
+              "forecastCompletedResultState",
               "forecastResultDetailState",
               "forecastResultLoadErrorState",
               "forecastResultLoadStartState",
@@ -268,6 +269,39 @@ class FrontendForecastViewTests(unittest.TestCase):
                 emptySelectionState.statePatch.forecastResultLoadingPath !== "" ||
                 emptySelectionState.statePatch.lastForecastExportPath !== "") {
               throw new Error(`empty selection state wrong: ${JSON.stringify(emptySelectionState)}`);
+            }
+
+            const completedFromResult = view.forecastCompletedResultState({
+              result: { run_path: " C:/runs/from-result " },
+              run_path: "C:/runs/from-task",
+              detected_runs: ["C:/runs/from-detected"],
+            });
+            if (!completedFromResult.ok || completedFromResult.runPath !== "C:/runs/from-result" ||
+                completedFromResult.statePatch.forecastResultRunPath !== "C:/runs/from-result" ||
+                completedFromResult.statePatch.forecastResultData !== null ||
+                completedFromResult.statePatch.forecastResultLoadingPath !== "" ||
+                completedFromResult.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`completed result path state wrong: ${JSON.stringify(completedFromResult)}`);
+            }
+
+            const completedFromRun = view.forecastCompletedResultState({
+              run_path: " C:/runs/from-task ",
+              detected_runs: ["C:/runs/from-detected"],
+            });
+            if (!completedFromRun.ok || completedFromRun.runPath !== "C:/runs/from-task") {
+              throw new Error(`completed task run_path fallback wrong: ${JSON.stringify(completedFromRun)}`);
+            }
+
+            const completedFromDetected = view.forecastCompletedResultState({
+              detected_runs: [" C:/runs/from-detected "],
+            });
+            if (!completedFromDetected.ok || completedFromDetected.runPath !== "C:/runs/from-detected") {
+              throw new Error(`completed detected run fallback wrong: ${JSON.stringify(completedFromDetected)}`);
+            }
+
+            const completedMissing = view.forecastCompletedResultState({ detected_runs: [] });
+            if (completedMissing.ok || completedMissing.runPath !== "" || completedMissing.statePatch !== null) {
+              throw new Error(`completed missing state wrong: ${JSON.stringify(completedMissing)}`);
             }
 
             const rendered = view.renderForecastResultOptions([

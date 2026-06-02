@@ -226,6 +226,23 @@
     };
   }
 
+  function forecastCompletedResultState(task = null) {
+    const runPath = String(
+      task?.result?.run_path ||
+      task?.run_path ||
+      task?.detected_runs?.[0] ||
+      "",
+    ).trim();
+    if (!runPath) {
+      return { ok: false, runPath: "", statePatch: null };
+    }
+    return {
+      ok: true,
+      runPath,
+      statePatch: forecastResultSelectionState(runPath).statePatch,
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1103,6 +1120,7 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastCandidateRuns,
+    forecastCompletedResultState,
     forecastInputCheckDecision,
     forecastInputCheckError,
     forecastInputPayload,
