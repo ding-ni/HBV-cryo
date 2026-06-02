@@ -136,6 +136,24 @@
     };
   }
 
+  function forecastRestartPayload(run = {}, fields = {}, options = {}) {
+    const text = value => String(value || "").trim();
+    const input = forecastInputPayload(run, fields, options);
+    return {
+      source_run: input.source_run,
+      config_path: input.config_path,
+      forecast_start: input.forecast_start,
+      forecast_end: input.forecast_end,
+      forecast_prec_dir: input.forecast_prec_dir,
+      forecast_temp_dir: input.forecast_temp_dir,
+      forecast_evap_dir: input.forecast_evap_dir,
+      profile: text(options.profile),
+      objective_mode: text(run?.effective_objective_mode || run?.objective_family || run?.recorded_objective_family || options.defaultObjectiveMode || ""),
+      prec_source: "custom_tif",
+      glacier_mode: text(fields.glacier_mode || options.glacierMode || "inline") || "inline",
+    };
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -846,6 +864,7 @@
     forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastRestartPayload,
     forecastResultRuns,
     forecastRunReady,
     forecastRunReadinessText,

@@ -229,6 +229,78 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_restart_payload_uses_run_and_context_metadata(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastRestartPayload !== "function") {
+              throw new Error("missing forecast restart payload export");
+            }
+
+            const payload = view.forecastRestartPayload({
+              path: " C:/runs/source ",
+              workspace_config: "",
+              objective_family: "daily_unified_professional_v1",
+            }, {
+              forecast_start: " 2026-03-01 ",
+              forecast_end: " 2026-03-10 ",
+              forecast_prec_dir: " C:/forecast/prec ",
+              forecast_temp_dir: " C:/forecast/temp ",
+              forecast_evap_dir: " C:/forecast/evap ",
+              glacier_mode: " external ",
+            }, {
+              fallbackConfigPath: " C:/workspaces/current.json ",
+              profile: " daily ",
+              defaultObjectiveMode: "fallback_objective",
+            });
+
+            const expected = {
+              source_run: "C:/runs/source",
+              config_path: "C:/workspaces/current.json",
+              forecast_start: "2026-03-01",
+              forecast_end: "2026-03-10",
+              forecast_prec_dir: "C:/forecast/prec",
+              forecast_temp_dir: "C:/forecast/temp",
+              forecast_evap_dir: "C:/forecast/evap",
+              profile: "daily",
+              objective_mode: "daily_unified_professional_v1",
+              prec_source: "custom_tif",
+              glacier_mode: "external",
+            };
+            for (const [key, value] of Object.entries(expected)) {
+              if (payload[key] !== value) throw new Error(`${key} mismatch: ${payload[key]} !== ${value}`);
+            }
+            if ("time_step_hours" in payload) throw new Error("restart payload should not include input-check-only time_step_hours");
+
+            const fallback = view.forecastRestartPayload({
+              path: "C:/runs/source2",
+            }, {
+              glacier_mode: "",
+            }, {
+              profile: "",
+              defaultObjectiveMode: "daily_unified_professional_v1",
+            });
+            if (fallback.objective_mode !== "daily_unified_professional_v1") throw new Error(`fallback objective wrong: ${fallback.objective_mode}`);
+            if (fallback.glacier_mode !== "inline") throw new Error(`fallback glacier mode wrong: ${fallback.glacier_mode}`);
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""

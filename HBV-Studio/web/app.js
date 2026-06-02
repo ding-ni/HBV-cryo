@@ -156,6 +156,7 @@ const frontendModuleContracts = [
       "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastRestartPayload",
       "forecastResultRuns",
       "forecastRunReady",
       "forecastRunReadinessText",
@@ -5842,19 +5843,18 @@ async function startForecastRestart() {
     const firstWarning = inputCheck?.warnings?.[0] || "预报气象目录存在提示，系统将按预报窗口筛选归档。";
     showToast(firstWarning);
   }
-  const payload = {
-    source_run: run.path,
-    config_path: run.workspace_config || state.wizardWorkspacePath || "",
+  const payload = window.HBVStudioForecastView.forecastRestartPayload(run, {
     forecast_start: forecastStart,
     forecast_end: forecastEnd,
     forecast_prec_dir: precDir,
     forecast_temp_dir: tempDir,
     forecast_evap_dir: evapDir,
+    glacier_mode: $("#forecast-glacier-mode")?.value,
+  }, {
+    fallbackConfigPath: state.wizardWorkspacePath,
     profile: runProfileValue(run) || state.currentWorkspace?.率定模式 || "",
-    objective_mode: run.effective_objective_mode || run.objective_family || run.recorded_objective_family || CURRENT_OBJECTIVE_FAMILY,
-    prec_source: "custom_tif",
-    glacier_mode: $("#forecast-glacier-mode")?.value || "inline",
-  };
+    defaultObjectiveMode: CURRENT_OBJECTIVE_FAMILY,
+  });
   try {
     const response = await apiPost("/api/forecast/restart/start", payload);
     showToast(`已启动：${response.task?.label || "连续状态预报"}`);
