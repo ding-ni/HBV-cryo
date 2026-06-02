@@ -160,6 +160,7 @@ const frontendModuleContracts = [
       "forecastParameterSourceSummary",
       "forecastResultButtonState",
       "forecastResultExportPayload",
+      "forecastResultExportSuccess",
       "forecastRestartPreflight",
       "forecastRestartPayload",
       "forecastResultRuns",
@@ -5767,12 +5768,17 @@ async function exportForecastResultExcel() {
   const payload = await apiPost("/api/run/export-excel", exportPayload);
   state.lastForecastExportPath = payload.data?.path || "";
   setForecastResultButtons(run || data?.run);
+  const exportSuccess = window.HBVStudioForecastView.forecastResultExportSuccess(
+    payload.data || {},
+    state.lastForecastExportPath,
+    { shortPath },
+  );
   const hint = $("#forecast-result-hint");
   if (hint) {
-    hint.textContent = `已导出 ${payload.data?.row_count || 0} 行到 ${payload.data?.display_path || shortPath(state.lastForecastExportPath)}。`;
+    hint.textContent = exportSuccess.hintText;
     hint.className = "hint-box status-ok";
   }
-  showToast(`预报结果 Excel 已导出：${payload.data?.row_count || 0} 行`);
+  showToast(exportSuccess.toastText);
 }
 
 function renderForecastView() {

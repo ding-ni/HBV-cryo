@@ -241,6 +241,18 @@
     };
   }
 
+  function forecastResultExportSuccess(responseData = {}, lastExportPath = "", helpers = {}) {
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const rowCount = Number(responseData?.row_count || 0);
+    const displayPath = responseData?.display_path || shortPath(lastExportPath);
+    return {
+      rowCount,
+      displayPath,
+      hintText: `已导出 ${rowCount} 行到 ${displayPath}。`,
+      toastText: `预报结果 Excel 已导出：${rowCount} 行`,
+    };
+  }
+
   function forecastResultButtonState(run = null, lastExportPath = "") {
     const hasRun = Boolean(run?.path);
     const hasExportPath = Boolean(lastExportPath);
@@ -994,6 +1006,7 @@
     forecastParameterSourceSummary,
     forecastResultButtonState,
     forecastResultExportPayload,
+    forecastResultExportSuccess,
     forecastRestartPreflight,
     forecastRestartPayload,
     forecastResultRuns,

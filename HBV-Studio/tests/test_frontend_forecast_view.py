@@ -552,6 +552,51 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_result_export_success_text_uses_display_path_or_short_path(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastResultExportSuccess !== "function") {
+              throw new Error("missing forecast result export success helper");
+            }
+
+            const explicit = view.forecastResultExportSuccess({
+              row_count: 12,
+              display_path: "预报导出.xlsx",
+            }, "C:/exports/fallback.xlsx", {
+              shortPath(value) { return String(value).split(/[\\/]/).pop(); },
+            });
+            if (explicit.rowCount !== 12 || explicit.displayPath !== "预报导出.xlsx") {
+              throw new Error(`explicit export text wrong: ${JSON.stringify(explicit)}`);
+            }
+            if (explicit.hintText !== "已导出 12 行到 预报导出.xlsx。") throw new Error(`hint wrong: ${explicit.hintText}`);
+            if (explicit.toastText !== "预报结果 Excel 已导出：12 行") throw new Error(`toast wrong: ${explicit.toastText}`);
+
+            const fallback = view.forecastResultExportSuccess({}, "C:/exports/fallback.xlsx", {
+              shortPath(value) { return String(value).split(/[\\/]/).pop(); },
+            });
+            if (fallback.rowCount !== 0 || fallback.displayPath !== "fallback.xlsx") {
+              throw new Error(`fallback export text wrong: ${JSON.stringify(fallback)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_result_button_state_tracks_run_and_export_availability(self) -> None:
         script = textwrap.dedent(
             r"""
