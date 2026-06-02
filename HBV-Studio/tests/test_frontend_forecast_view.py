@@ -362,6 +362,66 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_result_export_payload_uses_metadata_and_boundary_fields(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastResultExportPayload !== "function") {
+              throw new Error("missing forecast result export payload helper");
+            }
+
+            const payload = view.forecastResultExportPayload({
+              run: { path: " C:/runs/forecast-result " },
+              metadata: {
+                time_config: { forecast_start: "2026-04-01", forecast_end: "2026-04-10" },
+                boundary: { enabled: true },
+              },
+              series: { dates: ["2026-04-02", "2026-04-09"] },
+            }, null, {
+              boundaryEnabledFromMeta(meta) { return Boolean(meta.boundary?.enabled); },
+            });
+            if (payload.path !== "C:/runs/forecast-result") throw new Error(`path mismatch: ${payload.path}`);
+            if (payload.start_date !== "2026-04-01" || payload.end_date !== "2026-04-10") {
+              throw new Error(`metadata date range mismatch: ${payload.start_date} ${payload.end_date}`);
+            }
+            if (payload.fields.join(",") !== "q_sim,q_rain,q_snow,q_ice,q_boundary_inflow") {
+              throw new Error(`boundary field missing: ${payload.fields.join(",")}`);
+            }
+
+            const fallback = view.forecastResultExportPayload({
+              metadata: { forecast_result: { forecast_start: "2026-05-01" } },
+              series: { dates: ["2026-05-02", "2026-05-03"] },
+            }, { path: "C:/runs/selected-result" });
+            if (fallback.path !== "C:/runs/selected-result") throw new Error(`selected run path fallback wrong: ${fallback.path}`);
+            if (fallback.start_date !== "2026-05-01" || fallback.end_date !== "2026-05-03") {
+              throw new Error(`fallback date range wrong: ${fallback.start_date} ${fallback.end_date}`);
+            }
+            if (fallback.fields.join(",") !== "q_sim,q_rain,q_snow,q_ice") {
+              throw new Error(`default fields wrong: ${fallback.fields.join(",")}`);
+            }
+
+            if (view.forecastResultExportPayload({ series: { dates: ["2026-01-01"] } }, null) !== null) {
+              throw new Error("missing run path should return null");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""

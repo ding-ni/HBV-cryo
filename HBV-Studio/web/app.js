@@ -156,6 +156,7 @@ const frontendModuleContracts = [
       "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastResultExportPayload",
       "forecastRestartPreflight",
       "forecastRestartPayload",
       "forecastResultRuns",
@@ -5765,23 +5766,12 @@ async function openForecastResultAnalysis() {
 async function exportForecastResultExcel() {
   const run = selectedForecastResultRun();
   const data = state.forecastResultData;
-  const runPath = String(data?.run?.path || run?.path || "").trim();
-  if (!runPath) {
+  const exportPayload = window.HBVStudioForecastView.forecastResultExportPayload(data, run, { boundaryEnabledFromMeta });
+  if (!exportPayload) {
     showToast("当前没有可导出的预报结果。", true);
     return;
   }
-  const meta = data?.metadata || {};
-  const series = data?.series || {};
-  const start = meta.time_config?.forecast_start || meta.forecast_result?.forecast_start || series.dates?.[0] || "";
-  const end = meta.time_config?.forecast_end || meta.forecast_result?.forecast_end || (series.dates || []).slice(-1)[0] || "";
-  const fields = ["q_sim", "q_rain", "q_snow", "q_ice"];
-  if (boundaryEnabledFromMeta(meta)) fields.push("q_boundary_inflow");
-  const payload = await apiPost("/api/run/export-excel", {
-    path: runPath,
-    start_date: start,
-    end_date: end,
-    fields,
-  });
+  const payload = await apiPost("/api/run/export-excel", exportPayload);
   state.lastForecastExportPath = payload.data?.path || "";
   setForecastResultButtons(run || data?.run);
   const hint = $("#forecast-result-hint");

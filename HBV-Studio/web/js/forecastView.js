@@ -187,6 +187,25 @@
     return { ok: true, message: "", expectedStart };
   }
 
+  function forecastResultExportPayload(data = {}, selectedRun = null, helpers = {}) {
+    const boundaryEnabledFromMeta = helpers.boundaryEnabledFromMeta || (() => false);
+    const runPath = String(data?.run?.path || selectedRun?.path || "").trim();
+    if (!runPath) return null;
+    const meta = data?.metadata || {};
+    const series = data?.series || {};
+    const dates = Array.isArray(series.dates) ? series.dates : [];
+    const start = meta.time_config?.forecast_start || meta.forecast_result?.forecast_start || dates[0] || "";
+    const end = meta.time_config?.forecast_end || meta.forecast_result?.forecast_end || dates.slice(-1)[0] || "";
+    const fields = ["q_sim", "q_rain", "q_snow", "q_ice"];
+    if (boundaryEnabledFromMeta(meta)) fields.push("q_boundary_inflow");
+    return {
+      path: runPath,
+      start_date: start,
+      end_date: end,
+      fields,
+    };
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -897,6 +916,7 @@
     forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastResultExportPayload,
     forecastRestartPreflight,
     forecastRestartPayload,
     forecastResultRuns,
