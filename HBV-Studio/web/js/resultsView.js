@@ -304,6 +304,62 @@
     return !(requestPresetId && currentPresetId && requestPresetId !== currentPresetId);
   }
 
+  function forwardSimulationPreflight(runData = null, params = null, helpers = {}) {
+    const isStudioEditableRun = helpers.isStudioEditableRun || (() => false);
+    if (!runData || !params || !isStudioEditableRun(runData)) {
+      return {
+        ok: false,
+        reason: "unsupported-run",
+        message: "该结果不支持保存并重算。",
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+    };
+  }
+
+  function forwardSimulationStartState() {
+    return {
+      hint: {
+        visible: true,
+        text: "正在创建保存并重算任务...",
+        className: "hint-box status-warn",
+      },
+      log: {
+        visible: true,
+        text: "",
+      },
+    };
+  }
+
+  function forwardSimulationErrorState(error = {}) {
+    const message = error?.message || String(error || "未知错误");
+    return {
+      hint: {
+        visible: true,
+        text: `模拟失败：${message}`,
+        className: "hint-box status-fail",
+      },
+      log: {
+        visible: false,
+      },
+    };
+  }
+
+  function forwardSimulationRequestContext(runData = {}, params = {}, options = {}) {
+    const runPath = String(runData?.run?.path || "").trim();
+    return {
+      runPath,
+      payload: {
+        run_path: runPath,
+        params: params || {},
+        save_run: options.saveRun !== false,
+      },
+    };
+  }
+
   function runManualPresetLoadStartState(path = "", currentConfigPath = "", helpers = {}) {
     const samePath = helpers.samePath || defaultSamePath;
     const targetPath = String(path || "").trim();
@@ -911,6 +967,10 @@
     clearRunComparisonState,
     clearRunDetailState,
     filterRuns,
+    forwardSimulationErrorState,
+    forwardSimulationPreflight,
+    forwardSimulationRequestContext,
+    forwardSimulationStartState,
     latestEditableRunPath,
     manualStarterControlState,
     resultMetricItems,

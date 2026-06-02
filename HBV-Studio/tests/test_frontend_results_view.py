@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationStartState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -302,6 +302,57 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/A" } }, null, { samePath })) {
               throw new Error("missing current preset should keep original behavior and remain current");
+            }
+            const unsupportedForward = results.forwardSimulationPreflight(
+              { run: { path: "C:/runs/A" } },
+              { TT: 0.2 },
+              { isStudioEditableRun() { return false; } },
+            );
+            if (unsupportedForward.ok || unsupportedForward.reason !== "unsupported-run" || !unsupportedForward.message.includes("保存并重算")) {
+              throw new Error(`unsupported forward preflight wrong: ${JSON.stringify(unsupportedForward)}`);
+            }
+            const missingParamsForward = results.forwardSimulationPreflight(
+              { run: { path: "C:/runs/A" } },
+              null,
+              { isStudioEditableRun() { return true; } },
+            );
+            if (missingParamsForward.ok || missingParamsForward.reason !== "unsupported-run") {
+              throw new Error(`missing params forward preflight wrong: ${JSON.stringify(missingParamsForward)}`);
+            }
+            const readyForward = results.forwardSimulationPreflight(
+              { run: { path: "C:/runs/A" } },
+              { TT: 0.2 },
+              { isStudioEditableRun() { return true; } },
+            );
+            if (!readyForward.ok || readyForward.reason || readyForward.message) {
+              throw new Error(`ready forward preflight wrong: ${JSON.stringify(readyForward)}`);
+            }
+            const forwardStart = results.forwardSimulationStartState();
+            if (!forwardStart.hint.visible || forwardStart.hint.className !== "hint-box status-warn" ||
+                forwardStart.hint.text !== "正在创建保存并重算任务..." ||
+                !forwardStart.log.visible || forwardStart.log.text !== "") {
+              throw new Error(`forward start state wrong: ${JSON.stringify(forwardStart)}`);
+            }
+            const forwardError = results.forwardSimulationErrorState(new Error("接口超时"));
+            if (!forwardError.hint.visible || forwardError.hint.className !== "hint-box status-fail" ||
+                forwardError.hint.text !== "模拟失败：接口超时" || forwardError.log.visible) {
+              throw new Error(`forward error state wrong: ${JSON.stringify(forwardError)}`);
+            }
+            const forwardRequest = results.forwardSimulationRequestContext(
+              { run: { path: " C:/runs/A " } },
+              { TT: 0.2 },
+            );
+            if (forwardRequest.runPath !== "C:/runs/A" || forwardRequest.payload.run_path !== "C:/runs/A" ||
+                forwardRequest.payload.params.TT !== 0.2 || forwardRequest.payload.save_run !== true) {
+              throw new Error(`forward request context wrong: ${JSON.stringify(forwardRequest)}`);
+            }
+            const transientForwardRequest = results.forwardSimulationRequestContext(
+              { run: { path: "C:/runs/A" } },
+              { TT: 0.2 },
+              { saveRun: false },
+            );
+            if (transientForwardRequest.payload.save_run !== false) {
+              throw new Error(`forward request should support transient simulation: ${JSON.stringify(transientForwardRequest)}`);
             }
             const emptyPresetLoad = results.runManualPresetLoadStartState(" ", "C:/ws/A", helpers);
             if (emptyPresetLoad.path !== "" || emptyPresetLoad.shouldRequest || !emptyPresetLoad.shouldRender ||

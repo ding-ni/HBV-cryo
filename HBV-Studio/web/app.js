@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationStartState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5124,35 +5124,40 @@ function resetParamsToOriginal() {
 }
 
 async function runForwardSimulation() {
-  if (!state._runData || !state._runParams || !isStudioEditableRun(state._runData)) {
-    showToast("该结果不支持保存并重算。", true);
+  const preflight = window.HBVStudioResultsView.forwardSimulationPreflight(
+    state._runData,
+    state._runParams,
+    { isStudioEditableRun },
+  );
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
   const hint = $("#resim-hint");
   const logBox = $("#resim-log");
-  hint.style.display = "";
-  hint.textContent = "正在创建保存并重算任务...";
-  hint.className = "hint-box status-warn";
+  const startState = window.HBVStudioResultsView.forwardSimulationStartState();
+  hint.style.display = startState.hint.visible ? "" : "none";
+  hint.textContent = startState.hint.text;
+  hint.className = startState.hint.className;
   if (logBox) {
-    logBox.textContent = "";
-    logBox.style.display = "";
+    logBox.textContent = startState.log.text;
+    logBox.style.display = startState.log.visible ? "" : "none";
   }
+  const requestContext = window.HBVStudioResultsView.forwardSimulationRequestContext(state._runData, state._runParams);
   try {
-    const payload = await apiPost("/api/simulate/forward/start", {
-      run_path: state._runData.run?.path,
-      params: state._runParams,
-      save_run: true,
-    });
+    const payload = await apiPost("/api/simulate/forward/start", requestContext.payload);
     const task = payload.task;
     if (task) {
       updateForwardSimUi(task);
       await loadTasks();
-      await pollForwardSimulationTask(task.id, state._runData?.run?.path || "");
+      await pollForwardSimulationTask(task.id, requestContext.runPath);
     }
   } catch (err) {
-    hint.textContent = `模拟失败：${err.message}`;
-    hint.className = "hint-box status-fail";
-    if (logBox) logBox.style.display = "none";
+    const errorState = window.HBVStudioResultsView.forwardSimulationErrorState(err);
+    hint.style.display = errorState.hint.visible ? "" : "none";
+    hint.textContent = errorState.hint.text;
+    hint.className = errorState.hint.className;
+    if (logBox) logBox.style.display = errorState.log.visible ? "" : "none";
   }
 }
 
