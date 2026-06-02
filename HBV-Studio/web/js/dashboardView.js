@@ -49,6 +49,14 @@
   `).join("");
   }
 
+  function workspaceCardsState(workspaces, helpers = {}) {
+    const html = renderWorkspaceCards(workspaces, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#workspace-card-list", html }],
+    };
+  }
+
   function renderTemplates(templates, helpers = {}) {
     const items = Array.isArray(templates) ? templates : [];
     if (!items.length) return emptyTemplateHint();
@@ -73,8 +81,18 @@
   `).join("");
   }
 
+  function templateListState(templates, helpers = {}) {
+    const html = renderTemplates(templates, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#template-list", html }],
+    };
+  }
+
   window.HBVStudioDashboardView = {
     renderTemplates,
     renderWorkspaceCards,
+    templateListState,
+    workspaceCardsState,
   };
 })();

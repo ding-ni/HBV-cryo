@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates) {
+            if (!dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState) {
               throw new Error("dashboard view module exports are missing");
             }
             const helpers = {
@@ -59,6 +59,21 @@ class FrontendDashboardViewTests(unittest.TestCase):
             for (const attr of ["data-preview-workspace", "data-view-workspace-runs", "data-open-workspace", "data-delete-path"]) {
               if (!workspaceHtml.includes(attr)) throw new Error(`workspace action missing: ${attr}`);
             }
+            const workspaceState = dashboard.workspaceCardsState([
+              {
+                path: "C:/workspaces/A/config.json",
+                flow_name: "测试<流域>",
+                calibration_mode: "daily",
+                object_type: "full_upstream_basin",
+                workflow: { ready_for_calibration: true, completed_count: 6, total_steps: 7, next_step_label: "率定", missing_count: 0 },
+                display_path: "C:/workspaces/A/config.json",
+                runtime_display_path: "C:/workspaces/A/runtime",
+              },
+            ], { ...helpers, selectedPath: "C:/workspaces/A/config.json" });
+            const workspaceDom = Object.fromEntries(workspaceState.domUpdates.map(update => [update.selector, update]));
+            if (workspaceState.html !== workspaceHtml || workspaceDom["#workspace-card-list"].html !== workspaceHtml) {
+              throw new Error(`unexpected workspace DOM updates: ${JSON.stringify(workspaceState)}`);
+            }
             if (!dashboard.renderWorkspaceCards([], helpers).includes("还没有工作区")) {
               throw new Error("empty workspace hint missing");
             }
@@ -78,6 +93,19 @@ class FrontendDashboardViewTests(unittest.TestCase):
             }
             if (!templateHtml.includes('data-template-sync="tuotuohe"')) {
               throw new Error("built-in template sync action missing");
+            }
+            const templateState = dashboard.templateListState([
+              {
+                id: "tuotuohe-daily-builtin",
+                title: "沱沱河<模板>",
+                description: "内置测试",
+                calibration_mode: "daily",
+                object_type: "full_upstream_basin",
+              },
+            ], helpers);
+            const templateDom = Object.fromEntries(templateState.domUpdates.map(update => [update.selector, update]));
+            if (templateState.html !== templateHtml || templateDom["#template-list"].html !== templateHtml) {
+              throw new Error(`unexpected template DOM updates: ${JSON.stringify(templateState)}`);
             }
             if (!dashboard.renderTemplates([], helpers).includes("未发现模板")) {
               throw new Error("empty template hint missing");

@@ -240,7 +240,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["renderTemplates", "renderWorkspaceCards"],
+    exports: ["renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -4472,15 +4472,15 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
 // ===============================================================
 
 function renderWorkspaceCards() {
-  const host = $("#workspace-card-list");
   if (!state.workspaces.length) {
     state.dashboardWorkspaceLayout = null;
     state.dashboardGeoOverview = null;
     state.dashboardLayoutPath = "";
-    host.innerHTML = window.HBVStudioDashboardView.renderWorkspaceCards([], { escapeHtml });
+    const cards = window.HBVStudioDashboardView.workspaceCardsState([], { escapeHtml });
+    applyDomUpdates(cards.domUpdates);
     return;
   }
-  host.innerHTML = window.HBVStudioDashboardView.renderWorkspaceCards(state.workspaces, {
+  const cards = window.HBVStudioDashboardView.workspaceCardsState(state.workspaces, {
     escapeHtml,
     objectLabels,
     profileBadge,
@@ -4488,15 +4488,16 @@ function renderWorkspaceCards() {
     shortPath,
     workspaceNextStepText,
   });
+  applyDomUpdates(cards.domUpdates);
 }
 
 function renderTemplates() {
-  const host = $("#template-list");
-  host.innerHTML = window.HBVStudioDashboardView.renderTemplates(state.templates, {
+  const templates = window.HBVStudioDashboardView.templateListState(state.templates, {
     escapeHtml,
     objectLabels,
     profileBadge,
   });
+  applyDomUpdates(templates.domUpdates);
 }
 
 // ===============================================================
