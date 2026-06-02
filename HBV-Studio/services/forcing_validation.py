@@ -56,6 +56,12 @@ class ForcingPreprocessStatusContext:
     validate_tif_time_series: Callable[..., dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class ForcingDownloadStatusContext:
+    build_workspace_paths: Callable[[dict[str, Any]], dict[str, Any]]
+    configured_precip_source: Callable[[dict[str, Any]], str]
+
+
 def series_group_status(
     entries: list[tuple[str, Path]],
     step_hours: float,
@@ -103,6 +109,74 @@ def configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
     temp_source = str(meteo.get("温度来源", "era5")).strip().lower() or "era5"
     pet_source = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).strip().lower() or "era5_fao56"
     return temp_source, pet_source
+
+
+def glob_count(path: Path, pattern: str) -> int:
+    if not path.exists():
+        return 0
+    return len(list(path.glob(pattern)))
+
+
+def summarize_nc_download_status(entries: list[tuple[str, Path, str]]) -> tuple[bool, str, int]:
+    if not entries:
+        return True, "当前方案不需要这一步。", 0
+    existing: list[str] = []
+    missing: list[str] = []
+    total = 0
+    for label, directory, pattern in entries:
+        count = glob_count(directory, pattern)
+        total += count
+        if count > 0:
+            existing.append(f"{label} {count} 个")
+        else:
+            missing.append(label)
+    if not missing:
+        return True, "已下载：" + "；".join(existing), total
+    if existing:
+        return False, "已下载：" + "；".join(existing) + f"；仍缺少：{'、'.join(missing)}", total
+    return False, "还没有下载到这一步需要的 ERA5 原始文件。", 0
+
+
+def check_daily_era5_download_status(
+    config: dict[str, Any],
+    context: ForcingDownloadStatusContext,
+) -> tuple[bool, str, int]:
+    paths = context.build_workspace_paths(config)
+    temp_source, pet_source = configured_daily_meteo_sources(config)
+    precip_source = context.configured_precip_source(config)
+    entries: list[tuple[str, Path, str]] = []
+    if precip_source == "era5":
+        entries.append(("ERA5 降水", Path(paths["raw_prec_era5_dir"]), "era5_tp_*.nc"))
+    if temp_source != "custom_tif" or pet_source != "custom_tif":
+        entries.append(("ERA5 温度", Path(paths["raw_temp_dir"]), "era5_t2m_*.nc"))
+    if pet_source != "custom_tif":
+        entries.extend(
+            [
+                ("太阳辐射", Path(paths["raw_solar_dir"]), "era5_ssrd_*.nc"),
+                ("风速(U)", Path(paths["raw_wind_dir"]), "era5_u10_*.nc"),
+                ("风速(V)", Path(paths["raw_wind_dir"]), "era5_v10_*.nc"),
+                ("露点温度", Path(paths["raw_dewpoint_dir"]), "era5_d2m_*.nc"),
+            ]
+        )
+    return summarize_nc_download_status(entries)
+
+
+def check_hourly_era5_download_status(
+    config: dict[str, Any],
+    context: ForcingDownloadStatusContext,
+) -> tuple[bool, str, int]:
+    paths = context.build_workspace_paths(config)
+    patterns = [
+        Path(paths["raw_temp_dir"]).glob("era5_t2m_hourly_*.nc"),
+        Path(paths["raw_solar_dir"]).glob("era5_ssrd_hourly_*.nc"),
+        Path(paths["raw_wind_dir"]).glob("era5_u10_hourly_*.nc"),
+        Path(paths["raw_wind_dir"]).glob("era5_v10_hourly_*.nc"),
+        Path(paths["raw_dewpoint_dir"]).glob("era5_d2m_hourly_*.nc"),
+    ]
+    if context.configured_precip_source(config) == "era5":
+        patterns.append(Path(paths["raw_prec_era5_dir"]).glob("era5_tp_hourly_*.nc"))
+    count = sum(len(list(items)) for items in patterns)
+    return count > 0, f"小时 ERA5 原始 NetCDF 文件数：{count}", count
 
 
 def check_daily_temp_evap_status(

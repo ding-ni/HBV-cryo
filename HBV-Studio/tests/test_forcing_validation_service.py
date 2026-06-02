@@ -15,18 +15,22 @@ if str(STUDIO_DIR) not in sys.path:
 
 from services.forcing_validation import (  # noqa: E402
     ForcingAlignedStatusContext,
+    ForcingDownloadStatusContext,
     ForcingInputsReadyContext,
     ForcingPreprocessStatusContext,
     ForcingValidationContext,
     check_aligned_forcing_status,
+    check_daily_era5_download_status,
     check_daily_era5_processed_status,
     check_daily_prec_status,
     check_daily_temp_evap_status,
     check_forcing_inputs_ready,
+    check_hourly_era5_download_status,
     check_hourly_prec_status,
     check_hourly_temp_evap_status,
     configured_daily_meteo_sources,
     prefer_raw_or_aligned_group_status,
+    summarize_nc_download_status,
     validate_forcing_bundle,
 )
 
@@ -155,6 +159,26 @@ class ForcingValidationServiceTests(unittest.TestCase):
             resolve_config_related_path=resolve_config_related_path,
             validate_forcing_bundle=validate_forcing,
             observed_flow_key="观测径流_csv",
+        )
+
+    def _download_context(
+        self,
+        base_dir: Path,
+        *,
+        precip_source: str = "era5",
+    ) -> ForcingDownloadStatusContext:
+        paths = {
+            "raw_prec_era5_dir": base_dir / "prec",
+            "raw_temp_dir": base_dir / "temp",
+            "raw_solar_dir": base_dir / "solar",
+            "raw_wind_dir": base_dir / "wind",
+            "raw_dewpoint_dir": base_dir / "dewpoint",
+        }
+        for path in paths.values():
+            path.mkdir(parents=True, exist_ok=True)
+        return ForcingDownloadStatusContext(
+            build_workspace_paths=lambda config: paths,
+            configured_precip_source=lambda config: precip_source,
         )
 
     def _preprocess_context(
@@ -332,6 +356,74 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertFalse(ready)
         self.assertEqual(message, "基础输入缺失；小时气象驱动有效时间步数：3；问题：气象缺少降水；气象缺少气温")
         self.assertEqual(count, 3)
+
+    def test_summarize_nc_download_status_reports_existing_and_missing_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            temp_dir_path = base_dir / "temp"
+            wind_dir_path = base_dir / "wind"
+            temp_dir_path.mkdir()
+            wind_dir_path.mkdir()
+            (temp_dir_path / "era5_t2m_2020.nc").write_text("ok", encoding="utf-8")
+
+            ready, message, count = summarize_nc_download_status(
+                [
+                    ("ERA5 温度", temp_dir_path, "era5_t2m_*.nc"),
+                    ("风速(U)", wind_dir_path, "era5_u10_*.nc"),
+                ]
+            )
+
+        self.assertFalse(ready)
+        self.assertEqual(message, "已下载：ERA5 温度 1 个；仍缺少：风速(U)")
+        self.assertEqual(count, 1)
+
+    def test_check_daily_era5_download_status_skips_when_sources_do_not_need_era5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = self._download_context(Path(temp_dir), precip_source="cmfd")
+
+            ready, message, count = check_daily_era5_download_status(
+                {"气象策略": {"温度来源": "custom_tif", "潜在蒸散发来源": "custom_tif"}},
+                context,
+            )
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "当前方案不需要这一步。")
+        self.assertEqual(count, 0)
+
+    def test_check_daily_era5_download_status_counts_required_nc_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            context = self._download_context(base_dir, precip_source="era5")
+            (base_dir / "prec" / "era5_tp_2020.nc").write_text("ok", encoding="utf-8")
+            (base_dir / "temp" / "era5_t2m_2020.nc").write_text("ok", encoding="utf-8")
+
+            ready, message, count = check_daily_era5_download_status({}, context)
+
+        self.assertFalse(ready)
+        self.assertIn("ERA5 降水 1 个", message)
+        self.assertIn("ERA5 温度 1 个", message)
+        self.assertIn("太阳辐射", message)
+        self.assertEqual(count, 2)
+
+    def test_check_hourly_era5_download_status_counts_hourly_nc_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            context = self._download_context(base_dir, precip_source="era5")
+            for directory, name in [
+                ("prec", "era5_tp_hourly_2020.nc"),
+                ("temp", "era5_t2m_hourly_2020.nc"),
+                ("solar", "era5_ssrd_hourly_2020.nc"),
+                ("wind", "era5_u10_hourly_2020.nc"),
+                ("wind", "era5_v10_hourly_2020.nc"),
+                ("dewpoint", "era5_d2m_hourly_2020.nc"),
+            ]:
+                (base_dir / directory / name).write_text("ok", encoding="utf-8")
+
+            ready, message, count = check_hourly_era5_download_status({}, context)
+
+        self.assertTrue(ready)
+        self.assertEqual(message, "小时 ERA5 原始 NetCDF 文件数：6")
+        self.assertEqual(count, 6)
 
     def test_prefer_raw_or_aligned_group_status_prefers_ready_raw_series(self) -> None:
         context = self._preprocess_context(

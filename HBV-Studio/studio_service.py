@@ -112,14 +112,17 @@ from services.forecast_restart import ForecastRestartWorkerContext
 from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
 from services.forcing_validation import ForcingAlignedStatusContext
+from services.forcing_validation import ForcingDownloadStatusContext
 from services.forcing_validation import ForcingInputsReadyContext
 from services.forcing_validation import ForcingPreprocessStatusContext
 from services.forcing_validation import ForcingValidationContext
 from services.forcing_validation import check_aligned_forcing_status as build_check_aligned_forcing_status
+from services.forcing_validation import check_daily_era5_download_status as build_check_daily_era5_download_status
 from services.forcing_validation import check_daily_era5_processed_status as build_check_daily_era5_processed_status
 from services.forcing_validation import check_daily_prec_status as build_check_daily_prec_status
 from services.forcing_validation import check_daily_temp_evap_status as build_check_daily_temp_evap_status
 from services.forcing_validation import check_forcing_inputs_ready as build_check_forcing_inputs_ready
+from services.forcing_validation import check_hourly_era5_download_status as build_check_hourly_era5_download_status
 from services.forcing_validation import check_hourly_prec_status as build_check_hourly_prec_status
 from services.forcing_validation import check_hourly_temp_evap_status as build_check_hourly_temp_evap_status
 from services.forcing_validation import configured_daily_meteo_sources as build_configured_daily_meteo_sources
@@ -1266,6 +1269,13 @@ def _forcing_preprocess_status_context() -> ForcingPreprocessStatusContext:
     )
 
 
+def _forcing_download_status_context() -> ForcingDownloadStatusContext:
+    return ForcingDownloadStatusContext(
+        build_workspace_paths=build_workspace_paths,
+        configured_precip_source=configured_precip_source,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
@@ -1814,32 +1824,6 @@ def _configured_daily_meteo_sources(config: dict[str, Any]) -> tuple[str, str]:
     return build_configured_daily_meteo_sources(config)
 
 
-def _glob_count(path: Path, pattern: str) -> int:
-    if not path.exists():
-        return 0
-    return len(list(path.glob(pattern)))
-
-
-def _summarize_nc_download_status(entries: list[tuple[str, Path, str]]) -> tuple[bool, str, int]:
-    if not entries:
-        return True, "当前方案不需要这一步。", 0
-    existing: list[str] = []
-    missing: list[str] = []
-    total = 0
-    for label, directory, pattern in entries:
-        count = _glob_count(directory, pattern)
-        total += count
-        if count > 0:
-            existing.append(f"{label} {count} 个")
-        else:
-            missing.append(label)
-    if not missing:
-        return True, "已下载：" + "；".join(existing), total
-    if existing:
-        return False, "已下载：" + "；".join(existing) + f"；仍缺少：{'、'.join(missing)}", total
-    return False, "还没有下载到这一步需要的 ERA5 原始文件。", 0
-
-
 def hourly_forcing_ready(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
     base_paths = build_workspace_paths(config)
     forcing = validate_forcing_bundle(config, PROFILE_HOURLY, precip_source=precip_source)
@@ -1892,24 +1876,7 @@ def check_daily_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_daily_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_workspace_paths(config)
-    temp_source, pet_source = _configured_daily_meteo_sources(config)
-    precip_source = configured_precip_source(config)
-    entries: list[tuple[str, Path, str]] = []
-    if precip_source == "era5":
-        entries.append(("ERA5 降水", Path(paths["raw_prec_era5_dir"]), "era5_tp_*.nc"))
-    if temp_source != "custom_tif" or pet_source != "custom_tif":
-        entries.append(("ERA5 温度", Path(paths["raw_temp_dir"]), "era5_t2m_*.nc"))
-    if pet_source != "custom_tif":
-        entries.extend(
-            [
-                ("太阳辐射", Path(paths["raw_solar_dir"]), "era5_ssrd_*.nc"),
-                ("风速(U)", Path(paths["raw_wind_dir"]), "era5_u10_*.nc"),
-                ("风速(V)", Path(paths["raw_wind_dir"]), "era5_v10_*.nc"),
-                ("露点温度", Path(paths["raw_dewpoint_dir"]), "era5_d2m_*.nc"),
-            ]
-        )
-    return _summarize_nc_download_status(entries)
+    return build_check_daily_era5_download_status(config, _forcing_download_status_context())
 
 
 def check_daily_era5_processed(config: dict[str, Any]) -> tuple[bool, str, int]:
@@ -2101,18 +2068,7 @@ def check_hourly_temp_evap(config: dict[str, Any]) -> tuple[bool, str, int]:
 
 
 def check_hourly_era5_download(config: dict[str, Any]) -> tuple[bool, str, int]:
-    paths = build_workspace_paths(config)
-    patterns = [
-        paths["raw_temp_dir"].glob("era5_t2m_hourly_*.nc"),
-        paths["raw_solar_dir"].glob("era5_ssrd_hourly_*.nc"),
-        paths["raw_wind_dir"].glob("era5_u10_hourly_*.nc"),
-        paths["raw_wind_dir"].glob("era5_v10_hourly_*.nc"),
-        paths["raw_dewpoint_dir"].glob("era5_d2m_hourly_*.nc"),
-    ]
-    if configured_precip_source(config) == "era5":
-        patterns.append(paths["raw_prec_era5_dir"].glob("era5_tp_hourly_*.nc"))
-    count = sum(len(list(items)) for items in patterns)
-    return count > 0, f"小时 ERA5 原始 NetCDF 文件数：{count}", count
+    return build_check_hourly_era5_download_status(config, _forcing_download_status_context())
 
 
 def check_hourly_prec(config: dict[str, Any], precip_source: Any = None) -> tuple[bool, str, int]:
