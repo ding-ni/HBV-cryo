@@ -213,6 +213,10 @@
     return `/api/manual-presets?config_path=${encodeURIComponent(String(configPath || "").trim())}&calibration_profile=${encodeURIComponent(String(calibrationProfile || "").trim())}&scope=${encodeURIComponent(String(scope || "all").trim())}`;
   }
 
+  function manualPresetConfigPathFromRunData(data = null) {
+    return String(data?.metadata?.workspace_config || data?.run?.workspace_config || "").trim();
+  }
+
   function manualPresetProfileState(configPath = "", explicitProfile = "", context = {}, helpers = {}) {
     const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
     const normalizeProfile = helpers.normalizeProfile || ((value, fallback = "") => {
@@ -922,6 +926,7 @@
     manualPresetCompareErrorView,
     findPresetById,
     manualPresetListPath,
+    manualPresetConfigPathFromRunData,
     manualPresetProfileState,
     taskManualPresetLoadErrorState,
     taskManualPresetLoadStartState,

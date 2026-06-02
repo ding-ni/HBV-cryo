@@ -140,6 +140,7 @@ const frontendModuleContracts = [
       "manualPresetCompareErrorView",
       "findPresetById",
       "manualPresetListPath",
+      "manualPresetConfigPathFromRunData",
       "manualPresetProfileState",
       "taskManualPresetLoadErrorState",
       "taskManualPresetLoadStartState",
@@ -2509,7 +2510,7 @@ function isStudioEditableRun(data) {
 }
 
 function getRunManualPresetConfigPath(data = state._runData) {
-  return String(data?.metadata?.workspace_config || data?.run?.workspace_config || "").trim();
+  return window.HBVStudioParameterLibrary.manualPresetConfigPathFromRunData(data);
 }
 
 function getTaskManualPresetConfigPath() {

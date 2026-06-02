@@ -574,12 +574,28 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState", "manualPresetProfileState"]) {
+            for (const name of ["taskManualPresetLoadStartState", "taskManualPresetLoadSuccessState", "taskManualPresetLoadErrorState", "manualPresetTaskSyncState", "manualPresetConfigPathFromRunData", "manualPresetProfileState"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const path = library.manualPresetListPath(" C:/工作区/workspace.json ", "daily mode", "all");
             if (path !== "/api/manual-presets?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2Fworkspace.json&calibration_profile=daily%20mode&scope=all") {
               throw new Error(`unexpected list path: ${path}`);
+            }
+            const configFromMetadata = library.manualPresetConfigPathFromRunData({
+              metadata: { workspace_config: " C:/ws/meta.json " },
+              run: { workspace_config: "C:/ws/run.json" },
+            });
+            if (configFromMetadata !== "C:/ws/meta.json") {
+              throw new Error(`metadata config path should win: ${configFromMetadata}`);
+            }
+            const configFromRun = library.manualPresetConfigPathFromRunData({
+              run: { workspace_config: " C:/ws/run.json " },
+            });
+            if (configFromRun !== "C:/ws/run.json") {
+              throw new Error(`run config path fallback wrong: ${configFromRun}`);
+            }
+            if (library.manualPresetConfigPathFromRunData(null) !== "") {
+              throw new Error("missing run data should return empty config path");
             }
             const samePath = (a, b) => String(a || "").replace(/\\/g, "/") === String(b || "").replace(/\\/g, "/");
             const emptyLoad = library.taskManualPresetLoadStartState(" ", "C:/ws/A", { samePath });
