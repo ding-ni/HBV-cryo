@@ -69,6 +69,28 @@
     return dt ? formatForecastInputTime(dt, stepHours) : String(value || "").trim();
   }
 
+  function forecastCandidateRuns(runs = [], helpers = {}) {
+    const runTypeValue = helpers.runTypeValue || (run => run?.run_type || run?.kind || "");
+    const allowed = new Set(["calibration", "manual_result", "manual_starter", "forecast_restart"]);
+    const items = Array.isArray(runs) ? runs : [];
+    return items.filter(run => Boolean(run?.path) && allowed.has(runTypeValue(run)));
+  }
+
+  function forecastRunReady(run = null) {
+    if (!run) return false;
+    if (run.forecast_source_ready !== undefined) return Boolean(run.forecast_source_ready);
+    return Boolean(run.path && run.studio_compatible);
+  }
+
+  function forecastRunReadinessText(run = null, helpers = {}) {
+    const isReady = helpers.forecastRunReady || forecastRunReady;
+    if (!run) return "未选择源结果";
+    if (isReady(run)) return "可起报";
+    if (run.optimized_params_available === false) return "缺少率定参数";
+    if (run.state_snapshot_available === false) return "缺少起报状态";
+    return "需用新版结果";
+  }
+
   function forecastArchiveManifest(archive = {}) {
     return archive?.manifest || {};
   }
@@ -154,14 +176,14 @@
   function renderForecastSourceOptions(candidates = [], selectedPath = "", helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const forecastFriendlyRunName = helpers.forecastFriendlyRunName || (run => run?.display_name || run?.name || "未命名结果");
-    const forecastRunReadinessText = helpers.forecastRunReadinessText || (() => "可起报");
+    const readinessText = helpers.forecastRunReadinessText || forecastRunReadinessText;
     const samePath = helpers.samePath || ((a, b) => String(a || "") === String(b || ""));
     const items = Array.isArray(candidates) ? candidates : [];
     return {
       disabled: !items.length,
       html: items.length
         ? items.map(run => {
-          const label = `${forecastFriendlyRunName(run)} · ${forecastRunReadinessText(run)}`;
+          const label = `${forecastFriendlyRunName(run)} · ${readinessText(run)}`;
           return `<option value="${escapeHtml(run?.path || "")}" ${samePath(run?.path, selectedPath) ? "selected" : ""}>${escapeHtml(label)}</option>`;
         }).join("")
         : '<option value="">暂无可选源结果</option>',
@@ -170,8 +192,8 @@
 
   function renderForecastSourceSummary(run = null, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
-    const forecastRunReady = helpers.forecastRunReady || (item => Boolean(item?.path));
-    const forecastRunReadinessText = helpers.forecastRunReadinessText || (() => "可起报");
+    const sourceReady = helpers.forecastRunReady || forecastRunReady;
+    const readinessText = helpers.forecastRunReadinessText || forecastRunReadinessText;
     const runTypeValue = helpers.runTypeValue || (item => item?.run_type || "");
     const runTypeLabel = helpers.runTypeLabel || (value => value || "结果");
     const profileLabel = helpers.profileLabel || (value => value || "—");
@@ -194,7 +216,7 @@
         suggestedStart: "",
       };
     }
-    const ready = forecastRunReady(run);
+    const ready = sourceReady(run);
     const stateTime = run.state_snapshot_time || run.time_config?.forecast_end || run.time_config?.valid_end || run.time_config?.calib_end || "";
     const sourceStateTime = run.source_state_snapshot_time || "";
     const sourceType = runTypeLabel(runTypeValue(run));
@@ -209,7 +231,7 @@
         <div class="forecast-source-card ${ready ? "status-ok" : "status-warn"}">
           <div class="forecast-source-card-head">
             <strong title="${escapeHtml(runDisplayName(run))}">${escapeHtml(forecastFriendlyRunName(run))}</strong>
-            <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(forecastRunReadinessText(run))}</span>
+            <span class="status-badge ${ready ? "status-ok" : "status-warn"}">${escapeHtml(readinessText(run))}</span>
           </div>
           <div class="forecast-source-meta">
             <span>结果类型</span><strong>${escapeHtml(sourceType)}</strong>
@@ -775,8 +797,11 @@
     forecastArchiveSummaryText,
     forecastArchiveVariableItems,
     forecastArchiveVariables,
+    forecastCandidateRuns,
     forecastInputType,
     forecastParameterSourceSummary,
+    forecastRunReady,
+    forecastRunReadinessText,
     forecastSuggestedStart,
     forecastTimeComparable,
     formatForecastInputTime,

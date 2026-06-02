@@ -152,8 +152,11 @@ const frontendModuleContracts = [
       "forecastArchiveSummaryText",
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
+      "forecastCandidateRuns",
       "forecastInputType",
       "forecastParameterSourceSummary",
+      "forecastRunReady",
+      "forecastRunReadinessText",
       "forecastSuggestedStart",
       "forecastTimeComparable",
       "formatForecastInputTime",
@@ -5467,25 +5470,15 @@ function renderTasks() {
 // ===============================================================
 
 function forecastCandidateRuns() {
-  const allowed = new Set(["calibration", "manual_result", "manual_starter", "forecast_restart"]);
-  return state.runs.filter(run => {
-    const type = runTypeValue(run);
-    return Boolean(run?.path) && allowed.has(type);
-  });
+  return window.HBVStudioForecastView.forecastCandidateRuns(state.runs, { runTypeValue });
 }
 
 function forecastRunReady(run) {
-  if (!run) return false;
-  if (run.forecast_source_ready !== undefined) return Boolean(run.forecast_source_ready);
-  return Boolean(run.path && run.studio_compatible);
+  return window.HBVStudioForecastView.forecastRunReady(run);
 }
 
 function forecastRunReadinessText(run) {
-  if (!run) return "未选择源结果";
-  if (forecastRunReady(run)) return "可起报";
-  if (run.optimized_params_available === false) return "缺少率定参数";
-  if (run.state_snapshot_available === false) return "缺少起报状态";
-  return "需用新版结果";
+  return window.HBVStudioForecastView.forecastRunReadinessText(run);
 }
 
 function selectedForecastRun() {

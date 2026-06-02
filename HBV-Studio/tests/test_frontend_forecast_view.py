@@ -62,6 +62,55 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_source_candidate_and_readiness_helpers(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            for (const name of ["forecastCandidateRuns", "forecastRunReady", "forecastRunReadinessText"]) {
+              if (typeof view?.[name] !== "function") throw new Error(`missing source readiness export: ${name}`);
+            }
+
+            const runs = [
+              { id: "empty-path", path: "", kind: "calibration", studio_compatible: true },
+              { id: "cal-ready", path: "C:/runs/cal", kind: "calibration", studio_compatible: true },
+              { id: "manual-ready", path: "C:/runs/manual", kind: "manual_result", forecast_source_ready: true, studio_compatible: false },
+              { id: "forecast-missing-param", path: "C:/runs/forecast", kind: "forecast_restart", forecast_source_ready: false, optimized_params_available: false },
+              { id: "legacy", path: "C:/runs/legacy", kind: "legacy", studio_compatible: true },
+              { id: "starter-missing-state", path: "C:/runs/starter", kind: "manual_starter", state_snapshot_available: false },
+            ];
+
+            const candidates = view.forecastCandidateRuns(runs, { runTypeValue: run => run.kind });
+            const ids = candidates.map(run => run.id).join(",");
+            if (ids !== "cal-ready,manual-ready,forecast-missing-param,starter-missing-state") {
+              throw new Error(`unexpected forecast candidates: ${ids}`);
+            }
+
+            if (!view.forecastRunReady(runs[1])) throw new Error("studio-compatible calibration result should be ready");
+            if (!view.forecastRunReady(runs[2])) throw new Error("explicit forecast_source_ready should make result ready");
+            if (view.forecastRunReady(runs[3])) throw new Error("explicit false readiness should block result");
+            if (view.forecastRunReadinessText(null) !== "未选择源结果") throw new Error("empty readiness text wrong");
+            if (view.forecastRunReadinessText(runs[1]) !== "可起报") throw new Error("ready text wrong");
+            if (view.forecastRunReadinessText(runs[3]) !== "缺少率定参数") throw new Error("missing parameter text wrong");
+            if (view.forecastRunReadinessText(runs[5]) !== "缺少起报状态") throw new Error("missing state text wrong");
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_archive_summary_and_items(self) -> None:
         script = textwrap.dedent(
             r"""
