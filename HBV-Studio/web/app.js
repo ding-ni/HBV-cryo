@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "filterRuns", "latestEditableRunPath", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runExportPanelState", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -4840,42 +4840,27 @@ function renderRunList() {
   const workspaceFilterPath = String(state.runWorkspaceFilterPath || "").trim();
   const workspaceRunCount = workspaceFilterPath ? runsForWorkspace(workspaceFilterPath).length : state.runs.length;
   renderResultsFilterToolbar();
-  if (!state.runs.length) {
-    host.innerHTML = '<div class="hint-box">暂无结果。</div>';
-    const hint = $("#results-entry-hint");
-    if (hint) {
-      hint.textContent = manualStarterWorkspacePath()
-        ? `工作区“${workspaceLabelByPath(manualStarterWorkspacePath())}”当前还没有结果。可直接生成“手调起点”，不必先做正式率定。`
-        : "还没有结果。选择工作区后，可直接生成“手调起点”进入手动调参。";
-      hint.className = "hint-box status-warn";
-    }
-    updateManualStarterButtons();
-    return;
-  }
   const runs = visibleRuns();
-  if (!runs.length) {
-    const workspaceEmpty = Boolean(workspaceFilterPath) && workspaceRunCount === 0;
-    host.innerHTML = workspaceEmpty
-      ? `<div class="hint-box status-warn">工作区“${escapeHtml(workspaceLabelByPath(workspaceFilterPath))}”当前还没有结果。可直接生成“手调起点”，或启动正式率定。</div>`
-      : '<div class="hint-box status-warn">当前筛选下没有结果。可切换筛选条件，或先回到“全部结果”查看。</div>';
+  const listState = window.HBVStudioResultsView.runListState({
+    totalRuns: state.runs.length,
+    visibleCount: runs.length,
+    workspaceFilterPath,
+    workspaceRunCount,
+    workspaceFilterLabel: workspaceFilterPath ? workspaceLabelByPath(workspaceFilterPath) : "",
+    manualStarterWorkspaceLabel: manualStarterWorkspacePath() ? workspaceLabelByPath(manualStarterWorkspacePath()) : "",
+    hasCurrentRun: Boolean(state.currentRun),
+  }, { escapeHtml });
+  if (listState.updateHint) {
     const hint = $("#results-entry-hint");
     if (hint) {
-      hint.textContent = workspaceEmpty
-        ? `工作区“${workspaceLabelByPath(workspaceFilterPath)}”当前还没有结果。可直接生成“手调起点”继续。`
-        : workspaceFilterPath
-          ? `工作区“${workspaceLabelByPath(workspaceFilterPath)}”有结果，但当前筛选条件下没有匹配项。可放宽筛选后再查看。`
-          : "当前筛选下没有结果。可切换筛选条件后再查看。";
-      hint.className = "hint-box status-warn";
+      hint.textContent = listState.hintText;
+      hint.className = listState.hintClassName;
     }
+  }
+  if (listState.status !== "ready") {
+    host.innerHTML = listState.listHtml;
     updateManualStarterButtons();
     return;
-  }
-  const hint = $("#results-entry-hint");
-  if (hint && !state.currentRun) {
-    hint.textContent = state.runWorkspaceFilterPath
-      ? `先从左侧选择“${workspaceLabelByPath(state.runWorkspaceFilterPath)}”的一个结果。选中后即可在下方继续手动调参并重算结果。`
-      : "先从左侧选择一个结果，或点击“打开最新结果”。选中后即可在下方手动调参并重算结果。";
-    hint.className = "hint-box";
   }
   updateManualStarterButtons();
   host.innerHTML = window.HBVStudioResultsView.renderRunCards(runs, {

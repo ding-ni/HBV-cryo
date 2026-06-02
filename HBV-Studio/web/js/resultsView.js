@@ -188,6 +188,56 @@
     return editable?.path || items[0]?.path || "";
   }
 
+  function runListState(model = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const totalRuns = Number(model.totalRuns || 0);
+    const visibleCount = Number(model.visibleCount || 0);
+    const workspaceFilterPath = String(model.workspaceFilterPath || "").trim();
+    const workspaceRunCount = Number(model.workspaceRunCount || 0);
+    const workspaceFilterLabel = String(model.workspaceFilterLabel || "").trim();
+    const manualStarterWorkspaceLabel = String(model.manualStarterWorkspaceLabel || "").trim();
+    const hasCurrentRun = Boolean(model.hasCurrentRun);
+    if (!totalRuns) {
+      return {
+        status: "empty-all",
+        listHtml: '<div class="hint-box">暂无结果。</div>',
+        hintText: manualStarterWorkspaceLabel
+          ? `工作区“${manualStarterWorkspaceLabel}”当前还没有结果。可直接生成“手调起点”，不必先做正式率定。`
+          : "还没有结果。选择工作区后，可直接生成“手调起点”进入手动调参。",
+        hintClassName: "hint-box status-warn",
+        updateHint: true,
+      };
+    }
+    if (!visibleCount) {
+      const workspaceEmpty = Boolean(workspaceFilterPath) && workspaceRunCount === 0;
+      return {
+        status: workspaceEmpty ? "empty-workspace" : "empty-filter",
+        listHtml: workspaceEmpty
+          ? `<div class="hint-box status-warn">工作区“${escapeHtml(workspaceFilterLabel)}”当前还没有结果。可直接生成“手调起点”，或启动正式率定。</div>`
+          : '<div class="hint-box status-warn">当前筛选下没有结果。可切换筛选条件，或先回到“全部结果”查看。</div>',
+        hintText: workspaceEmpty
+          ? `工作区“${workspaceFilterLabel}”当前还没有结果。可直接生成“手调起点”继续。`
+          : workspaceFilterPath
+            ? `工作区“${workspaceFilterLabel}”有结果，但当前筛选条件下没有匹配项。可放宽筛选后再查看。`
+            : "当前筛选下没有结果。可切换筛选条件后再查看。",
+        hintClassName: "hint-box status-warn",
+        updateHint: true,
+      };
+    }
+    if (!hasCurrentRun) {
+      return {
+        status: "ready",
+        listHtml: "",
+        hintText: workspaceFilterPath
+          ? `先从左侧选择“${workspaceFilterLabel}”的一个结果。选中后即可在下方继续手动调参并重算结果。`
+          : "先从左侧选择一个结果，或点击“打开最新结果”。选中后即可在下方手动调参并重算结果。",
+        hintClassName: "hint-box",
+        updateHint: true,
+      };
+    }
+    return { status: "ready", listHtml: "", hintText: "", hintClassName: "", updateHint: false };
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -611,6 +661,7 @@
     resultsFilterBreakdown,
     resultsFilterHint,
     runExportPanelState,
+    runListState,
     runProfileValue,
     runsForWorkspace,
     selectedRunPath,

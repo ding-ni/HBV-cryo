@@ -21,7 +21,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.filterRuns || !results?.latestEditableRunPath || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runExportPanelState || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -167,6 +167,48 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
               throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");
+            }
+            const emptyAllState = results.runListState({
+              totalRuns: 0,
+              visibleCount: 0,
+              manualStarterWorkspaceLabel: "工作区<A>",
+            }, helpers);
+            if (emptyAllState.status !== "empty-all" || !emptyAllState.listHtml.includes("暂无结果") || !emptyAllState.hintText.includes("工作区<A>") || emptyAllState.hintClassName !== "hint-box status-warn") {
+              throw new Error(`unexpected no-results list state: ${JSON.stringify(emptyAllState)}`);
+            }
+            const workspaceEmptyState = results.runListState({
+              totalRuns: 2,
+              visibleCount: 0,
+              workspaceFilterPath: "C:/ws/A",
+              workspaceRunCount: 0,
+              workspaceFilterLabel: "工作区<A>",
+            }, helpers);
+            if (workspaceEmptyState.status !== "empty-workspace" || !workspaceEmptyState.listHtml.includes("工作区&lt;A&gt;") || !workspaceEmptyState.hintText.includes("生成“手调起点”继续")) {
+              throw new Error(`unexpected workspace-empty list state: ${JSON.stringify(workspaceEmptyState)}`);
+            }
+            const filterEmptyState = results.runListState({
+              totalRuns: 2,
+              visibleCount: 0,
+              workspaceFilterPath: "C:/ws/A",
+              workspaceRunCount: 2,
+              workspaceFilterLabel: "工作区A",
+            }, helpers);
+            if (filterEmptyState.status !== "empty-filter" || !filterEmptyState.hintText.includes("当前筛选条件下没有匹配项")) {
+              throw new Error(`unexpected filter-empty list state: ${JSON.stringify(filterEmptyState)}`);
+            }
+            const readyState = results.runListState({
+              totalRuns: 2,
+              visibleCount: 2,
+              workspaceFilterPath: "C:/ws/A",
+              workspaceFilterLabel: "工作区A",
+              hasCurrentRun: false,
+            }, helpers);
+            if (readyState.status !== "ready" || !readyState.updateHint || readyState.hintClassName !== "hint-box" || !readyState.hintText.includes("先从左侧选择“工作区A”")) {
+              throw new Error(`unexpected ready list state: ${JSON.stringify(readyState)}`);
+            }
+            const selectedReadyState = results.runListState({ totalRuns: 2, visibleCount: 1, hasCurrentRun: true }, helpers);
+            if (selectedReadyState.status !== "ready" || selectedReadyState.updateHint) {
+              throw new Error(`selected run should not overwrite entry hint: ${JSON.stringify(selectedReadyState)}`);
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);
