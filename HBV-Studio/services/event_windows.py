@@ -100,6 +100,205 @@ def build_expected_observation_index(
     )
 
 
+def _format_time_for_check(value: Any, step_hours: float) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        ts = pd.to_datetime(value)
+    except Exception:
+        return "\u672a\u8bc6\u522b"
+    if pd.isna(ts):
+        return ""
+    if abs(float(step_hours) - 24.0) < 1e-9 and ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+        return ts.strftime("%Y-%m-%d")
+    return ts.strftime("%Y-%m-%d %H:%M")
+
+
+def event_forcing_coverage_summary(
+    event_info: dict[str, Any] | None,
+    directories: dict[str, dict[str, Any]],
+    step_hours: float,
+) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    valid_events = [item for item in list(event_info.get("valid_events", []) or []) if isinstance(item, dict)]
+    if not valid_events:
+        return {
+            "enabled": True,
+            "status": "fail",
+            "event_count": 0,
+            "complete_event_count": 0,
+            "events": [],
+        }
+    label_map = {"prec": "\u964d\u6c34", "temp": "\u6c14\u6e29", "evap": "\u6f5c\u5728\u84b8\u6563\u53d1"}
+    timestamp_sets: dict[str, set[pd.Timestamp]] = {}
+    for key, item in directories.items():
+        timestamp_sets[key] = set(pd.Timestamp(ts) for ts in list(item.get("timestamps", []) or []))
+
+    rows: list[dict[str, Any]] = []
+    complete_count = 0
+    for event in valid_events:
+        run_start = pd.Timestamp(event.get("run_start"))
+        run_end = pd.Timestamp(event.get("run_end"))
+        run_index = event_date_range(run_start, run_end, step_hours)
+        expected_steps = int(len(run_index))
+        variables: dict[str, Any] = {}
+        event_missing = 0
+        for key, label in label_map.items():
+            actual = timestamp_sets.get(key, set())
+            missing_steps = [ts for ts in run_index if pd.Timestamp(ts) not in actual]
+            missing_count = int(len(missing_steps))
+            event_missing += missing_count
+            variables[key] = {
+                "label": label,
+                "expected_steps": expected_steps,
+                "covered_steps": max(0, expected_steps - missing_count),
+                "missing_steps": missing_count,
+                "status": "ok" if missing_count == 0 and expected_steps > 0 else "fail",
+                "missing_preview": [
+                    _format_time_for_check(ts, step_hours)
+                    for ts in missing_steps[:3]
+                ],
+            }
+        status = "ok" if event_missing == 0 and expected_steps > 0 else "fail"
+        if status == "ok":
+            complete_count += 1
+        rows.append(
+            {
+                "event_id": str(event.get("event_id", "") or ""),
+                "name": str(event.get("name", "") or event.get("event_id", "") or ""),
+                "purpose": str(event.get("purpose", "") or ""),
+                "run_start": _format_time_for_check(run_start, step_hours),
+                "run_end": _format_time_for_check(run_end, step_hours),
+                "expected_steps": expected_steps,
+                "status": status,
+                "variables": variables,
+            }
+        )
+
+    return {
+        "enabled": True,
+        "status": "ok" if complete_count == len(valid_events) else "fail",
+        "event_count": len(valid_events),
+        "complete_event_count": complete_count,
+        "events": rows,
+    }
+
+
+def event_observation_coverage_summary(
+    event_info: dict[str, Any] | None,
+    observed_series: Any,
+    step_hours: float,
+) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    valid_events = [item for item in list(event_info.get("valid_events", []) or []) if isinstance(item, dict)]
+    if not valid_events:
+        return {
+            "enabled": True,
+            "status": "fail",
+            "event_count": 0,
+            "complete_event_count": 0,
+            "required_event_count": 0,
+            "events": [],
+        }
+    if observed_series is None:
+        actual_index = pd.DatetimeIndex([])
+    else:
+        try:
+            actual_index = pd.DatetimeIndex(observed_series.dropna().index)
+        except Exception:
+            actual_index = pd.DatetimeIndex([])
+    actual_set = set(pd.Timestamp(ts) for ts in actual_index.tolist())
+
+    rows: list[dict[str, Any]] = []
+    complete_count = 0
+    required_count = 0
+    required_complete_count = 0
+    diagnostic_warn_count = 0
+    for event in valid_events:
+        score_start = pd.Timestamp(event.get("score_start"))
+        score_end = pd.Timestamp(event.get("score_end"))
+        score_index = event_date_range(score_start, score_end, step_hours)
+        expected_steps = int(len(score_index))
+        missing_steps = [ts for ts in score_index if pd.Timestamp(ts) not in actual_set]
+        missing_count = int(len(missing_steps))
+        covered_steps = max(0, expected_steps - missing_count)
+        coverage_ratio = (covered_steps / expected_steps) if expected_steps > 0 else None
+        purpose = str(event.get("purpose", "") or "").strip().lower()
+        is_required = purpose in {"calibration", "validation", ""}
+        if is_required:
+            required_count += 1
+        if missing_count == 0 and expected_steps > 0:
+            status = "ok"
+            complete_count += 1
+            if is_required:
+                required_complete_count += 1
+        elif is_required:
+            status = "fail"
+        else:
+            status = "warn"
+            diagnostic_warn_count += 1
+        rows.append(
+            {
+                "event_id": str(event.get("event_id", "") or ""),
+                "name": str(event.get("name", "") or event.get("event_id", "") or ""),
+                "purpose": purpose,
+                "score_start": _format_time_for_check(score_start, step_hours),
+                "score_end": _format_time_for_check(score_end, step_hours),
+                "expected_steps": expected_steps,
+                "covered_steps": covered_steps,
+                "missing_steps": missing_count,
+                "coverage_ratio": coverage_ratio,
+                "status": status,
+                "missing_preview": [
+                    _format_time_for_check(ts, step_hours)
+                    for ts in missing_steps[:5]
+                ],
+            }
+        )
+
+    if required_complete_count < required_count:
+        status = "fail"
+    elif diagnostic_warn_count > 0:
+        status = "warn"
+    else:
+        status = "ok"
+    return {
+        "enabled": True,
+        "status": status,
+        "event_count": len(valid_events),
+        "complete_event_count": complete_count,
+        "required_event_count": required_count,
+        "required_complete_event_count": required_complete_count,
+        "events": rows,
+    }
+
+
+def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(coverage, dict) or not coverage.get("enabled"):
+        return issues, warnings
+    for event in list(coverage.get("events", []) or []):
+        if not isinstance(event, dict):
+            continue
+        status = str(event.get("status", "") or "").lower()
+        if status == "ok":
+            continue
+        name = str(event.get("name") or event.get("event_id") or "\u672a\u547d\u540d\u4e8b\u4ef6")
+        missing_steps = int(event.get("missing_steps", 0) or 0)
+        expected_steps = int(event.get("expected_steps", 0) or 0)
+        preview = "\u3001".join(str(item) for item in list(event.get("missing_preview", []) or [])[:3])
+        suffix = f"\uff1b\u4f8b\u5982 {preview}" if preview else ""
+        message = f"\u4e8b\u4ef6 {name} \u89c2\u6d4b\u5f84\u6d41\u7f3a\u6d4b {missing_steps}/{expected_steps} \u6b65{suffix}\u3002"
+        if status == "fail":
+            issues.append(message)
+        else:
+            warnings.append(message)
+    return issues, warnings
+
+
 def normalized_flood_events(
     config: dict[str, Any],
     context: EventWindowContext,

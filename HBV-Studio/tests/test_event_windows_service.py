@@ -18,6 +18,9 @@ from services.event_windows import (  # noqa: E402
     build_expected_forcing_index,
     build_expected_observation_index,
     build_expected_time_index,
+    event_forcing_coverage_summary,
+    event_observation_coverage_messages,
+    event_observation_coverage_summary,
     normalized_flood_events,
 )
 
@@ -144,6 +147,84 @@ class EventWindowsServiceTests(unittest.TestCase):
         self.assertEqual(forcing_index[0], pd.Timestamp("2026-01-01"))
         self.assertEqual(len(observation_index), 4)
         self.assertEqual(observation_index[0], pd.Timestamp("2026-01-02"))
+
+    def test_event_forcing_coverage_summary_reports_variable_gaps(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a": {
+                "\u542f\u7528": True,
+                "\u4e8b\u4ef6\u8868": [
+                    {
+                        "event_id": "E1",
+                        "run_start": "2026-06-01",
+                        "score_start": "2026-06-02",
+                        "score_end": "2026-06-04",
+                        "run_end": "2026-06-05",
+                    }
+                ],
+            },
+        }
+        event_info = normalized_flood_events(config, self._context())
+        full_index = list(pd.date_range("2026-06-01", "2026-06-05", freq="1D"))
+        directories = {
+            "prec": {"timestamps": full_index},
+            "temp": {"timestamps": [ts for ts in full_index if ts != pd.Timestamp("2026-06-03")]},
+            "evap": {"timestamps": full_index},
+        }
+
+        coverage = event_forcing_coverage_summary(event_info, directories, 24)
+
+        self.assertIsNotNone(coverage)
+        self.assertEqual(coverage["status"], "fail")
+        self.assertEqual(coverage["event_count"], 1)
+        event = coverage["events"][0]
+        self.assertEqual(event["variables"]["prec"]["status"], "ok")
+        self.assertEqual(event["variables"]["temp"]["missing_steps"], 1)
+        self.assertEqual(event["variables"]["temp"]["missing_preview"], ["2026-06-03"])
+
+    def test_event_observation_coverage_messages_split_required_and_diagnostic(self) -> None:
+        event_info = {
+            "valid_events": [
+                {
+                    "event_id": "REQ",
+                    "name": "\u7387\u5b9a\u4e8b\u4ef6",
+                    "purpose": "calibration",
+                    "score_start": pd.Timestamp("2026-06-02"),
+                    "score_end": pd.Timestamp("2026-06-04"),
+                },
+                {
+                    "event_id": "DIAG",
+                    "name": "\u8bca\u65ad\u4e8b\u4ef6",
+                    "purpose": "diagnostic",
+                    "score_start": pd.Timestamp("2026-07-02"),
+                    "score_end": pd.Timestamp("2026-07-04"),
+                },
+            ],
+        }
+        observed = pd.Series(
+            [1.0, 1.0, 1.0, 1.0, None],
+            index=pd.DatetimeIndex(
+                [
+                    "2026-06-02",
+                    "2026-06-03",
+                    "2026-06-04",
+                    "2026-07-02",
+                    "2026-07-03",
+                ]
+            ),
+        )
+
+        coverage = event_observation_coverage_summary(event_info, observed, 24)
+        issues, warnings = event_observation_coverage_messages(coverage)
+
+        self.assertIsNotNone(coverage)
+        self.assertEqual(coverage["status"], "warn")
+        self.assertEqual(coverage["required_complete_event_count"], 1)
+        self.assertEqual(coverage["events"][1]["status"], "warn")
+        self.assertEqual(coverage["events"][1]["missing_preview"], ["2026-07-03", "2026-07-04"])
+        self.assertEqual(issues, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("\u8bca\u65ad\u4e8b\u4ef6", warnings[0])
 
     def test_normalized_flood_events_counts_valid_purposes_and_sorts_by_run_start(self) -> None:
         config = {
