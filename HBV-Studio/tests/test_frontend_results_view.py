@@ -1140,6 +1140,12 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (detail.hintClassName !== "hint-box status-warn" || !detail.hintText.includes("未包含预热段") || !detail.hintText.includes("率定期<2020>&验证期")) {
               throw new Error(`unexpected detail hint: ${detail.hintClassName} ${detail.hintText}`);
             }
+            const detailDom = Object.fromEntries(detail.domUpdates.map(update => [update.selector, update]));
+            if (detailDom["#metadata-grid"].html !== detail.metadataHtml ||
+                detailDom["#results-entry-hint"].text !== detail.hintText ||
+                detailDom["#results-entry-hint"].className !== detail.hintClassName) {
+              throw new Error(`detail metadata DOM updates should mirror rendered content: ${JSON.stringify(detailDom)}`);
+            }
             """
         )
         result = run_node_script(script)

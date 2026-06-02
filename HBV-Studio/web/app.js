@@ -4848,12 +4848,7 @@ function renderRunDetail(data) {
     timeRangeText,
     workspaceLabelByPath,
   });
-  $("#metadata-grid").innerHTML = detailMetadata.metadataHtml;
-  const hint = $("#results-entry-hint");
-  if (hint) {
-    hint.textContent = detailMetadata.hintText;
-    hint.className = detailMetadata.hintClassName;
-  }
+  applyDomUpdates(detailMetadata.domUpdates);
 }
 
 function updateMetricsStrip(cal, val, meta) {

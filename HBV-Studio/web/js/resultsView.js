@@ -980,15 +980,21 @@
     const legacyWarmupWarning = seriesRange.warmup_start && seriesRange.actual_start && !seriesRange.warmup_covered
       ? `当前这个历史结果实际从 ${compactTimeText(seriesRange.actual_start, stepHours)} 开始保存，未包含预热段；如果需要导出或查看预热期，请用新版程序重新生成一次结果。`
       : "";
+    const hintText = [
+      baseText,
+      periodHint ? `当前图表与导出都覆盖${periodHint}。` : "",
+      legacyWarmupWarning,
+      "结果页只显示简要水文解释；完整过程复核请打开本地过程复核报告。",
+    ].filter(Boolean).join(" ");
+    const hintClassName = `hint-box ${(editable && !legacyWarmupWarning) ? "status-ok" : "status-warn"}`.trim();
     return {
       metadataHtml,
-      hintText: [
-        baseText,
-        periodHint ? `当前图表与导出都覆盖${periodHint}。` : "",
-        legacyWarmupWarning,
-        "结果页只显示简要水文解释；完整过程复核请打开本地过程复核报告。",
-      ].filter(Boolean).join(" "),
-      hintClassName: `hint-box ${(editable && !legacyWarmupWarning) ? "status-ok" : "status-warn"}`.trim(),
+      hintText,
+      hintClassName,
+      domUpdates: [
+        { selector: "#metadata-grid", html: metadataHtml },
+        { selector: "#results-entry-hint", text: hintText, className: hintClassName },
+      ],
     };
   }
 
