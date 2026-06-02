@@ -365,6 +365,9 @@ from services.workspace_layout import (
     count_path_entries as build_workspace_layout_count_path_entries,
     workspace_layout_summary as build_workspace_layout_summary,
 )
+from services.workspace_staging import WorkspaceStagingContext
+from services.workspace_staging import stage_observed_runoff_file as build_stage_observed_runoff_file
+from services.workspace_staging import stage_vector_shapefile as build_stage_vector_shapefile
 from services.workspace_validation import WorkspaceValidationContext
 from services.workspace_validation import build_engineering_focus_checks as build_workspace_engineering_focus_checks
 from services.workspace_validation import validate_workspace_fields as build_validate_workspace_fields
@@ -634,7 +637,6 @@ FORWARD_RUNTIME_CACHE_LOCK = threading.Lock()
 MAX_FORWARD_RUNTIME_CACHE = 4
 
 OBSERVED_FLOW_KEY = "\u89c2\u6d4b\u5f84\u6d41_csv"
-OBSERVED_FLOW_SUFFIXES = {".csv", ".xlsx", ".xls", ".xlsm"}
 VECTOR_BUNDLE_SUFFIXES = tuple(
     getattr(
         profile_runner,
@@ -711,6 +713,16 @@ def seed_workspace_runtime_dirs(config: dict[str, Any]) -> None:
         created.add(resolved)
 
 
+def _workspace_staging_context() -> WorkspaceStagingContext:
+    return WorkspaceStagingContext(
+        resolve_any_path=resolve_any_path,
+        replace_placeholders=replace_placeholders,
+        build_workspace_paths=build_workspace_paths,
+        workspace_dir=WORKSPACE_DIR,
+        vector_bundle_suffixes=VECTOR_BUNDLE_SUFFIXES,
+    )
+
+
 def stage_vector_shapefile(
     config: dict[str, Any],
     raw_path: Any,
@@ -718,69 +730,22 @@ def stage_vector_shapefile(
     role: str,
     config_path: Path | None = None,
 ) -> Path:
-    """Copy a shapefile bundle into the active workspace GIS directory."""
-    src = resolve_any_path(str(raw_path), must_exist=True)
-    if not src.is_file():
-        raise ValueError(f"shp 路径不是文件：{src}")
-    if src.suffix.lower() != ".shp":
-        raise ValueError(f"当前只支持 .shp 文件：{src}")
-
-    resolved_config = replace_placeholders(dict(config))
-    if config_path is not None:
-        resolved_config["_config_path"] = str(config_path.resolve(strict=False))
-    elif not str(resolved_config.get("_config_path", "")).strip():
-        resolved_config["_config_path"] = str((WORKSPACE_DIR / "_staging_context.json").resolve(strict=False))
-    if not str(resolved_config.get("运行目录", "")).strip():
-        raise ValueError("缺少运行目录，无法归档 shp 文件。")
-
-    paths = build_workspace_paths(resolved_config)
-    gis_dir = Path(paths["gis_dir"]).resolve(strict=False)
-    if role == "basin":
-        dst = (gis_dir / "basin.shp").resolve(strict=False)
-    elif role == "glacier":
-        dst = (gis_dir / "glacier_shp" / "glacier.shp").resolve(strict=False)
-    else:
-        raise ValueError(f"未知 shp 类型：{role}")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    copied = False
-    for suffix in VECTOR_BUNDLE_SUFFIXES:
-        sidecar = src.with_suffix(suffix)
-        if not sidecar.exists():
-            continue
-        target = dst.with_suffix(suffix)
-        if sidecar.resolve(strict=False) != target.resolve(strict=False):
-            shutil.copy2(sidecar, target)
-        copied = True
-    if not copied:
-        shutil.copy2(src, dst)
-    return dst
+    return build_stage_vector_shapefile(
+        config,
+        raw_path,
+        _workspace_staging_context(),
+        role=role,
+        config_path=config_path,
+    )
 
 
 def stage_observed_runoff_file(config: dict[str, Any], raw_path: Any, *, config_path: Path | None = None) -> Path:
-    """Copy the selected observed runoff file into the active workspace."""
-    src = resolve_any_path(str(raw_path), must_exist=True)
-    if not src.is_file():
-        raise ValueError(f"观测径流路径不是文件：{src}")
-    if src.suffix.lower() not in OBSERVED_FLOW_SUFFIXES:
-        allowed = ", ".join(sorted(OBSERVED_FLOW_SUFFIXES))
-        raise ValueError(f"观测径流文件类型不支持：{src.suffix or '(无扩展名)'}，支持 {allowed}")
-
-    resolved_config = replace_placeholders(dict(config))
-    if config_path is not None:
-        resolved_config["_config_path"] = str(config_path.resolve(strict=False))
-    elif not str(resolved_config.get("_config_path", "")).strip():
-        resolved_config["_config_path"] = str((WORKSPACE_DIR / "_staging_context.json").resolve(strict=False))
-    if not str(resolved_config.get("运行目录", "")).strip():
-        raise ValueError("缺少运行目录，无法归档观测径流文件。")
-    paths = build_workspace_paths(resolved_config)
-    observed_dir = Path(paths["observed_dir"]).resolve(strict=False)
-    observed_dir.mkdir(parents=True, exist_ok=True)
-    dst = (observed_dir / src.name).resolve(strict=False)
-
-    if src.resolve(strict=False) != dst:
-        shutil.copy2(src, dst)
-    return dst
+    return build_stage_observed_runoff_file(
+        config,
+        raw_path,
+        _workspace_staging_context(),
+        config_path=config_path,
+    )
 
 
 def _meteo_state_context() -> MeteoStateContext:
