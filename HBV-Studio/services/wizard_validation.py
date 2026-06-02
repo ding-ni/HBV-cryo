@@ -29,7 +29,7 @@ class WizardValidationContext:
     inspect_boundary_csv: Callable[..., dict[str, Any]]
     build_expected_forcing_index: Callable[..., pd.DatetimeIndex | None]
     boundary_info_messages: Callable[..., tuple[list[str], list[str]]]
-    meteo_validation: Callable[[dict[str, Any]], tuple[list[str], list[str]]]
+    configured_precip_source: Callable[[dict[str, Any]], str]
     check_clip_dem: Callable[[dict[str, Any]], tuple[bool, str, Any]]
     check_flow_acc: Callable[[dict[str, Any]], tuple[bool, str, Any]]
     check_masked_flow: Callable[[dict[str, Any]], tuple[bool, str, Any]]
@@ -42,6 +42,61 @@ class WizardValidationContext:
     observed_flow_key: str
     object_interbasin: str
     time_basis_event_windows: str
+    meteo_key: str
+    meteo_precip_mode_key: str
+    meteo_temp_source_key: str
+    meteo_pet_source_key: str
+    meteo_station_prec_key: str
+    meteo_station_meta_key: str
+    meteo_custom_prec_dir_key: str
+    meteo_custom_temp_dir_key: str
+    meteo_custom_pet_dir_key: str
+
+
+def wizard_step4_meteo_validation(
+    config: dict[str, Any],
+    context: WizardValidationContext,
+) -> tuple[list[str], list[str]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    meteo = dict(config.get(context.meteo_key, {}))
+    precip_mode = str(meteo.get(context.meteo_precip_mode_key, "grid_only")).strip()
+    precip_source = context.configured_precip_source(config)
+    temp_source = str(meteo.get(context.meteo_temp_source_key, "era5")).strip().lower()
+    pet_source = str(meteo.get(context.meteo_pet_source_key, "era5_fao56")).strip().lower()
+    station_prec_path = context.resolve_config_related_path(config, meteo.get(context.meteo_station_prec_key))
+    station_meta_path = context.resolve_config_related_path(config, meteo.get(context.meteo_station_meta_key))
+    custom_prec_path = context.resolve_config_related_path(config, meteo.get(context.meteo_custom_prec_dir_key))
+    custom_temp_path = context.resolve_config_related_path(config, meteo.get(context.meteo_custom_temp_dir_key))
+    custom_pet_path = context.resolve_config_related_path(config, meteo.get(context.meteo_custom_pet_dir_key))
+    if precip_mode in {"grid_plus_station_bias", "thiessen_station_only"}:
+        if not meteo.get(context.meteo_station_prec_key):
+            missing.append("站点降水 csv")
+        elif station_prec_path is None or not station_prec_path.exists():
+            missing.append(f"站点降水 csv 文件不存在：{meteo.get(context.meteo_station_prec_key)}")
+        if not meteo.get(context.meteo_station_meta_key):
+            missing.append("站点信息 csv")
+        elif station_meta_path is None or not station_meta_path.exists():
+            missing.append(f"站点信息 csv 文件不存在：{meteo.get(context.meteo_station_meta_key)}")
+    if precip_source == "custom_tif":
+        custom_prec_dir = str(meteo.get(context.meteo_custom_prec_dir_key, "")).strip()
+        if not custom_prec_dir:
+            missing.append("本地降水栅格目录")
+        elif custom_prec_path is None or not custom_prec_path.exists():
+            missing.append(f"本地降水栅格目录不存在：{custom_prec_dir}")
+    if temp_source == "custom_tif":
+        custom_temp_dir = str(meteo.get(context.meteo_custom_temp_dir_key, "")).strip()
+        if not custom_temp_dir:
+            missing.append("本地气温栅格目录")
+        elif custom_temp_path is None or not custom_temp_path.exists():
+            missing.append(f"本地气温栅格目录不存在：{custom_temp_dir}")
+    if pet_source == "custom_tif":
+        custom_pet_dir = str(meteo.get(context.meteo_custom_pet_dir_key, "")).strip()
+        if not custom_pet_dir:
+            missing.append("本地蒸散发栅格目录")
+        elif custom_pet_path is None or not custom_pet_path.exists():
+            missing.append(f"本地蒸散发栅格目录不存在：{custom_pet_dir}")
+    return missing, warnings
 
 
 def wizard_validate_step(
@@ -180,7 +235,7 @@ def wizard_validate_step(
             if boundary_csv:
                 warnings.append("当前项目不是区间流域，但配置了上游边界入流；请确认对象类型是否正确。")
     elif step == 4:
-        step_missing, step_warnings = context.meteo_validation(config)
+        step_missing, step_warnings = wizard_step4_meteo_validation(config, context)
         missing.extend(step_missing)
         warnings.extend(step_warnings)
     elif step == 5:

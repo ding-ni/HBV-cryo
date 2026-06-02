@@ -304,7 +304,9 @@ from services.workspace_layout import WorkspaceLayoutContext, workspace_layout_s
 from services.workspace_validation import WorkspaceValidationContext
 from services.workspace_validation import build_engineering_focus_checks as build_workspace_engineering_focus_checks
 from services.workspace_validation import validate_workspace_fields as build_validate_workspace_fields
-from services.wizard_validation import WizardValidationContext, wizard_validate_step as build_wizard_validate_step
+from services.wizard_validation import WizardValidationContext
+from services.wizard_validation import wizard_step4_meteo_validation as build_wizard_step4_meteo_validation
+from services.wizard_validation import wizard_validate_step as build_wizard_validate_step
 from profile_runner import (
     PROFILE_DAILY,
     PROFILE_HOURLY,
@@ -2878,46 +2880,7 @@ def _workspace_validation_context() -> WorkspaceValidationContext:
 
 
 def wizard_step4_meteo_validation(config: dict[str, Any]) -> tuple[list[str], list[str]]:
-    missing: list[str] = []
-    warnings: list[str] = []
-    meteo = dict(config.get(METEO_KEY, {}))
-    precip_mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip()
-    precip_source = configured_precip_source(config)
-    temp_source = str(meteo.get(METEO_TEMP_SOURCE_KEY, "era5")).strip().lower()
-    pet_source = str(meteo.get(METEO_PET_SOURCE_KEY, "era5_fao56")).strip().lower()
-    station_prec_path = _resolve_config_related_path(config, meteo.get(METEO_STATION_PREC_KEY))
-    station_meta_path = _resolve_config_related_path(config, meteo.get(METEO_STATION_META_KEY))
-    custom_prec_path = _resolve_config_related_path(config, meteo.get(METEO_CUSTOM_PREC_DIR_KEY))
-    custom_temp_path = _resolve_config_related_path(config, meteo.get(METEO_CUSTOM_TEMP_DIR_KEY))
-    custom_pet_path = _resolve_config_related_path(config, meteo.get(METEO_CUSTOM_PET_DIR_KEY))
-    if precip_mode in {"grid_plus_station_bias", "thiessen_station_only"}:
-        if not meteo.get(METEO_STATION_PREC_KEY):
-            missing.append("站点降水 csv")
-        elif station_prec_path is None or not station_prec_path.exists():
-            missing.append(f"站点降水 csv 文件不存在：{meteo.get(METEO_STATION_PREC_KEY)}")
-        if not meteo.get(METEO_STATION_META_KEY):
-            missing.append("站点信息 csv")
-        elif station_meta_path is None or not station_meta_path.exists():
-            missing.append(f"站点信息 csv 文件不存在：{meteo.get(METEO_STATION_META_KEY)}")
-    if precip_source == "custom_tif":
-        custom_prec_dir = str(meteo.get(METEO_CUSTOM_PREC_DIR_KEY, "")).strip()
-        if not custom_prec_dir:
-            missing.append("本地降水栅格目录")
-        elif custom_prec_path is None or not custom_prec_path.exists():
-            missing.append(f"本地降水栅格目录不存在：{custom_prec_dir}")
-    if temp_source == "custom_tif":
-        custom_temp_dir = str(meteo.get(METEO_CUSTOM_TEMP_DIR_KEY, "")).strip()
-        if not custom_temp_dir:
-            missing.append("本地气温栅格目录")
-        elif custom_temp_path is None or not custom_temp_path.exists():
-            missing.append(f"本地气温栅格目录不存在：{custom_temp_dir}")
-    if pet_source == "custom_tif":
-        custom_pet_dir = str(meteo.get(METEO_CUSTOM_PET_DIR_KEY, "")).strip()
-        if not custom_pet_dir:
-            missing.append("本地蒸散发栅格目录")
-        elif custom_pet_path is None or not custom_pet_path.exists():
-            missing.append(f"本地蒸散发栅格目录不存在：{custom_pet_dir}")
-    return missing, warnings
+    return build_wizard_step4_meteo_validation(config, _wizard_validation_context())
 
 
 def _data_prep_context() -> DataPrepContext:
@@ -3629,7 +3592,7 @@ def _wizard_validation_context() -> WizardValidationContext:
         inspect_boundary_csv=inspect_boundary_inflow_csv,
         build_expected_forcing_index=build_expected_forcing_index,
         boundary_info_messages=boundary_info_messages,
-        meteo_validation=wizard_step4_meteo_validation,
+        configured_precip_source=configured_precip_source,
         check_clip_dem=check_clip_dem,
         check_flow_acc=check_flow_acc,
         check_masked_flow=check_masked_flow,
@@ -3642,6 +3605,15 @@ def _wizard_validation_context() -> WizardValidationContext:
         observed_flow_key=OBSERVED_FLOW_KEY,
         object_interbasin=OBJECT_INTERBASIN,
         time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
+        meteo_key=METEO_KEY,
+        meteo_precip_mode_key=METEO_PRECIP_MODE_KEY,
+        meteo_temp_source_key=METEO_TEMP_SOURCE_KEY,
+        meteo_pet_source_key=METEO_PET_SOURCE_KEY,
+        meteo_station_prec_key=METEO_STATION_PREC_KEY,
+        meteo_station_meta_key=METEO_STATION_META_KEY,
+        meteo_custom_prec_dir_key=METEO_CUSTOM_PREC_DIR_KEY,
+        meteo_custom_temp_dir_key=METEO_CUSTOM_TEMP_DIR_KEY,
+        meteo_custom_pet_dir_key=METEO_CUSTOM_PET_DIR_KEY,
     )
 
 
