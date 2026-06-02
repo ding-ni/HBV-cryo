@@ -57,10 +57,16 @@ from services.calibration import calibration_start_plan as build_calibration_sta
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
 from services.filesystem import (
     FilesystemContext,
+    FilesystemPathContext,
+    ensure_within as build_ensure_within,
+    is_within_any_root as build_is_within_any_root,
+    is_within_root as build_is_within_root,
     list_drives as build_list_drives,
     list_filesystem as build_list_filesystem,
     open_path_in_explorer as build_open_path_in_explorer,
+    resolve_any_path as build_resolve_any_path,
     safe_iterdir as build_safe_iterdir,
+    to_display_path as build_to_display_path,
 )
 from services.forecast_input import ForecastInputCheckContext
 from services.forecast_input import ensure_forecast_input_ready as build_ensure_forecast_input_ready
@@ -954,53 +960,33 @@ def delete_manual_preset(payload: dict[str, Any]) -> dict[str, Any]:
     return build_delete_manual_preset(payload, _manual_preset_context())
 
 
+def _filesystem_path_context() -> FilesystemPathContext:
+    return FilesystemPathContext(
+        gui_root=GUI_ROOT,
+        project_root=PROJECT_ROOT,
+        replace_placeholders=replace_placeholders,
+        remap_legacy_project_path=remap_legacy_project_path,
+    )
+
+
 def resolve_any_path(raw_path: str, *, must_exist: bool = False) -> Path:
-    text = str(raw_path or "").strip()
-    if not text:
-        raise ValueError("缺少路径参数。")
-    expanded = replace_placeholders(text)
-    expanded = remap_legacy_project_path(expanded)
-    path = Path(str(expanded)).expanduser()
-    if not path.is_absolute():
-        path = (GUI_ROOT / path).resolve()
-    else:
-        path = path.resolve(strict=False)
-    if must_exist and not path.exists():
-        raise FileNotFoundError(str(path))
-    return path
+    return build_resolve_any_path(raw_path, _filesystem_path_context(), must_exist=must_exist)
 
 
 def ensure_within(root: Path, candidate: Path) -> Path:
-    resolved_root = root.resolve()
-    resolved = candidate.resolve(strict=False)
-    try:
-        resolved.relative_to(resolved_root)
-    except ValueError as exc:
-        raise ValueError(f"路径超出允许范围：{resolved}") from exc
-    return resolved
+    return build_ensure_within(root, candidate)
 
 
 def is_within_root(root: Path, candidate: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
-        return True
-    except ValueError:
-        return False
-    except Exception:
-        return False
+    return build_is_within_root(root, candidate)
 
 
 def is_within_current_project(candidate: Path) -> bool:
-    return any(is_within_root(root, candidate) for root in (WORKSPACE_DIR, GUI_ROOT, PROJECT_ROOT))
+    return build_is_within_any_root(candidate, (WORKSPACE_DIR, GUI_ROOT, PROJECT_ROOT))
 
 
 def to_display_path(path: Path) -> str:
-    for base in (GUI_ROOT, PROJECT_ROOT):
-        try:
-            return str(path.resolve().relative_to(base.resolve())).replace("\\", "/")
-        except ValueError:
-            continue
-    return str(path.resolve())
+    return build_to_display_path(path, (GUI_ROOT, PROJECT_ROOT))
 
 
 def safe_float(value: Any) -> float | None:

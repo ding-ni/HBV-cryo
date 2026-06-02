@@ -32,6 +32,14 @@ class FilesystemContext:
     max_browser_file_items: int
 
 
+@dataclass(frozen=True)
+class FilesystemPathContext:
+    gui_root: Path
+    project_root: Path
+    replace_placeholders: Callable[..., Any]
+    remap_legacy_project_path: Callable[..., Any]
+
+
 def list_drives() -> list[str]:
     if os.name != "nt":
         return ["/"]
@@ -62,6 +70,55 @@ def safe_iterdir(directory: Path) -> list[Path]:
     finally:
         scanner.close()
     return results
+
+
+def resolve_any_path(raw_path: str, context: FilesystemPathContext, *, must_exist: bool = False) -> Path:
+    text = str(raw_path or "").strip()
+    if not text:
+        raise ValueError("缺少路径参数。")
+    expanded = context.replace_placeholders(text)
+    expanded = context.remap_legacy_project_path(expanded)
+    path = Path(str(expanded)).expanduser()
+    if not path.is_absolute():
+        path = (context.gui_root / path).resolve()
+    else:
+        path = path.resolve(strict=False)
+    if must_exist and not path.exists():
+        raise FileNotFoundError(str(path))
+    return path
+
+
+def ensure_within(root: Path, candidate: Path) -> Path:
+    resolved_root = root.resolve()
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"路径超出允许范围：{resolved}") from exc
+    return resolved
+
+
+def is_within_root(root: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+    except Exception:
+        return False
+
+
+def is_within_any_root(candidate: Path, roots: list[Path] | tuple[Path, ...]) -> bool:
+    return any(is_within_root(root, candidate) for root in roots)
+
+
+def to_display_path(path: Path, bases: list[Path] | tuple[Path, ...]) -> str:
+    for base in bases:
+        try:
+            return str(path.resolve().relative_to(base.resolve())).replace("\\", "/")
+        except ValueError:
+            continue
+    return str(path.resolve())
 
 
 def list_filesystem(
@@ -151,11 +208,7 @@ def list_filesystem(
 
 
 def _is_within_root(candidate: Path, root: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
-        return True
-    except ValueError:
-        return False
+    return is_within_root(root, candidate)
 
 
 def open_path_in_explorer(payload: dict[str, Any], context: FilesystemContext) -> dict[str, Any]:
