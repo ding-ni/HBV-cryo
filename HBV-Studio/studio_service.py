@@ -73,6 +73,8 @@ from services.event_windows import build_expected_time_index as build_event_expe
 from services.event_windows import event_forcing_coverage_summary as build_event_forcing_coverage_summary
 from services.event_windows import event_observation_coverage_messages as build_event_observation_coverage_messages
 from services.event_windows import event_observation_coverage_summary as build_event_observation_coverage_summary
+from services.event_windows import event_windows_ui_summary as build_event_windows_ui_summary
+from services.event_windows import input_time_basis_ui_summary as build_input_time_basis_ui_summary
 from services.event_windows import normalized_flood_events as build_normalized_flood_events
 from services.filesystem import (
     FilesystemContext,
@@ -2561,39 +2563,7 @@ def _format_time_for_check(value: Any, step_hours: float) -> str:
 
 
 def event_windows_ui_summary(event_info: dict[str, Any] | None, step_hours: float) -> dict[str, Any] | None:
-    if not isinstance(event_info, dict):
-        return None
-    events = list(event_info.get("events", []) or [])
-    valid_events = list(event_info.get("valid_events", []) or [])
-
-    def convert_event(event: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "event_id": event.get("event_id", ""),
-            "name": event.get("name", "") or event.get("event_id", ""),
-            "valid": bool(event.get("valid")),
-            "score_start": _format_time_for_check(event.get("score_start"), step_hours),
-            "score_end": _format_time_for_check(event.get("score_end"), step_hours),
-            "run_start": _format_time_for_check(event.get("run_start"), step_hours),
-            "run_end": _format_time_for_check(event.get("run_end"), step_hours),
-        }
-
-    return {
-        "enabled": bool(event_info.get("enabled")),
-        "source_file": str(event_info.get("source_file", "") or ""),
-        "event_count": int(event_info.get("event_count", 0) or 0),
-        "valid_event_count": int(event_info.get("valid_event_count", 0) or 0),
-        "purpose_counts": dict(event_info.get("purpose_counts", {}) or {}),
-        "warnings": [str(item) for item in list(event_info.get("warnings", []) or [])],
-        "errors": [str(item) for item in list(event_info.get("errors", []) or [])],
-        "events": [convert_event(item) for item in events if isinstance(item, dict)],
-        "valid_events": [convert_event(item) for item in valid_events if isinstance(item, dict)],
-        "time_basis": TIME_BASIS_EVENT_WINDOWS,
-        "initial_state_policy": str(event_info.get("initial_state_policy", "event_warmup") or "event_warmup"),
-        "initial_state_policy_label": str(event_info.get("initial_state_policy_label", "事件预热") or "事件预热"),
-        "state_continuity_between_events": bool(event_info.get("state_continuity_between_events")),
-        "initial_state_note": str(event_info.get("initial_state_note", "") or ""),
-        "initial_state_warning": str(event_info.get("initial_state_warning", "") or ""),
-    }
+    return build_event_windows_ui_summary(event_info, step_hours)
 
 
 def input_time_basis_ui_summary(
@@ -2604,88 +2574,14 @@ def input_time_basis_ui_summary(
     event_info: dict[str, Any] | None = None,
     context: str = "calibration",
 ) -> dict[str, Any]:
-    label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
-
-    def index_range(index: pd.DatetimeIndex | None) -> tuple[str, str, int]:
-        if index is None or len(index) <= 0:
-            return "", "", 0
-        return _format_time_for_check(index[0], step_hours), _format_time_for_check(index[-1], step_hours), int(len(index))
-
-    if time_basis == TIME_BASIS_EVENT_WINDOWS:
-        info = event_info if isinstance(event_info, dict) else normalized_flood_events(config, step_hours=step_hours)
-        valid_events = list(info.get("valid_events", []) or [])
-        run_index = _event_window_index(valid_events, "run_start", "run_end", step_hours)
-        start, end, expected_steps = index_range(run_index)
-        event_count = int(info.get("event_count", 0) or 0)
-        valid_event_count = int(info.get("valid_event_count", 0) or 0)
-        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") or info.get("warnings") else "ok"
-        initial_label = str(info.get("initial_state_policy_label", "事件预热") or "事件预热")
-        initial_note = str(info.get("initial_state_note", "") or "")
-        headline = (
-            f"当前按 {valid_event_count} 场洪水事件检查，事件之间允许资料间断。"
-            if valid_event_count > 0
-            else "当前选择洪水事件，但尚未识别到合法事件。"
-        )
-        return {
-            "time_basis": time_basis,
-            "time_basis_label": label,
-            "headline": headline,
-            "detail": "只检查每场洪水内部的气象与流量资料。"
-            + (f" {initial_note}" if initial_note else ""),
-            "start": start,
-            "end": end,
-            "expected_steps": expected_steps,
-            "event_count": event_count,
-            "valid_event_count": valid_event_count,
-            "status": status,
-            "items": [
-                {"label": "资料口径", "value": label},
-                {"label": "有效事件", "value": f"{valid_event_count}/{event_count} 场"},
-                {"label": "事件时段", "value": f"{start} 至 {end}" if start and end else "未形成有效时段"},
-                {"label": "初始条件", "value": initial_label},
-            ],
-            "initial_state_policy": str(info.get("initial_state_policy", "event_warmup") or "event_warmup"),
-            "initial_state_policy_label": initial_label,
-            "state_continuity_between_events": bool(info.get("state_continuity_between_events")),
-            "initial_state_note": initial_note,
-        }
-
-    try:
-        expected_index = build_expected_forcing_index(config, context=context)
-    except Exception:
-        expected_index = None
-    start, end, expected_steps = index_range(expected_index)
-    status = "ok" if expected_steps else "warn"
-    if time_basis == TIME_BASIS_FORECAST_WINDOW:
-        headline = (
-            f"当前按连续状态预报窗口检查：{start} 至 {end}。"
-            if start and end
-            else "当前按连续状态预报窗口检查，但预报起止时间尚未完整配置。"
-        )
-        detail = "预报窗口内降水、气温和潜在蒸散发必须连续；多余气象文件不作为本次预报依据。"
-    else:
-        headline = (
-            f"当前按连续时段检查：{start} 至 {end}。"
-            if start and end
-            else "当前按连续时段检查，但预热、率定或验证时间尚未完整配置。"
-        )
-        detail = "连续模拟要求目标时间轴内降水、气温、潜在蒸散发和必要观测资料连续覆盖。"
-    return {
-        "time_basis": time_basis,
-        "time_basis_label": label,
-        "headline": headline,
-        "detail": detail,
-        "start": start,
-        "end": end,
-        "expected_steps": expected_steps,
-        "status": status,
-        "items": [
-            {"label": "资料口径", "value": label},
-            {"label": "检查范围", "value": f"{start} 至 {end}" if start and end else "未完整配置"},
-            {"label": "目标时间步", "value": str(expected_steps) if expected_steps else "未形成"},
-            {"label": "时间步长", "value": f"{step_hours:g} 小时"},
-        ],
-    }
+    return build_input_time_basis_ui_summary(
+        config,
+        _event_window_context(),
+        time_basis=time_basis,
+        step_hours=step_hours,
+        event_info=event_info,
+        runtime_context=context,
+    )
 
 
 def _load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None]:

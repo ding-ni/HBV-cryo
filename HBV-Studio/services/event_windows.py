@@ -11,6 +11,8 @@ import pandas as pd
 from services.event_config import (
     EVENT_PURPOSE_ALIASES,
     TIME_BASIS_EVENT_WINDOWS,
+    TIME_BASIS_FORECAST_WINDOW,
+    TIME_BASIS_LABELS,
     event_date_range,
     event_field,
     event_initial_state_policy_summary,
@@ -297,6 +299,135 @@ def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tupl
         else:
             warnings.append(message)
     return issues, warnings
+
+
+def event_windows_ui_summary(event_info: dict[str, Any] | None, step_hours: float) -> dict[str, Any] | None:
+    if not isinstance(event_info, dict):
+        return None
+    events = list(event_info.get("events", []) or [])
+    valid_events = list(event_info.get("valid_events", []) or [])
+
+    def convert_event(event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "event_id": event.get("event_id", ""),
+            "name": event.get("name", "") or event.get("event_id", ""),
+            "valid": bool(event.get("valid")),
+            "score_start": _format_time_for_check(event.get("score_start"), step_hours),
+            "score_end": _format_time_for_check(event.get("score_end"), step_hours),
+            "run_start": _format_time_for_check(event.get("run_start"), step_hours),
+            "run_end": _format_time_for_check(event.get("run_end"), step_hours),
+        }
+
+    return {
+        "enabled": bool(event_info.get("enabled")),
+        "source_file": str(event_info.get("source_file", "") or ""),
+        "event_count": int(event_info.get("event_count", 0) or 0),
+        "valid_event_count": int(event_info.get("valid_event_count", 0) or 0),
+        "purpose_counts": dict(event_info.get("purpose_counts", {}) or {}),
+        "warnings": [str(item) for item in list(event_info.get("warnings", []) or [])],
+        "errors": [str(item) for item in list(event_info.get("errors", []) or [])],
+        "events": [convert_event(item) for item in events if isinstance(item, dict)],
+        "valid_events": [convert_event(item) for item in valid_events if isinstance(item, dict)],
+        "time_basis": TIME_BASIS_EVENT_WINDOWS,
+        "initial_state_policy": str(event_info.get("initial_state_policy", "event_warmup") or "event_warmup"),
+        "initial_state_policy_label": str(event_info.get("initial_state_policy_label", "\u4e8b\u4ef6\u9884\u70ed") or "\u4e8b\u4ef6\u9884\u70ed"),
+        "state_continuity_between_events": bool(event_info.get("state_continuity_between_events")),
+        "initial_state_note": str(event_info.get("initial_state_note", "") or ""),
+        "initial_state_warning": str(event_info.get("initial_state_warning", "") or ""),
+    }
+
+
+def input_time_basis_ui_summary(
+    config: dict[str, Any],
+    context: EventWindowContext,
+    *,
+    time_basis: str,
+    step_hours: float,
+    event_info: dict[str, Any] | None = None,
+    runtime_context: str = "calibration",
+) -> dict[str, Any]:
+    label = TIME_BASIS_LABELS.get(time_basis, "\u5f53\u524d\u4efb\u52a1\u65f6\u6bb5")
+
+    def index_range(index: pd.DatetimeIndex | None) -> tuple[str, str, int]:
+        if index is None or len(index) <= 0:
+            return "", "", 0
+        return _format_time_for_check(index[0], step_hours), _format_time_for_check(index[-1], step_hours), int(len(index))
+
+    if time_basis == TIME_BASIS_EVENT_WINDOWS:
+        info = event_info if isinstance(event_info, dict) else normalized_flood_events(config, context, step_hours=step_hours)
+        valid_events = list(info.get("valid_events", []) or [])
+        run_index = event_window_index(valid_events, "run_start", "run_end", step_hours)
+        start, end, expected_steps = index_range(run_index)
+        event_count = int(info.get("event_count", 0) or 0)
+        valid_event_count = int(info.get("valid_event_count", 0) or 0)
+        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") or info.get("warnings") else "ok"
+        initial_label = str(info.get("initial_state_policy_label", "\u4e8b\u4ef6\u9884\u70ed") or "\u4e8b\u4ef6\u9884\u70ed")
+        initial_note = str(info.get("initial_state_note", "") or "")
+        headline = (
+            f"\u5f53\u524d\u6309 {valid_event_count} \u573a\u6d2a\u6c34\u4e8b\u4ef6\u68c0\u67e5\uff0c\u4e8b\u4ef6\u4e4b\u95f4\u5141\u8bb8\u8d44\u6599\u95f4\u65ad\u3002"
+            if valid_event_count > 0
+            else "\u5f53\u524d\u9009\u62e9\u6d2a\u6c34\u4e8b\u4ef6\uff0c\u4f46\u5c1a\u672a\u8bc6\u522b\u5230\u5408\u6cd5\u4e8b\u4ef6\u3002"
+        )
+        return {
+            "time_basis": time_basis,
+            "time_basis_label": label,
+            "headline": headline,
+            "detail": "\u53ea\u68c0\u67e5\u6bcf\u573a\u6d2a\u6c34\u5185\u90e8\u7684\u6c14\u8c61\u4e0e\u6d41\u91cf\u8d44\u6599\u3002"
+            + (f" {initial_note}" if initial_note else ""),
+            "start": start,
+            "end": end,
+            "expected_steps": expected_steps,
+            "event_count": event_count,
+            "valid_event_count": valid_event_count,
+            "status": status,
+            "items": [
+                {"label": "\u8d44\u6599\u53e3\u5f84", "value": label},
+                {"label": "\u6709\u6548\u4e8b\u4ef6", "value": f"{valid_event_count}/{event_count} \u573a"},
+                {"label": "\u4e8b\u4ef6\u65f6\u6bb5", "value": f"{start} \u81f3 {end}" if start and end else "\u672a\u5f62\u6210\u6709\u6548\u65f6\u6bb5"},
+                {"label": "\u521d\u59cb\u6761\u4ef6", "value": initial_label},
+            ],
+            "initial_state_policy": str(info.get("initial_state_policy", "event_warmup") or "event_warmup"),
+            "initial_state_policy_label": initial_label,
+            "state_continuity_between_events": bool(info.get("state_continuity_between_events")),
+            "initial_state_note": initial_note,
+        }
+
+    try:
+        expected_index = build_expected_forcing_index(config, context, runtime_context=runtime_context)
+    except Exception:
+        expected_index = None
+    start, end, expected_steps = index_range(expected_index)
+    status = "ok" if expected_steps else "warn"
+    if time_basis == TIME_BASIS_FORECAST_WINDOW:
+        headline = (
+            f"\u5f53\u524d\u6309\u8fde\u7eed\u72b6\u6001\u9884\u62a5\u7a97\u53e3\u68c0\u67e5\uff1a{start} \u81f3 {end}\u3002"
+            if start and end
+            else "\u5f53\u524d\u6309\u8fde\u7eed\u72b6\u6001\u9884\u62a5\u7a97\u53e3\u68c0\u67e5\uff0c\u4f46\u9884\u62a5\u8d77\u6b62\u65f6\u95f4\u5c1a\u672a\u5b8c\u6574\u914d\u7f6e\u3002"
+        )
+        detail = "\u9884\u62a5\u7a97\u53e3\u5185\u964d\u6c34\u3001\u6c14\u6e29\u548c\u6f5c\u5728\u84b8\u6563\u53d1\u5fc5\u987b\u8fde\u7eed\uff1b\u591a\u4f59\u6c14\u8c61\u6587\u4ef6\u4e0d\u4f5c\u4e3a\u672c\u6b21\u9884\u62a5\u4f9d\u636e\u3002"
+    else:
+        headline = (
+            f"\u5f53\u524d\u6309\u8fde\u7eed\u65f6\u6bb5\u68c0\u67e5\uff1a{start} \u81f3 {end}\u3002"
+            if start and end
+            else "\u5f53\u524d\u6309\u8fde\u7eed\u65f6\u6bb5\u68c0\u67e5\uff0c\u4f46\u9884\u70ed\u3001\u7387\u5b9a\u6216\u9a8c\u8bc1\u65f6\u95f4\u5c1a\u672a\u5b8c\u6574\u914d\u7f6e\u3002"
+        )
+        detail = "\u8fde\u7eed\u6a21\u62df\u8981\u6c42\u76ee\u6807\u65f6\u95f4\u8f74\u5185\u964d\u6c34\u3001\u6c14\u6e29\u3001\u6f5c\u5728\u84b8\u6563\u53d1\u548c\u5fc5\u8981\u89c2\u6d4b\u8d44\u6599\u8fde\u7eed\u8986\u76d6\u3002"
+    return {
+        "time_basis": time_basis,
+        "time_basis_label": label,
+        "headline": headline,
+        "detail": detail,
+        "start": start,
+        "end": end,
+        "expected_steps": expected_steps,
+        "status": status,
+        "items": [
+            {"label": "\u8d44\u6599\u53e3\u5f84", "value": label},
+            {"label": "\u68c0\u67e5\u8303\u56f4", "value": f"{start} \u81f3 {end}" if start and end else "\u672a\u5b8c\u6574\u914d\u7f6e"},
+            {"label": "\u76ee\u6807\u65f6\u95f4\u6b65", "value": str(expected_steps) if expected_steps else "\u672a\u5f62\u6210"},
+            {"label": "\u65f6\u95f4\u6b65\u957f", "value": f"{step_hours:g} \u5c0f\u65f6"},
+        ],
+    }
 
 
 def normalized_flood_events(

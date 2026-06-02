@@ -21,6 +21,8 @@ from services.event_windows import (  # noqa: E402
     event_forcing_coverage_summary,
     event_observation_coverage_messages,
     event_observation_coverage_summary,
+    event_windows_ui_summary,
+    input_time_basis_ui_summary,
     normalized_flood_events,
 )
 
@@ -225,6 +227,89 @@ class EventWindowsServiceTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertEqual(len(warnings), 1)
         self.assertIn("\u8bca\u65ad\u4e8b\u4ef6", warnings[0])
+
+    def test_event_windows_ui_summary_formats_event_rows_and_policy(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 1,
+            "\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a": {
+                "\u521d\u59cb\u6761\u4ef6\u7b56\u7565": "\u4e8b\u4ef6\u9884\u70ed",
+                "\u4e8b\u4ef6\u8868": [
+                    {
+                        "event_id": "E1",
+                        "run_start": "2026-06-01 00:00",
+                        "score_start": "2026-06-01 01:00",
+                        "score_end": "2026-06-01 06:00",
+                        "run_end": "2026-06-01 07:00",
+                    }
+                ],
+            },
+        }
+        event_info = normalized_flood_events(config, self._context())
+
+        summary = event_windows_ui_summary(event_info, 1)
+
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["event_count"], 1)
+        self.assertEqual(summary["valid_event_count"], 1)
+        self.assertEqual(summary["time_basis"], "event_windows")
+        self.assertEqual(summary["initial_state_policy"], "event_warmup")
+        self.assertEqual(summary["valid_events"][0]["score_end"], "2026-06-01 06:00")
+
+    def test_input_time_basis_ui_summary_describes_event_windows(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a": {
+                "\u542f\u7528": True,
+                "\u4e8b\u4ef6\u8868": [
+                    {
+                        "event_id": "E1",
+                        "run_start": "2026-06-01",
+                        "score_start": "2026-06-02",
+                        "score_end": "2026-06-04",
+                        "run_end": "2026-06-05",
+                    }
+                ],
+            },
+        }
+        event_info = normalized_flood_events(config, self._context())
+
+        summary = input_time_basis_ui_summary(
+            config,
+            self._context(),
+            time_basis="event_windows",
+            step_hours=24,
+            event_info=event_info,
+        )
+
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["start"], "2026-06-01")
+        self.assertEqual(summary["end"], "2026-06-05")
+        self.assertEqual(summary["expected_steps"], 5)
+        self.assertEqual(summary["valid_event_count"], 1)
+        self.assertIn("1 \u573a\u6d2a\u6c34\u4e8b\u4ef6", summary["headline"])
+
+    def test_input_time_basis_ui_summary_describes_continuous_period(self) -> None:
+        config = {
+            "\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6": 24,
+            "\u65f6\u95f4": {
+                "\u9884\u70ed\u5f00\u59cb": "2026-01-01",
+                "\u7387\u5b9a\u5f00\u59cb": "2026-01-02",
+                "\u7387\u5b9a\u7ed3\u675f": "2026-01-04",
+            },
+        }
+
+        summary = input_time_basis_ui_summary(
+            config,
+            self._context(),
+            time_basis="continuous",
+            step_hours=24,
+        )
+
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["start"], "2026-01-01")
+        self.assertEqual(summary["end"], "2026-01-04")
+        self.assertEqual(summary["expected_steps"], 4)
+        self.assertEqual(summary["items"][2]["value"], "4")
 
     def test_normalized_flood_events_counts_valid_purposes_and_sorts_by_run_start(self) -> None:
         config = {
