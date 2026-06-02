@@ -268,7 +268,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -3323,39 +3323,14 @@ async function previewBoundary() {
     params.set("date_field", dateField);
     params.set("flow_field", flowField);
     const payload = await apiGet(`/api/boundary-preview?${params.toString()}`);
-    const d = payload.data;
-    const suggestedProfile = d.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度";
-    const detectedStep = d.time_step_hours !== null && d.time_step_hours !== undefined ? `${formatNumber(d.time_step_hours, 0)} 小时` : "未识别";
-    const expectedStep = d.expected_time_step_hours !== null && d.expected_time_step_hours !== undefined ? `${formatNumber(d.expected_time_step_hours, 0)} 小时` : "未提供";
-    const coverage = d.coverage_ratio !== null && d.coverage_ratio !== undefined
-      ? `${formatNumber(d.coverage_ratio * 100, 1)}%`
-      : "未与当前项目时段对比";
-    const zeroRatio = d.valid_rows ? `${formatNumber((d.zero_count / Math.max(1, d.valid_rows)) * 100, 1)}%` : "—";
-    const checks = [
-      { label: "识别时间步长", value: detectedStep, status: d.time_step_hours && d.expected_time_step_hours && Number(d.time_step_hours) !== Number(d.expected_time_step_hours) ? "fail" : "ok" },
-      { label: "当前项目时间步长", value: expectedStep, status: "ok" },
-      { label: "覆盖率", value: coverage, status: d.coverage_ratio !== null && d.coverage_ratio !== undefined && d.coverage_ratio < 0.99 ? "fail" : "ok" },
-      { label: "重复时间戳", value: String(d.duplicate_count || 0), status: Number(d.duplicate_count || 0) > 0 ? "fail" : "ok" },
-      { label: "负流量记录", value: String(d.negative_count || 0), status: Number(d.negative_count || 0) > 0 ? "fail" : "ok" },
-      { label: "零值比例", value: zeroRatio, status: Number(d.valid_rows || 0) > 0 && (Number(d.zero_count || 0) / Math.max(1, Number(d.valid_rows || 0))) >= 0.8 ? "warn" : "ok" },
-    ];
-    const summary = d.coverage_ratio !== null && d.coverage_ratio !== undefined && d.coverage_ratio < 0.99
-      ? "当前边界入流和项目时段相比仍有缺口，建议先补齐覆盖范围后再做率定。"
-      : (Number(d.duplicate_count || 0) > 0 || Number(d.negative_count || 0) > 0)
-        ? "边界入流存在重复时间戳或负值，建议先清洗数据。"
-        : "边界入流预览通过，可继续结合第 7 步输入检查核对覆盖范围。";
-    $("#wz-boundary-preview").innerHTML = `
-      <div class="hint-box ${Number(d.duplicate_count || 0) > 0 || Number(d.negative_count || 0) > 0 ? "status-fail" : (d.coverage_ratio !== null && d.coverage_ratio !== undefined && d.coverage_ratio < 0.99 ? "status-warn" : "status-ok")}">
-        <strong>边界入流概览</strong><br>
-        有效记录 ${escapeHtml(String(d.valid_rows || 0))}/${escapeHtml(String(d.total_rows || 0))} 行；
-        时间范围 ${escapeHtml(d.date_range?.start || "—")} → ${escapeHtml(d.date_range?.end || "—")}；
-        流量范围 ${escapeHtml(formatNumber(d.flow_stats?.min, 2))} ~ ${escapeHtml(formatNumber(d.flow_stats?.max, 2))} m³/s；
-        建议模式 ${escapeHtml(suggestedProfile)}。
-      </div>
-      ${renderEngineeringFocusChecks([{ title: "边界入流预览检查", summary, status: Number(d.duplicate_count || 0) > 0 || Number(d.negative_count || 0) > 0 ? "fail" : (d.coverage_ratio !== null && d.coverage_ratio !== undefined && d.coverage_ratio < 0.99 ? "warn" : "ok"), items: checks }], { title: "边界入流预览检查" })}
-    `;
+    const preview = window.HBVStudioDataPrepView.boundaryPreviewState(payload.data, {
+      escapeHtml,
+      formatNumber,
+      renderEngineeringFocusChecks,
+    });
+    $("#wz-boundary-preview").innerHTML = preview.html;
   } catch (err) {
-    $("#wz-boundary-preview").innerHTML = `<div class="hint-box status-fail">边界入流预览失败：${escapeHtml(err.message)}</div>`;
+    $("#wz-boundary-preview").innerHTML = window.HBVStudioDataPrepView.boundaryPreviewErrorState(err, { escapeHtml }).html;
     showToast(err.message, true);
   }
 }

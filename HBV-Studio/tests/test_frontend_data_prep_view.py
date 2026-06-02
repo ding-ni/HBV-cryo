@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -32,7 +32,17 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               "\"": "&quot;",
               "'": "&#39;",
             }[ch]));
-            const helpers = { escapeHtml, isGisStepId: id => id === "gis_base" };
+            const helpers = {
+              escapeHtml,
+              isGisStepId: id => id === "gis_base",
+              formatNumber(value, digits = 0) {
+                const number = Number(value);
+                return Number.isFinite(number) ? number.toFixed(digits) : "—";
+              },
+              renderEngineeringFocusChecks(checks, options) {
+                return `<div class="focus-proxy" data-title="${escapeHtml(options.title)}">${checks.map(check => `${escapeHtml(check.status)}:${escapeHtml(check.summary)}:${check.items.length}`).join("|")}</div>`;
+              },
+            };
 
             if (view.formatPrepDisplayTitle(2, "01. 下载 ERA5") !== "2. 下载 ERA5") {
               throw new Error("display title should strip stale numbering");
@@ -125,6 +135,40 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const hourlyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: true });
             if (hourlyBoundaryGuidance.className !== "hint-box status-warn" || !hourlyBoundaryGuidance.text.includes("1 小时")) {
               throw new Error(`hourly boundary guidance mismatch: ${JSON.stringify(hourlyBoundaryGuidance)}`);
+            }
+            const boundaryPreview = view.boundaryPreviewState({
+              suggested_calibration_mode: "hourly",
+              time_step_hours: 1,
+              expected_time_step_hours: 24,
+              coverage_ratio: 0.75,
+              duplicate_count: 2,
+              negative_count: 1,
+              zero_count: 8,
+              valid_rows: 10,
+              total_rows: 12,
+              date_range: { start: "2020-01-01 <bad>", end: "2020-01-02" },
+              flow_stats: { min: -1.234, max: 4.567 },
+            }, helpers);
+            if (boundaryPreview.status !== "fail" || boundaryPreview.className !== "hint-box status-fail" || !boundaryPreview.html.includes("边界入流概览")) {
+              throw new Error(`boundary preview state mismatch: ${JSON.stringify(boundaryPreview)}`);
+            }
+            if (!boundaryPreview.html.includes("2020-01-01 &lt;bad&gt;") || boundaryPreview.html.includes("2020-01-01 <bad>")) {
+              throw new Error(`boundary preview date should be escaped: ${boundaryPreview.html}`);
+            }
+            if (!boundaryPreview.html.includes("流量范围 -1.23 ~ 4.57 m³/s") || !boundaryPreview.html.includes("建议模式 小时尺度")) {
+              throw new Error(`boundary preview summary html mismatch: ${boundaryPreview.html}`);
+            }
+            if (!boundaryPreview.html.includes("focus-proxy") || !boundaryPreview.html.includes("fail:当前边界入流和项目时段相比仍有缺口") || !boundaryPreview.html.includes(":6")) {
+              throw new Error(`boundary preview focus checks missing: ${boundaryPreview.html}`);
+            }
+            const stepCheck = boundaryPreview.checks.find(item => item.label === "识别时间步长");
+            const zeroCheck = boundaryPreview.checks.find(item => item.label === "零值比例");
+            if (stepCheck?.value !== "1 小时" || stepCheck?.status !== "fail" || zeroCheck?.value !== "80.0%" || zeroCheck?.status !== "warn") {
+              throw new Error(`boundary preview checks mismatch: ${JSON.stringify(boundaryPreview.checks)}`);
+            }
+            const boundaryError = view.boundaryPreviewErrorState({ message: "CSV <bad>" }, helpers);
+            if (boundaryError.className !== "hint-box status-fail" || !boundaryError.html.includes("CSV &lt;bad&gt;") || boundaryError.html.includes("CSV <bad>")) {
+              throw new Error(`boundary preview error mismatch: ${JSON.stringify(boundaryError)}`);
             }
             const emptyObsHint = view.observationHintState(null, helpers);
             if (emptyObsHint.text !== "选择观测径流文件后将自动推断时间范围。" || emptyObsHint.className !== "hint-box" || emptyObsHint.html !== "") {

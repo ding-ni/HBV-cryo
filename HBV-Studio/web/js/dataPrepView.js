@@ -282,6 +282,74 @@
     };
   }
 
+  function defaultFormatNumber(value, digits = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(digits) : "—";
+  }
+
+  function boundaryPreviewState(data = {}, helpers = {}) {
+    const d = data || {};
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const formatNumber = helpers.formatNumber || defaultFormatNumber;
+    const renderEngineeringFocusChecks = helpers.renderEngineeringFocusChecks || (() => "");
+    const hasCoverage = d.coverage_ratio !== null && d.coverage_ratio !== undefined;
+    const duplicateCount = Number(d.duplicate_count || 0);
+    const negativeCount = Number(d.negative_count || 0);
+    const validRows = Number(d.valid_rows || 0);
+    const zeroCount = Number(d.zero_count || 0);
+    const coverageLow = hasCoverage && Number(d.coverage_ratio) < 0.99;
+    const failed = duplicateCount > 0 || negativeCount > 0;
+    const status = failed ? "fail" : coverageLow ? "warn" : "ok";
+    const className = `hint-box ${status === "fail" ? "status-fail" : status === "warn" ? "status-warn" : "status-ok"}`;
+    const suggestedProfile = d.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度";
+    const detectedStep = d.time_step_hours !== null && d.time_step_hours !== undefined ? `${formatNumber(d.time_step_hours, 0)} 小时` : "未识别";
+    const expectedStep = d.expected_time_step_hours !== null && d.expected_time_step_hours !== undefined ? `${formatNumber(d.expected_time_step_hours, 0)} 小时` : "未提供";
+    const coverage = hasCoverage ? `${formatNumber(Number(d.coverage_ratio) * 100, 1)}%` : "未与当前项目时段对比";
+    const zeroRatio = validRows ? `${formatNumber((zeroCount / Math.max(1, validRows)) * 100, 1)}%` : "—";
+    const checks = [
+      { label: "识别时间步长", value: detectedStep, status: d.time_step_hours && d.expected_time_step_hours && Number(d.time_step_hours) !== Number(d.expected_time_step_hours) ? "fail" : "ok" },
+      { label: "当前项目时间步长", value: expectedStep, status: "ok" },
+      { label: "覆盖率", value: coverage, status: coverageLow ? "fail" : "ok" },
+      { label: "重复时间戳", value: String(duplicateCount), status: duplicateCount > 0 ? "fail" : "ok" },
+      { label: "负流量记录", value: String(negativeCount), status: negativeCount > 0 ? "fail" : "ok" },
+      { label: "零值比例", value: zeroRatio, status: validRows > 0 && zeroCount / Math.max(1, validRows) >= 0.8 ? "warn" : "ok" },
+    ];
+    const summary = coverageLow
+      ? "当前边界入流和项目时段相比仍有缺口，建议先补齐覆盖范围后再做率定。"
+      : failed
+        ? "边界入流存在重复时间戳或负值，建议先清洗数据。"
+        : "边界入流预览通过，可继续结合第 7 步输入检查核对覆盖范围。";
+    const focusHtml = renderEngineeringFocusChecks([
+      { title: "边界入流预览检查", summary, status, items: checks },
+    ], { title: "边界入流预览检查" });
+    return {
+      html: `
+      <div class="${className}">
+        <strong>边界入流概览</strong><br>
+        有效记录 ${escapeHtml(String(validRows))}/${escapeHtml(String(d.total_rows || 0))} 行；
+        时间范围 ${escapeHtml(d.date_range?.start || "—")} → ${escapeHtml(d.date_range?.end || "—")}；
+        流量范围 ${escapeHtml(formatNumber(d.flow_stats?.min, 2))} ~ ${escapeHtml(formatNumber(d.flow_stats?.max, 2))} m³/s；
+        建议模式 ${escapeHtml(suggestedProfile)}。
+      </div>
+      ${focusHtml}
+    `,
+      className,
+      status,
+      summary,
+      checks,
+    };
+  }
+
+  function boundaryPreviewErrorState(error = {}, helpers = {}) {
+    const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
+    const message = error?.message || String(error || "预览失败");
+    return {
+      html: `<div class="hint-box status-fail">边界入流预览失败：${escapeHtml(message)}</div>`,
+      className: "hint-box status-fail",
+      text: `边界入流预览失败：${message}`,
+    };
+  }
+
   function parseObservationComparableTime(text) {
     const value = String(text || "").trim();
     if (!value) return null;
@@ -942,6 +1010,8 @@
 
   window.HBVStudioDataPrepView = {
     boundaryGuidanceState,
+    boundaryPreviewErrorState,
+    boundaryPreviewState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
