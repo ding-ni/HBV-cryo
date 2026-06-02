@@ -105,6 +105,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetCompareSummary !== "function") {
               throw new Error("manualPresetCompareSummary was not exported");
             }
+            if (typeof library.manualPresetCompareView !== "function") {
+              throw new Error("manualPresetCompareView was not exported");
+            }
 
             const summary = library.manualPresetCompareSummary(
               {
@@ -133,6 +136,33 @@ class FrontendParameterLibraryTests(unittest.TestCase):
 
             const hidden = library.manualPresetCompareSummary({ label: "", compareMetrics: { nse_cal: 0.8 } });
             if (hidden.visible || hidden.lines.length) throw new Error("missing label should hide summary");
+
+            const view = library.manualPresetCompareView(
+              {
+                label: "Trial A",
+                compareMetrics: { nse_cal: 0.81, nse_val: 0.72 },
+                baseCalibration: { nse: 0.76 },
+                baseValidation: { nse: 0.75 },
+                adjusted: true,
+              },
+              {
+                title: label => `comparing ${label}`,
+                metricSummary: (label, current, baseline) => `${label}:${current}-${baseline}`,
+                calibrationLabel: "cal",
+                validationLabel: "val",
+                adjustedNote: () => "adjusted",
+              },
+            );
+            if (!view.visible || view.className !== "hint-box status-ok") {
+              throw new Error(`unexpected compare view state: ${JSON.stringify(view)}`);
+            }
+            if (view.text !== "comparing Trial A cal:0.81-0.76 val:0.72-0.75 adjusted") {
+              throw new Error(`unexpected compare view text: ${view.text}`);
+            }
+            const hiddenView = library.manualPresetCompareView({ label: "", compareMetrics: { nse_cal: 0.8 } });
+            if (hiddenView.visible || hiddenView.className || hiddenView.text) {
+              throw new Error(`unexpected hidden compare view: ${JSON.stringify(hiddenView)}`);
+            }
             """
         )
         result = subprocess.run(

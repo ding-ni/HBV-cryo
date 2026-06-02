@@ -132,6 +132,7 @@ const frontendModuleContracts = [
       "manualPresetDiffSummary",
       "manualPresetDiffView",
       "manualPresetCompareSummary",
+      "manualPresetCompareView",
       "findPresetById",
       "manualPresetListPath",
       "shouldClearManualPresetComparison",
@@ -1515,7 +1516,7 @@ function updateCompareSummary() {
   const baseMeta = state._runData.metadata || {};
   const baseCal = baseMeta.metrics?.calibration || {};
   const baseVal = baseMeta.metrics?.validation || {};
-  const summary = window.HBVStudioParameterLibrary.manualPresetCompareSummary(
+  const view = window.HBVStudioParameterLibrary.manualPresetCompareView(
     {
       label: state.compareLabel,
       compareMetrics: state.compareMetrics,
@@ -1531,14 +1532,14 @@ function updateCompareSummary() {
       adjustedNote: () => "该参数集在运行前已按约束自动修正。",
     },
   );
-  if (!summary.visible) {
+  if (!view.visible) {
     host.style.display = "none";
     host.textContent = "";
     return;
   }
   host.style.display = "";
-  host.className = `hint-box ${summary.statusClass}`.trim();
-  host.textContent = summary.lines.join(" ");
+  host.className = view.className;
+  host.textContent = view.text;
 }
 
 function clearStaleManualPresetComparison({ silent = true } = {}) {

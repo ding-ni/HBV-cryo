@@ -117,6 +117,19 @@
     return { visible: true, statusClass, lines, deltaCalibration, deltaValidation };
   }
 
+  function manualPresetCompareView(options = {}, helpers = {}) {
+    const summary = manualPresetCompareSummary(options, helpers);
+    if (!summary.visible) {
+      return { visible: false, className: "", text: "", summary };
+    }
+    return {
+      visible: true,
+      className: `hint-box ${summary.statusClass}`.trim(),
+      text: summary.lines.join(" "),
+      summary,
+    };
+  }
+
   function findPresetById(presets = [], presetId = "") {
     const target = String(presetId || "").trim();
     if (!target || !Array.isArray(presets)) return null;
@@ -523,6 +536,7 @@
     manualPresetDiffSummary,
     manualPresetDiffView,
     manualPresetCompareSummary,
+    manualPresetCompareView,
     findPresetById,
     manualPresetListPath,
     shouldClearManualPresetComparison,
