@@ -21,7 +21,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
+            if (!view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoSourceLabels || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -375,6 +375,44 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             });
             if (!quickCompletion.comp.ready || quickCompletion.shouldUpdateCalibrationUi || Object.keys(quickCompletion.statePatch).length !== 0) {
               throw new Error(`quick input check should not patch calibration workflow: ${JSON.stringify(quickCompletion)}`);
+            }
+            const emptyCache = view.emptyInputCheckCache();
+            if (emptyCache.configPath !== "" || emptyCache.stage !== "calibration" || emptyCache.result !== null || emptyCache.html !== "") {
+              throw new Error(`empty input check cache mismatch: ${JSON.stringify(emptyCache)}`);
+            }
+            const cacheEntry = view.inputCheckCacheEntry({
+              configPath: "C:/Workspace/A",
+              precipSource: "ERA5",
+              stage: "quick_test",
+              checkedAt: 1000,
+              result: { ready: false },
+              html: "<div>ok</div>",
+            });
+            if (cacheEntry.configPath !== "C:/Workspace/A" || cacheEntry.precipSource !== "ERA5" || cacheEntry.stage !== "quick_test" || cacheEntry.checkedAt !== 1000 || cacheEntry.html !== "<div>ok</div>") {
+              throw new Error(`input check cache entry mismatch: ${JSON.stringify(cacheEntry)}`);
+            }
+            const cacheHelpers = { samePath: (left, right) => String(left).toLowerCase() === String(right).toLowerCase() };
+            const freshCacheModel = {
+              workspacePath: "c:/workspace/a",
+              precipSource: "era5",
+              stage: "quick_test",
+              nowMs: 1200,
+              maxAgeMs: 45000,
+            };
+            if (!view.hasRecentInputCheckCache(cacheEntry, freshCacheModel, cacheHelpers)) {
+              throw new Error("fresh input check cache should be accepted");
+            }
+            if (view.hasRecentInputCheckCache(cacheEntry, { ...freshCacheModel, requireReady: true }, cacheHelpers)) {
+              throw new Error("requireReady should reject non-ready cache result");
+            }
+            if (view.hasRecentInputCheckCache(cacheEntry, { ...freshCacheModel, precipSource: "cmfd" }, cacheHelpers)) {
+              throw new Error("precip source mismatch should reject cache");
+            }
+            if (view.hasRecentInputCheckCache(cacheEntry, { ...freshCacheModel, nowMs: 60000 }, cacheHelpers)) {
+              throw new Error("expired cache should be rejected");
+            }
+            if (view.hasRecentInputCheckCache(cacheEntry, { ...freshCacheModel, hasRunningImport: true }, cacheHelpers)) {
+              throw new Error("running meteo import should reject cache");
             }
 
             const checkHelpers = {

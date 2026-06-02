@@ -267,7 +267,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
+    exports: ["emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoSourceLabels", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "visiblePrepSteps"],
   },
   {
     script: "./js/taskView.js",
@@ -1250,26 +1250,23 @@ function renderDashboardWorkspaceLayout() {
 }
 
 function clearInputCheckCache() {
-  state.lastInputCheck = {
-    configPath: "",
-    precipSource: "",
-    stage: "calibration",
-    checkedAt: 0,
-    result: null,
-    html: "",
-  };
+  state.lastInputCheck = window.HBVStudioDataPrepView.emptyInputCheckCache();
 }
 
 function hasRecentInputCheck({ requireReady = false, maxAgeMs = 45000, stage = "calibration" } = {}) {
-  const cache = state.lastInputCheck || {};
-  if (!state.wizardWorkspacePath || !cache.configPath) return false;
-  if (!samePath(cache.configPath, state.wizardWorkspacePath)) return false;
-  if (String(cache.precipSource || "").trim().toLowerCase() !== String(getTaskRuntimePrecipSource()).trim().toLowerCase()) return false;
-  if (String(cache.stage || "calibration").trim().toLowerCase() !== String(stage || "calibration").trim().toLowerCase()) return false;
-  if (!cache.result) return false;
-  if ((Date.now() - Number(cache.checkedAt || 0)) > maxAgeMs) return false;
-  if (findCurrentMeteoImportTask({ runningOnly: true })) return false;
-  return requireReady ? Boolean(cache.result.ready) : true;
+  return window.HBVStudioDataPrepView.hasRecentInputCheckCache(
+    state.lastInputCheck || {},
+    {
+      workspacePath: state.wizardWorkspacePath,
+      precipSource: getTaskRuntimePrecipSource(),
+      stage,
+      nowMs: Date.now(),
+      maxAgeMs,
+      requireReady,
+      hasRunningImport: Boolean(findCurrentMeteoImportTask({ runningOnly: true })),
+    },
+    { samePath },
+  );
 }
 
 function stableHash32(text) {
@@ -4095,14 +4092,14 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     });
 
     host.innerHTML = html;
-    state.lastInputCheck = {
+    state.lastInputCheck = window.HBVStudioDataPrepView.inputCheckCacheEntry({
       configPath: String(state.wizardWorkspacePath),
       precipSource: String(getTaskRuntimePrecipSource()),
       stage: String(stage || "calibration"),
       checkedAt: Date.now(),
       result: comp,
       html,
-    };
+    });
     await refreshCurrentWorkspaceWorkflow().catch(() => {});
     return comp;
   } catch (err) {

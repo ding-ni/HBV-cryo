@@ -553,6 +553,42 @@
     };
   }
 
+  function emptyInputCheckCache() {
+    return {
+      configPath: "",
+      precipSource: "",
+      stage: "calibration",
+      checkedAt: 0,
+      result: null,
+      html: "",
+    };
+  }
+
+  function inputCheckCacheEntry(model = {}) {
+    return {
+      configPath: String(model.configPath || ""),
+      precipSource: String(model.precipSource || ""),
+      stage: String(model.stage || "calibration"),
+      checkedAt: Number(model.checkedAt || 0),
+      result: model.result || null,
+      html: String(model.html || ""),
+    };
+  }
+
+  function hasRecentInputCheckCache(cache = {}, model = {}, helpers = {}) {
+    const samePath = helpers.samePath || ((left, right) => String(left || "") === String(right || ""));
+    const maxAgeMs = Number(model.maxAgeMs || 45000);
+    const nowMs = Number(model.nowMs || Date.now());
+    if (!model.workspacePath || !cache.configPath) return false;
+    if (!samePath(cache.configPath, model.workspacePath)) return false;
+    if (String(cache.precipSource || "").trim().toLowerCase() !== String(model.precipSource || "").trim().toLowerCase()) return false;
+    if (String(cache.stage || "calibration").trim().toLowerCase() !== String(model.stage || "calibration").trim().toLowerCase()) return false;
+    if (!cache.result) return false;
+    if ((nowMs - Number(cache.checkedAt || 0)) > maxAgeMs) return false;
+    if (model.hasRunningImport) return false;
+    return model.requireReady ? Boolean(cache.result.ready) : true;
+  }
+
   function inputCheckReadyHeadline(stage = "calibration") {
     if (stage === "calibration") return "所有率定所需数据已就位，可以进入率定！";
     if (stage === "quick_test") return "输入预核算所需数据已就位，可以进行限定时段前向计算。";
@@ -701,7 +737,10 @@
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
+    emptyInputCheckCache,
+    hasRecentInputCheckCache,
     inputCheckCompletionState,
+    inputCheckCacheEntry,
     meteoModeHintState,
     meteoImportCreatingUiState,
     meteoImportErrorUiState,
