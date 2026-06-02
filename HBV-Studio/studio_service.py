@@ -111,6 +111,8 @@ from services.forecast_restart import forecast_restart_run_with_progress as buil
 from services.forecast_restart import ForecastRestartWorkerContext
 from services.forecast_restart import forecast_restart_worker_run as build_forecast_restart_worker_run
 from services.forecast_restart import forecast_restart_start_plan as build_forecast_restart_start_plan
+from services.forcing_validation import ForcingValidationContext
+from services.forcing_validation import validate_forcing_bundle as build_validate_forcing_bundle
 from services.forward_simulation import ForwardSimulationStartContext
 from services.forward_simulation import ForwardSimulationWorkerContext
 from services.forward_simulation import forward_simulation_start_plan as build_forward_simulation_start_plan
@@ -1197,53 +1199,37 @@ def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tupl
     return build_event_observation_coverage_messages(coverage)
 
 
+def _forcing_validation_context() -> ForcingValidationContext:
+    return ForcingValidationContext(
+        current_profile=current_profile,
+        build_profile_paths=build_profile_paths,
+        normalize_time_step_hours=normalize_time_step_hours,
+        task_time_basis=task_time_basis,
+        time_basis_labels=TIME_BASIS_LABELS,
+        time_basis_event_windows=TIME_BASIS_EVENT_WINDOWS,
+        build_expected_forcing_index=build_expected_forcing_index,
+        normalized_flood_events=normalized_flood_events,
+        effective_precip_paths=effective_precip_paths,
+        validate_tif_time_series=validate_tif_time_series,
+        workspace_dem_path=_workspace_dem_path,
+        configured_dem_kind=_configured_dem_kind,
+        validate_tif_grid_alignment=validate_tif_grid_alignment,
+        event_windows_ui_summary=event_windows_ui_summary,
+        event_forcing_coverage_summary=event_forcing_coverage_summary,
+    )
+
+
 def validate_forcing_bundle(
     config: dict[str, Any],
     profile: str | None = None,
     precip_source: Any = None,
 ) -> dict[str, Any]:
-    active_profile = profile or current_profile(config)
-    paths = build_profile_paths(config, active_profile)
-    step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
-    time_basis = task_time_basis(config, context="calibration")
-    time_basis_label = TIME_BASIS_LABELS.get(time_basis, "当前任务时段")
-    expected_index = build_expected_forcing_index(config, context="calibration")
-    event_info = normalized_flood_events(config, step_hours=step_hours) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
-    _, precip_dir, selected_source = effective_precip_paths(config, active_profile, precip_source=precip_source)
-    precip_label = "降水（本地栅格）" if selected_source == "custom_tif" else "降水"
-    directories = {
-        "prec": validate_tif_time_series(precip_label, Path(precip_dir), step_hours, expected_index, time_basis_label),
-        "temp": validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours, expected_index, time_basis_label),
-        "evap": validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours, expected_index, time_basis_label),
-    }
-    errors: list[str] = []
-    warnings: list[str] = []
-    for item in directories.values():
-        errors.extend(item["errors"])
-        warnings.extend(item["warnings"])
-    dem_path = _workspace_dem_path(paths["gis_dir"], prefer=_configured_dem_kind(config))
-    grid_checks = {
-        "prec": validate_tif_grid_alignment(precip_label, Path(precip_dir), dem_path),
-        "temp": validate_tif_grid_alignment("气温", Path(paths["aligned_temp_dir"]), dem_path),
-        "evap": validate_tif_grid_alignment("蒸散发", Path(paths["aligned_evap_dir"]), dem_path),
-    }
-    for item in grid_checks.values():
-        if not item.get("ok") and item.get("error"):
-            errors.append(str(item["error"]))
-    return {
-        "ok": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "expected_steps": len(expected_index) if expected_index is not None else None,
-        "directories": directories,
-        "grid_checks": grid_checks,
-        "total_valid_steps": sum(int(item["valid_time_steps"]) for item in directories.values()),
-        "profile": active_profile,
-        "time_basis": time_basis,
-        "time_basis_label": time_basis_label,
-        "event_windows": event_windows_ui_summary(event_info, step_hours) if event_info is not None else None,
-        "event_forcing_coverage": event_forcing_coverage_summary(event_info, directories, step_hours) if event_info is not None else None,
-    }
+    return build_validate_forcing_bundle(
+        config,
+        _forcing_validation_context(),
+        profile=profile,
+        precip_source=precip_source,
+    )
 
 
 def inspect_observed_csv(
