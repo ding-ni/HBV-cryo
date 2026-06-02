@@ -1159,7 +1159,7 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastRestartTasks", "renderForecastTaskCard", "renderForecastTaskList"]) {
+            for (const name of ["forecastRestartTasks", "forecastTaskListState", "renderForecastTaskCard", "renderForecastTaskList"]) {
               if (typeof view?.[name] !== "function") {
                 throw new Error(`missing forecast task export: ${name}`);
               }
@@ -1257,6 +1257,11 @@ class FrontendForecastViewTests(unittest.TestCase):
             }
             if (!view.renderForecastTaskList([], helpers).includes("暂无连续状态预报任务")) {
               throw new Error("empty forecast task hint missing");
+            }
+            const listState = view.forecastTaskListState(tasks, helpers);
+            const listDom = Object.fromEntries(listState.domUpdates.map(update => [update.selector, update]));
+            if (listState.html !== html || listDom["#forecast-task-list"].html !== html) {
+              throw new Error(`forecast task list DOM updates wrong: ${JSON.stringify(listState)}`);
             }
             """
         )

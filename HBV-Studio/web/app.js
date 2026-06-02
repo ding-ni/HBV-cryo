@@ -226,6 +226,7 @@ const frontendModuleContracts = [
       "renderForecastSourceSummary",
       "renderForecastResultOptions",
       "forecastRestartTasks",
+      "forecastTaskListState",
       "renderForecastTaskCard",
       "renderForecastResultEmpty",
       "renderForecastResultLoading",
@@ -5226,7 +5227,7 @@ function scheduleForecastInputCheck(delay = 350) {
 function renderForecastTaskList() {
   const host = $("#forecast-task-list");
   if (!host) return;
-  host.innerHTML = window.HBVStudioForecastView.renderForecastTaskList(state.tasks, {
+  const taskList = window.HBVStudioForecastView.forecastTaskListState(state.tasks, {
     escapeHtml,
     focusStatusClass,
     focusStatusLabel,
@@ -5241,6 +5242,7 @@ function renderForecastTaskList() {
     taskSummaryLine,
     taskTypeLabel,
   });
+  applyDomUpdates(taskList.domUpdates);
   restoreVisibleLogViewports("#forecast-task-list [data-log-key]");
 }
 

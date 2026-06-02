@@ -1105,6 +1105,14 @@
     return items.map(task => renderForecastTaskCard(task, helpers)).join("");
   }
 
+  function forecastTaskListState(tasks = [], helpers = {}) {
+    const html = renderForecastTaskList(tasks, helpers);
+    return {
+      html,
+      domUpdates: [{ selector: "#forecast-task-list", html }],
+    };
+  }
+
   function renderForecastSummary(data = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const runDisplayName = helpers.runDisplayName || (run => run?.name || run?.title || "连续状态预报结果");
@@ -1245,6 +1253,7 @@
     renderForecastSourceSummary,
     renderForecastResultOptions,
     forecastRestartTasks,
+    forecastTaskListState,
     renderForecastTaskCard,
     renderForecastResultEmpty,
     renderForecastResultLoading,
