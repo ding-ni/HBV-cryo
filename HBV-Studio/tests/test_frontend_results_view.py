@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -236,6 +236,39 @@ class FrontendResultsViewTests(unittest.TestCase):
                 clearedComparison.compareLabel !== "" || clearedComparison.comparePresetId !== "" ||
                 clearedComparison.compareAdjusted !== false) {
               throw new Error(`clear comparison state wrong: ${JSON.stringify(clearedComparison)}`);
+            }
+            const clearComparisonView = results.runComparisonClearViewState({
+              run: { path: "C:/runs/A" },
+              metadata: {
+                metrics: {
+                  calibration: { nse: 0.82, kge: 0.74, pbias: -1.2 },
+                  validation: { nse: 0.69 },
+                },
+              },
+            });
+            if (clearComparisonView.statePatch.compareSeries !== null ||
+                clearComparisonView.summary.visible ||
+                clearComparisonView.summary.text !== "" ||
+                clearComparisonView.summary.className !== "hint-box" ||
+                !clearComparisonView.shouldRestoreRun ||
+                clearComparisonView.chartData.run.path !== "C:/runs/A" ||
+                clearComparisonView.calibrationMetrics.nse !== 0.82 ||
+                clearComparisonView.validationMetrics.nse !== 0.69 ||
+                clearComparisonView.metricMetadata.metrics.calibration.kge !== 0.74 ||
+                !clearComparisonView.shouldToast ||
+                clearComparisonView.toastText !== "已清除参数集对比。") {
+              throw new Error(`clear comparison view state wrong: ${JSON.stringify(clearComparisonView)}`);
+            }
+            const silentClearComparisonView = results.runComparisonClearViewState({ metadata: {} }, { silent: true });
+            if (silentClearComparisonView.shouldToast || !silentClearComparisonView.shouldRestoreRun ||
+                Object.keys(silentClearComparisonView.calibrationMetrics).length ||
+                Object.keys(silentClearComparisonView.validationMetrics).length) {
+              throw new Error(`silent clear comparison view state wrong: ${JSON.stringify(silentClearComparisonView)}`);
+            }
+            const emptyClearComparisonView = results.runComparisonClearViewState(null);
+            if (emptyClearComparisonView.shouldRestoreRun || emptyClearComparisonView.chartData !== null ||
+                !emptyClearComparisonView.shouldToast || Object.keys(emptyClearComparisonView.metricMetadata).length) {
+              throw new Error(`empty clear comparison view state wrong: ${JSON.stringify(emptyClearComparisonView)}`);
             }
             const comparisonSuccessState = results.runComparisonSuccessState({
               id: "preset-A",

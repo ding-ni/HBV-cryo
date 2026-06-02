@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -1447,21 +1447,20 @@ function renderTaskPresetContextHint() {
 
 function clearManualPresetComparison({ silent = false } = {}) {
   compareRequestGuard.cancel();
-  Object.assign(state, window.HBVStudioResultsView.clearRunComparisonState().statePatch);
+  const clearState = window.HBVStudioResultsView.runComparisonClearViewState(state._runData, { silent });
+  Object.assign(state, clearState.statePatch);
   const host = $("#manual-compare-summary");
   if (host) {
-    host.style.display = "none";
-    host.textContent = "";
+    host.style.display = clearState.summary.visible ? "" : "none";
+    host.textContent = clearState.summary.text;
+    host.className = clearState.summary.className;
   }
-  if (state._runData) {
-    renderCharts(state._runData);
-    const meta = state._runData.metadata || {};
-    const cal = meta.metrics?.calibration || {};
-    const val = meta.metrics?.validation || {};
-    updateMetricsStrip(cal, val, meta);
+  if (clearState.shouldRestoreRun) {
+    renderCharts(clearState.chartData);
+    updateMetricsStrip(clearState.calibrationMetrics, clearState.validationMetrics, clearState.metricMetadata);
   }
   updateManualPresetControls();
-  if (!silent) showToast("已清除参数集对比。");
+  if (clearState.shouldToast) showToast(clearState.toastText);
 }
 
 function updateCompareSummary() {

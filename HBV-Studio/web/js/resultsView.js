@@ -190,6 +190,26 @@
     };
   }
 
+  function runComparisonClearViewState(runData = null, options = {}) {
+    const meta = runData?.metadata || {};
+    const metrics = meta.metrics || {};
+    return {
+      statePatch: clearRunComparisonState().statePatch,
+      summary: {
+        visible: false,
+        text: "",
+        className: "hint-box",
+      },
+      shouldRestoreRun: Boolean(runData),
+      chartData: runData || null,
+      calibrationMetrics: metrics.calibration || {},
+      validationMetrics: metrics.validation || {},
+      metricMetadata: meta,
+      shouldToast: !options.silent,
+      toastText: "已清除参数集对比。",
+    };
+  }
+
   function clearRunDetailState() {
     const comparison = clearRunComparisonState().statePatch;
     return {
@@ -1115,6 +1135,7 @@
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
+    runComparisonClearViewState,
     runComparisonErrorState,
     runComparisonPreflight,
     runComparisonRequestContext,
