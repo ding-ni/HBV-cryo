@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "filterRuns", "latestEditableRunPath", "manualStarterControlState", "resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5131,12 +5131,9 @@ async function runForwardSimulation() {
 
 async function compareSelectedManualPresetSimulation() {
   const preset = selectedManualPreset();
-  if (!preset) {
-    showToast("请先选择一个参数集。", true);
-    return;
-  }
-  if (!state._runData || !isStudioEditableRun(state._runData)) {
-    showToast("当前结果不支持参数集对比。", true);
+  const preflight = window.HBVStudioResultsView.runComparisonPreflight(preset, state._runData, { isStudioEditableRun });
+  if (!preflight.ok) {
+    showToast(preflight.message, true);
     return;
   }
   const host = $("#manual-compare-summary");
@@ -5147,17 +5144,11 @@ async function compareSelectedManualPresetSimulation() {
     host.textContent = view.text;
   }
   const requestToken = compareRequestGuard.next();
-  const runPath = String(state._runData?.run?.path || "").trim();
-  const presetId = String(preset.id || "").trim();
+  const requestContext = window.HBVStudioResultsView.runComparisonRequestContext(preset, state._runData);
   try {
-    const payload = await apiPost("/api/simulate/forward", {
-      run_path: state._runData.run?.path,
-      params: preset.params || {},
-    });
+    const payload = await apiPost("/api/simulate/forward", requestContext.payload);
     if (!compareRequestGuard.isActive(requestToken)) return;
-    if (!samePath(runPath, state._runData?.run?.path || "")) return;
-    const currentPresetId = String(selectedManualPreset()?.id || "").trim();
-    if (presetId && currentPresetId && presetId !== currentPresetId) return;
+    if (!window.HBVStudioResultsView.runComparisonRequestStillCurrent(requestContext, state._runData, selectedManualPreset(), { samePath })) return;
     Object.assign(state, window.HBVStudioResultsView.runComparisonSuccessState(preset, payload.data || {}).statePatch);
     renderCharts(state._runData);
     updateCompareSummary();

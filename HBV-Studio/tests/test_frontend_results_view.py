@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.filterRuns || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             const helpers = {
@@ -263,6 +263,45 @@ class FrontendResultsViewTests(unittest.TestCase):
                 fallbackComparison.comparePresetId !== "" ||
                 fallbackComparison.compareSeries.residuals.join("|") !== "|") {
               throw new Error(`fallback comparison state wrong: ${JSON.stringify(fallbackComparison)}`);
+            }
+            const missingPresetPreflight = results.runComparisonPreflight(null, { run: { path: "C:/runs/A" } });
+            if (missingPresetPreflight.ok || missingPresetPreflight.reason !== "missing-preset" || !missingPresetPreflight.message.includes("参数集")) {
+              throw new Error(`missing preset preflight wrong: ${JSON.stringify(missingPresetPreflight)}`);
+            }
+            const unsupportedPreflight = results.runComparisonPreflight({ id: "preset-A" }, { run: { path: "C:/runs/A" } }, {
+              isStudioEditableRun() { return false; },
+            });
+            if (unsupportedPreflight.ok || unsupportedPreflight.reason !== "unsupported-run" || !unsupportedPreflight.message.includes("不支持")) {
+              throw new Error(`unsupported preflight wrong: ${JSON.stringify(unsupportedPreflight)}`);
+            }
+            const readyPreflight = results.runComparisonPreflight({ id: "preset-A" }, { run: { path: "C:/runs/A" } }, {
+              isStudioEditableRun() { return true; },
+            });
+            if (!readyPreflight.ok || readyPreflight.reason || readyPreflight.message) {
+              throw new Error(`ready preflight wrong: ${JSON.stringify(readyPreflight)}`);
+            }
+            const compareRequest = results.runComparisonRequestContext({
+              id: " preset-A ",
+              params: { TT: 0.1 },
+            }, {
+              run: { path: " C:/runs/A " },
+            });
+            if (compareRequest.runPath !== "C:/runs/A" || compareRequest.presetId !== "preset-A" ||
+                compareRequest.payload.run_path !== "C:/runs/A" || compareRequest.payload.params.TT !== 0.1) {
+              throw new Error(`comparison request context wrong: ${JSON.stringify(compareRequest)}`);
+            }
+            const samePath = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+            if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "c:/RUNS/a" } }, { id: "preset-A" }, { samePath })) {
+              throw new Error("matching comparison request should remain current");
+            }
+            if (results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/B" } }, { id: "preset-A" }, { samePath })) {
+              throw new Error("changed run should invalidate comparison request");
+            }
+            if (results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/A" } }, { id: "preset-B" }, { samePath })) {
+              throw new Error("changed preset should invalidate comparison request");
+            }
+            if (!results.runComparisonRequestStillCurrent(compareRequest, { run: { path: "C:/runs/A" } }, null, { samePath })) {
+              throw new Error("missing current preset should keep original behavior and remain current");
             }
             if (results.latestEditableRunPath([runItems[3], runItems[0]]) !== "r1" || results.latestEditableRunPath([runItems[3], runItems[2]]) !== "r4" || results.latestEditableRunPath([]) !== "") {
               throw new Error("latestEditableRunPath should prefer editable runs and otherwise fall back to first run");

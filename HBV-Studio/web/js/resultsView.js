@@ -258,6 +258,52 @@
     };
   }
 
+  function runComparisonPreflight(preset = null, runData = null, helpers = {}) {
+    const isStudioEditableRun = helpers.isStudioEditableRun || (() => false);
+    if (!preset) {
+      return {
+        ok: false,
+        reason: "missing-preset",
+        message: "请先选择一个参数集。",
+      };
+    }
+    if (!runData || !isStudioEditableRun(runData)) {
+      return {
+        ok: false,
+        reason: "unsupported-run",
+        message: "当前结果不支持参数集对比。",
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      message: "",
+    };
+  }
+
+  function runComparisonRequestContext(preset = {}, runData = {}) {
+    const runPath = String(runData?.run?.path || "").trim();
+    const presetId = String(preset?.id || "").trim();
+    return {
+      runPath,
+      presetId,
+      payload: {
+        run_path: runPath,
+        params: preset?.params || {},
+      },
+    };
+  }
+
+  function runComparisonRequestStillCurrent(request = {}, runData = null, preset = null, helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const requestRunPath = String(request?.runPath || "").trim();
+    const currentRunPath = String(runData?.run?.path || "").trim();
+    if (!samePath(requestRunPath, currentRunPath)) return false;
+    const requestPresetId = String(request?.presetId || "").trim();
+    const currentPresetId = String(preset?.id || "").trim();
+    return !(requestPresetId && currentPresetId && requestPresetId !== currentPresetId);
+  }
+
   function workspaceHasEditableRun(runs = [], path = "", helpers = {}) {
     return runsForWorkspace(runs, path, helpers).some(run => run?.studio_compatible);
   }
@@ -848,6 +894,9 @@
     runExportPanelState,
     runExportPayload,
     runExportSuccess,
+    runComparisonPreflight,
+    runComparisonRequestContext,
+    runComparisonRequestStillCurrent,
     runComparisonSuccessState,
     runDetailState,
     runListState,
