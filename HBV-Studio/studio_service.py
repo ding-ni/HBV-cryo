@@ -235,24 +235,24 @@ from services.runs import discover_run_entries as build_discover_run_entries
 from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
 from services.runs import build_run_summary as build_run_summary_payload
-from services.runs import first_existing_path as build_first_existing_path
+from services.runs import first_existing_path as _first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
-from services.runs import infer_project_roots_from_run_path as build_infer_project_roots_from_run_path
-from services.runs import infer_selected_result_stage as build_infer_selected_result_stage
+from services.runs import infer_project_roots_from_run_path as _infer_project_roots_from_run_path
+from services.runs import infer_selected_result_stage as _infer_selected_result_stage
 from services.runs import is_studio_editable_metadata as build_is_studio_editable_metadata
 from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
 from services.runs import load_run_series_map as build_load_run_series_map
-from services.runs import metadata_boundary_enabled as build_metadata_boundary_enabled
+from services.runs import metadata_boundary_enabled as _metadata_boundary_enabled
 from services.runs import normalize_result_title as build_normalize_result_title
-from services.runs import normalize_metadata_object_type as build_normalize_metadata_object_type
+from services.runs import normalize_metadata_object_type as _normalize_metadata_object_type
 from services.runs import normalize_run_metadata_payload as build_normalize_run_metadata_payload
-from services.runs import normalized_method_label as build_normalized_method_label
-from services.runs import normalized_selected_result_label as build_normalized_selected_result_label
-from services.runs import optimization_stage_has_execution as build_optimization_stage_has_execution
-from services.runs import optimization_stage_payload as build_optimization_stage_payload
+from services.runs import normalized_method_label as _normalized_method_label
+from services.runs import normalized_selected_result_label as _normalized_selected_result_label
+from services.runs import optimization_stage_has_execution as _optimization_stage_has_execution
+from services.runs import optimization_stage_payload as _optimization_stage_payload
 from services.runs import pick_latest_run_path as build_pick_latest_run_path
 from services.runs import portableize_value_paths as build_portableize_value_paths
 from services.runs import read_run_metrics_snapshot as build_read_run_metrics_snapshot
@@ -266,7 +266,7 @@ from services.runs import resolve_workspace_config_reference as build_resolve_wo
 from services.runs import run_csv_date_bounds as build_run_csv_date_bounds
 from services.runs import run_csv_preview as build_run_csv_preview
 from services.runs import run_parameter_context as build_run_parameter_context
-from services.runs import default_run_export_fields as build_default_run_export_fields
+from services.runs import default_run_export_fields
 from services.runs import run_kind_from_metadata as build_run_kind_from_metadata
 from services.runs import run_kind_label as build_run_kind_label
 from services.runs import workspace_name_for_summary as build_workspace_name_for_summary
@@ -275,7 +275,7 @@ from services.runs import run_update_timestamps as build_run_update_timestamps
 from services.runs import snapshot_run_paths as build_snapshot_run_paths
 from services.runs import to_portable_path as build_to_portable_path
 from services.runs import workspace_config_candidates as build_workspace_config_candidates
-from services.runs import workspace_roots_hint_from_metadata as build_workspace_roots_hint_from_metadata
+from services.runs import workspace_roots_hint_from_metadata as _workspace_roots_hint_from_metadata
 from services.run_hydrology import RunHydrologyContext
 from services.run_hydrology import build_hydrology_summary as build_run_hydrology_summary
 from services.run_hydrology import ensure_hydrology_diagnostic_report as build_ensure_hydrology_diagnostic_report
@@ -414,10 +414,6 @@ CALIBRATION_METHODS = {
     "mc_screen_de": "Monte Carlo 预筛 + DE",
     "mc_only": "Monte Carlo 采样",
 }
-
-
-def default_run_export_fields(metadata: dict[str, Any] | None) -> list[str]:
-    return build_default_run_export_fields(metadata)
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -1203,14 +1199,6 @@ def portableize_value_paths(value: Any) -> Any:
     return build_portableize_value_paths(value, _run_portable_path_context())
 
 
-def _infer_project_roots_from_run_path(run_path: Path | None) -> tuple[Path | None, Path | None]:
-    return build_infer_project_roots_from_run_path(run_path)
-
-
-def _workspace_roots_hint_from_metadata(metadata: dict[str, Any] | None) -> tuple[Path | None, Path | None]:
-    return build_workspace_roots_hint_from_metadata(metadata)
-
-
 def _workspace_config_reference_context() -> RunWorkspaceConfigReferenceContext:
     return RunWorkspaceConfigReferenceContext(
         project_root=PROJECT_ROOT,
@@ -1242,10 +1230,6 @@ def resolve_workspace_config_reference(raw_path: str, *, run_path: Path | None =
     )
 
 
-def _first_existing_path(candidates: list[Path]) -> Path | None:
-    return build_first_existing_path(candidates)
-
-
 def _run_metadata_compatibility_context() -> RunMetadataCompatibilityContext:
     return RunMetadataCompatibilityContext(
         workspace_roots_hint_from_metadata=_workspace_roots_hint_from_metadata,
@@ -1268,14 +1252,6 @@ def _run_source_reference_context() -> RunSourceReferenceContext:
 
 def _resolve_source_run_reference(source_run_path_raw: Any, source_run_name_raw: Any) -> str:
     return build_resolve_source_run_reference(source_run_path_raw, source_run_name_raw, _run_source_reference_context())
-
-
-def _normalize_metadata_object_type(value: Any) -> str:
-    return build_normalize_metadata_object_type(value)
-
-
-def _metadata_boundary_enabled(metadata: dict[str, Any]) -> bool | None:
-    return build_metadata_boundary_enabled(metadata)
 
 
 def _run_metadata_object_type_context() -> RunMetadataObjectTypeContext:
@@ -1329,26 +1305,6 @@ def _run_metadata_normalization_context() -> RunMetadataNormalizationContext:
 
 def _resolve_metadata_object_type(metadata: dict[str, Any], config: dict[str, Any] | None = None) -> str:
     return build_resolve_metadata_object_type(metadata, config, _run_metadata_object_type_context())
-
-
-def _optimization_stage_payload(value: Any) -> dict[str, Any]:
-    return build_optimization_stage_payload(value)
-
-
-def _optimization_stage_has_execution(stage: dict[str, Any]) -> bool:
-    return build_optimization_stage_has_execution(stage)
-
-
-def _infer_selected_result_stage(optimization: dict[str, Any], stage_stats: dict[str, dict[str, Any]]) -> str:
-    return build_infer_selected_result_stage(optimization, stage_stats)
-
-
-def _normalized_selected_result_label(optimization: dict[str, Any]) -> str:
-    return build_normalized_selected_result_label(optimization)
-
-
-def _normalized_method_label(optimization: dict[str, Any]) -> str:
-    return build_normalized_method_label(optimization)
 
 
 def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = None) -> tuple[dict[str, Any], Path | None]:
