@@ -8,7 +8,6 @@ import csv
 import hashlib
 import io
 import json
-import math
 import mimetypes
 import os
 import shutil
@@ -110,6 +109,10 @@ from services.manual_presets import load_manual_preset_store as build_load_manua
 from services.manual_presets import manual_preset_store_path as build_manual_preset_store_path
 from services.manual_presets import save_manual_preset as build_save_manual_preset
 from services.manual_presets import write_manual_preset_store as build_write_manual_preset_store
+from services.json_utils import json_dumps_safe as build_json_dumps_safe
+from services.json_utils import json_safe_value as build_json_safe_value
+from services.json_utils import read_json_file as build_read_json_file
+from services.json_utils import write_json_file as build_write_json_file
 from services.meteo_import import MeteoImportStartContext
 from services.meteo_import import MeteoImportWorkerContext
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
@@ -1040,7 +1043,7 @@ def normalize_time_step_hours(value: Any) -> float:
 
 
 def read_json_file(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    return build_read_json_file(path)
 
 
 def read_runtime_config(path: Path) -> dict[str, Any]:
@@ -1093,26 +1096,15 @@ def _append_unique_message(items: list[str], text: str) -> None:
 
 
 def _json_safe_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _json_safe_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe_value(item) for item in value]
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    return value
+    return build_json_safe_value(value)
 
 
 def json_dumps_safe(payload: Any, *, indent: int | None = None) -> str:
-    return json.dumps(_json_safe_value(payload), ensure_ascii=False, indent=indent, allow_nan=False)
+    return build_json_dumps_safe(payload, indent=indent)
 
 
 def write_json_file(path: Path, data: dict[str, Any]) -> None:
-    payload = dict(data)
-    payload.pop("_config_path", None)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json_dumps_safe(payload, indent=2), encoding="utf-8")
+    build_write_json_file(path, data)
 
 
 def detect_time_column(frame: pd.DataFrame, preferred: str | None = None) -> str | None:
