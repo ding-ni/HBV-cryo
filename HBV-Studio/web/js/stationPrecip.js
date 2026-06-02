@@ -127,6 +127,22 @@
     };
   }
 
+  function stationPrecipCheckOverviewState(model = {}, helpers = {}) {
+    const validationCheck = stationPrecipCheckFromValidation(model.validation || null);
+    const check = validationCheck || stationPrecipFallbackCheck({
+      mode: model.mode || "grid_only",
+      stationPrec: model.stationPrec || "",
+      stationMeta: model.stationMeta || "",
+    }, helpers);
+    return {
+      selector: "#wz-station-check-overview",
+      checks: [check],
+      options: { title: "站点降水专项检查" },
+      check,
+      source: validationCheck ? "validation" : "fallback",
+    };
+  }
+
   function renderTaskScopeSummary(check = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const focusStatusClass = helpers.focusStatusClass || defaultStatusClass;
@@ -226,6 +242,7 @@
     stationPrecipModeLabel,
     precipStrategyStatusState,
     renderPrecipStrategyStatusCards,
+    stationPrecipCheckOverviewState,
     stationPrecipFallbackCheck,
     renderTaskScopeSummary,
     renderEventCoverageMatrix,

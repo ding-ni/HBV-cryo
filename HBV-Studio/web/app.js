@@ -97,6 +97,7 @@ const frontendModuleContracts = [
       "stationPrecipModeLabel",
       "precipStrategyStatusState",
       "renderPrecipStrategyStatusCards",
+      "stationPrecipCheckOverviewState",
       "stationPrecipFallbackCheck",
       "renderTaskScopeSummary",
       "renderEventCoverageMatrix",
@@ -1858,18 +1859,13 @@ function renderStationPrecipCheckOverview(validation = null) {
   const host = $("#wz-station-check-overview");
   if (!host) return;
   const mode = getSelectedRadio("wz-precip-mode") || state.currentWorkspace?.气象策略?.降水方案 || "grid_only";
-  const check = window.HBVStudioStationPrecip.stationPrecipCheckFromValidation(validation);
-  if (check) {
-    applyDomUpdates(engineeringFocusChecksState("#wz-station-check-overview", [check], { title: "站点降水专项检查" }).domUpdates);
-    return;
-  }
   const stationPrec = $("#wz-station-prec")?.value.trim() || state.currentWorkspace?.气象策略?.站点降水_csv || "";
   const stationMeta = $("#wz-station-meta")?.value.trim() || state.currentWorkspace?.气象策略?.站点信息_csv || "";
-  const fallback = window.HBVStudioStationPrecip.stationPrecipFallbackCheck(
-    { mode, stationPrec, stationMeta },
+  const overview = window.HBVStudioStationPrecip.stationPrecipCheckOverviewState(
+    { validation, mode, stationPrec, stationMeta },
     { shortPath },
   );
-  applyDomUpdates(engineeringFocusChecksState("#wz-station-check-overview", [fallback], { title: "站点降水专项检查" }).domUpdates);
+  applyDomUpdates(engineeringFocusChecksState(overview.selector, overview.checks, overview.options).domUpdates);
 }
 
 function updateProjectFocusHint() {

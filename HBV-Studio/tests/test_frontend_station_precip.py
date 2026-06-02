@@ -22,6 +22,9 @@ class FrontendStationPrecipTests(unittest.TestCase):
 
             const station = context.window.HBVStudioStationPrecip;
             if (!station) throw new Error("station precipitation module was not exported");
+            if (typeof station.stationPrecipCheckOverviewState !== "function") {
+              throw new Error("missing station precipitation overview state export");
+            }
 
             if (station.stationPrecipModeLabel("grid_only") !== "格点直接使用") {
               throw new Error("grid-only label mismatch");
@@ -119,6 +122,58 @@ class FrontendStationPrecipTests(unittest.TestCase):
             const statusDom = Object.fromEntries(statusState.domUpdates.map(update => [update.selector, update]));
             if (statusState.html !== stationHtml || statusDom["#wz-precip-strategy-status"].html !== stationHtml) {
               throw new Error(`unexpected precip strategy DOM updates: ${JSON.stringify(statusState)}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_check_overview_state_prefers_validation_and_builds_fallback(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/stationPrecip.js", "utf8"), context);
+
+            const station = context.window.HBVStudioStationPrecip;
+            const validationCheck = { id: "station_precip", title: "backend station check", status: "ok", items: [] };
+            const validationOverview = station.stationPrecipCheckOverviewState({
+              validation: { focus_checks: [{ id: "other" }, validationCheck] },
+              mode: "grid_plus_station_bias",
+            });
+            if (validationOverview.source !== "validation" || validationOverview.check !== validationCheck || validationOverview.checks[0] !== validationCheck) {
+              throw new Error(`validation overview should reuse backend check: ${JSON.stringify(validationOverview)}`);
+            }
+            if (validationOverview.selector !== "#wz-station-check-overview" || validationOverview.options.title !== "站点降水专项检查") {
+              throw new Error(`validation overview render target mismatch: ${JSON.stringify(validationOverview)}`);
+            }
+
+            const fallbackOverview = station.stationPrecipCheckOverviewState(
+              {
+                validation: { focus_checks: [{ id: "glacier" }] },
+                mode: "grid_plus_station_bias",
+                stationPrec: "D:/data/prec.csv",
+                stationMeta: "",
+              },
+              {
+                shortPath: value => String(value).split("/").pop(),
+              },
+            );
+            if (fallbackOverview.source !== "fallback" || fallbackOverview.checks.length !== 1 || fallbackOverview.check !== fallbackOverview.checks[0]) {
+              throw new Error(`fallback overview shape mismatch: ${JSON.stringify(fallbackOverview)}`);
+            }
+            if (fallbackOverview.check.status !== "fail" || fallbackOverview.check.items[1].value !== "prec.csv" || fallbackOverview.check.items[2].status !== "fail") {
+              throw new Error(`fallback overview check mismatch: ${JSON.stringify(fallbackOverview.check)}`);
             }
             """
         )
