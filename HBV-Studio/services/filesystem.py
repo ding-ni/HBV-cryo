@@ -78,6 +78,18 @@ def safe_iterdir(directory: Path) -> list[Path]:
     return results
 
 
+def count_matching(path: Path, pattern: str = "*.tif") -> int:
+    if not path.exists():
+        return 0
+    return len(list(path.glob(pattern)))
+
+
+def has_matching(path: Path, pattern: str = "*.tif") -> bool:
+    if not path.exists():
+        return False
+    return next(path.glob(pattern), None) is not None
+
+
 def placeholder_roots_for_config_path(
     config_path: Path | str | None,
     context: FilesystemPlaceholderContext,

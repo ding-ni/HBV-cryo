@@ -14,7 +14,9 @@ if str(STUDIO_DIR) not in sys.path:
 from services.filesystem import (  # noqa: E402
     FilesystemPathContext,
     FilesystemPlaceholderContext,
+    count_matching,
     ensure_within,
+    has_matching,
     is_within_any_root,
     is_within_root,
     normalize_legacy_project_paths,
@@ -153,6 +155,28 @@ class FilesystemServiceTests(unittest.TestCase):
             normalized["nested"][0]["dem_tif"],
             str((project_root / "HBV-Cryo" / "dem.tif").resolve(strict=False)),
         )
+
+    def test_count_matching_and_has_matching_use_glob_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.tif").write_text("", encoding="utf-8")
+            (root / "b.txt").write_text("", encoding="utf-8")
+            (root / "nested").mkdir()
+            (root / "nested" / "c.tif").write_text("", encoding="utf-8")
+
+            tif_count = count_matching(root)
+            txt_count = count_matching(root, "*.txt")
+            has_tif = has_matching(root)
+            has_csv = has_matching(root, "*.csv")
+            missing_count = count_matching(root / "missing")
+            missing_has = has_matching(root / "missing")
+
+        self.assertEqual(tif_count, 1)
+        self.assertEqual(txt_count, 1)
+        self.assertTrue(has_tif)
+        self.assertFalse(has_csv)
+        self.assertEqual(missing_count, 0)
+        self.assertFalse(missing_has)
 
 
 if __name__ == "__main__":

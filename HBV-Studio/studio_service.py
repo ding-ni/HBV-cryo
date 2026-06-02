@@ -86,7 +86,9 @@ from services.filesystem import (
     FilesystemContext,
     FilesystemPathContext,
     FilesystemPlaceholderContext,
+    count_matching,
     ensure_within as build_ensure_within,
+    has_matching,
     is_within_any_root as build_is_within_any_root,
     is_within_root as build_is_within_root,
     list_drives as build_list_drives,
@@ -1744,18 +1746,6 @@ def create_workspace_from_import(payload: dict[str, Any]) -> dict[str, Any]:
 
 def current_profile(config: dict[str, Any]) -> str:
     return resolve_profile(config, None)
-
-
-def count_matching(path: Path, pattern: str = "*.tif") -> int:
-    if not path.exists():
-        return 0
-    return len(list(path.glob(pattern)))
-
-
-def has_matching(path: Path, pattern: str = "*.tif") -> bool:
-    if not path.exists():
-        return False
-    return next(path.glob(pattern), None) is not None
 
 
 def _prefer_raw_or_aligned_group_status(
