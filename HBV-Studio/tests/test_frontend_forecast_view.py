@@ -269,6 +269,45 @@ class FrontendForecastViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_forecast_input_check_error_summary_is_stable(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
+
+            const view = context.window.HBVStudioForecastView;
+            if (typeof view?.forecastInputCheckError !== "function") {
+              throw new Error("missing forecast input check error helper");
+            }
+
+            const check = view.forecastInputCheckError(new Error("目录无法读取"));
+            if (check.status !== "fail") throw new Error(`status mismatch: ${check.status}`);
+            if (check.headline !== "预报气象输入检查失败。") throw new Error(`headline mismatch: ${check.headline}`);
+            if (check.errors.length !== 1 || check.errors[0] !== "目录无法读取") throw new Error(`error message mismatch: ${check.errors}`);
+            if (check.warnings.length || check.items.length || check.variables.length) {
+              throw new Error(`detail arrays should be empty: ${JSON.stringify(check)}`);
+            }
+
+            const fallback = view.forecastInputCheckError({});
+            if (fallback.errors[0] !== "预报气象输入检查失败。") throw new Error(`fallback message wrong: ${fallback.errors[0]}`);
+            const textError = view.forecastInputCheckError("手动错误");
+            if (textError.errors[0] !== "手动错误") throw new Error(`text message wrong: ${textError.errors[0]}`);
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_forecast_restart_payload_uses_run_and_context_metadata(self) -> None:
         script = textwrap.dedent(
             r"""

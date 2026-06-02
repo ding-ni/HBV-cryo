@@ -153,6 +153,7 @@ const frontendModuleContracts = [
       "forecastArchiveVariableItems",
       "forecastArchiveVariables",
       "forecastCandidateRuns",
+      "forecastInputCheckError",
       "forecastInputPayload",
       "forecastInputType",
       "forecastParameterSourceSummary",
@@ -5606,14 +5607,7 @@ async function refreshForecastInputCheck({ loading = false } = {}) {
     return check;
   } catch (err) {
     if (!forecastInputCheckRequestGuard.isActive(requestToken)) return;
-    const check = {
-      status: "fail",
-      headline: "预报气象输入检查失败。",
-      errors: [err.message],
-      warnings: [],
-      items: [],
-      variables: [],
-    };
+    const check = window.HBVStudioForecastView.forecastInputCheckError(err);
     renderForecastInputSummary(check);
     return check;
   }

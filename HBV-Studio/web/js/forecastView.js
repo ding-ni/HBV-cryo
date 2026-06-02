@@ -187,6 +187,19 @@
     return { ok: true, message: "", expectedStart };
   }
 
+  function forecastInputCheckError(error = null) {
+    const rawMessage = error?.message || (typeof error === "string" ? error : "");
+    const message = String(rawMessage || "预报气象输入检查失败。").trim() || "预报气象输入检查失败。";
+    return {
+      status: "fail",
+      headline: "预报气象输入检查失败。",
+      errors: [message],
+      warnings: [],
+      items: [],
+      variables: [],
+    };
+  }
+
   function forecastResultExportPayload(data = {}, selectedRun = null, helpers = {}) {
     const boundaryEnabledFromMeta = helpers.boundaryEnabledFromMeta || (() => false);
     const runPath = String(data?.run?.path || selectedRun?.path || "").trim();
@@ -952,6 +965,7 @@
     forecastArchiveVariableItems,
     forecastArchiveVariables,
     forecastCandidateRuns,
+    forecastInputCheckError,
     forecastInputPayload,
     forecastInputType,
     forecastParameterSourceSummary,
