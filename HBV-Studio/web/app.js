@@ -131,6 +131,7 @@ const frontendModuleContracts = [
       "renderPresetOptions",
       "manualPresetDiffSummary",
       "manualPresetDiffView",
+      "manualPresetDiffPanelState",
       "compareMetricSummary",
       "manualPresetCompareSummary",
       "manualPresetCompareView",
@@ -157,6 +158,7 @@ const frontendModuleContracts = [
       "manualGroupParamNames",
       "manualPhaseGuide",
       "manualChangeSummary",
+      "manualChangeSummaryPanelState",
       "renderParamSliders",
       "manualContextFromRunData",
       "manualContextWarning",
@@ -1341,17 +1343,13 @@ function updateManualPhaseGuide(paramNames = []) {
 function updateManualChangeSummary() {
   const host = $("#manual-change-summary");
   if (!host) return;
-  const summary = window.HBVStudioParameterLibrary.manualChangeSummary(
+  const summary = window.HBVStudioParameterLibrary.manualChangeSummaryPanelState(
     state._runParams,
     state._runOrigParams,
     state.manualParamGroup,
     MANUAL_GROUP_PARAMS,
   );
-  if (!summary.visible) {
-    host.style.display = "none";
-    return;
-  }
-  host.style.display = "";
+  host.style.display = summary.visible ? "" : "none";
   host.className = summary.className;
   host.textContent = summary.text;
 }
@@ -1361,17 +1359,13 @@ function renderManualPresetDiff() {
   if (!host) return;
   const preset = selectedManualPreset();
   const baseline = state._runOrigParams || {};
-  const view = window.HBVStudioParameterLibrary.manualPresetDiffView(
+  const view = window.HBVStudioParameterLibrary.manualPresetDiffPanelState(
     preset,
     baseline,
     { contextWarning: manualPresetContextWarning(preset) },
     { formatNumber },
   );
-  if (!view.visible) {
-    host.style.display = "none";
-    return;
-  }
-  host.style.display = "";
+  host.style.display = view.visible ? "" : "none";
   host.className = view.className;
   host.textContent = view.text;
 }

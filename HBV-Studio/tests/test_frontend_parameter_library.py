@@ -28,6 +28,9 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (typeof library.manualPresetDiffView !== "function") {
               throw new Error("manualPresetDiffView was not exported");
             }
+            if (typeof library.manualPresetDiffPanelState !== "function") {
+              throw new Error("manualPresetDiffPanelState was not exported");
+            }
 
             const summary = library.manualPresetDiffSummary(
               { params: { TT: 0.5, FC: 130, K0: 0.11, unchanged: 7 } },
@@ -51,6 +54,10 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             const hiddenView = library.manualPresetDiffView(null, { TT: 0.1 });
             if (hiddenView.visible || hiddenView.text || hiddenView.className || hiddenView.diffCount !== 0) {
               throw new Error(`unexpected hidden view: ${JSON.stringify(hiddenView)}`);
+            }
+            const hiddenPanel = library.manualPresetDiffPanelState(null, { TT: 0.1 });
+            if (hiddenPanel.visible || hiddenPanel.text !== "" || hiddenPanel.className !== "hint-box" || hiddenPanel.diffCount !== 0) {
+              throw new Error(`unexpected hidden panel: ${JSON.stringify(hiddenPanel)}`);
             }
             const sameView = library.manualPresetDiffView(
               { name: "Base", params: { TT: 0.1 } },
@@ -78,6 +85,15 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             }
             if (!changedView.text.includes("FC: 120.0000 → 130.0000 (+10.0000)")) {
               throw new Error(`changed view should format arrows and separators: ${changedView.text}`);
+            }
+            const changedPanel = library.manualPresetDiffPanelState(
+              { name: "Trial", params: { TT: 0.5 } },
+              { TT: 0.1 },
+              {},
+              { formatNumber: (value, digits) => Number(value).toFixed(digits) },
+            );
+            if (!changedPanel.visible || changedPanel.className !== "hint-box" || changedPanel.diffCount !== 1) {
+              throw new Error(`unexpected changed panel: ${JSON.stringify(changedPanel)}`);
             }
             """
         )
@@ -815,7 +831,7 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/parameterLibrary.js", "utf8"), context);
 
             const library = context.window.HBVStudioParameterLibrary;
-            for (const name of ["manualGroupParamNames", "manualPhaseGuide", "manualChangeSummary", "renderParamSliders"]) {
+            for (const name of ["manualGroupParamNames", "manualPhaseGuide", "manualChangeSummary", "manualChangeSummaryPanelState", "renderParamSliders"]) {
               if (typeof library[name] !== "function") throw new Error(`${name} was not exported`);
             }
             const groupParams = {
@@ -861,6 +877,15 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             }
             const hidden = library.manualChangeSummary({ TT: 0.1 }, { TT: 0.1 }, "snow", groupParams);
             if (hidden.visible || hidden.text) throw new Error("unchanged params should hide summary");
+            const hiddenPanel = library.manualChangeSummaryPanelState({ TT: 0.1 }, { TT: 0.1 }, "snow", groupParams);
+            if (hiddenPanel.visible || hiddenPanel.text !== "" || hiddenPanel.className !== "hint-box") {
+              throw new Error(`unexpected hidden change panel: ${JSON.stringify(hiddenPanel)}`);
+            }
+            const changedPanel = library.manualChangeSummaryPanelState({ TT: 0.2, FC: 100 }, { TT: 0.1, FC: 100 }, "snow", groupParams);
+            if (!changedPanel.visible || changedPanel.className !== "hint-box status-warn" ||
+                changedPanel.text !== "已修改 1 个参数。当前分组中已改动：TT") {
+              throw new Error(`unexpected changed panel: ${JSON.stringify(changedPanel)}`);
+            }
 
             const readonly = library.renderParamSliders({ editable: false }, helpers);
             if (readonly.status !== "readonly" || !readonly.html.includes("不能手动调参")) {

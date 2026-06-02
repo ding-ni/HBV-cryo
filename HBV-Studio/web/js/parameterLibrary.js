@@ -92,6 +92,13 @@
     };
   }
 
+  function manualPresetDiffPanelState(preset, baseline = {}, options = {}, helpers = {}) {
+    const view = manualPresetDiffView(preset, baseline, options, helpers);
+    return view.visible
+      ? view
+      : { visible: false, className: "hint-box", text: "", diffCount: 0 };
+  }
+
   function manualPresetCompareSummary(options = {}, helpers = {}) {
     const label = String(options.label || "").trim();
     const compareMetrics = options.compareMetrics || null;
@@ -521,6 +528,13 @@
     };
   }
 
+  function manualChangeSummaryPanelState(currentParams = null, originalParams = null, group = "all", groupParams = {}) {
+    const summary = manualChangeSummary(currentParams, originalParams, group, groupParams);
+    return summary.visible
+      ? summary
+      : { visible: false, className: "hint-box", text: "", changed: [], visibleChanged: [] };
+  }
+
   function normalizeBoundPair(value) {
     if (!Array.isArray(value) || value.length < 2) return [0, 1];
     const lo = Number(value[0]);
@@ -808,6 +822,7 @@
     renderPresetOptions,
     manualPresetDiffSummary,
     manualPresetDiffView,
+    manualPresetDiffPanelState,
     compareMetricSummary,
     manualPresetCompareSummary,
     manualPresetCompareView,
@@ -834,6 +849,7 @@
     manualGroupParamNames,
     manualPhaseGuide,
     manualChangeSummary,
+    manualChangeSummaryPanelState,
     renderParamSliders,
     manualContextFromRunData,
     manualContextWarning,
