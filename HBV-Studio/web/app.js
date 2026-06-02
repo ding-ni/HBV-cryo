@@ -162,6 +162,9 @@ const frontendModuleContracts = [
       "forecastResultDetailState",
       "forecastResultExportPayload",
       "forecastResultExportSuccess",
+      "forecastResultLoadErrorState",
+      "forecastResultLoadStartState",
+      "forecastResultLoadSuccessState",
       "forecastResultPanelState",
       "forecastRestartPreflight",
       "forecastRestartPayload",
@@ -5684,33 +5687,31 @@ function renderForecastResultDetail(data = state.forecastResultData) {
 }
 
 async function loadForecastResultDetail(path) {
-  const targetPath = String(path || "").trim();
-  if (!targetPath) {
+  const loadStart = window.HBVStudioForecastView.forecastResultLoadStartState(path);
+  if (!loadStart.ok) {
     forecastResultRequestGuard.cancel();
     return;
   }
   const requestToken = forecastResultRequestGuard.next();
-  state.forecastResultRunPath = targetPath;
-  state.forecastResultLoadingPath = targetPath;
-  state.lastForecastExportPath = "";
+  Object.assign(state, loadStart.statePatch);
   if (window.HBVStudioForecastView) {
     window.HBVStudioForecastView.renderForecastResultLoading("正在读取连续状态预报结果。");
   }
-  setForecastResultButtons({ path: targetPath });
+  setForecastResultButtons(loadStart.buttonRun);
   try {
-    const payload = await apiGet(`/api/run?path=${encodeURIComponent(targetPath)}`);
-    if (!forecastResultRequestGuard.isActive(requestToken) || !samePath(targetPath, state.forecastResultRunPath)) return;
-    state.forecastResultData = payload.data;
-    state.forecastResultLoadingPath = "";
-    renderForecastResultDetail(payload.data);
+    const payload = await apiGet(`/api/run?path=${encodeURIComponent(loadStart.targetPath)}`);
+    if (!forecastResultRequestGuard.isActive(requestToken) || !samePath(loadStart.targetPath, state.forecastResultRunPath)) return;
+    const loadSuccess = window.HBVStudioForecastView.forecastResultLoadSuccessState(payload.data);
+    Object.assign(state, loadSuccess.statePatch);
+    renderForecastResultDetail(loadSuccess.detailData);
   } catch (err) {
     if (!forecastResultRequestGuard.isActive(requestToken)) return;
-    state.forecastResultData = null;
-    state.forecastResultLoadingPath = "";
+    const loadError = window.HBVStudioForecastView.forecastResultLoadErrorState(err);
+    Object.assign(state, loadError.statePatch);
     if (window.HBVStudioForecastView) {
       window.HBVStudioForecastView.renderForecastResultEmpty(`预报结果读取失败：${err.message}`);
     }
-    setForecastResultButtons(null);
+    setForecastResultButtons(loadError.buttonRun);
   }
 }
 

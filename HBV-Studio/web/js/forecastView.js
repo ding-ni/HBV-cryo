@@ -173,6 +173,48 @@
     };
   }
 
+  function forecastResultLoadStartState(path = "") {
+    const targetPath = String(path || "").trim();
+    if (!targetPath) {
+      return {
+        ok: false,
+        targetPath: "",
+        statePatch: null,
+        buttonRun: null,
+      };
+    }
+    return {
+      ok: true,
+      targetPath,
+      statePatch: {
+        forecastResultRunPath: targetPath,
+        forecastResultLoadingPath: targetPath,
+        lastForecastExportPath: "",
+      },
+      buttonRun: { path: targetPath },
+    };
+  }
+
+  function forecastResultLoadSuccessState(data = null) {
+    return {
+      statePatch: {
+        forecastResultData: data || null,
+        forecastResultLoadingPath: "",
+      },
+      detailData: data || null,
+    };
+  }
+
+  function forecastResultLoadErrorState() {
+    return {
+      statePatch: {
+        forecastResultData: null,
+        forecastResultLoadingPath: "",
+      },
+      buttonRun: null,
+    };
+  }
+
   function forecastInputPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     return {
@@ -1059,6 +1101,9 @@
     forecastResultDetailState,
     forecastResultExportPayload,
     forecastResultExportSuccess,
+    forecastResultLoadErrorState,
+    forecastResultLoadStartState,
+    forecastResultLoadSuccessState,
     forecastResultPanelState,
     forecastRestartPreflight,
     forecastRestartPayload,

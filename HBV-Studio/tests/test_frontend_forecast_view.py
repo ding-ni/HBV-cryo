@@ -141,7 +141,16 @@ class FrontendForecastViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/forecastView.js", "utf8"), context);
 
             const view = context.window.HBVStudioForecastView;
-            for (const name of ["forecastResultRuns", "forecastSelectedResultRun", "forecastResultDetailState", "forecastResultPanelState", "renderForecastResultOptions"]) {
+            for (const name of [
+              "forecastResultRuns",
+              "forecastSelectedResultRun",
+              "forecastResultDetailState",
+              "forecastResultLoadErrorState",
+              "forecastResultLoadStartState",
+              "forecastResultLoadSuccessState",
+              "forecastResultPanelState",
+              "renderForecastResultOptions",
+            ]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing forecast result export: ${name}`);
             }
 
@@ -213,6 +222,35 @@ class FrontendForecastViewTests(unittest.TestCase):
             const emptyNoRunState = view.forecastResultDetailState(null, null);
             if (emptyNoRunState.renderMode !== "empty" || emptyNoRunState.buttonRun !== null || emptyNoRunState.detailData !== null) {
               throw new Error(`empty no-run detail state wrong: ${JSON.stringify(emptyNoRunState)}`);
+            }
+
+            const emptyLoadStart = view.forecastResultLoadStartState(" ");
+            if (emptyLoadStart.ok || emptyLoadStart.targetPath !== "" || emptyLoadStart.statePatch !== null) {
+              throw new Error(`empty load start state wrong: ${JSON.stringify(emptyLoadStart)}`);
+            }
+
+            const loadStart = view.forecastResultLoadStartState(" C:/runs/forecast-new ");
+            if (!loadStart.ok || loadStart.targetPath !== "C:/runs/forecast-new" || loadStart.buttonRun?.path !== "C:/runs/forecast-new") {
+              throw new Error(`load start state wrong: ${JSON.stringify(loadStart)}`);
+            }
+            if (loadStart.statePatch.forecastResultRunPath !== "C:/runs/forecast-new" ||
+                loadStart.statePatch.forecastResultLoadingPath !== "C:/runs/forecast-new" ||
+                loadStart.statePatch.lastForecastExportPath !== "") {
+              throw new Error(`load start patch wrong: ${JSON.stringify(loadStart.statePatch)}`);
+            }
+
+            const loadSuccess = view.forecastResultLoadSuccessState({ run: { path: "C:/runs/forecast-new" } });
+            if (loadSuccess.statePatch.forecastResultData?.run?.path !== "C:/runs/forecast-new" ||
+                loadSuccess.statePatch.forecastResultLoadingPath !== "" ||
+                loadSuccess.detailData?.run?.path !== "C:/runs/forecast-new") {
+              throw new Error(`load success state wrong: ${JSON.stringify(loadSuccess)}`);
+            }
+
+            const loadError = view.forecastResultLoadErrorState(new Error("failed"));
+            if (loadError.statePatch.forecastResultData !== null ||
+                loadError.statePatch.forecastResultLoadingPath !== "" ||
+                loadError.buttonRun !== null) {
+              throw new Error(`load error state wrong: ${JSON.stringify(loadError)}`);
             }
 
             const rendered = view.renderForecastResultOptions([
