@@ -49,7 +49,10 @@ from services.data_prep import (
     verify_data_prep_step_output as build_verify_data_prep_step_output,
     verify_data_prep_task_output as build_verify_data_prep_task_output,
 )
-from services.boundary import BoundaryPreviewContext, boundary_preview as build_boundary_preview
+from services.boundary import BoundaryInflowInspectContext, BoundaryPreviewContext
+from services.boundary import boundary_info_messages as build_boundary_info_messages
+from services.boundary import boundary_preview as build_boundary_preview
+from services.boundary import inspect_boundary_inflow_csv as build_inspect_boundary_inflow_csv
 from services.calibration import CalibrationStartContext
 from services.calibration import calibration_start_plan as build_calibration_start_plan
 from services.dashboard import DashboardContext, dashboard_payload as build_dashboard_payload
@@ -550,9 +553,6 @@ GRID_ALIGNMENT_CACHE: dict[str, dict[str, Any]] = {}
 GRID_ALIGNMENT_SAMPLE_LIMIT = 12
 PATH_ENTRY_COUNT_CACHE_LOCK = threading.Lock()
 PATH_ENTRY_COUNT_CACHE: dict[str, dict[str, Any]] = {}
-BOUNDARY_CSV_CACHE_LOCK = threading.Lock()
-BOUNDARY_CSV_CACHE: dict[str, dict[str, Any]] = {}
-MAX_BOUNDARY_CSV_CACHE = 6
 MAX_BROWSER_FILE_ITEMS = 300
 
 
@@ -1520,80 +1520,12 @@ def _file_signature(path: Path) -> tuple[int, int]:
     )
 
 
-def _trim_boundary_csv_cache_locked() -> None:
-    while len(BOUNDARY_CSV_CACHE) > MAX_BOUNDARY_CSV_CACHE:
-        oldest_key = min(
-            BOUNDARY_CSV_CACHE.items(),
-            key=lambda item: float(item[1].get("used_at", 0.0)),
-        )[0]
-        BOUNDARY_CSV_CACHE.pop(oldest_key, None)
-
-
-def _inspect_boundary_inflow_csv_base(
-    csv_path_raw: str,
-    date_field: str = "date",
-    flow_field: str = "inflow_m3s",
-) -> dict[str, Any]:
-    path = resolve_any_path(csv_path_raw, must_exist=True)
-    cache_key = f"{path.resolve(strict=False)}|{date_field}|{flow_field}"
-    signature = _file_signature(path)
-    with BOUNDARY_CSV_CACHE_LOCK:
-        cached = BOUNDARY_CSV_CACHE.get(cache_key)
-        if cached and cached.get("signature") == signature:
-            cached["used_at"] = time.time()
-            return copy.deepcopy(cached["data"])
-
-    frame = pd.read_csv(path)
-    if date_field not in frame.columns:
-        raise ValueError(f"找不到时间字段 '{date_field}'，可用列：{list(frame.columns)}")
-    if flow_field not in frame.columns:
-        raise ValueError(f"找不到流量字段 '{flow_field}'，可用列：{list(frame.columns)}")
-
-    frame = frame.copy()
-    frame[date_field] = pd.to_datetime(frame[date_field], errors="coerce")
-    frame[flow_field] = pd.to_numeric(frame[flow_field], errors="coerce")
-    valid = frame.dropna(subset=[date_field, flow_field]).copy()
-    if valid.empty:
-        raise ValueError("上游边界入流文件中没有可识别的有效时间和流量记录。")
-
-    valid.sort_values(date_field, inplace=True)
-    duplicate_mask = valid.duplicated(subset=[date_field], keep=False)
-    duplicate_timestamps = valid.loc[duplicate_mask, date_field].drop_duplicates().sort_values().tolist()
-    actual_index = pd.DatetimeIndex(valid[date_field].drop_duplicates().sort_values().tolist())
-    step_hours = detect_series_step_hours(pd.Series(actual_index.tolist()))
-    flow_values = valid[flow_field].astype(float)
-
-    preview_rows = []
-    for _, row in valid.head(10).iterrows():
-        preview_rows.append({date_field: str(row[date_field]), flow_field: float(row[flow_field])})
-
-    base = {
-        "columns": list(frame.columns),
-        "total_rows": int(len(frame)),
-        "valid_rows": int(len(valid)),
-        "invalid_rows": int(len(frame) - len(valid)),
-        "duplicate_timestamps": [pd.Timestamp(item) for item in duplicate_timestamps],
-        "duplicate_count": int(len(duplicate_timestamps)),
-        "time_step_hours": step_hours,
-        "negative_count": int((flow_values < 0).sum()),
-        "zero_count": int((flow_values == 0).sum()),
-        "date_range": {
-            "start": str(valid[date_field].min()),
-            "end": str(valid[date_field].max()),
-        },
-        "flow_stats": {
-            "min": round(float(flow_values.min()), 4),
-            "max": round(float(flow_values.max()), 4),
-            "mean": round(float(flow_values.mean()), 4),
-        },
-        "preview": preview_rows,
-        "suggested_calibration_mode": PROFILE_HOURLY if step_hours is not None and step_hours <= 1.5 else PROFILE_DAILY,
-        "_actual_index": actual_index,
-    }
-    with BOUNDARY_CSV_CACHE_LOCK:
-        BOUNDARY_CSV_CACHE[cache_key] = {"signature": signature, "data": copy.deepcopy(base), "used_at": time.time()}
-        _trim_boundary_csv_cache_locked()
-    return base
+def _boundary_inflow_inspect_context() -> BoundaryInflowInspectContext:
+    return BoundaryInflowInspectContext(
+        resolve_path=resolve_any_path,
+        profile_daily=PROFILE_DAILY,
+        profile_hourly=PROFILE_HOURLY,
+    )
 
 
 def inspect_boundary_inflow_csv(
@@ -1604,29 +1536,14 @@ def inspect_boundary_inflow_csv(
     expected_index: pd.DatetimeIndex | None = None,
     expected_step_hours: float | None = None,
 ) -> dict[str, Any]:
-    base = _inspect_boundary_inflow_csv_base(csv_path_raw, date_field=date_field, flow_field=flow_field)
-    actual_index = pd.DatetimeIndex(base.pop("_actual_index"))
-    expected_steps = None
-    missing_steps: list[pd.Timestamp] = []
-    out_of_range_steps: list[pd.Timestamp] = []
-    coverage_ratio = None
-    if expected_index is not None:
-        expected_steps = len(expected_index)
-        expected_list = list(expected_index)
-        expected_set = set(expected_list)
-        actual_set = set(actual_index.tolist())
-        missing_steps = [ts for ts in expected_list if ts not in actual_set]
-        out_of_range_steps = [ts for ts in actual_index.tolist() if ts not in expected_set]
-        coverage_ratio = (len(expected_set & actual_set) / len(expected_set)) if expected_set else None
-
-    return {
-        **base,
-        "expected_time_step_hours": expected_step_hours,
-        "expected_steps": expected_steps,
-        "missing_steps": missing_steps,
-        "out_of_range_steps": out_of_range_steps,
-        "coverage_ratio": coverage_ratio,
-    }
+    return build_inspect_boundary_inflow_csv(
+        csv_path_raw,
+        _boundary_inflow_inspect_context(),
+        date_field=date_field,
+        flow_field=flow_field,
+        expected_index=expected_index,
+        expected_step_hours=expected_step_hours,
+    )
 
 
 def boundary_info_messages(
@@ -1634,42 +1551,7 @@ def boundary_info_messages(
     step_hours: float,
     gap_fill: str = "zero",
 ) -> tuple[list[str], list[str]]:
-    issues: list[str] = []
-    warnings: list[str] = []
-    gap_mode = str(gap_fill or "zero").strip().lower()
-    detected_step = boundary_info.get("time_step_hours")
-    if detected_step is not None and normalize_time_step_hours(detected_step) != step_hours:
-        issues.append(
-            f"上游边界入流时间步识别为 {int(detected_step)} 小时，与当前项目时间步长 {int(step_hours)} 小时不一致。"
-        )
-    if boundary_info.get("duplicate_count", 0) > 0:
-        sample = "、".join(
-            format_timestamp_for_display(ts, step_hours)
-            for ts in boundary_info["duplicate_timestamps"][:3]
-        )
-        issues.append(f"上游边界入流存在重复时间戳 {boundary_info['duplicate_count']} 个，例如：{sample}")
-    if boundary_info.get("negative_count", 0) > 0:
-        issues.append(f"上游边界入流存在 {boundary_info['negative_count']} 条负流量记录。")
-    missing_steps = list(boundary_info.get("missing_steps", []))
-    if missing_steps:
-        sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in missing_steps[:3])
-        if gap_mode == "interpolate":
-            warnings.append(f"上游边界入流缺少 {len(missing_steps)} 个时间步，例如：{sample}；运行时会按线性插值补齐。")
-        elif gap_mode in {"", "zero", "0"}:
-            warnings.append(f"上游边界入流缺少 {len(missing_steps)} 个时间步，例如：{sample}；运行时会按 0 填补。")
-        else:
-            issues.append(f"上游边界入流时间覆盖不完整，缺少 {len(missing_steps)} 个时间步，例如：{sample}")
-    out_of_range_steps = list(boundary_info.get("out_of_range_steps", []))
-    if out_of_range_steps:
-        sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in out_of_range_steps[:3])
-        warnings.append(f"上游边界入流有 {len(out_of_range_steps)} 个时间步落在当前配置时间范围之外，例如：{sample}")
-    if boundary_info.get("invalid_rows", 0) > 0:
-        warnings.append(f"上游边界入流中有 {boundary_info['invalid_rows']} 行无法解析时间或流量，已在读取时忽略。")
-    zero_count = int(boundary_info.get("zero_count", 0))
-    valid_rows = max(1, int(boundary_info.get("valid_rows", 0)))
-    if zero_count / valid_rows >= 0.8:
-        warnings.append("上游边界入流中零值比例超过 80%，请确认缺测值没有被误当成 0。")
-    return issues, warnings
+    return build_boundary_info_messages(boundary_info, step_hours, gap_fill)
 
 
 def fill_bbox_from_shp(shp_path: str) -> dict[str, float] | None:
