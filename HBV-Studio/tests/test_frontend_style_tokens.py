@@ -20,6 +20,13 @@ def root_tokens(source: str) -> dict[str, str]:
     )
 
 
+def rule_body(source: str, selector: str) -> str:
+    match = re.search(rf"{re.escape(selector)}\s*\{{(?P<body>.*?)\n\}}", source, re.S)
+    if not match:
+        raise AssertionError(f"Missing CSS rule for {selector}")
+    return match.group("body")
+
+
 class FrontendStyleTokenTests(unittest.TestCase):
     def test_scientific_dashboard_tokens_are_cold_neutral(self) -> None:
         styles = STYLES_PATH.read_text(encoding="utf-8")
@@ -41,6 +48,8 @@ class FrontendStyleTokenTests(unittest.TestCase):
             "--radius-lg": "8px",
             "--radius-md": "7px",
             "--radius-sm": "6px",
+            "--control-height": "32px",
+            "--control-height-primary": "36px",
         }
 
         for name, value in expected.items():
@@ -85,6 +94,39 @@ class FrontendStyleTokenTests(unittest.TestCase):
                 oversized.append(match.group(0))
 
         self.assertEqual(oversized, [])
+
+    def test_shared_controls_use_compact_height_tokens(self) -> None:
+        styles = STYLES_PATH.read_text(encoding="utf-8")
+        tokens = root_tokens(styles)
+
+        self.assertEqual(tokens.get("--control-height"), "32px")
+        self.assertEqual(tokens.get("--control-height-primary"), "36px")
+
+        expected = {
+            ".primary-button": [
+                "min-height: var(--control-height-primary);",
+                "padding: 7px 18px;",
+                "font-size: 14px;",
+            ],
+            ".ghost-button": [
+                "min-height: var(--control-height);",
+                "padding: 6px 14px;",
+                "font-size: 13px;",
+            ],
+            ".close-button": [
+                "min-height: var(--control-height);",
+                "padding: 5px 12px;",
+            ],
+            ".phase-chip": [
+                "min-height: var(--control-height);",
+                "padding: 5px 11px;",
+            ],
+        }
+
+        for selector, declarations in expected.items():
+            body = rule_body(styles, selector)
+            for declaration in declarations:
+                self.assertIn(declaration, body, selector)
 
 
 if __name__ == "__main__":
