@@ -113,6 +113,8 @@ const frontendModuleContracts = [
       "renderEventWindowSummary",
       "renderEventForcingCoverage",
       "renderEventObservationCoverage",
+      "renderWizardEventSummary",
+      "renderInputTimeSummary",
     ],
   },
   {
@@ -2139,41 +2141,19 @@ function clearWizardEventSummary() {
 function renderWizardEventSummary(eventInfo = null, observationCoverage = null) {
   const host = $("#wz-event-file-summary");
   if (!host) return;
-  if (!eventInfo || !window.HBVStudioEventMode?.renderEventWindowSummary) {
+  if (!eventInfo || !window.HBVStudioEventMode?.renderWizardEventSummary) {
     host.innerHTML = "";
     return;
   }
-  let html = window.HBVStudioEventMode.renderEventWindowSummary(eventInfo, {
+  host.innerHTML = window.HBVStudioEventMode.renderWizardEventSummary(eventInfo, observationCoverage, {
     escapeHtml,
     statusClass: focusStatusClass,
     shortPath,
   });
-  if (observationCoverage && window.HBVStudioEventMode?.renderEventObservationCoverage) {
-    html += window.HBVStudioEventMode.renderEventObservationCoverage(observationCoverage, {
-      escapeHtml,
-      statusClass: focusStatusClass,
-    });
-  }
-  host.innerHTML = html;
 }
 
 function renderInputTimeSummary(summary = {}) {
-  if (!summary || !summary.headline) return "";
-  const status = String(summary.status || "ok").toLowerCase();
-  const cls = status === "fail" ? "status-fail" : status === "warn" ? "status-warn" : "status-ok";
-  const items = Array.isArray(summary.items) ? summary.items : [];
-  const itemHtml = items.length
-    ? `<div class="input-time-summary-items">${items.map(item => `
-      <span><strong>${escapeHtml(item.label || "")}</strong>${escapeHtml(item.value || "—")}</span>
-    `).join("")}</div>`
-    : "";
-  return `
-    <div class="hint-box input-time-summary ${cls}" style="margin-bottom:12px">
-      <strong>${escapeHtml(summary.headline)}</strong>
-      ${summary.detail ? `<div class="input-time-summary-detail">${escapeHtml(summary.detail)}</div>` : ""}
-      ${itemHtml}
-    </div>
-  `;
+  return window.HBVStudioEventMode?.renderInputTimeSummary(summary, { escapeHtml }) || "";
 }
 
 function clearBoundaryPreview() {

@@ -92,6 +92,120 @@ class FrontendEventModeTests(unittest.TestCase):
             ["node", "-e", script],
             cwd=STUDIO_DIR,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_wizard_event_and_input_time_summaries_render_safely(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/eventMode.js", "utf8"), context);
+
+            const eventMode = context.window.HBVStudioEventMode;
+            for (const name of ["renderWizardEventSummary", "renderInputTimeSummary"]) {
+              if (typeof eventMode?.[name] !== "function") throw new Error(`missing event export: ${name}`);
+            }
+            const helpers = {
+              escapeHtml(value) {
+                return String(value ?? "").replace(/[&<>"']/g, ch => ({
+                  "&": "&amp;",
+                  "<": "&lt;",
+                  ">": "&gt;",
+                  "\"": "&quot;",
+                  "'": "&#39;",
+                }[ch]));
+              },
+              statusClass(status) {
+                return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
+              },
+              shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
+            };
+
+            const html = eventMode.renderWizardEventSummary({
+              event_count: 2,
+              valid_event_count: 1,
+              source_file: "C:/events/floods.csv",
+              events: [
+                { event_id: "E1", name: "洪水<一>", valid: true, score_start: "2020-07-01", score_end: "2020-07-02" },
+                { event_id: "E2", name: "洪水二", valid: false, score_start: "2020-08-01", score_end: "2020-08-02" },
+              ],
+              warnings: ["第二场缺少退水段"],
+            }, {
+              enabled: true,
+              status: "fail",
+              event_count: 2,
+              complete_event_count: 1,
+              events: [
+                {
+                  event_id: "E1",
+                  name: "洪水<一>",
+                  status: "ok",
+                  expected_steps: 24,
+                  covered_steps: 24,
+                  score_start: "2020-07-01",
+                  score_end: "2020-07-02",
+                },
+                {
+                  event_id: "E2",
+                  name: "洪水二",
+                  status: "fail",
+                  expected_steps: 24,
+                  covered_steps: 12,
+                  missing_steps: 12,
+                  missing_preview: ["2020-08-02"],
+                  score_start: "2020-08-01",
+                  score_end: "2020-08-02",
+                },
+              ],
+            }, helpers);
+            if (!html.includes("洪水事件表") || !html.includes("事件流量覆盖")) {
+              throw new Error(`event and observation summaries should be combined: ${html}`);
+            }
+            if (!html.includes("洪水&lt;一&gt;") || html.includes("洪水<一>")) {
+              throw new Error(`event names should be escaped: ${html}`);
+            }
+            if (!html.includes("1/2 场完整") || !html.includes("缺 12")) {
+              throw new Error(`observation coverage details missing: ${html}`);
+            }
+
+            const inputHtml = eventMode.renderInputTimeSummary({
+              status: "warn",
+              headline: "资料时段需复核<A>",
+              detail: "事件之间允许间断&连续模式不同",
+              items: [
+                { label: "事件数", value: "2" },
+                { label: "窗口", value: "2020-07-01 ~ 2020-08-02" },
+              ],
+            }, helpers);
+            if (!inputHtml.includes("input-time-summary status-warn") || !inputHtml.includes("资料时段需复核&lt;A&gt;")) {
+              throw new Error(`input time summary status or headline wrong: ${inputHtml}`);
+            }
+            if (!inputHtml.includes("事件之间允许间断&amp;连续模式不同") || !inputHtml.includes("<strong>事件数</strong>2")) {
+              throw new Error(`input time summary details missing: ${inputHtml}`);
+            }
+            if (eventMode.renderInputTimeSummary({}, helpers) !== "") {
+              throw new Error("empty input time summary should render empty string");
+            }
+            if (eventMode.renderWizardEventSummary(null, null, helpers) !== "") {
+              throw new Error("empty wizard event summary should render empty string");
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=STUDIO_DIR,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=20,
         )
