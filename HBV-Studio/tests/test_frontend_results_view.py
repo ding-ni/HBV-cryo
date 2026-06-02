@@ -162,6 +162,60 @@ class FrontendResultsViewTests(unittest.TestCase):
               throw new Error(`unexpected empty export panel state: ${JSON.stringify(emptyExport)}`);
             }
 
+            const chartPayloads = results.resultChartPayloads({
+              metadata: { boundary: { enabled: true } },
+              series: {
+                dates: ["2020-01-01", "2020-01-02"],
+                q_obs: [10, 11],
+                q_sim: [9, 12],
+                q_rain: [4, 5],
+                q_snow: [3, 4],
+                q_ice: [2, 3],
+                q_boundary_inflow: [1, 1.5],
+                residuals: [-1, 1],
+              },
+            }, {
+              boundaryEnabled: true,
+              compareLabel: "参数集<A>",
+              compareSeries: {
+                dates: ["2020-01-01", "2020-01-02"],
+                q_sim: [8, 10],
+                residuals: [-2, -1],
+              },
+            }, {
+              colors: {
+                qObs: "#obs",
+                qSim: "#sim",
+                qRain: "#rain",
+                qSnow: "#snow",
+                qIce: "#ice",
+                boundary: "#boundary",
+                residual: "#residual",
+              },
+            });
+            const hydroNames = chartPayloads.hydrograph.traces.map(trace => trace.name).join("|");
+            if (hydroNames !== "实测流量|模拟流量|对比：参数集<A>|边界入流") {
+              throw new Error(`unexpected hydrograph traces: ${hydroNames}`);
+            }
+            if (chartPayloads.hydrograph.traces[0].line.color !== "#obs" || chartPayloads.hydrograph.traces[1].line.width !== 1.8) {
+              throw new Error(`unexpected hydrograph trace styles: ${JSON.stringify(chartPayloads.hydrograph.traces)}`);
+            }
+            const componentNames = chartPayloads.component.traces.map(trace => trace.name).join("|");
+            if (componentNames !== "降雨产流|融雪流量|裸冰融化流量") {
+              throw new Error(`unexpected component traces: ${componentNames}`);
+            }
+            if (chartPayloads.component.traces[2].line.color !== "#ice" || chartPayloads.component.layout.yaxis.title !== "流量 m³/s") {
+              throw new Error(`unexpected component chart payload: ${JSON.stringify(chartPayloads.component)}`);
+            }
+            const residualNames = chartPayloads.residual.traces.map(trace => trace.name).join("|");
+            if (residualNames !== "当前残差|对比残差" || chartPayloads.residual.layout.yaxis.title !== "残差 m³/s") {
+              throw new Error(`unexpected residual chart payload: ${JSON.stringify(chartPayloads.residual)}`);
+            }
+            const noBoundaryPayloads = results.resultChartPayloads({ series: { dates: ["2020-01-01"] } }, { boundaryEnabled: false });
+            if (noBoundaryPayloads.hydrograph.traces.some(trace => trace.name === "边界入流")) {
+              throw new Error("boundary trace should not render when disabled");
+            }
+
             const cards = results.renderRunCards([
               {
                 path: "C:/runs/A",

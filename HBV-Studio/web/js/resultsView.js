@@ -117,6 +117,16 @@
     return Number.isFinite(num) ? `${num.toFixed(digits)}${suffix}` : "—";
   }
 
+  const DEFAULT_RESULT_CHART_COLORS = Object.freeze({
+    qObs: "#1e293b",
+    qSim: "#0e7490",
+    qRain: "#2563eb",
+    qSnow: "#38bdf8",
+    qIce: "#06b6d4",
+    boundary: "#64748b",
+    residual: "#b91c1c",
+  });
+
   function defaultHydrologySummaryValue(summary = {}, key, fallback = "—") {
     const value = summary?.[key];
     return value === undefined || value === null || value === "" ? fallback : value;
@@ -382,6 +392,69 @@
     `).join("");
   }
 
+  function resultChartPayloads(data = {}, options = {}, helpers = {}) {
+    const palette = helpers.colors || DEFAULT_RESULT_CHART_COLORS;
+    const series = data?.series || {};
+    const dates = Array.isArray(series.dates) ? series.dates : [];
+    const compare = options.compareSeries || null;
+    const compareLabel = String(options.compareLabel || "").trim();
+    const boundaryEnabled = Boolean(options.boundaryEnabled);
+    const baseLayout = {
+      margin: { t: 10, r: 10, b: 40, l: 55 },
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      xaxis: { title: "日期" },
+      yaxis: { title: "流量 m\u00B3/s" },
+      legend: { orientation: "h", y: 1.12 },
+    };
+    const hydrographTraces = [
+      { x: dates, y: series.q_obs || [], name: "实测流量", mode: "lines", line: { color: palette.qObs, width: 1.6 } },
+      { x: dates, y: series.q_sim || [], name: "模拟流量", mode: "lines", line: { color: palette.qSim, width: 1.8 } },
+    ];
+    if (compare?.q_sim?.length) {
+      hydrographTraces.push({
+        x: compare.dates || dates,
+        y: compare.q_sim,
+        name: compareLabel ? `对比：${compareLabel}` : "对比模拟",
+        mode: "lines",
+        line: { color: "#5b4a3a", width: 1.6, dash: "dash" },
+      });
+    }
+    if (boundaryEnabled) {
+      hydrographTraces.push({ x: dates, y: series.q_boundary_inflow || [], name: "边界入流", mode: "lines", line: { color: palette.boundary, width: 1.2 } });
+    }
+    const residualTraces = [
+      { x: dates, y: series.residuals || [], name: "当前残差", mode: "lines", line: { color: palette.residual } },
+    ];
+    if (compare?.residuals?.length) {
+      residualTraces.push({
+        x: compare.dates || dates,
+        y: compare.residuals,
+        name: "对比残差",
+        mode: "lines",
+        line: { color: "#6f6255", width: 1.4, dash: "dash" },
+      });
+    }
+    return {
+      hydrograph: {
+        traces: hydrographTraces,
+        layout: baseLayout,
+      },
+      component: {
+        traces: [
+          { x: dates, y: series.q_rain || [], name: "降雨产流", mode: "lines", line: { color: palette.qRain } },
+          { x: dates, y: series.q_snow || [], name: "融雪流量", mode: "lines", line: { color: palette.qSnow } },
+          { x: dates, y: series.q_ice || [], name: "裸冰融化流量", mode: "lines", line: { color: palette.qIce } },
+        ],
+        layout: { ...baseLayout, yaxis: { title: "流量 m\u00B3/s" } },
+      },
+      residual: {
+        traces: residualTraces,
+        layout: { ...baseLayout, yaxis: { title: "残差 m\u00B3/s" } },
+      },
+    };
+  }
+
   function runExportPanelState(data = {}, options = {}, helpers = {}) {
     const formatInputTime = helpers.formatInputTime || (value => String(value || "").trim());
     const stepHours = runStepHours(data);
@@ -425,6 +498,7 @@
     renderRunDetailMetadata,
     renderRunEngineeringSummary,
     renderRunExportFields,
+    resultChartPayloads,
     resultsFilterHint,
     runExportPanelState,
     runStepHours,

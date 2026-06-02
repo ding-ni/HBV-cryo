@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultsFilterHint", "runExportPanelState", "runStepHours"],
+    exports: ["resultMetricItems", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterHint", "runExportPanelState", "runStepHours"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5096,56 +5096,16 @@ function renderCharts(data) {
       if (plot && typeof plot.catch === "function") plot.catch(() => {});
     } catch {}
   };
-  const dates = data.series?.dates || [];
-  const plotLayout = {
-    margin: { t: 10, r: 10, b: 40, l: 55 },
-    paper_bgcolor: "transparent", plot_bgcolor: "transparent",
-    xaxis: { title: "日期" }, yaxis: { title: "流量 m\u00B3/s" },
-    legend: { orientation: "h", y: 1.12 },
-  };
   const plotCfg = { responsive: true };
-  const qIceLabel = "裸冰融化流量";
-  const compare = state.compareSeries;
-  const boundaryEnabled = boundaryEnabledFromMeta(data?.metadata || {});
-  const hydrographTraces = [
-    { x: dates, y: data.series?.q_obs || [], name: "实测流量", mode: "lines", line: { color: colors.qObs, width: 1.6 } },
-    { x: dates, y: data.series?.q_sim || [], name: "模拟流量", mode: "lines", line: { color: colors.qSim, width: 1.8 } },
-  ];
-  if (compare?.q_sim?.length) {
-    hydrographTraces.push({
-      x: compare.dates || dates,
-      y: compare.q_sim,
-      name: state.compareLabel ? `对比：${state.compareLabel}` : "对比模拟",
-      mode: "lines",
-      line: { color: "#5b4a3a", width: 1.6, dash: "dash" },
-    });
-  }
-  if (boundaryEnabled) {
-    hydrographTraces.push({ x: dates, y: data.series?.q_boundary_inflow || [], name: "边界入流", mode: "lines", line: { color: colors.boundary, width: 1.2 } });
-  }
-
-  drawPlot("hydrograph-chart", hydrographTraces, plotLayout, plotCfg);
+  const chartPayloads = window.HBVStudioResultsView.resultChartPayloads(data, {
+    compareSeries: state.compareSeries,
+    compareLabel: state.compareLabel,
+    boundaryEnabled: boundaryEnabledFromMeta(data?.metadata || {}),
+  }, { colors });
+  drawPlot("hydrograph-chart", chartPayloads.hydrograph.traces, chartPayloads.hydrograph.layout, plotCfg);
   renderFloodEventChart(data?.metadata || {}, plotCfg);
-
-  drawPlot("component-chart", [
-    { x: dates, y: data.series?.q_rain || [], name: "降雨产流", mode: "lines", line: { color: colors.qRain } },
-    { x: dates, y: data.series?.q_snow || [], name: "融雪流量", mode: "lines", line: { color: colors.qSnow } },
-    { x: dates, y: data.series?.q_ice || [],  name: qIceLabel, mode: "lines", line: { color: colors.qIce } },
-  ], { ...plotLayout, yaxis: { title: "流量 m\u00B3/s" } }, plotCfg);
-
-  const residualTraces = [
-    { x: dates, y: data.series?.residuals || [], name: "当前残差", mode: "lines", line: { color: colors.residual } },
-  ];
-  if (compare?.residuals?.length) {
-    residualTraces.push({
-      x: compare.dates || dates,
-      y: compare.residuals,
-      name: "对比残差",
-      mode: "lines",
-      line: { color: "#6f6255", width: 1.4, dash: "dash" },
-    });
-  }
-  drawPlot("residual-chart", residualTraces, { ...plotLayout, yaxis: { title: "残差 m\u00B3/s" } }, plotCfg);
+  drawPlot("component-chart", chartPayloads.component.traces, chartPayloads.component.layout, plotCfg);
+  drawPlot("residual-chart", chartPayloads.residual.traces, chartPayloads.residual.layout, plotCfg);
 }
 
 function renderParamSliders(data) {
