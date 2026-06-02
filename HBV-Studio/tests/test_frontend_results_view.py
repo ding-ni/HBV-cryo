@@ -318,6 +318,12 @@ class FrontendResultsViewTests(unittest.TestCase):
                 clearComparisonView.toastText !== "已清除参数集对比。") {
               throw new Error(`clear comparison view state wrong: ${JSON.stringify(clearComparisonView)}`);
             }
+            const clearComparisonDom = Object.fromEntries(clearComparisonView.domUpdates.map(update => [update.selector, update]));
+            if (clearComparisonDom["#manual-compare-summary"].visible !== false ||
+                clearComparisonDom["#manual-compare-summary"].text !== "" ||
+                clearComparisonDom["#manual-compare-summary"].className !== "hint-box") {
+              throw new Error(`clear comparison DOM updates wrong: ${JSON.stringify(clearComparisonDom)}`);
+            }
             const silentClearComparisonView = results.runComparisonClearViewState({ metadata: {} }, { silent: true });
             if (silentClearComparisonView.shouldToast || !silentClearComparisonView.shouldRestoreRun ||
                 Object.keys(silentClearComparisonView.calibrationMetrics).length ||
@@ -430,6 +436,12 @@ class FrontendResultsViewTests(unittest.TestCase):
                 !comparisonError.shouldRestoreRun ||
                 comparisonError.toastText !== "接口超时") {
               throw new Error(`comparison error state wrong: ${JSON.stringify(comparisonError)}`);
+            }
+            const comparisonErrorDom = Object.fromEntries(comparisonError.domUpdates.map(update => [update.selector, update]));
+            if (comparisonErrorDom["#manual-compare-summary"].visible !== true ||
+                comparisonErrorDom["#manual-compare-summary"].className !== "custom-error" ||
+                comparisonErrorDom["#manual-compare-summary"].text !== "custom:接口超时") {
+              throw new Error(`comparison error DOM updates wrong: ${JSON.stringify(comparisonErrorDom)}`);
             }
             const defaultComparisonError = results.runComparisonErrorState("普通错误");
             if (defaultComparisonError.summary.className !== "hint-box status-fail" ||

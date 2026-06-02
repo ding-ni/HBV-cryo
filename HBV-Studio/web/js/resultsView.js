@@ -200,6 +200,9 @@
         text: "",
         className: "hint-box",
       },
+      domUpdates: [
+        { selector: "#manual-compare-summary", visible: false, text: "", className: "hint-box" },
+      ],
       shouldRestoreRun: Boolean(runData),
       chartData: runData || null,
       calibrationMetrics: metrics.calibration || {},
@@ -390,9 +393,13 @@
       className: "hint-box status-fail",
       text: `参数集对比失败：${err?.message || String(err || "未知错误")}`,
     }));
+    const summary = compareErrorView(error);
     return {
       statePatch: clearRunComparisonState().statePatch,
-      summary: compareErrorView(error),
+      summary,
+      domUpdates: summary?.visible
+        ? [{ selector: "#manual-compare-summary", visible: true, text: summary.text || "", className: summary.className || "hint-box status-fail" }]
+        : [],
       shouldRestoreRun: true,
       toastText: message,
     };

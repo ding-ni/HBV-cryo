@@ -1434,12 +1434,7 @@ function clearManualPresetComparison({ silent = false } = {}) {
   compareRequestGuard.cancel();
   const clearState = window.HBVStudioResultsView.runComparisonClearViewState(state._runData, { silent });
   Object.assign(state, clearState.statePatch);
-  const host = $("#manual-compare-summary");
-  if (host) {
-    host.style.display = clearState.summary.visible ? "" : "none";
-    host.textContent = clearState.summary.text;
-    host.className = clearState.summary.className;
-  }
+  applyDomUpdates(clearState.domUpdates);
   if (clearState.shouldRestoreRun) {
     renderCharts(clearState.chartData);
     updateMetricsStrip(clearState.calibrationMetrics, clearState.validationMetrics, clearState.metricMetadata);
@@ -5087,12 +5082,7 @@ async function compareSelectedManualPresetSimulation() {
       const val = meta.metrics?.validation || {};
       updateMetricsStrip(cal, val, meta);
     }
-    if (host && errorState.summary?.visible) {
-      const view = errorState.summary;
-      host.style.display = "";
-      host.className = view.className;
-      host.textContent = view.text;
-    }
+    applyDomUpdates(errorState.domUpdates);
     updateManualPresetControls();
     showToast(errorState.toastText, true);
   }
