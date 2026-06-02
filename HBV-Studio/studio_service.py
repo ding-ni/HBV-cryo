@@ -117,7 +117,7 @@ from services.runs import delete_run as build_delete_run
 from services.runs import discover_run_entries as build_discover_run_entries
 from services.runs import discover_runtime_roots as build_discover_runtime_roots
 from services.runs import export_run_excel as build_export_run_excel
-from services.runs import finalize_run_metadata_sections as build_finalize_run_metadata_sections
+from services.runs import finalize_run_metadata_normalization as build_finalize_run_metadata_normalization
 from services.runs import build_run_summary as build_run_summary_payload
 from services.runs import first_existing_path as build_first_existing_path
 from services.runs import has_custom_result_title as build_has_custom_result_title
@@ -142,7 +142,6 @@ from services.runs import rename_run as build_rename_run
 from services.runs import restore_forward_boundary_series as build_restore_forward_boundary_series
 from services.runs import restore_forward_observation_state as build_restore_forward_observation_state
 from services.runs import restore_forward_observed_series as build_restore_forward_observed_series
-from services.runs import resolve_run_objective_metadata as build_resolve_run_objective_metadata
 from services.runs import resolve_run_workspace_config as build_resolve_run_workspace_config
 from services.runs import resolve_source_run_reference as build_resolve_source_run_reference
 from services.runs import resolve_metadata_object_type as build_resolve_metadata_object_type
@@ -2728,8 +2727,6 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
     data_sources = sections.data_sources
     boundary_condition = sections.boundary_condition
     optimization = sections.optimization
-    manual_result = sections.manual_result
-    replay_context = sections.replay_context
     cache = sections.cache
     effective_objective_mode = sections.effective_objective_mode
 
@@ -2745,21 +2742,10 @@ def normalize_run_metadata(metadata: dict[str, Any], *, run_path: Path | None = 
         context=_run_config_sync_context(),
     )
 
-    effective_objective_mode = build_resolve_run_objective_metadata(
+    build_finalize_run_metadata_normalization(
         normalized,
-        optimization,
-        effective_objective_mode=effective_objective_mode,
+        sections,
         resolved_object_type=resolved_object_type,
-    )
-
-    build_finalize_run_metadata_sections(
-        normalized,
-        data_sources=data_sources,
-        boundary_condition=boundary_condition,
-        replay_context=replay_context,
-        manual_result=manual_result,
-        optimization=optimization,
-        cache=cache,
         effective_objective_mode=effective_objective_mode,
         resolve_source_run_reference=_resolve_source_run_reference,
     )

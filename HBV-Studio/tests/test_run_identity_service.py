@@ -24,6 +24,7 @@ from services.runs import (  # noqa: E402
     RunDiscoveryContext,
     RunMetadataCompatibilityContext,
     RunMetadataObjectTypeContext,
+    RunMetadataSections,
     RunReplayConfigContext,
     RunSourceReferenceContext,
     RunSummaryContext,
@@ -37,6 +38,7 @@ from services.runs import (  # noqa: E402
     discover_runtime_roots,
     display_run_title,
     finalize_run_metadata_sections,
+    finalize_run_metadata_normalization,
     first_existing_path,
     has_parameter_bounds,
     has_custom_result_title,
@@ -947,6 +949,41 @@ class RunIdentityServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(metadata, {})
+
+    def test_finalize_run_metadata_normalization_resolves_objective_and_writes_sections(self) -> None:
+        metadata = {"objective_profile": {"type": profile_runner.OBJECTIVE_MODE_MULTI}, "objective": {}}
+        sections = RunMetadataSections(
+            data_sources={"runtime_prec_source": "era5"},
+            boundary_condition={"enabled": True},
+            optimization={
+                "method": "de",
+                "selected_result_stage": "global",
+                "stage_stats": {"global": {"nfev": 7}},
+                "source_run_name": "best-run",
+            },
+            manual_result={},
+            replay_context={},
+            cache={"simulation": {"csv": "C:/run/simulation.csv"}},
+            effective_objective_mode="",
+        )
+
+        effective = finalize_run_metadata_normalization(
+            metadata,
+            sections,
+            resolved_object_type="interbasin_with_boundary",
+            effective_objective_mode="",
+            resolve_source_run_reference=lambda raw, name: f"C:/resolved/{name}",
+        )
+
+        self.assertEqual(effective, profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["project_object_type"], "interbasin_with_boundary")
+        self.assertEqual(metadata["objective"]["type"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["effective_objective_mode"], profile_runner.OBJECTIVE_MODE_MULTI)
+        self.assertEqual(metadata["optimization"]["source_run_path"], "C:/resolved/best-run")
+        self.assertEqual(metadata["optimization"]["total_evaluations"], 7)
+        self.assertEqual(metadata["data_sources"], {"runtime_prec_source": "era5"})
+        self.assertEqual(metadata["boundary_condition"], {"enabled": True})
+        self.assertEqual(metadata["data_cache"], {"simulation": {"csv": "C:/run/simulation.csv"}})
 
     def test_run_precip_dir_candidates_follow_source_specific_order(self) -> None:
         paths = {

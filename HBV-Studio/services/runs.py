@@ -1090,6 +1090,34 @@ def finalize_run_metadata_sections(
         metadata["data_cache"] = cache
 
 
+def finalize_run_metadata_normalization(
+    metadata: dict[str, Any],
+    sections: RunMetadataSections,
+    *,
+    resolved_object_type: str,
+    effective_objective_mode: str,
+    resolve_source_run_reference: Callable[[Any, Any], str],
+) -> str:
+    effective_mode = resolve_run_objective_metadata(
+        metadata,
+        sections.optimization,
+        effective_objective_mode=effective_objective_mode,
+        resolved_object_type=resolved_object_type,
+    )
+    finalize_run_metadata_sections(
+        metadata,
+        data_sources=sections.data_sources,
+        boundary_condition=sections.boundary_condition,
+        replay_context=sections.replay_context,
+        manual_result=sections.manual_result,
+        optimization=sections.optimization,
+        cache=sections.cache,
+        effective_objective_mode=effective_mode,
+        resolve_source_run_reference=resolve_source_run_reference,
+    )
+    return effective_mode
+
+
 def run_precip_dir_candidates(
     paths: dict[str, Any],
     source_key: str,
