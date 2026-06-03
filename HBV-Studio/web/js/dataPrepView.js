@@ -225,6 +225,18 @@
     }).join("");
   }
 
+  function bootstrapTaskRequestState(model = {}) {
+    const runtimePrecipSource = String(model.runtimePrecipSource || "").trim();
+    const ready = Boolean(runtimePrecipSource);
+    return {
+      ready,
+      message: ready ? "" : "请选择降水来源。",
+      request: {
+        prec_source: runtimePrecipSource,
+      },
+    };
+  }
+
   function gisImportStartingUiState() {
     return {
       hint: {
@@ -1215,6 +1227,7 @@
 
   window.HBVStudioDataPrepView = {
     boundaryGuidanceState,
+    bootstrapTaskRequestState,
     boundaryPreviewQueryState,
     boundaryPreviewErrorState,
     boundaryPreviewState,
