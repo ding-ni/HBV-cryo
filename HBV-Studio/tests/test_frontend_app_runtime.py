@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -78,6 +78,11 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.slashPath("C:\\workspaces\\basin") !== "C:/workspaces/basin" ||
                 runtime.normalizePath(" C:\\Workspaces\\Basin ") !== "c:/workspaces/basin") {
               throw new Error("path runtime helpers mismatch");
+            }
+            if (!runtime.samePath(" C:\\Workspaces\\Basin ", "c:/workspaces/basin") ||
+                runtime.samePath("", "") ||
+                runtime.samePath("C:/a", "C:/b")) {
+              throw new Error("same path runtime helper mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });

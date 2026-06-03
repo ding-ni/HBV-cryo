@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -592,6 +592,8 @@ function normalizePath(v) {
 }
 
 function samePath(a, b) {
+  const runtimeSamePath = window.HBVStudioAppRuntime?.samePath;
+  if (typeof runtimeSamePath === "function") return runtimeSamePath(a, b);
   const left = normalizePath(a);
   const right = normalizePath(b);
   return Boolean(left && right && left === right);

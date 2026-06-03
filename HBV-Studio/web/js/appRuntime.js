@@ -62,6 +62,12 @@
     return slashPath(value).trim().toLowerCase();
   }
 
+  function samePath(leftValue = "", rightValue = "") {
+    const left = normalizePath(leftValue);
+    const right = normalizePath(rightValue);
+    return Boolean(left && right && left === right);
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -226,6 +232,7 @@
     sidebarContextState,
     sidebarCountsState,
     normalizePath,
+    samePath,
     shortPath,
     slashPath,
     toastState,
