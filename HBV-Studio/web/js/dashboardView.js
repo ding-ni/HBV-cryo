@@ -7,6 +7,16 @@
     return '<div class="hint-box">未发现模板。</div>';
   }
 
+  function workspaceLoadQueryState(model = {}) {
+    const path = String(model.path || model.configPath || "").trim();
+    return {
+      ready: Boolean(path),
+      message: path ? "" : "请选择工作区。",
+      path,
+      workspacePath: `/api/workspace?path=${encodeURIComponent(path)}`,
+    };
+  }
+
   function renderWorkspaceCards(workspaces, helpers = {}) {
     const items = Array.isArray(workspaces) ? workspaces : [];
     if (!items.length) return emptyWorkspaceHint();
@@ -94,5 +104,6 @@
     renderWorkspaceCards,
     templateListState,
     workspaceCardsState,
+    workspaceLoadQueryState,
   };
 })();

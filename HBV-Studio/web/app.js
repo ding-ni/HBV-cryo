@@ -249,7 +249,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState"],
+    exports: ["renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -5207,9 +5207,11 @@ async function previewWorkspaceLayout(path, { silent = false } = {}) {
 }
 
 async function loadWorkspace(path) {
-  const p = await apiGet(`/api/workspace?path=${encodeURIComponent(path)}`);
-  populateWizardFromConfig(p.data, p.path || path);
-  await loadTaskManualPresets(p.path || path, { silent: true, calibrationProfile: p.data?.率定模式 || "" });
+  const query = window.HBVStudioDashboardView.workspaceLoadQueryState({ path });
+  if (!query.ready) return null;
+  const p = await apiGet(query.workspacePath);
+  populateWizardFromConfig(p.data, p.path || query.path);
+  await loadTaskManualPresets(p.path || query.path, { silent: true, calibrationProfile: p.data?.率定模式 || "" });
   const workflow = await refreshCurrentWorkspaceWorkflow();
   refreshCurrentWorkspaceAdvice().catch(() => {});
   refreshCurrentWorkspaceLayout().catch(() => {});

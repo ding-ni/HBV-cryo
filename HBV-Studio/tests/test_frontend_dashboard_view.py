@@ -21,8 +21,17 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState) {
+            if (!dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
+            }
+            const workspaceQuery = dashboard.workspaceLoadQueryState({ path: " F:/工作区/A & B " });
+            const encodedPath = encodeURIComponent("F:/工作区/A & B");
+            if (!workspaceQuery.ready || workspaceQuery.path !== "F:/工作区/A & B" || workspaceQuery.workspacePath !== `/api/workspace?path=${encodedPath}`) {
+              throw new Error(`workspace load query mismatch: ${JSON.stringify(workspaceQuery)}`);
+            }
+            const missingWorkspaceQuery = dashboard.workspaceLoadQueryState({ path: " " });
+            if (missingWorkspaceQuery.ready || missingWorkspaceQuery.message !== "请选择工作区。" || !missingWorkspaceQuery.workspacePath.includes("path=")) {
+              throw new Error(`missing workspace load query mismatch: ${JSON.stringify(missingWorkspaceQuery)}`);
             }
             const helpers = {
               escapeHtml(value) {
