@@ -22,7 +22,16 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/geoPreview.js", "utf8"), context);
 
             const geo = context.window.HBVStudioGeoPreview;
-            if (!geo) throw new Error("geo preview module was not exported");
+            if (!geo?.geoOverviewQueryState || !geo?.renderOverview) throw new Error("geo preview module exports are missing");
+            const overviewQuery = geo.geoOverviewQueryState({ configPath: " F:/工作区/A & B " });
+            const encodedPath = encodeURIComponent("F:/工作区/A & B");
+            if (!overviewQuery.ready || overviewQuery.configPath !== "F:/工作区/A & B" || overviewQuery.overviewPath !== `/api/geo/overview?config_path=${encodedPath}`) {
+              throw new Error(`geo overview query mismatch: ${JSON.stringify(overviewQuery)}`);
+            }
+            const missingOverviewQuery = geo.geoOverviewQueryState({ configPath: " " });
+            if (missingOverviewQuery.ready || missingOverviewQuery.message !== "请选择工作区。" || !missingOverviewQuery.overviewPath.includes("config_path=")) {
+              throw new Error(`missing geo overview query mismatch: ${JSON.stringify(missingOverviewQuery)}`);
+            }
             const css = fs.readFileSync("web/styles.css", "utf8");
             const html = geo.renderOverview({
               flow_name: "测试流域",

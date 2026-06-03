@@ -41,6 +41,16 @@
     return { key: "station", label: "站点", symbol: "●", radius: 4.4 };
   }
 
+  function geoOverviewQueryState(model = {}) {
+    const configPath = String(model.configPath || model.path || "").trim();
+    return {
+      ready: Boolean(configPath),
+      message: configPath ? "" : "请选择工作区。",
+      configPath,
+      overviewPath: `/api/geo/overview?config_path=${encodeURIComponent(configPath)}`,
+    };
+  }
+
   function previewBounds(overview) {
     const b = overview?.focus_bounds || overview?.bounds || null;
     if (!b) return null;
@@ -352,6 +362,7 @@
   }
 
   window.HBVStudioGeoPreview = {
+    geoOverviewQueryState,
     renderOverview,
   };
 })();

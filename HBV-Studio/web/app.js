@@ -259,7 +259,7 @@ const frontendModuleContracts = [
   {
     script: "./js/geoPreview.js",
     global: "HBVStudioGeoPreview",
-    exports: ["renderOverview"],
+    exports: ["geoOverviewQueryState", "renderOverview"],
   },
   {
     script: "./js/workspaceLayout.js",
@@ -5137,10 +5137,10 @@ async function refreshCurrentWorkspaceAdvice() {
 }
 
 async function loadWorkspaceGeoOverview(path, { silent = true } = {}) {
-  const target = String(path || "").trim();
-  if (!target) return null;
+  const query = window.HBVStudioGeoPreview.geoOverviewQueryState({ configPath: path });
+  if (!query.ready) return null;
   try {
-    const p = await apiGet(`/api/geo/overview?config_path=${encodeURIComponent(target)}`);
+    const p = await apiGet(query.overviewPath);
     return p.data || null;
   } catch (err) {
     if (!silent) showToast(err.message, true);
