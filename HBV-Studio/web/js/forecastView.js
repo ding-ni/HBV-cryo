@@ -318,6 +318,16 @@
     };
   }
 
+  function forecastInputCheckRequestState(payload = {}) {
+    return {
+      ready: Boolean(payload?.source_run),
+      reason: payload?.source_run ? "" : "missing-source-run",
+      message: payload?.source_run ? "" : "请选择源结果。",
+      requestPath: "/api/forecast/input-check",
+      payload: payload || {},
+    };
+  }
+
   function forecastRestartPayload(run = {}, fields = {}, options = {}) {
     const text = value => String(value || "").trim();
     const input = forecastInputPayload(run, fields, options);
@@ -333,6 +343,16 @@
       objective_mode: text(run?.effective_objective_mode || run?.objective_family || run?.recorded_objective_family || options.defaultObjectiveMode || ""),
       prec_source: "custom_tif",
       glacier_mode: text(fields.glacier_mode || options.glacierMode || "inline") || "inline",
+    };
+  }
+
+  function forecastRestartRequestState(payload = {}) {
+    return {
+      ready: Boolean(payload?.source_run),
+      reason: payload?.source_run ? "" : "missing-source-run",
+      message: payload?.source_run ? "" : "请选择源结果。",
+      requestPath: "/api/forecast/restart/start",
+      payload: payload || {},
     };
   }
 
@@ -1241,6 +1261,7 @@
     forecastInputCheckDelay,
     forecastInputCheckError,
     forecastInputPayload,
+    forecastInputCheckRequestState,
     forecastInputCheckTimerState,
     forecastInputType,
     forecastParameterSourceSummary,
@@ -1258,6 +1279,7 @@
     forecastResultSelectionState,
     forecastRestartPreflight,
     forecastRestartPayload,
+    forecastRestartRequestState,
     forecastResultRuns,
     forecastRunReady,
     forecastRunReadinessText,

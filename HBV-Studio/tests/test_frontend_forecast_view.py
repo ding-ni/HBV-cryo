@@ -484,6 +484,9 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (typeof view?.forecastInputPayload !== "function") {
               throw new Error("missing forecast input payload export");
             }
+            if (typeof view?.forecastInputCheckRequestState !== "function") {
+              throw new Error("missing forecast input check request export");
+            }
 
             const payload = view.forecastInputPayload({
               path: " C:/runs/source ",
@@ -510,6 +513,15 @@ class FrontendForecastViewTests(unittest.TestCase):
             for (const [key, value] of Object.entries(expected)) {
               if (payload[key] !== value) throw new Error(`${key} mismatch: ${payload[key]} !== ${value}`);
             }
+            const request = view.forecastInputCheckRequestState(payload);
+            if (!request.ready ||
+                request.reason !== "" ||
+                request.message !== "" ||
+                request.requestPath !== "/api/forecast/input-check" ||
+                request.payload.source_run !== "C:/runs/source" ||
+                request.payload.time_step_hours !== 1) {
+              throw new Error(`forecast input check request mismatch: ${JSON.stringify(request)}`);
+            }
 
             const fallback = view.forecastInputPayload({
               path: "C:/runs/no-workspace",
@@ -518,6 +530,13 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (fallback.time_step_hours !== 24) throw new Error(`default step hours wrong: ${fallback.time_step_hours}`);
             if (fallback.forecast_prec_dir !== "" || fallback.forecast_temp_dir !== "" || fallback.forecast_evap_dir !== "") {
               throw new Error("missing directory fields should normalize to empty strings");
+            }
+            const missingRequest = view.forecastInputCheckRequestState(view.forecastInputPayload({}, {}, {}));
+            if (missingRequest.ready ||
+                missingRequest.reason !== "missing-source-run" ||
+                missingRequest.message !== "请选择源结果。" ||
+                missingRequest.requestPath !== "/api/forecast/input-check") {
+              throw new Error(`missing forecast input check request mismatch: ${JSON.stringify(missingRequest)}`);
             }
             """
         )
@@ -635,6 +654,9 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (typeof view?.forecastRestartPayload !== "function") {
               throw new Error("missing forecast restart payload export");
             }
+            if (typeof view?.forecastRestartRequestState !== "function") {
+              throw new Error("missing forecast restart request export");
+            }
 
             const payload = view.forecastRestartPayload({
               path: " C:/runs/source ",
@@ -670,6 +692,15 @@ class FrontendForecastViewTests(unittest.TestCase):
               if (payload[key] !== value) throw new Error(`${key} mismatch: ${payload[key]} !== ${value}`);
             }
             if ("time_step_hours" in payload) throw new Error("restart payload should not include input-check-only time_step_hours");
+            const request = view.forecastRestartRequestState(payload);
+            if (!request.ready ||
+                request.reason !== "" ||
+                request.message !== "" ||
+                request.requestPath !== "/api/forecast/restart/start" ||
+                request.payload.source_run !== "C:/runs/source" ||
+                request.payload.profile !== "daily") {
+              throw new Error(`forecast restart request mismatch: ${JSON.stringify(request)}`);
+            }
 
             const fallback = view.forecastRestartPayload({
               path: "C:/runs/source2",
@@ -681,6 +712,13 @@ class FrontendForecastViewTests(unittest.TestCase):
             });
             if (fallback.objective_mode !== "daily_unified_professional_v1") throw new Error(`fallback objective wrong: ${fallback.objective_mode}`);
             if (fallback.glacier_mode !== "inline") throw new Error(`fallback glacier mode wrong: ${fallback.glacier_mode}`);
+            const missingRequest = view.forecastRestartRequestState(view.forecastRestartPayload({}, {}, {}));
+            if (missingRequest.ready ||
+                missingRequest.reason !== "missing-source-run" ||
+                missingRequest.message !== "请选择源结果。" ||
+                missingRequest.requestPath !== "/api/forecast/restart/start") {
+              throw new Error(`missing forecast restart request mismatch: ${JSON.stringify(missingRequest)}`);
+            }
             """
         )
         result = subprocess.run(

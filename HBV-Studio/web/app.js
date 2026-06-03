@@ -205,6 +205,7 @@ const frontendModuleContracts = [
       "forecastInputCheckDelay",
       "forecastInputCheckError",
       "forecastInputPayload",
+      "forecastInputCheckRequestState",
       "forecastInputCheckTimerState",
       "forecastInputType",
       "forecastParameterSourceSummary",
@@ -222,6 +223,7 @@ const frontendModuleContracts = [
       "forecastResultSelectionState",
       "forecastRestartPreflight",
       "forecastRestartPayload",
+      "forecastRestartRequestState",
       "forecastResultRuns",
       "forecastRunReady",
       "forecastRunReadinessText",
@@ -4766,7 +4768,8 @@ async function refreshForecastInputCheck({ loading = false } = {}) {
   const requestToken = forecastInputCheckRequestGuard.next();
   if (loading) renderForecastInputSummary(null, "loading");
   try {
-    const response = await apiPost("/api/forecast/input-check", forecastInputPayload(run));
+    const request = window.HBVStudioForecastView.forecastInputCheckRequestState(forecastInputPayload(run));
+    const response = await apiPost(request.requestPath, request.payload);
     if (!forecastInputCheckRequestGuard.isActive(requestToken)) return;
     const check = response.data || null;
     renderForecastInputSummary(check);
@@ -5008,7 +5011,8 @@ async function startForecastRestart() {
     defaultObjectiveMode: CURRENT_OBJECTIVE_FAMILY,
   });
   try {
-    const response = await apiPost("/api/forecast/restart/start", payload);
+    const request = window.HBVStudioForecastView.forecastRestartRequestState(payload);
+    const response = await apiPost(request.requestPath, request.payload);
     showToast(`已启动：${response.task?.label || "连续状态预报"}`);
     await loadTasks();
     renderForecastView();
