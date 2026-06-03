@@ -810,6 +810,12 @@
     };
   }
 
+  function cdsApiStatusQueryState() {
+    return {
+      statusPath: "/api/cdsapi/status",
+    };
+  }
+
   function era5ApiPanelState(model = {}) {
     const mode = String(model.mode || "");
     const needsDownload = Boolean(model.needsDownload);
@@ -1333,6 +1339,7 @@
     boundaryPreviewRequestState,
     boundaryPreviewErrorState,
     boundaryPreviewState,
+    cdsApiStatusQueryState,
     customMeteoImportCopyState,
     customMeteoImportDirectoryState,
     elevationSuggestionQueryState,
