@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -46,6 +46,24 @@ class FrontendDataPrepViewTests(unittest.TestCase):
 
             if (view.formatPrepDisplayTitle(2, "01. 下载 ERA5") !== "2. 下载 ERA5") {
               throw new Error("display title should strip stale numbering");
+            }
+            if (view.toWizardInputTimeValue("2020-01-02 03:04", false) !== "2020-01-02") {
+              throw new Error("daily wizard input value should keep date only");
+            }
+            if (view.toWizardInputTimeValue("2020-01-02", true) !== "2020-01-02T00:00") {
+              throw new Error("hourly wizard input value should add midnight when time is missing");
+            }
+            if (view.toWizardInputTimeValue("2020-01-02T03:04", true) !== "2020-01-02T03:04") {
+              throw new Error("hourly wizard input value should preserve explicit time");
+            }
+            if (view.toWizardInputTimeValue("not-a-date", true) !== "not-a-date") {
+              throw new Error("invalid wizard input value should round-trip as text");
+            }
+            if (view.fromWizardInputTimeValue("2020-01-02T03:04", true) !== "2020-01-02 03:04") {
+              throw new Error("hourly wizard stored value should use a space separator");
+            }
+            if (view.fromWizardInputTimeValue("2020-01-02T03:04", false) !== "2020-01-02") {
+              throw new Error("daily wizard stored value should keep date only");
             }
             const blockedText = view.formatPrepBlockedMessage(
               { blocked_by: ["gis_base", "download_era5"] },
