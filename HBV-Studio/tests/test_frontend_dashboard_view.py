@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutClearState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.dashboardWorkspaceEmptyState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutClearState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.dashboardWorkspaceEmptyState || !dashboard?.dashboardWorkspaceLayoutLoadedState || !dashboard?.dashboardWorkspacePreviewSelectionState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
             for (const name of ["templateInstantiateRequestState", "templateInstantiateSuccessState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceDeleteRequestState"]) {
@@ -173,6 +173,28 @@ class FrontendDashboardViewTests(unittest.TestCase):
             const populatedWorkspaceState = dashboard.dashboardWorkspaceEmptyState(lookupWorkspaces);
             if (populatedWorkspaceState.empty || Object.keys(populatedWorkspaceState.statePatch).length !== 0) {
               throw new Error(`populated workspace state should not request clear patch: ${JSON.stringify(populatedWorkspaceState)}`);
+            }
+            const previewSelection = dashboard.dashboardWorkspacePreviewSelectionState(" C:/Workspaces/A/config.json ");
+            if (previewSelection.dashboardLayoutPath !== "C:/Workspaces/A/config.json" ||
+                previewSelection.statePatch.dashboardLayoutPath !== "C:/Workspaces/A/config.json") {
+              throw new Error(`dashboard preview selection should trim path: ${JSON.stringify(previewSelection)}`);
+            }
+            const loadedLayout = { tree: [{ name: "config.json" }] };
+            const loadedGeoOverview = { bbox: [91, 32, 92, 33] };
+            const loadedState = dashboard.dashboardWorkspaceLayoutLoadedState(loadedLayout, loadedGeoOverview);
+            if (loadedState.dashboardWorkspaceLayout !== loadedLayout ||
+                loadedState.dashboardGeoOverview !== loadedGeoOverview ||
+                loadedState.statePatch.dashboardWorkspaceLayout !== loadedLayout ||
+                loadedState.statePatch.dashboardGeoOverview !== loadedGeoOverview ||
+                loadedLayout.geo_overview !== loadedGeoOverview) {
+              throw new Error(`dashboard layout loaded state mismatch: ${JSON.stringify(loadedState)}`);
+            }
+            const emptyLoadedState = dashboard.dashboardWorkspaceLayoutLoadedState(null, loadedGeoOverview);
+            if (emptyLoadedState.dashboardWorkspaceLayout !== null ||
+                emptyLoadedState.dashboardGeoOverview !== loadedGeoOverview ||
+                emptyLoadedState.statePatch.dashboardWorkspaceLayout !== null ||
+                emptyLoadedState.statePatch.dashboardGeoOverview !== loadedGeoOverview) {
+              throw new Error(`empty dashboard layout loaded state should preserve geo overview: ${JSON.stringify(emptyLoadedState)}`);
             }
             const instantiateRequest = dashboard.templateInstantiateRequestState({
               templateId: " tpl-1 ",

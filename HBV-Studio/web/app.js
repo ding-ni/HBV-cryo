@@ -255,7 +255,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutClearState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "dashboardWorkspaceEmptyState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutClearState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "dashboardWorkspaceEmptyState", "dashboardWorkspaceLayoutLoadedState", "dashboardWorkspacePreviewSelectionState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -5195,7 +5195,7 @@ async function refreshCurrentWorkspaceLayout() {
 }
 
 async function previewWorkspaceLayout(path, { silent = false } = {}) {
-  state.dashboardLayoutPath = String(path || "").trim();
+  Object.assign(state, window.HBVStudioDashboardView.dashboardWorkspacePreviewSelectionState(path).statePatch);
   renderWorkspaceCards();
   try {
     const query = window.HBVStudioWorkspaceLayout.workspaceLayoutQueryState({
@@ -5207,11 +5207,8 @@ async function previewWorkspaceLayout(path, { silent = false } = {}) {
       return null;
     }
     const p = await apiGet(query.layoutPath);
-    state.dashboardWorkspaceLayout = p.data || null;
-    state.dashboardGeoOverview = await loadWorkspaceGeoOverview(query.configPath);
-    if (state.dashboardWorkspaceLayout) {
-      state.dashboardWorkspaceLayout.geo_overview = state.dashboardGeoOverview;
-    }
+    const geoOverview = await loadWorkspaceGeoOverview(query.configPath);
+    Object.assign(state, window.HBVStudioDashboardView.dashboardWorkspaceLayoutLoadedState(p.data, geoOverview).statePatch);
     renderDashboardWorkspaceLayout();
     return state.dashboardWorkspaceLayout;
   } catch (err) {

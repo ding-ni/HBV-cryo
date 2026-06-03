@@ -54,6 +54,29 @@
     };
   }
 
+  function dashboardWorkspacePreviewSelectionState(path = "") {
+    const dashboardLayoutPath = String(path || "").trim();
+    return {
+      dashboardLayoutPath,
+      statePatch: { dashboardLayoutPath },
+    };
+  }
+
+  function dashboardWorkspaceLayoutLoadedState(layout = null, geoOverview = null) {
+    const dashboardWorkspaceLayout = layout || null;
+    if (dashboardWorkspaceLayout && typeof dashboardWorkspaceLayout === "object") {
+      dashboardWorkspaceLayout.geo_overview = geoOverview;
+    }
+    return {
+      dashboardWorkspaceLayout,
+      dashboardGeoOverview: geoOverview,
+      statePatch: {
+        dashboardWorkspaceLayout,
+        dashboardGeoOverview: geoOverview,
+      },
+    };
+  }
+
   function workspaceLoadQueryState(model = {}) {
     const path = String(model.path || model.configPath || "").trim();
     return {
@@ -293,6 +316,8 @@
     dashboardLayoutStaleState,
     dashboardLoadQueryState,
     dashboardWorkspaceEmptyState,
+    dashboardWorkspaceLayoutLoadedState,
+    dashboardWorkspacePreviewSelectionState,
     renderTemplates,
     renderWorkspaceCards,
     templateInstantiateRequestState,
