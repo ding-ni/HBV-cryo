@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -753,6 +753,35 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             });
             if (!quickCompletion.comp.ready || quickCompletion.shouldUpdateCalibrationUi || Object.keys(quickCompletion.statePatch).length !== 0) {
               throw new Error(`quick input check should not patch calibration workflow: ${JSON.stringify(quickCompletion)}`);
+            }
+            const detailCheckQuery = view.inputCheckQueryState({
+              configPath: " C:/工作区/A & B ",
+              precipSource: " era5 ",
+              stage: "calibration",
+              detail: true,
+            });
+            const encodedConfigPath = encodeURIComponent("C:/工作区/A & B");
+            if (!detailCheckQuery.ready || !detailCheckQuery.wantsDetail || detailCheckQuery.stage !== "calibration" || detailCheckQuery.precipSource !== "era5") {
+              throw new Error(`detailed input check query state mismatch: ${JSON.stringify(detailCheckQuery)}`);
+            }
+            if (detailCheckQuery.validationPath !== `/api/config/validate?config_path=${encodedConfigPath}&stage=calibration&prec_source=era5`) {
+              throw new Error(`validation path mismatch: ${detailCheckQuery.validationPath}`);
+            }
+            if (detailCheckQuery.detailPath !== `/api/workspace/detailed-check?config_path=${encodedConfigPath}&prec_source=era5` || detailCheckQuery.advicePath !== `/api/workspace/advice?config_path=${encodedConfigPath}&prec_source=era5`) {
+              throw new Error(`detail/advice path mismatch: ${JSON.stringify(detailCheckQuery)}`);
+            }
+            const quickCheckQuery = view.inputCheckQueryState({
+              configPath: "C:/Workspace/A",
+              precipSource: "cmfd",
+              stage: "quick_test",
+              detail: true,
+            });
+            if (!quickCheckQuery.ready || quickCheckQuery.wantsDetail || quickCheckQuery.detailPath !== "" || quickCheckQuery.advicePath !== "" || !quickCheckQuery.validationPath.includes("stage=quick_test")) {
+              throw new Error(`quick input check query mismatch: ${JSON.stringify(quickCheckQuery)}`);
+            }
+            const missingCheckQuery = view.inputCheckQueryState({ configPath: " ", precipSource: "era5" });
+            if (missingCheckQuery.ready || missingCheckQuery.message !== "请先保存工作区。" || !missingCheckQuery.validationPath.includes("config_path=")) {
+              throw new Error(`missing input check query mismatch: ${JSON.stringify(missingCheckQuery)}`);
             }
             const emptyCache = view.emptyInputCheckCache();
             if (emptyCache.configPath !== "" || emptyCache.stage !== "calibration" || emptyCache.result !== null || emptyCache.html !== "") {

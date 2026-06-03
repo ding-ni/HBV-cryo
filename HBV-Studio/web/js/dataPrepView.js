@@ -1045,6 +1045,25 @@
     };
   }
 
+  function inputCheckQueryState(model = {}) {
+    const configPath = String(model.configPath || "").trim();
+    const stage = String(model.stage || "calibration").trim() || "calibration";
+    const precipSource = String(model.precipSource || "").trim();
+    const wantsDetail = Boolean(model.detail) && stage === "calibration";
+    const query = `config_path=${encodeURIComponent(configPath)}&prec_source=${encodeURIComponent(precipSource)}`;
+    const validationQuery = `config_path=${encodeURIComponent(configPath)}&stage=${encodeURIComponent(stage)}&prec_source=${encodeURIComponent(precipSource)}`;
+    return {
+      ready: Boolean(configPath),
+      message: configPath ? "" : "请先保存工作区。",
+      stage,
+      precipSource,
+      wantsDetail,
+      validationPath: `/api/config/validate?${validationQuery}`,
+      detailPath: wantsDetail ? `/api/workspace/detailed-check?${query}` : "",
+      advicePath: wantsDetail ? `/api/workspace/advice?${query}` : "",
+    };
+  }
+
   function emptyInputCheckCache() {
     return {
       configPath: "",
@@ -1245,6 +1264,7 @@
     emptyInputCheckCache,
     hasRecentInputCheckCache,
     inputCheckCompletionState,
+    inputCheckQueryState,
     meteoModePanelState,
     inputCheckCacheEntry,
     meteoModeHintState,

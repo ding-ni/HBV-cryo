@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3911,6 +3911,13 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     host.innerHTML = state.lastInputCheck.html || host.innerHTML;
     return state.lastInputCheck.result;
   }
+  const queryState = window.HBVStudioDataPrepView.inputCheckQueryState({
+    configPath: state.wizardWorkspacePath,
+    stage,
+    precipSource: getTaskRuntimePrecipSource(),
+    detail,
+  });
+  if (!queryState.ready) { showToast(queryState.message, true); return null; }
   const checkStartedAt = Date.now();
   let checkStage = "基础配置检查";
   let checkTimer = null;
@@ -3921,17 +3928,16 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
   renderChecking();
   try {
     checkTimer = setInterval(renderChecking, 1000);
-    const validationResp = await apiGet(`/api/config/validate?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&stage=${encodeURIComponent(stage)}&prec_source=${encodeURIComponent(getTaskRuntimePrecipSource())}`);
-    const runtimePrecSource = getTaskRuntimePrecipSource();
+    const validationResp = await apiGet(queryState.validationPath);
     checkStage = "详细输入检查";
     renderChecking();
-    const detailResp = (detail && stage === "calibration")
-      ? await apiGet(`/api/workspace/detailed-check?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&prec_source=${encodeURIComponent(runtimePrecSource)}`)
+    const detailResp = queryState.detailPath
+      ? await apiGet(queryState.detailPath)
       : { data: null };
     checkStage = "建议生成";
     renderChecking();
-    const adviceResp = (detail && stage === "calibration")
-      ? await apiGet(`/api/workspace/advice?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&prec_source=${encodeURIComponent(runtimePrecSource)}`)
+    const adviceResp = queryState.advicePath
+      ? await apiGet(queryState.advicePath)
       : { data: state.currentWorkspaceAdvice || null };
     if (checkTimer) clearInterval(checkTimer);
     checkTimer = null;
@@ -3975,8 +3981,8 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
     host.innerHTML = html;
     state.lastInputCheck = window.HBVStudioDataPrepView.inputCheckCacheEntry({
       configPath: String(state.wizardWorkspacePath),
-      precipSource: String(getTaskRuntimePrecipSource()),
-      stage: String(stage || "calibration"),
+      precipSource: String(queryState.precipSource),
+      stage: String(queryState.stage),
       checkedAt: Date.now(),
       result: comp,
       html,
