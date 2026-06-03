@@ -21,10 +21,22 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListState", "taskProgressChartData"]) {
+            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
+            }
+            const taskQuery = taskView.taskListQueryState();
+            if (taskQuery.tasksPath !== "/api/tasks") {
+              throw new Error(`task list query mismatch: ${JSON.stringify(taskQuery)}`);
+            }
+            const normalizedTasks = taskView.taskListDataState([{ id: "task-1" }]);
+            if (normalizedTasks.tasks[0].id !== "task-1" || normalizedTasks.statePatch.tasks !== normalizedTasks.tasks) {
+              throw new Error(`task list data state mismatch: ${JSON.stringify(normalizedTasks)}`);
+            }
+            const emptyTasks = taskView.taskListDataState({ bad: true });
+            if (emptyTasks.tasks.length !== 0 || emptyTasks.statePatch.tasks.length !== 0) {
+              throw new Error(`invalid task list data should normalize to empty array: ${JSON.stringify(emptyTasks)}`);
             }
 
             const helpers = {

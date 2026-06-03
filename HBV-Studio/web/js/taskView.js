@@ -68,6 +68,20 @@
     };
   }
 
+  function taskListQueryState() {
+    return {
+      tasksPath: "/api/tasks",
+    };
+  }
+
+  function taskListDataState(data = []) {
+    const tasks = Array.isArray(data) ? data : [];
+    return {
+      tasks,
+      statePatch: { tasks },
+    };
+  }
+
   function normalizeTaskFilters(filters = {}) {
     return {
       workspaceMode: String(filters.workspaceMode || "current").trim().toLowerCase() || "current",
@@ -788,6 +802,8 @@
     taskContextSummary,
     taskDebugDetails,
     taskLastMeaningfulLog,
+    taskListDataState,
+    taskListQueryState,
     taskPrimaryTitle,
     taskProgressChartData,
     taskStageLabel,

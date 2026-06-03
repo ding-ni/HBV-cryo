@@ -293,6 +293,8 @@ const frontendModuleContracts = [
       "taskContextSummary",
       "taskDebugDetails",
       "taskLastMeaningfulLog",
+      "taskListDataState",
+      "taskListQueryState",
       "taskPrimaryTitle",
       "taskProgressChartData",
       "taskStageLabel",
@@ -3449,8 +3451,8 @@ async function pollForwardSimulationTask(taskId, sourceRunPath = "") {
 
   const tick = async () => {
     try {
-      const payload = await apiGet("/api/tasks");
-      state.tasks = payload.data || [];
+      const payload = await apiGet(window.HBVStudioTaskView.taskListQueryState().tasksPath);
+      Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
       const task = state.tasks.find(item => item.id === taskId);
@@ -3539,8 +3541,8 @@ async function pollMeteoImportTask(taskId) {
 
   const tick = async () => {
     try {
-      const payload = await apiGet("/api/tasks");
-      state.tasks = payload.data || [];
+      const payload = await apiGet(window.HBVStudioTaskView.taskListQueryState().tasksPath);
+      Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
       const task = state.tasks.find(item => item.id === taskId);
@@ -3679,8 +3681,9 @@ function pollBootstrapLog(task) {
   const logBox = $("#wz-bootstrap-log");
   const timer = setInterval(async () => {
     try {
-      const payload = await apiGet("/api/tasks");
-      const t = payload.data.find(x => x.id === task.id);
+      const payload = await apiGet(window.HBVStudioTaskView.taskListQueryState().tasksPath);
+      const tasks = window.HBVStudioTaskView.taskListDataState(payload.data).tasks;
+      const t = tasks.find(x => x.id === task.id);
       if (t) {
         setLogBoxContent(logBox, (t.output || []).slice(-30), "wizard:bootstrap-log");
         if (t.status !== "running") {
@@ -3856,8 +3859,8 @@ async function pollPrepTask(taskId) {
   stopPrepTaskPolling();
   const tick = async () => {
     try {
-      const payload = await apiGet("/api/tasks");
-      state.tasks = payload.data || [];
+      const payload = await apiGet(window.HBVStudioTaskView.taskListQueryState().tasksPath);
+      Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
       const task = state.tasks.find(item => item.id === taskId);
@@ -5357,8 +5360,8 @@ async function deleteRun(path) {
 
 async function loadTasks() {
   const previousTasks = new Map(state.tasks.map(t => [t.id, t]));
-  const p = await apiGet("/api/tasks");
-  state.tasks = p.data;
+  const p = await apiGet(window.HBVStudioTaskView.taskListQueryState().tasksPath);
+  Object.assign(state, window.HBVStudioTaskView.taskListDataState(p.data).statePatch);
   renderTasks();
   renderForecastView();
   updateCounts();
