@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
             for (const name of ["templateInstantiateRequestState", "templateInstantiateSuccessState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceDeleteRequestState"]) {
@@ -99,6 +99,30 @@ class FrontendDashboardViewTests(unittest.TestCase):
             const emptyWorkspaceListData = dashboard.workspaceListDataState(null);
             if (emptyWorkspaceListData.workspaces.length !== 0 || emptyWorkspaceListData.statePatch.workspaces.length !== 0) {
               throw new Error(`invalid workspace data should normalize to empty array: ${JSON.stringify(emptyWorkspaceListData)}`);
+            }
+            const lookupWorkspaces = [
+              { path: "C:/Workspaces/A/config.json", name: "A" },
+              { path: "D:/Workspaces/B/config.json", name: "B" },
+            ];
+            if (dashboard.workspaceByPath(lookupWorkspaces, " C:/Workspaces/A/config.json ") !== lookupWorkspaces[0]) {
+              throw new Error("workspace lookup should trim and match exact paths by default");
+            }
+            const normalizedWorkspace = dashboard.workspaceByPath(lookupWorkspaces, "c:\\workspaces\\a\\config.json", {
+              samePath(left, right) {
+                return String(left || "").replace(/\\/g, "/").toLowerCase() === String(right || "").replace(/\\/g, "/").toLowerCase();
+              },
+            });
+            if (normalizedWorkspace !== lookupWorkspaces[0]) {
+              throw new Error(`workspace lookup should use injected path comparator: ${JSON.stringify(normalizedWorkspace)}`);
+            }
+            if (!dashboard.workspaceExists(lookupWorkspaces, "D:/Workspaces/B/config.json")) {
+              throw new Error("workspace exists should return true for matched paths");
+            }
+            if (dashboard.workspaceByPath(lookupWorkspaces, " ") !== null ||
+                dashboard.workspaceByPath(null, "C:/Workspaces/A/config.json") !== null ||
+                dashboard.workspaceExists(lookupWorkspaces, "missing.json") ||
+                dashboard.workspaceExists(null, "C:/Workspaces/A/config.json")) {
+              throw new Error("workspace lookup should handle missing paths and invalid lists");
             }
             const instantiateRequest = dashboard.templateInstantiateRequestState({
               templateId: " tpl-1 ",

@@ -7,6 +7,25 @@
     return '<div class="hint-box">未发现模板。</div>';
   }
 
+  function defaultSamePath(a, b) {
+    const left = String(a || "").trim();
+    const right = String(b || "").trim();
+    return Boolean(left && right && left === right);
+  }
+
+  function workspaceByPath(workspaces = [], path = "", helpers = {}) {
+    const items = Array.isArray(workspaces) ? workspaces : [];
+    const targetPath = String(path || "").trim();
+    if (!targetPath) return null;
+
+    const samePath = typeof helpers.samePath === "function" ? helpers.samePath : defaultSamePath;
+    return items.find(item => samePath(item?.path, targetPath)) || null;
+  }
+
+  function workspaceExists(workspaces = [], path = "", helpers = {}) {
+    return Boolean(workspaceByPath(workspaces, path, helpers));
+  }
+
   function workspaceLoadQueryState(model = {}) {
     const path = String(model.path || model.configPath || "").trim();
     return {
@@ -251,8 +270,10 @@
     templateListState,
     templateSyncRequestState,
     templateSyncSuccessState,
+    workspaceByPath,
     workspaceCardsState,
     workspaceDeleteRequestState,
+    workspaceExists,
     workspaceListDataState,
     workspaceListQueryState,
     workspaceLoadQueryState,
