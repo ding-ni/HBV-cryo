@@ -320,9 +320,14 @@ const frontendModuleContracts = [
     exports: ["calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
+    script: "./js/objectiveRuntime.js",
+    global: "HBVStudioObjectiveRuntime",
+    exports: ["effectiveObjectiveMode", "objectiveDetail", "objectiveLabel", "objectiveSummary", "requestedObjectiveMode"],
+  },
+  {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["effectiveObjectiveMode", "finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "objectiveDetail", "objectiveLabel", "objectiveSummary", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "requestedObjectiveMode", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1675,7 +1680,7 @@ function optimizationMethodLabel(optimization) {
 }
 
 function objectiveLabel(value) {
-  const runtimeObjectiveLabel = window.HBVStudioAppRuntime?.objectiveLabel;
+  const runtimeObjectiveLabel = window.HBVStudioObjectiveRuntime?.objectiveLabel;
   if (typeof runtimeObjectiveLabel === "function") return runtimeObjectiveLabel(value);
   return ({
     auto: "自动选择",
@@ -1688,7 +1693,7 @@ function objectiveLabel(value) {
 }
 
 function effectiveObjectiveMode(meta) {
-  const runtimeEffectiveObjectiveMode = window.HBVStudioAppRuntime?.effectiveObjectiveMode;
+  const runtimeEffectiveObjectiveMode = window.HBVStudioObjectiveRuntime?.effectiveObjectiveMode;
   if (typeof runtimeEffectiveObjectiveMode === "function") return runtimeEffectiveObjectiveMode(meta);
   const normalizedMode = String(meta?.effective_objective_mode || meta?.optimization?.effective_objective_mode || "").trim().toLowerCase();
   if (normalizedMode) return normalizedMode;
@@ -1698,13 +1703,13 @@ function effectiveObjectiveMode(meta) {
 }
 
 function requestedObjectiveMode(meta) {
-  const runtimeRequestedObjectiveMode = window.HBVStudioAppRuntime?.requestedObjectiveMode;
+  const runtimeRequestedObjectiveMode = window.HBVStudioObjectiveRuntime?.requestedObjectiveMode;
   if (typeof runtimeRequestedObjectiveMode === "function") return runtimeRequestedObjectiveMode(meta);
   return String(meta?.requested_objective_mode || meta?.optimization?.requested_objective_mode || meta?.optimization?.objective_mode || "").trim().toLowerCase();
 }
 
 function objectiveDetail(meta) {
-  const runtimeObjectiveDetail = window.HBVStudioAppRuntime?.objectiveDetail;
+  const runtimeObjectiveDetail = window.HBVStudioObjectiveRuntime?.objectiveDetail;
   if (typeof runtimeObjectiveDetail === "function") return runtimeObjectiveDetail(meta);
   const mode = effectiveObjectiveMode(meta) || meta?.objective_family || meta?.objective_profile?.type || meta?.objective?.type;
   if (String(mode || "").toLowerCase() === "daily_unified_professional_v1") {
@@ -1720,7 +1725,7 @@ function objectiveDetail(meta) {
 }
 
 function objectiveSummary(meta) {
-  const runtimeObjectiveSummary = window.HBVStudioAppRuntime?.objectiveSummary;
+  const runtimeObjectiveSummary = window.HBVStudioObjectiveRuntime?.objectiveSummary;
   if (typeof runtimeObjectiveSummary === "function") return runtimeObjectiveSummary(meta);
   return [objectiveLabel(effectiveObjectiveMode(meta) || "—"), objectiveDetail(meta)].filter(Boolean).join(" · ");
 }
