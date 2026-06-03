@@ -599,6 +599,29 @@
     };
   }
 
+  function customMeteoImportDirectoryState(model = {}) {
+    const sources = model.sources || {};
+    const registeredDirs = model.registeredDirs || {};
+    const importDirs = model.importDirs || {};
+    const fields = ["prec", "temp", "pet"];
+    const dirs = Object.fromEntries(fields.map(key => {
+      const current = String(importDirs[key] || "").trim();
+      const fallback = sources[key] === "custom_tif" ? String(registeredDirs[key] || "").trim() : "";
+      return [key, current || fallback];
+    }));
+    const missing = fields.filter(key => !dirs[key]);
+    const writeBackUpdates = missing.length ? [] : fields.flatMap(key => {
+      const current = String(importDirs[key] || "").trim();
+      return current ? [] : [{ key, value: dirs[key] }];
+    });
+    return {
+      dirs,
+      ready: missing.length === 0,
+      missing,
+      writeBackUpdates,
+    };
+  }
+
   function meteoModeHintState(model = {}) {
     const sources = model.sources || {};
     const copiedLabels = Array.isArray(model.copiedLabels) ? model.copiedLabels : [];
@@ -1141,6 +1164,7 @@
     boundaryPreviewErrorState,
     boundaryPreviewState,
     customMeteoImportCopyState,
+    customMeteoImportDirectoryState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,

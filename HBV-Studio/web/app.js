@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3605,21 +3605,37 @@ async function importGisFiles() {
 async function importMeteoFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
-  const precDir = $("#wz-import-prec-dir").value.trim() || ((($("#wz-prec-source")?.value || "era5") === "custom_tif") ? ($("#wz-custom-prec-dir")?.value.trim() || "") : "");
-  const tempDir = $("#wz-import-temp-dir").value.trim() || ((($("#wz-temp-source")?.value || "era5") === "custom_tif") ? ($("#wz-custom-temp-dir")?.value.trim() || "") : "");
-  const evapDir = $("#wz-import-evap-dir").value.trim() || ((($("#wz-pet-source")?.value || "era5_fao56") === "custom_tif") ? ($("#wz-custom-pet-dir")?.value.trim() || "") : "");
-  if (!precDir || !tempDir || !evapDir) { showToast("请选择降水、气温和蒸散发三个目录。", true); return; }
-  if ($("#wz-import-prec-dir") && !$("#wz-import-prec-dir").value.trim()) $("#wz-import-prec-dir").value = precDir;
-  if ($("#wz-import-temp-dir") && !$("#wz-import-temp-dir").value.trim()) $("#wz-import-temp-dir").value = tempDir;
-  if ($("#wz-import-evap-dir") && !$("#wz-import-evap-dir").value.trim()) $("#wz-import-evap-dir").value = evapDir;
+  const directoryState = window.HBVStudioDataPrepView.customMeteoImportDirectoryState({
+    sources: getWizardMeteoSources(),
+    registeredDirs: {
+      prec: $("#wz-custom-prec-dir")?.value || "",
+      temp: $("#wz-custom-temp-dir")?.value || "",
+      pet: $("#wz-custom-pet-dir")?.value || "",
+    },
+    importDirs: {
+      prec: $("#wz-import-prec-dir")?.value || "",
+      temp: $("#wz-import-temp-dir")?.value || "",
+      pet: $("#wz-import-evap-dir")?.value || "",
+    },
+  });
+  if (!directoryState.ready) { showToast("请选择降水、气温和蒸散发三个目录。", true); return; }
+  const targets = {
+    prec: "#wz-import-prec-dir",
+    temp: "#wz-import-temp-dir",
+    pet: "#wz-import-evap-dir",
+  };
+  directoryState.writeBackUpdates.forEach(update => {
+    const target = $(targets[update.key]);
+    if (target) target.value = update.value;
+  });
   applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportCreatingUiState());
   try {
     const payload = await apiPost("/api/meteo/import/start", {
       config_path: state.wizardWorkspacePath,
       prec_source: getEffectiveRuntimePrecipSource(),
-      prec_dir: precDir,
-      temp_dir: tempDir,
-      evap_dir: evapDir,
+      prec_dir: directoryState.dirs.prec,
+      temp_dir: directoryState.dirs.temp,
+      evap_dir: directoryState.dirs.pet,
     });
     const task = payload.task;
     state.activeMeteoImportTaskId = task?.id || "";
