@@ -42,6 +42,13 @@
     return Number.isFinite(numeric) ? numeric : null;
   }
 
+  function formatDateTime(value) {
+    if (!value) return "\u2014";
+    const date = new Date(Number(value) * 1000 || value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -197,6 +204,7 @@
 
   window.HBVStudioAppRuntime = {
     finiteNumber,
+    formatDateTime,
     formatNumber,
     healthQueryState,
     pollingScheduleState,

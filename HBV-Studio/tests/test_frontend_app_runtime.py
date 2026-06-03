@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -64,6 +64,13 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.finiteNumber("3.5") !== 3.5 ||
                 runtime.finiteNumber("bad") !== null) {
               throw new Error("numeric runtime helpers mismatch");
+            }
+
+            const expectedDateTime = new Date(1700000000 * 1000).toLocaleString("zh-CN", { hour12: false });
+            if (runtime.formatDateTime("") !== "\u2014" ||
+                runtime.formatDateTime("bad-date") !== "bad-date" ||
+                runtime.formatDateTime(1700000000) !== expectedDateTime) {
+              throw new Error("date runtime helper mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });

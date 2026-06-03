@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatNumber", "healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -564,6 +564,8 @@ function finiteNumber(v) {
 }
 
 function formatDateTime(v) {
+  const runtimeFormatDateTime = window.HBVStudioAppRuntime?.formatDateTime;
+  if (typeof runtimeFormatDateTime === "function") return runtimeFormatDateTime(v);
   if (!v) return "\u2014";
   const d = new Date(Number(v) * 1000 || v);
   if (Number.isNaN(d.getTime())) return String(v);
