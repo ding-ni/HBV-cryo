@@ -21,7 +21,8 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/calibrationView.js", "utf8"), context);
 
             const calibration = context.window.HBVStudioCalibrationView;
-            if (!calibration?.calibrationLoadState ||
+            if (!calibration?.calibrationDebugGuidanceState ||
+                !calibration?.calibrationLoadState ||
                 !calibration?.calibrationPlainGuideState ||
                 !calibration?.calibrationQuickTestGuidanceState ||
                 !calibration?.calibrationSelfCheckGuidanceState ||
@@ -57,6 +58,21 @@ class FrontendCalibrationViewTests(unittest.TestCase):
                 !quickTestGuidance.strategy.text.includes("\u6c14\u8c61\u8f93\u5165") ||
                 !quickTestGuidance.load.text.includes("12")) {
               throw new Error(`quick-test guidance mismatch: ${JSON.stringify(quickTestGuidance)}`);
+            }
+
+            const debugGuidance = calibration.calibrationDebugGuidanceState({
+              adviceHeadline: "\u5148\u770b\u53c2\u6570\u54cd\u5e94",
+              debugDays: "9",
+              loadInfo: { label: "\u5feb\u901f\u7b5b\u9009" },
+            });
+            if (debugGuidance.smart.className !== "hint-box status-ok" ||
+                debugGuidance.strategy.className !== "hint-box status-ok" ||
+                debugGuidance.load.className !== "hint-box status-ok" ||
+                !debugGuidance.smart.text.includes("\u5148\u770b\u53c2\u6570\u54cd\u5e94") ||
+                !debugGuidance.strategy.text.includes("\u9884\u70ed\u6bb5") ||
+                !debugGuidance.load.text.includes("9") ||
+                !debugGuidance.load.text.includes("\u5feb\u901f\u7b5b\u9009")) {
+              throw new Error(`debug guidance mismatch: ${JSON.stringify(debugGuidance)}`);
             }
 
             const mcOnlyLoad = calibration.calibrationLoadState({

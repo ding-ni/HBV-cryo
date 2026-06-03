@@ -53,6 +53,29 @@
     };
   }
 
+  function calibrationDebugGuidanceState(model = {}) {
+    const adviceHeadline = text(model.adviceHeadline ?? model.advice_headline);
+    const debugDays = Math.max(1, Number(model.debugDays ?? model.debug_days) || 30);
+    const loadInfo = model.loadInfo ?? model.load_info ?? {};
+    const loadLabel = text(model.loadLabel ?? model.load_label ?? loadInfo.label, "快速筛选 + 精细搜索");
+    return {
+      smart: {
+        text: adviceHeadline
+          ? `智能建议：${adviceHeadline} 当前使用快速试算，可先看参数响应。`
+          : "智能建议：快速试算适合先确认参数响应，再进入正式率定。",
+        className: "hint-box status-ok",
+      },
+      strategy: {
+        text: "快速试算会保留预热段，优先使用率定开始后的有效时段参与搜索；如果起始窗口观测变化不足，系统会自动顺延到首个可计算时段。",
+        className: "hint-box status-ok",
+      },
+      load: {
+        text: `${loadLabel}：当前仅使用率定开始后的前 ${debugDays} 天做快速试算，搜索次数不变，但单次前向模拟会明显缩短。`,
+        className: "hint-box status-ok",
+      },
+    };
+  }
+
   function calibrationLoadState(model = {}) {
     const method = text(model.method, "mc_screen_de");
     const maxiter = Math.max(0, Number(model.maxiter) || 0);
@@ -164,6 +187,7 @@
   }
 
   window.HBVStudioCalibrationView = {
+    calibrationDebugGuidanceState,
     calibrationLoadState,
     calibrationPlainGuideState,
     calibrationQuickTestGuidanceState,

@@ -317,7 +317,7 @@ const frontendModuleContracts = [
   {
     script: "./js/calibrationView.js",
     global: "HBVStudioCalibrationView",
-    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationQuickTestGuidanceState", "calibrationSelfCheckGuidanceState", "calibrationStartRequestState", "selfCheckStartRequestState"],
+    exports: ["calibrationDebugGuidanceState", "calibrationLoadState", "calibrationPlainGuideState", "calibrationQuickTestGuidanceState", "calibrationSelfCheckGuidanceState", "calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
     script: "./js/objectiveRuntime.js",
@@ -1902,6 +1902,23 @@ function updateCalibrationGuidance() {
   if (kind === "debug_calibration") {
     const debugDays = Number($("#task-quick-days")?.value) || 30;
     const loadInfo = estimateCalibrationLoad();
+    const runtimeGuidanceState = window.HBVStudioCalibrationView?.calibrationDebugGuidanceState;
+    const guidance = typeof runtimeGuidanceState === "function"
+      ? runtimeGuidanceState({
+        adviceHeadline: advice?.headline,
+        debugDays,
+        loadInfo,
+      })
+      : null;
+    if (guidance?.smart?.text && guidance?.strategy?.text && guidance?.load?.text) {
+      smart.textContent = guidance.smart.text;
+      smart.className = guidance.smart.className || "hint-box status-ok";
+      strategy.textContent = guidance.strategy.text;
+      strategy.className = guidance.strategy.className || "hint-box status-ok";
+      load.textContent = guidance.load.text;
+      load.className = guidance.load.className || "hint-box status-ok";
+      return;
+    }
     smart.textContent = advice?.headline
       ? `智能建议：${advice.headline} 当前使用快速试算，可先看参数响应。`
       : "智能建议：快速试算适合先确认参数响应，再进入正式率定。";
