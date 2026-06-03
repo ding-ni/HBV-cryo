@@ -98,6 +98,7 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!html.includes("/api/geo/*")) throw new Error("offline map plan should mention local geo endpoints");
 
             const rasterHtml = geo.renderOverview({
+              config_path: "F:/model workspace/config.json",
               flow_name: "raster preview",
               available_layer_count: 3,
               focus_bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 },
@@ -107,8 +108,11 @@ class FrontendGeoPreviewTests(unittest.TestCase):
                 { id: "glacier", label: "冰川", kind: "raster", status: "ok", bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 } },
               ],
             });
-            for (const item of ["geo-raster-surface", "geo-dem-base", "geo-elevation-band-low", "geo-elevation-band-mid", "geo-elevation-band-high", "geo-glacier-fill", "geo-glacier-stripe"]) {
+            for (const item of ["geo-raster-surface", "geo-raster-image", "/api/geo/dem?", "/api/geo/elevation-zones.png?", "/api/geo/glacier.png?"]) {
               if (!rasterHtml.includes(item)) throw new Error(`raster preview layer missing: ${item}`);
+            }
+            if (rasterHtml.includes("geo-elevation-band-low") || rasterHtml.includes("geo-glacier-stripe")) {
+              throw new Error("raster preview should not render illustrative fake bands or stripes");
             }
             for (const key of ["dem", "elevation_zone", "glacier"]) {
               if (!rasterHtml.includes(`data-geo-layer-toggle="${key}"`)) throw new Error(`raster layer toggle missing: ${key}`);
@@ -164,8 +168,12 @@ class FrontendGeoPreviewTests(unittest.TestCase):
 
             if (plan.version !== 8 || plan.offline !== true) throw new Error("plan metadata mismatch");
             if (plan.sources.dem.type !== "image") throw new Error("DEM should use image source");
+            if (plan.sources.elevation_zones.type !== "image") throw new Error("elevation zones should use image source");
+            if (plan.sources.glacier.type !== "image") throw new Error("glacier should use image source");
             if (!plan.sources.dem.url.startsWith("/api/geo/dem?")) throw new Error(plan.sources.dem.url);
             if (!plan.sources.dem.url.includes("style=gray")) throw new Error(plan.sources.dem.url);
+            if (!plan.sources.elevation_zones.url.startsWith("/api/geo/elevation-zones.png?")) throw new Error(plan.sources.elevation_zones.url);
+            if (!plan.sources.glacier.url.startsWith("/api/geo/glacier.png?")) throw new Error(plan.sources.glacier.url);
             if (!plan.sources.dem.url.includes("ws=F%3A%2F%E6%B5%8B%E8%AF%95+%E5%B7%A5%E4%BD%9C%E5%8C%BA%2Fworkspace.json")) {
               throw new Error(`workspace path was not encoded: ${plan.sources.dem.url}`);
             }
@@ -178,16 +186,16 @@ class FrontendGeoPreviewTests(unittest.TestCase):
               if (/https?:\/\//i.test(serialized)) throw new Error(`${key} source must stay offline`);
             }
             const ids = plan.layers.map(layer => layer.id);
-            for (const id of ["dem", "elevation-zones-fill", "glacier-fill", "basin-line", "stations"]) {
+            for (const id of ["dem", "elevation-zones-raster", "glacier-raster", "basin-line", "stations"]) {
               if (!ids.includes(id)) throw new Error(`missing layer ${id}: ${ids.join(",")}`);
             }
             const controlIds = plan.layerControls.map(item => item.id);
             for (const id of ["dem", "elevation_zone", "glacier", "basin", "stations"]) {
               if (!controlIds.includes(id)) throw new Error(`missing layer control ${id}: ${controlIds.join(",")}`);
             }
-            const zonesPaint = plan.layers.find(layer => layer.id === "elevation-zones-fill").paint["fill-color"];
-            if (!Array.isArray(zonesPaint) || zonesPaint[0] !== "match" || !zonesPaint.includes("low") || !zonesPaint.includes("high")) {
-              throw new Error(`elevation zones should use banded fill colors: ${JSON.stringify(zonesPaint)}`);
+            const zonesPaint = plan.layers.find(layer => layer.id === "elevation-zones-raster").paint;
+            if (zonesPaint["raster-opacity"] !== 0.78) {
+              throw new Error(`elevation zones should use raster opacity: ${JSON.stringify(zonesPaint)}`);
             }
             const stationPaint = plan.layers.find(layer => layer.id === "stations").paint;
             const stationColor = stationPaint["circle-color"];
@@ -208,13 +216,12 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (controlledDem.paint["raster-opacity"] !== 0.22) {
               throw new Error(`DEM opacity should apply layer control: ${JSON.stringify(controlledDem.paint)}`);
             }
-            const controlledGlacierFill = controlled.layers.find(layer => layer.id === "glacier-fill");
-            const controlledGlacierLine = controlled.layers.find(layer => layer.id === "glacier-line");
-            if (controlledGlacierFill.layout.visibility !== "none" || controlledGlacierLine.layout.visibility !== "none") {
-              throw new Error("glacier visibility control should hide both fill and line layers");
+            const controlledGlacier = controlled.layers.find(layer => layer.id === "glacier-raster");
+            if (controlledGlacier.layout.visibility !== "none") {
+              throw new Error("glacier visibility control should hide the raster layer");
             }
-            if (controlledGlacierFill.paint["fill-opacity"] !== 0.136 || controlledGlacierLine.paint["line-opacity"] !== 0.4) {
-              throw new Error(`glacier opacity control mismatch: ${JSON.stringify([controlledGlacierFill.paint, controlledGlacierLine.paint])}`);
+            if (controlledGlacier.paint["raster-opacity"] !== 0.368) {
+              throw new Error(`glacier opacity control mismatch: ${JSON.stringify(controlledGlacier.paint)}`);
             }
             const controlledStations = controlled.layers.find(layer => layer.id === "stations");
             if (controlledStations.paint["circle-opacity"] !== 0.5 || controlledStations.paint["circle-stroke-opacity"] !== 0.5) {

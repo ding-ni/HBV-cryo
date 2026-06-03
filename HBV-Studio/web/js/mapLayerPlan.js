@@ -98,6 +98,8 @@
     const stationsLayer = overviewLayer(overview, "stations");
     const demBounds = layerBounds(demLayer, bounds);
     const demCoordinates = imageCoordinates(demBounds);
+    const zonesCoordinates = imageCoordinates(layerBounds(zonesLayer, bounds));
+    const glacierCoordinates = imageCoordinates(layerBounds(glacierLayer, bounds));
 
     if (demLayer && demCoordinates) {
       const control = layerControlState(options, "dem");
@@ -115,39 +117,37 @@
       });
       pushLayerControl(layerControls, "dem", demLayer, ["dem"], control);
     }
-    if (zonesLayer) {
+    if (zonesLayer && zonesCoordinates) {
       const control = layerControlState(options, "elevation_zone");
-      sources.elevation_zones = { type: "geojson", data: endpointUrl("/api/geo/elevation-zones", ws) };
+      sources.elevation_zones = {
+        type: "image",
+        url: endpointUrl("/api/geo/elevation-zones.png", ws),
+        coordinates: zonesCoordinates,
+      };
       layers.push({
-        id: "elevation-zones-fill",
-        type: "fill",
+        id: "elevation-zones-raster",
+        type: "raster",
         source: "elevation_zones",
         layout: layerLayout(control),
-        paint: {
-          "fill-color": ["match", ["get", "zone"], "low", "#7fcdbb", "mid", "#38bdf8", "high", "#2563eb", "#64748b"],
-          "fill-opacity": layerOpacity(0.24, control),
-        },
+        paint: { "raster-opacity": layerOpacity(0.78, control) },
       });
-      pushLayerControl(layerControls, "elevation_zone", zonesLayer, ["elevation-zones-fill"], control);
+      pushLayerControl(layerControls, "elevation_zone", zonesLayer, ["elevation-zones-raster"], control);
     }
-    if (glacierLayer) {
+    if (glacierLayer && glacierCoordinates) {
       const control = layerControlState(options, "glacier");
-      sources.glacier = { type: "geojson", data: endpointUrl("/api/geo/glacier", ws) };
+      sources.glacier = {
+        type: "image",
+        url: endpointUrl("/api/geo/glacier.png", ws),
+        coordinates: glacierCoordinates,
+      };
       layers.push({
-        id: "glacier-fill",
-        type: "fill",
+        id: "glacier-raster",
+        type: "raster",
         source: "glacier",
         layout: layerLayout(control),
-        paint: { "fill-color": "#06b6d4", "fill-opacity": layerOpacity(0.34, control) },
+        paint: { "raster-opacity": layerOpacity(0.92, control) },
       });
-      layers.push({
-        id: "glacier-line",
-        type: "line",
-        source: "glacier",
-        layout: layerLayout(control),
-        paint: { "line-color": "#0891b2", "line-width": 1.4, "line-opacity": layerOpacity(1, control) },
-      });
-      pushLayerControl(layerControls, "glacier", glacierLayer, ["glacier-fill", "glacier-line"], control);
+      pushLayerControl(layerControls, "glacier", glacierLayer, ["glacier-raster"], control);
     }
     if (basinLayer) {
       const control = layerControlState(options, "basin");

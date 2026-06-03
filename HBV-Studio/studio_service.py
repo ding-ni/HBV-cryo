@@ -146,7 +146,9 @@ from services.geo_overview import GeoOverviewContext
 from services.geo_overview import workspace_basin_geojson as build_workspace_basin_geojson
 from services.geo_overview import workspace_dem_png as build_workspace_dem_png
 from services.geo_overview import workspace_elevation_zones_geojson as build_workspace_elevation_zones_geojson
+from services.geo_overview import workspace_elevation_zones_png as build_workspace_elevation_zones_png
 from services.geo_overview import workspace_glacier_geojson as build_workspace_glacier_geojson
+from services.geo_overview import workspace_glacier_png as build_workspace_glacier_png
 from services.geo_overview import workspace_geo_overview as build_workspace_geo_overview
 from services.geo_overview import workspace_station_geojson as build_workspace_station_geojson
 from services.geo_status import GeoStatusContext
@@ -1153,6 +1155,14 @@ def workspace_basin_geojson(config_path_raw: str) -> dict[str, Any]:
 
 def workspace_dem_png(config_path_raw: str, style: str = "hillshade") -> dict[str, Any]:
     return build_workspace_dem_png(config_path_raw, _geo_overview_context(), style=style)
+
+
+def workspace_elevation_zones_png(config_path_raw: str) -> dict[str, Any]:
+    return build_workspace_elevation_zones_png(config_path_raw, _geo_overview_context())
+
+
+def workspace_glacier_png(config_path_raw: str) -> dict[str, Any]:
+    return build_workspace_glacier_png(config_path_raw, _geo_overview_context())
 
 
 def workspace_glacier_geojson(config_path_raw: str) -> dict[str, Any]:
@@ -4283,6 +4293,16 @@ class StudioHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _send_geo_png(self, image: dict[str, Any]) -> None:
+        self.send_bytes(
+            image["body"],
+            str(image.get("content_type") or "image/png"),
+            headers={
+                "X-HBV-Geo-Bounds": json_dumps_safe(image.get("bounds") or {}),
+                "X-HBV-Geo-Metrics": json_dumps_safe(image.get("metrics") or {}),
+            },
+        )
+
     def _api_get_geo_overview(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_geo_overview(raw_path)})
@@ -4295,9 +4315,17 @@ class StudioHandler(BaseHTTPRequestHandler):
         raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_elevation_zones_geojson(raw_path)})
 
+    def _api_get_geo_elevation_zones_png(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self._send_geo_png(workspace_elevation_zones_png(raw_path))
+
     def _api_get_geo_glacier(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
         self.send_json({"ok": True, "data": workspace_glacier_geojson(raw_path)})
+
+    def _api_get_geo_glacier_png(self, query: dict[str, list[str]]) -> None:
+        raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])
+        self._send_geo_png(workspace_glacier_png(raw_path))
 
     def _api_get_geo_stations(self, query: dict[str, list[str]]) -> None:
         raw_path = unquote(query.get("ws", [""])[0] or query.get("config_path", [""])[0] or query.get("path", [""])[0])

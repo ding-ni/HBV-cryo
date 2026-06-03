@@ -1242,6 +1242,10 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   vector-effect: non-scaling-stroke;
   transition: opacity 140ms ease;
 }
+.geo-raster-image {
+  image-rendering: auto;
+  pointer-events: none;
+}
 .geo-layer-dem {
   color: rgba(71,85,105,0.30);
   fill: rgba(100,116,139,0.12);

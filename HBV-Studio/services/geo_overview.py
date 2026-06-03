@@ -230,6 +230,114 @@ def _dem_array_to_png(values: Any, style: str = "hillshade") -> bytes:
     return _encode_rgba_png(rgba)
 
 
+def _read_raster_preview(path: Path, max_dim: int = 768, out_shape: tuple[int, int] | None = None) -> dict[str, Any]:
+    import numpy as np
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    with rasterio.open(path) as src:
+        if src.crs:
+            bounds_values = transform_bounds(src.crs, "EPSG:4326", *src.bounds, densify_pts=21)
+            crs_text = str(src.crs)
+        else:
+            bounds_values = src.bounds
+            crs_text = ""
+        bounds = _geo_bounds_dict(bounds_values)
+        if not bounds:
+            raise ValueError("Invalid raster bounds.")
+
+        if out_shape is None:
+            scale = min(1.0, max_dim / max(1, src.width), max_dim / max(1, src.height))
+            out_width = max(2, int(round(src.width * scale)))
+            out_height = max(2, int(round(src.height * scale)))
+        else:
+            out_height = max(2, int(out_shape[0]))
+            out_width = max(2, int(out_shape[1]))
+
+        arr = src.read(1, out_shape=(out_height, out_width), masked=True)
+        if np.ma.isMaskedArray(arr):
+            values = np.asarray(arr.astype("float64").filled(np.nan), dtype="float64")
+            valid = np.asarray(~np.ma.getmaskarray(arr), dtype=bool) & np.isfinite(values)
+        else:
+            values = np.asarray(arr, dtype="float64")
+            valid = np.isfinite(values)
+
+        res_x, res_y = src.res
+        return {
+            "values": values,
+            "valid": valid,
+            "bounds": bounds,
+            "path": path.resolve(strict=False),
+            "metrics": {
+                "width": int(src.width),
+                "height": int(src.height),
+                "preview_width": int(out_width),
+                "preview_height": int(out_height),
+                "crs": crs_text,
+                "resolution": [round(float(res_x), 6), round(float(res_y), 6)],
+            },
+        }
+
+
+def _positive_raster_mask(values: Any, valid: Any) -> Any:
+    import numpy as np
+
+    arr = np.asarray(values, dtype="float64")
+    return np.asarray(valid, dtype=bool) & np.isfinite(arr) & (arr > 0)
+
+
+def _elevation_zone_arrays_to_png(zone_entries: list[dict[str, Any]]) -> bytes:
+    import numpy as np
+
+    if not zone_entries:
+        raise ValueError("No elevation zone raster to render.")
+    first_values = np.asarray(zone_entries[0]["preview"]["values"], dtype="float64")
+    rgba = np.zeros((first_values.shape[0], first_values.shape[1], 4), dtype=np.uint8)
+    colors = {
+        "low": (125, 211, 252, 118),
+        "mid": (59, 130, 246, 126),
+        "high": (30, 64, 175, 138),
+    }
+    for entry in zone_entries:
+        zone = str(entry.get("zone", "") or "")
+        color = colors.get(zone, (100, 116, 139, 120))
+        preview = entry["preview"]
+        mask = _positive_raster_mask(preview["values"], preview["valid"])
+        rgba[mask, 0] = color[0]
+        rgba[mask, 1] = color[1]
+        rgba[mask, 2] = color[2]
+        rgba[mask, 3] = color[3]
+        entry["positive_pixels"] = int(np.count_nonzero(mask))
+    return _encode_rgba_png(rgba)
+
+
+def _glacier_array_to_png(values: Any, valid: Any) -> tuple[bytes, dict[str, Any]]:
+    import numpy as np
+
+    arr = np.asarray(values, dtype="float64")
+    positive = _positive_raster_mask(arr, valid)
+    rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+    metrics: dict[str, Any] = {"positive_pixels": int(np.count_nonzero(positive))}
+    if np.any(positive):
+        positive_values = arr[positive]
+        max_value = float(np.nanmax(positive_values))
+        min_value = float(np.nanmin(positive_values))
+        raw = np.where(positive, np.maximum(arr, 0.0), 0.0)
+        if max_value <= 1.0:
+            unit = raw
+        elif max_value <= 100.0:
+            unit = raw / 100.0
+        else:
+            unit = raw / max_value
+        unit = np.clip(unit, 0.0, 1.0)
+        rgba[..., 0] = np.where(positive, np.clip(6 + unit * 28, 0, 255), 0).astype(np.uint8)
+        rgba[..., 1] = np.where(positive, np.clip(126 + unit * 85, 0, 255), 0).astype(np.uint8)
+        rgba[..., 2] = np.where(positive, np.clip(170 + unit * 72, 0, 255), 0).astype(np.uint8)
+        rgba[..., 3] = np.where(positive, np.clip(58 + unit * 174, 0, 255), 0).astype(np.uint8)
+        metrics.update({"min": round(min_value, 4), "max": round(max_value, 4)})
+    return _encode_rgba_png(rgba), metrics
+
+
 def _detect_table_column(columns: list[str], candidates: list[str]) -> str | None:
     lookup = {str(column).strip().lower(): str(column) for column in columns}
     for candidate in candidates:
@@ -768,6 +876,93 @@ def workspace_elevation_zones_geojson(config_path_raw: str, context: GeoOverview
     if not layers:
         return _empty_geojson_layer("elevation_zones", "高程分区", message="未生成高程分区")
     return _polygon_layers_geojson("elevation_zones", "高程分区", layers)
+
+
+def workspace_elevation_zones_png(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    _cfg_path, config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    threshold_m = _finite_float(config.get("CFMAX分区阈值_m", 5000.0))
+    zone_entries: list[dict[str, Any]] = []
+    out_shape: tuple[int, int] | None = None
+
+    for zone, label, filename in _ELEVATION_ZONE_SPECS:
+        path = gis_dir / filename
+        if not path.exists():
+            continue
+        try:
+            preview = _read_raster_preview(path, out_shape=out_shape)
+        except Exception as exc:
+            raise ValueError(f"Elevation zone raster render failed: {path}: {exc}") from exc
+        if out_shape is None:
+            values = preview["values"]
+            out_shape = (int(values.shape[0]), int(values.shape[1]))
+        metadata = _elevation_zone_metadata(zone, threshold_m)
+        zone_entries.append({
+            "zone": zone,
+            "label": label,
+            "filename": filename,
+            "preview": preview,
+            **metadata,
+        })
+
+    if not zone_entries:
+        raise FileNotFoundError("Elevation zone rasters have not been generated.")
+    body = _elevation_zone_arrays_to_png(zone_entries)
+    bounds = _merge_geo_bounds([entry["preview"].get("bounds") for entry in zone_entries])
+    if not bounds:
+        raise ValueError("Elevation zone raster bounds are invalid.")
+    first_preview = zone_entries[0]["preview"]
+    return {
+        "content_type": "image/png",
+        "body": body,
+        "bounds": bounds,
+        "path": str(gis_dir.resolve(strict=False)),
+        "display_path": context.to_display_path(gis_dir.resolve(strict=False)),
+        "metrics": {
+            **first_preview["metrics"],
+            "layer_count": len(zone_entries),
+            "threshold_m": threshold_m,
+            "zones": [
+                {
+                    "zone": entry["zone"],
+                    "positive_pixels": int(entry.get("positive_pixels", 0)),
+                    **{
+                        key: entry[key]
+                        for key in _ELEVATION_ZONE_PROPERTY_KEYS
+                        if entry.get(key) is not None
+                    },
+                }
+                for entry in zone_entries
+            ],
+        },
+    }
+
+
+def workspace_glacier_png(config_path_raw: str, context: GeoOverviewContext) -> dict[str, Any]:
+    _cfg_path, _config, _raw_config, _profile, _paths, gis_dir = _load_workspace_geo_sources(config_path_raw, context)
+    glacier_path = next(
+        (item for item in [gis_dir / "glacier_fraction.tif", gis_dir / "glacier_mask.tif"] if item.exists()),
+        None,
+    )
+    if glacier_path is None:
+        raise FileNotFoundError("Glacier raster has not been generated.")
+    try:
+        preview = _read_raster_preview(glacier_path)
+        body, value_metrics = _glacier_array_to_png(preview["values"], preview["valid"])
+    except Exception as exc:
+        raise ValueError(f"Glacier raster render failed: {glacier_path}: {exc}") from exc
+    source_kind = "fraction" if glacier_path.name == "glacier_fraction.tif" else "mask"
+    return {
+        "content_type": "image/png",
+        "body": body,
+        "bounds": preview["bounds"],
+        "path": str(preview["path"]),
+        "display_path": context.to_display_path(preview["path"]),
+        "metrics": {
+            **preview["metrics"],
+            **value_metrics,
+            "source": source_kind,
+        },
+    }
 
 
 def workspace_dem_png(config_path_raw: str, context: GeoOverviewContext, style: str = "hillshade") -> dict[str, Any]:

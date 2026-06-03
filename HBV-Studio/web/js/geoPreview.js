@@ -51,6 +51,18 @@
     };
   }
 
+  function endpointUrl(endpoint, workspacePath, params = {}) {
+    const query = new URLSearchParams();
+    const ws = String(workspacePath || "").trim();
+    if (ws) query.set("ws", ws);
+    Object.entries(params).forEach(([key, value]) => {
+      const text = String(value ?? "").trim();
+      if (text) query.set(key, text);
+    });
+    const suffix = query.toString();
+    return suffix ? `${endpoint}?${suffix}` : endpoint;
+  }
+
   function previewBounds(overview) {
     const b = overview?.focus_bounds || overview?.bounds || null;
     if (!b) return null;
@@ -138,36 +150,24 @@
     return { x, y, width, height };
   }
 
-  function renderRasterLayer(layer, bounds) {
+  function rasterImageUrl(layer, overview) {
+    const ws = String(overview?.config_path || "").trim();
+    if (!ws) return "";
+    if (layer.id === "dem") return endpointUrl("/api/geo/dem", ws, { style: "hillshade" });
+    if (layer.id === "elevation_zone") return endpointUrl("/api/geo/elevation-zones.png", ws);
+    if (layer.id === "glacier") return endpointUrl("/api/geo/glacier.png", ws);
+    return "";
+  }
+
+  function renderRasterLayer(layer, bounds, overview, escapeHtml) {
     const rect = rectFromBounds(layer, bounds);
     if (!rect) return "";
     const attrs = `x="${rect.x.toFixed(1)}" y="${rect.y.toFixed(1)}" width="${rect.width.toFixed(1)}" height="${rect.height.toFixed(1)}"`;
-    if (layer.id === "dem") {
+    const href = rasterImageUrl(layer, overview);
+    if (["dem", "elevation_zone", "glacier"].includes(layer.id)) {
       return `
-        <g class="geo-raster-surface geo-layer geo-layer-dem">
-          <rect class="geo-dem-base" ${attrs} rx="3"></rect>
-          <rect class="geo-dem-shade geo-raster-band" ${attrs} rx="3"></rect>
-        </g>
-      `;
-    }
-    if (layer.id === "elevation_zone") {
-      const bandHeight = rect.height / 3;
-      return `
-        <g class="geo-raster-surface geo-layer geo-layer-elevation_zone">
-          ${["low", "mid", "high"].map((band, index) => `
-            <rect class="geo-elevation-band geo-elevation-band-${band}" x="${rect.x.toFixed(1)}" y="${(rect.y + bandHeight * index).toFixed(1)}" width="${rect.width.toFixed(1)}" height="${bandHeight.toFixed(1)}"></rect>
-          `).join("")}
-          <rect class="geo-raster-outline" ${attrs} rx="3"></rect>
-        </g>
-      `;
-    }
-    if (layer.id === "glacier") {
-      return `
-        <g class="geo-raster-surface geo-layer geo-layer-glacier">
-          <rect class="geo-glacier-fill" ${attrs} rx="3"></rect>
-          ${[0.2, 0.38, 0.56, 0.74].map(fraction => `
-            <line class="geo-glacier-stripe" x1="${rect.x.toFixed(1)}" y1="${(rect.y + rect.height * fraction).toFixed(1)}" x2="${(rect.x + rect.width).toFixed(1)}" y2="${(rect.y + rect.height * (fraction - 0.16)).toFixed(1)}"></line>
-          `).join("")}
+        <g class="geo-raster-surface geo-layer ${layerCssClass(layer)}">
+          ${href ? `<image class="geo-raster-image" ${attrs} href="${escapeHtml(href)}" preserveAspectRatio="none"></image>` : ""}
           <rect class="geo-raster-outline" ${attrs} rx="3"></rect>
         </g>
       `;
@@ -175,12 +175,12 @@
     return "";
   }
 
-  function renderRasterLayers(overview, bounds) {
+  function renderRasterLayers(overview, bounds, escapeHtml) {
     const layers = Array.isArray(overview?.layers) ? overview.layers : [];
     return ["dem", "elevation_zone", "glacier"]
       .map(id => layers.find(layer => layer?.id === id && layer?.status === "ok"))
       .filter(Boolean)
-      .map(layer => renderRasterLayer(layer, bounds))
+      .map(layer => renderRasterLayer(layer, bounds, overview, escapeHtml))
       .join("");
   }
 
@@ -413,7 +413,7 @@
             ${renderLayerToggles(overview, escapeHtml)}
             <svg class="geo-preview-svg" viewBox="0 0 640 300" role="img" aria-label="工作区空间预览">
               <rect class="geo-preview-frame" x="1" y="1" width="638" height="298" rx="4"></rect>
-              ${renderRasterLayers(overview, bounds)}
+              ${renderRasterLayers(overview, bounds, escapeHtml)}
               ${renderLayerPaths(overview, bounds)}
               ${renderLayerPoints(overview, bounds, escapeHtml)}
               ${renderCoordinateFrame(bounds, escapeHtml)}

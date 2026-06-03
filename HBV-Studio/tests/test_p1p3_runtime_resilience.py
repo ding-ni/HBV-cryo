@@ -82,7 +82,9 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             "/api/geo/overview",
             "/api/geo/basin",
             "/api/geo/elevation-zones",
+            "/api/geo/elevation-zones.png",
             "/api/geo/glacier",
+            "/api/geo/glacier.png",
             "/api/geo/stations",
             "/api/data-prep/steps",
             "/api/data-prep/status",
@@ -228,6 +230,32 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(calls[0][1], "image/png")
         self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Bounds"])["east"], 101.0)
         self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Metrics"])["style"], "gray")
+
+    def test_geo_raster_png_handlers_send_workspace_raster_images(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+        calls: list[tuple[bytes, str, dict[str, str]]] = []
+        handler.send_bytes = lambda body, content_type, status=200, headers=None: calls.append((body, content_type, headers or {})) or True
+        encoded_workspace = "F%3A%2F%E6%B5%8B%E8%AF%95%20workspace%2Fconfig.json"
+        decoded_workspace = "F:/测试 workspace/config.json"
+        image = {
+            "body": b"\x89PNG\r\n\x1a\n",
+            "content_type": "image/png",
+            "bounds": {"west": 100.0, "south": 31.0, "east": 101.0, "north": 32.0},
+            "metrics": {"preview_width": 10, "preview_height": 8},
+        }
+
+        with (
+            mock.patch.object(svc, "workspace_elevation_zones_png", return_value={**image, "metrics": {"layer_count": 3}}) as zones,
+            mock.patch.object(svc, "workspace_glacier_png", return_value={**image, "metrics": {"source": "fraction"}}) as glacier,
+        ):
+            handler._api_get_geo_elevation_zones_png({"ws": [encoded_workspace]})
+            handler._api_get_geo_glacier_png({"ws": [encoded_workspace]})
+
+        zones.assert_called_once_with(decoded_workspace)
+        glacier.assert_called_once_with(decoded_workspace)
+        self.assertEqual([call[1] for call in calls], ["image/png", "image/png"])
+        self.assertEqual(json.loads(calls[0][2]["X-HBV-Geo-Metrics"])["layer_count"], 3)
+        self.assertEqual(json.loads(calls[1][2]["X-HBV-Geo-Metrics"])["source"], "fraction")
 
     def test_geo_json_handlers_accept_workspace_alias_and_send_layer_payloads(self) -> None:
         handler = object.__new__(svc.StudioHandler)

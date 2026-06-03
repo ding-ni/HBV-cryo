@@ -21,8 +21,10 @@ from services.geo_overview import (  # noqa: E402
     workspace_basin_geojson,
     workspace_dem_png,
     workspace_elevation_zones_geojson,
+    workspace_elevation_zones_png,
     workspace_geo_overview,
     workspace_glacier_geojson,
+    workspace_glacier_png,
     workspace_station_geojson,
 )
 
@@ -149,6 +151,107 @@ class GeoOverviewStationLayerTests(unittest.TestCase):
         self.assertAlmostEqual(image["bounds"]["east"], 100.12)
         self.assertAlmostEqual(image["bounds"]["north"], 32.0)
         self.assertAlmostEqual(image["bounds"]["south"], 31.92)
+
+    def test_elevation_zone_rasters_can_be_rendered_as_offline_png(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_path = root / "workspace.json"
+            gis_dir = root / "gis"
+            gis_dir.mkdir()
+            zone_values = {
+                "elevation_zone_low.tif": np.array([[1, 1, 0], [0, 0, 0], [0, 0, 0]], dtype="uint8"),
+                "elevation_zone_mid.tif": np.array([[0, 0, 0], [1, 1, 1], [0, 0, 0]], dtype="uint8"),
+                "elevation_zone_high.tif": np.array([[0, 0, 0], [0, 0, 0], [1, 0, 1]], dtype="uint8"),
+            }
+            for filename, values in zone_values.items():
+                with rasterio.open(
+                    gis_dir / filename,
+                    "w",
+                    driver="GTiff",
+                    height=values.shape[0],
+                    width=values.shape[1],
+                    count=1,
+                    dtype="uint8",
+                    crs="EPSG:4326",
+                    transform=from_origin(100.0, 32.0, 0.01, 0.01),
+                    nodata=0,
+                ) as dst:
+                    dst.write(values, 1)
+
+            context = GeoOverviewContext(
+                load_workspace_config=lambda raw: (cfg_path, {}),
+                read_json_file=lambda path: {},
+                current_profile=lambda cfg: "daily",
+                build_profile_paths=lambda cfg, profile: {"gis_dir": str(gis_dir)},
+                resolve_config_related_path=lambda cfg, raw: None,
+                workspace_dem_path=lambda path, prefer=None: Path(path) / "missing_dem.tif",
+                configured_dem_kind=lambda cfg: "",
+                to_display_path=lambda path: Path(path).name,
+                profile_labels={"daily": "daily"},
+            )
+
+            image = workspace_elevation_zones_png(str(cfg_path), context)
+
+        self.assertEqual(image["content_type"], "image/png")
+        self.assertTrue(image["body"].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreater(len(image["body"]), 80)
+        self.assertEqual(image["metrics"]["layer_count"], 3)
+        self.assertEqual(image["metrics"]["preview_width"], 3)
+        self.assertEqual(image["metrics"]["preview_height"], 3)
+        self.assertEqual([item["zone"] for item in image["metrics"]["zones"]], ["low", "mid", "high"])
+        self.assertEqual([item["positive_pixels"] for item in image["metrics"]["zones"]], [2, 3, 2])
+        self.assertAlmostEqual(image["bounds"]["west"], 100.0)
+        self.assertAlmostEqual(image["bounds"]["east"], 100.03)
+
+    def test_glacier_fraction_raster_can_be_rendered_as_offline_png(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg_path = root / "workspace.json"
+            gis_dir = root / "gis"
+            gis_dir.mkdir()
+            values = np.array(
+                [
+                    [0.0, 0.25, 0.0],
+                    [0.5, 0.75, 0.0],
+                    [0.0, 0.0, 0.0],
+                ],
+                dtype="float32",
+            )
+            with rasterio.open(
+                gis_dir / "glacier_fraction.tif",
+                "w",
+                driver="GTiff",
+                height=values.shape[0],
+                width=values.shape[1],
+                count=1,
+                dtype="float32",
+                crs="EPSG:4326",
+                transform=from_origin(100.0, 32.0, 0.01, 0.01),
+            ) as dst:
+                dst.write(values, 1)
+
+            context = GeoOverviewContext(
+                load_workspace_config=lambda raw: (cfg_path, {}),
+                read_json_file=lambda path: {},
+                current_profile=lambda cfg: "daily",
+                build_profile_paths=lambda cfg, profile: {"gis_dir": str(gis_dir)},
+                resolve_config_related_path=lambda cfg, raw: None,
+                workspace_dem_path=lambda path, prefer=None: Path(path) / "missing_dem.tif",
+                configured_dem_kind=lambda cfg: "",
+                to_display_path=lambda path: Path(path).name,
+                profile_labels={"daily": "daily"},
+            )
+
+            image = workspace_glacier_png(str(cfg_path), context)
+
+        self.assertEqual(image["content_type"], "image/png")
+        self.assertTrue(image["body"].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreater(len(image["body"]), 80)
+        self.assertEqual(image["metrics"]["source"], "fraction")
+        self.assertEqual(image["metrics"]["positive_pixels"], 3)
+        self.assertAlmostEqual(image["metrics"]["max"], 0.75)
+        self.assertAlmostEqual(image["bounds"]["west"], 100.0)
+        self.assertAlmostEqual(image["bounds"]["east"], 100.03)
 
     def test_basin_layer_rings_become_geojson_polygon(self) -> None:
         context = mock.Mock()

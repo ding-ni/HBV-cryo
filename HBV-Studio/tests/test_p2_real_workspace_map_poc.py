@@ -38,6 +38,14 @@ class P2RealWorkspaceMapPoCTests(unittest.TestCase):
         self.assertTrue(dem["body"].startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(dem["metrics"]["preview_width"], 10)
         self.assertGreater(dem["metrics"]["preview_height"], 10)
+        zones = svc.workspace_elevation_zones_png(str(config_path.resolve()))
+        self.assertEqual(zones["content_type"], "image/png")
+        self.assertTrue(zones["body"].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreaterEqual(zones["metrics"]["layer_count"], 1)
+        glacier = svc.workspace_glacier_png(str(config_path.resolve()))
+        self.assertEqual(glacier["content_type"], "image/png")
+        self.assertTrue(glacier["body"].startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertIn(glacier["metrics"]["source"], {"fraction", "mask"})
 
         script = textwrap.dedent(
             r"""
@@ -64,19 +72,18 @@ class P2RealWorkspaceMapPoCTests(unittest.TestCase):
               if (/https?:\/\//i.test(serialized)) throw new Error(`${key} source must not use online tiles`);
             }
             const ids = plan.layers.map(layer => layer.id);
-            for (const id of ["dem", "elevation-zones-fill", "glacier-fill", "glacier-line", "basin-line"]) {
+            for (const id of ["dem", "elevation-zones-raster", "glacier-raster", "basin-line"]) {
               if (!ids.includes(id)) throw new Error(`missing real workspace map layer ${id}`);
             }
             const controls = plan.layerControls.map(item => item.id);
             for (const id of ["dem", "elevation_zone", "glacier", "basin"]) {
               if (!controls.includes(id)) throw new Error(`missing real workspace control ${id}`);
             }
-            const glacierFill = plan.layers.find(layer => layer.id === "glacier-fill");
-            const glacierLine = plan.layers.find(layer => layer.id === "glacier-line");
-            if (glacierFill.layout.visibility !== "none" || glacierLine.layout.visibility !== "none") {
-              throw new Error("glacier control should hide both real workspace glacier layers");
+            const glacierRaster = plan.layers.find(layer => layer.id === "glacier-raster");
+            if (glacierRaster.layout.visibility !== "none") {
+              throw new Error("glacier control should hide the real workspace glacier raster");
             }
-            if (glacierFill.paint["fill-opacity"] !== 0.136 || glacierLine.paint["line-opacity"] !== 0.4) {
+            if (glacierRaster.paint["raster-opacity"] !== 0.368) {
               throw new Error("glacier opacity control was not applied to real workspace layers");
             }
             """
