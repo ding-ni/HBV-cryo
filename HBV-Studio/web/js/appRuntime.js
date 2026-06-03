@@ -32,9 +32,22 @@
     };
   }
 
+  function servicePillState(ok, message = "") {
+    const connected = Boolean(ok);
+    const text = String(message || "");
+    const className = `service-pill ${connected ? "connected" : "error"}`;
+    return {
+      connected,
+      text,
+      className,
+      domUpdates: [{ selector: "#service-pill", text, className }],
+    };
+  }
+
   window.HBVStudioAppRuntime = {
     healthQueryState,
     quitRequestState,
+    servicePillState,
     windowUnloadRequestState,
   };
 })();

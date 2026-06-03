@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -56,6 +56,24 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             const health = runtime.healthQueryState();
             if (!health.ready || health.healthPath !== "/api/health") {
               throw new Error(`health query state mismatch: ${JSON.stringify(health)}`);
+            }
+
+            const connectedPill = runtime.servicePillState(true, "本地服务已连接");
+            if (!connectedPill.connected ||
+                connectedPill.text !== "本地服务已连接" ||
+                connectedPill.className !== "service-pill connected" ||
+                connectedPill.domUpdates[0].selector !== "#service-pill" ||
+                connectedPill.domUpdates[0].text !== "本地服务已连接" ||
+                connectedPill.domUpdates[0].className !== "service-pill connected") {
+              throw new Error(`connected service pill state mismatch: ${JSON.stringify(connectedPill)}`);
+            }
+
+            const errorPill = runtime.servicePillState(false, "连接失败");
+            if (errorPill.connected ||
+                errorPill.text !== "连接失败" ||
+                errorPill.className !== "service-pill error" ||
+                errorPill.domUpdates[0].className !== "service-pill error") {
+              throw new Error(`error service pill state mismatch: ${JSON.stringify(errorPill)}`);
             }
             """
         )

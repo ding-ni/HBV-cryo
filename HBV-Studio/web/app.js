@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "quitRequestState", "servicePillState", "windowUnloadRequestState"],
   },
 ];
 
@@ -2301,10 +2301,8 @@ async function apiPost(path, body) {
 // --------------- service pill ---------------
 
 function setServiceState(ok, msg) {
-  const pill = $("#service-pill");
-  pill.textContent = msg;
-  pill.classList.remove("connected", "error");
-  pill.classList.add(ok ? "connected" : "error");
+  const serviceState = window.HBVStudioAppRuntime.servicePillState(ok, msg);
+  applyDomUpdates(serviceState.domUpdates);
 }
 
 // --------------- view switching ---------------
