@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartRequestState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestState || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             for (const name of ["deleteRunRequestState", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
@@ -534,6 +534,20 @@ class FrontendResultsViewTests(unittest.TestCase):
                 compareRequest.payload.run_path !== "C:/runs/A" || compareRequest.payload.params.TT !== 0.1) {
               throw new Error(`comparison request context wrong: ${JSON.stringify(compareRequest)}`);
             }
+            const compareRequestState = results.runComparisonRequestState(compareRequest);
+            if (!compareRequestState.ready || compareRequestState.reason ||
+                compareRequestState.requestPath !== "/api/simulate/forward" ||
+                compareRequestState.runPath !== "C:/runs/A" ||
+                compareRequestState.payload.run_path !== "C:/runs/A" ||
+                compareRequestState.payload.params.TT !== 0.1) {
+              throw new Error(`comparison request state wrong: ${JSON.stringify(compareRequestState)}`);
+            }
+            const missingCompareRequestState = results.runComparisonRequestState({ payload: { run_path: " " } });
+            if (missingCompareRequestState.ready || missingCompareRequestState.reason !== "missing-run" ||
+                missingCompareRequestState.requestPath !== "/api/simulate/forward" ||
+                missingCompareRequestState.payload.run_path !== "") {
+              throw new Error(`missing comparison request state wrong: ${JSON.stringify(missingCompareRequestState)}`);
+            }
             const globalCompareRequest = results.runComparisonRequestContext({
               parameter_set_id: " global-A ",
               params: { FC: 120 },
@@ -654,6 +668,21 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (forwardRequest.runPath !== "C:/runs/A" || forwardRequest.payload.run_path !== "C:/runs/A" ||
                 forwardRequest.payload.params.TT !== 0.2 || forwardRequest.payload.save_run !== true) {
               throw new Error(`forward request context wrong: ${JSON.stringify(forwardRequest)}`);
+            }
+            const forwardStartRequest = results.forwardSimulationStartRequestState(forwardRequest);
+            if (!forwardStartRequest.ready || forwardStartRequest.reason ||
+                forwardStartRequest.requestPath !== "/api/simulate/forward/start" ||
+                forwardStartRequest.runPath !== "C:/runs/A" ||
+                forwardStartRequest.payload.run_path !== "C:/runs/A" ||
+                forwardStartRequest.payload.params.TT !== 0.2 ||
+                forwardStartRequest.payload.save_run !== true) {
+              throw new Error(`forward start request state wrong: ${JSON.stringify(forwardStartRequest)}`);
+            }
+            const missingForwardStartRequest = results.forwardSimulationStartRequestState({ payload: { run_path: " " } });
+            if (missingForwardStartRequest.ready || missingForwardStartRequest.reason !== "missing-run" ||
+                missingForwardStartRequest.requestPath !== "/api/simulate/forward/start" ||
+                missingForwardStartRequest.payload.run_path !== "") {
+              throw new Error(`missing forward start request state wrong: ${JSON.stringify(missingForwardStartRequest)}`);
             }
             const transientForwardRequest = results.forwardSimulationRequestContext(
               { run: { path: "C:/runs/A" } },

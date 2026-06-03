@@ -454,6 +454,22 @@
     };
   }
 
+  function runComparisonRequestState(requestContext = {}) {
+    const payload = requestContext?.payload && typeof requestContext.payload === "object" ? requestContext.payload : {};
+    const runPath = String(requestContext?.runPath || payload.run_path || "").trim();
+    return {
+      ready: Boolean(runPath),
+      reason: runPath ? "" : "missing-run",
+      message: runPath ? "" : "请选择结果。",
+      runPath,
+      requestPath: "/api/simulate/forward",
+      payload: {
+        ...payload,
+        run_path: runPath,
+      },
+    };
+  }
+
   function runComparisonRequestStillCurrent(request = {}, runData = null, preset = null, helpers = {}) {
     const samePath = helpers.samePath || defaultSamePath;
     const requestRunPath = String(request?.runPath || "").trim();
@@ -567,6 +583,22 @@
         run_path: runPath,
         params: params || {},
         save_run: options.saveRun !== false,
+      },
+    };
+  }
+
+  function forwardSimulationStartRequestState(requestContext = {}) {
+    const payload = requestContext?.payload && typeof requestContext.payload === "object" ? requestContext.payload : {};
+    const runPath = String(requestContext?.runPath || payload.run_path || "").trim();
+    return {
+      ready: Boolean(runPath),
+      reason: runPath ? "" : "missing-run",
+      message: runPath ? "" : "请选择结果。",
+      runPath,
+      requestPath: "/api/simulate/forward/start",
+      payload: {
+        ...payload,
+        run_path: runPath,
       },
     };
   }
@@ -1406,6 +1438,7 @@
     forwardSimulationPreflight,
     forwardSimulationRequestContext,
     forwardSimulationResultState,
+    forwardSimulationStartRequestState,
     forwardSimulationStartState,
     forwardSimulationTaskUiState,
     latestEditableRunPath,
@@ -1437,6 +1470,7 @@
     runComparisonErrorState,
     runComparisonPreflight,
     runComparisonRequestContext,
+    runComparisonRequestState,
     runComparisonRequestStillCurrent,
     runComparisonSuccessState,
     runDetailQueryState,

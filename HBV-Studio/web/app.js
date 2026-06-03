@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartRequestState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestState", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -4555,12 +4555,13 @@ async function runForwardSimulation() {
   applyDomUpdates(startState.domUpdates);
   const requestContext = window.HBVStudioResultsView.forwardSimulationRequestContext(state._runData, state._runParams);
   try {
-    const payload = await apiPost("/api/simulate/forward/start", requestContext.payload);
+    const request = window.HBVStudioResultsView.forwardSimulationStartRequestState(requestContext);
+    const payload = await apiPost(request.requestPath, request.payload);
     const task = payload.task;
     if (task) {
       updateForwardSimUi(task);
       await loadTasks();
-      await pollForwardSimulationTask(task.id, requestContext.runPath);
+      await pollForwardSimulationTask(task.id, request.runPath);
     }
   } catch (err) {
     const errorState = window.HBVStudioResultsView.forwardSimulationErrorState(err);
@@ -4580,7 +4581,8 @@ async function compareSelectedManualPresetSimulation() {
   const requestToken = compareRequestGuard.next();
   const requestContext = window.HBVStudioResultsView.runComparisonRequestContext(preset, state._runData);
   try {
-    const payload = await apiPost("/api/simulate/forward", requestContext.payload);
+    const request = window.HBVStudioResultsView.runComparisonRequestState(requestContext);
+    const payload = await apiPost(request.requestPath, request.payload);
     if (!compareRequestGuard.isActive(requestToken)) return;
     if (!window.HBVStudioResultsView.runComparisonRequestStillCurrent(requestContext, state._runData, selectedManualPreset(), { samePath })) return;
     const successState = window.HBVStudioResultsView.runComparisonSuccessState(preset, payload.data || {});
