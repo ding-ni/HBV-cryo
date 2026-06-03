@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1393,6 +1393,8 @@ function workspaceNextStepText(workflow) {
 }
 
 function formatDurationSeconds(v) {
+  const runtimeFormatDurationSeconds = window.HBVStudioAppRuntime?.formatDurationSeconds;
+  if (typeof runtimeFormatDurationSeconds === "function") return runtimeFormatDurationSeconds(v);
   if (v === null || v === undefined || Number.isNaN(Number(v))) return "\u2014";
   const total = Math.max(0, Math.round(Number(v)));
   const h = Math.floor(total / 3600);

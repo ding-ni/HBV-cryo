@@ -68,6 +68,17 @@
     return Boolean(left && right && left === right);
   }
 
+  function formatDurationSeconds(value) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "\u2014";
+    const total = Math.max(0, Math.round(Number(value)));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+    if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+    return `${seconds}s`;
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -224,6 +235,7 @@
   window.HBVStudioAppRuntime = {
     finiteNumber,
     formatDateTime,
+    formatDurationSeconds,
     formatNumber,
     healthQueryState,
     pollingScheduleState,

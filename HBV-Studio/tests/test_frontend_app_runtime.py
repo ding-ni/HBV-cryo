@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -71,6 +71,12 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.formatDateTime("bad-date") !== "bad-date" ||
                 runtime.formatDateTime(1700000000) !== expectedDateTime) {
               throw new Error("date runtime helper mismatch");
+            }
+            if (runtime.formatDurationSeconds(null) !== "\u2014" ||
+                runtime.formatDurationSeconds(-1) !== "0s" ||
+                runtime.formatDurationSeconds(65) !== "1m 05s" ||
+                runtime.formatDurationSeconds(3661) !== "1h 01m") {
+              throw new Error("duration runtime helper mismatch");
             }
 
             if (runtime.shortPath("") !== "\u2014" ||
