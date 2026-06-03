@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarCountsState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "windowUnloadRequestState"],
   },
 ];
 
@@ -2348,20 +2348,18 @@ function setView(view) {
 // --------------- sidebar ---------------
 
 function updateSidebar() {
-  $("#sidebar-current-workspace").textContent = state.currentWorkspace
-    ? (state.currentWorkspace?.流域名称 || workspaceLabelByPath(state.wizardWorkspacePath) || shortPath(state.wizardWorkspacePath))
-    : "未选择";
-  $("#sidebar-current-profile").textContent = profileLabel(state.currentWorkspace?.率定模式);
-  $("#sidebar-current-object").textContent = objectLabels[state.currentWorkspace?.项目对象] || "未选择";
-  const workflow = state.currentWorkspaceWorkflow;
-  $("#sidebar-current-workflow").textContent = workflow
-    ? (workflow.ready_for_calibration
-      ? `可率定 · ${workflow.completed_count || 0}/${workflow.total_steps || 0}`
-      : workflow.pending_validation
-        ? `待检查 · ${workflow.completed_count || 0}/${workflow.total_steps || 0}`
-        : `未就绪 · ${workflow.completed_count || 0}/${workflow.total_steps || 0}`)
-    : "未检查";
-  $("#sidebar-next-step").textContent = workspaceNextStepText(workflow);
+  const sidebarState = window.HBVStudioAppRuntime.sidebarContextState({
+    currentWorkspace: state.currentWorkspace,
+    workspacePath: state.wizardWorkspacePath,
+    workflow: state.currentWorkspaceWorkflow,
+  }, {
+    objectLabels,
+    profileLabel,
+    shortPath,
+    workspaceLabelByPath,
+    workspaceNextStepText,
+  });
+  applyDomUpdates(sidebarState.domUpdates);
 }
 
 function updateCounts() {

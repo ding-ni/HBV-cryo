@@ -66,10 +66,70 @@
     };
   }
 
+  function defaultShortPath(value = "") {
+    if (!value) return "—";
+    return String(value).replace(/\\/g, "/").replace(/^.*\/([^/]+)$/, "$1");
+  }
+
+  function defaultProfileLabel(value = "") {
+    return value === "hourly" ? "小时尺度" : value === "daily" ? "日尺度" : "未选择";
+  }
+
+  function workflowStatusText(workflow = null) {
+    if (!workflow) return "未检查";
+    const completed = workflow.completed_count || 0;
+    const total = workflow.total_steps || 0;
+    if (workflow.ready_for_calibration) return `可率定 · ${completed}/${total}`;
+    if (workflow.pending_validation) return `待检查 · ${completed}/${total}`;
+    return `未就绪 · ${completed}/${total}`;
+  }
+
+  function sidebarContextState(model = {}, helpers = {}) {
+    const currentWorkspace = model.currentWorkspace || null;
+    const workspacePath = String(model.workspacePath || "");
+    const workflow = model.workflow || null;
+    const objectLabels = helpers.objectLabels || {};
+    const workspaceLabelByPath = typeof helpers.workspaceLabelByPath === "function"
+      ? helpers.workspaceLabelByPath
+      : value => String(value || "");
+    const shortPath = typeof helpers.shortPath === "function" ? helpers.shortPath : defaultShortPath;
+    const profileLabel = typeof helpers.profileLabel === "function" ? helpers.profileLabel : defaultProfileLabel;
+    const workspaceNextStepText = typeof helpers.workspaceNextStepText === "function"
+      ? helpers.workspaceNextStepText
+      : () => "—";
+
+    const workspaceText = currentWorkspace
+      ? (String(currentWorkspace?.["流域名称"] || "").trim() || workspaceLabelByPath(workspacePath) || shortPath(workspacePath))
+      : "未选择";
+    const profileText = profileLabel(currentWorkspace?.["率定模式"]);
+    const objectText = objectLabels[currentWorkspace?.["项目对象"]] || "未选择";
+    const workflowText = workflowStatusText(workflow);
+    const nextStepText = workspaceNextStepText(workflow);
+
+    const context = {
+      workspaceText,
+      profileText,
+      objectText,
+      workflowText,
+      nextStepText,
+    };
+    return {
+      context,
+      domUpdates: [
+        { selector: "#sidebar-current-workspace", text: workspaceText },
+        { selector: "#sidebar-current-profile", text: profileText },
+        { selector: "#sidebar-current-object", text: objectText },
+        { selector: "#sidebar-current-workflow", text: workflowText },
+        { selector: "#sidebar-next-step", text: nextStepText },
+      ],
+    };
+  }
+
   window.HBVStudioAppRuntime = {
     healthQueryState,
     quitRequestState,
     servicePillState,
+    sidebarContextState,
     sidebarCountsState,
     windowUnloadRequestState,
   };
