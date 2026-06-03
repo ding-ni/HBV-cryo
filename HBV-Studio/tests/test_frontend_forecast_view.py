@@ -216,6 +216,7 @@ class FrontendForecastViewTests(unittest.TestCase):
               "forecastSelectedResultRun",
               "forecastCompletedResultState",
               "forecastResultDetailState",
+              "forecastResultDetailQueryState",
               "forecastResultLoadErrorState",
               "forecastResultLoadStartState",
               "forecastResultLoadSuccessState",
@@ -329,6 +330,20 @@ class FrontendForecastViewTests(unittest.TestCase):
                 loadStart.statePatch.forecastResultLoadingPath !== "C:/runs/forecast-new" ||
                 loadStart.statePatch.lastForecastExportPath !== "") {
               throw new Error(`load start patch wrong: ${JSON.stringify(loadStart.statePatch)}`);
+            }
+            const detailQuery = view.forecastResultDetailQueryState({ path: " C:/预报/状态 结果 & 1 " });
+            if (!detailQuery.ready ||
+                detailQuery.message !== "" ||
+                detailQuery.targetPath !== "C:/预报/状态 结果 & 1" ||
+                detailQuery.detailPath !== "/api/run?path=C%3A%2F%E9%A2%84%E6%8A%A5%2F%E7%8A%B6%E6%80%81%20%E7%BB%93%E6%9E%9C%20%26%201") {
+              throw new Error(`detail query should trim and encode result path: ${JSON.stringify(detailQuery)}`);
+            }
+            const emptyDetailQuery = view.forecastResultDetailQueryState({ path: " " });
+            if (emptyDetailQuery.ready ||
+                emptyDetailQuery.message !== "请选择预报结果。" ||
+                emptyDetailQuery.targetPath !== "" ||
+                emptyDetailQuery.detailPath !== "/api/run?path=") {
+              throw new Error(`empty detail query should stay inactive: ${JSON.stringify(emptyDetailQuery)}`);
             }
 
             const loadSuccess = view.forecastResultLoadSuccessState({ run: { path: "C:/runs/forecast-new" } });

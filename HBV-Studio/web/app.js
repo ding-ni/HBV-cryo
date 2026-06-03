@@ -211,6 +211,7 @@ const frontendModuleContracts = [
       "forecastResultExportPayload",
       "forecastResultExportState",
       "forecastResultExportSuccess",
+      "forecastResultDetailQueryState",
       "forecastResultLoadErrorState",
       "forecastResultLoadStartState",
       "forecastResultLoadSuccessState",
@@ -4842,8 +4843,9 @@ async function loadForecastResultDetail(path) {
     window.HBVStudioForecastView.renderForecastResultLoading("正在读取连续状态预报结果。");
   }
   setForecastResultButtons(loadStart.buttonRun);
+  const query = window.HBVStudioForecastView.forecastResultDetailQueryState({ path: loadStart.targetPath });
   try {
-    const payload = await apiGet(`/api/run?path=${encodeURIComponent(loadStart.targetPath)}`);
+    const payload = await apiGet(query.detailPath);
     if (!forecastResultRequestGuard.isActive(requestToken) || !samePath(loadStart.targetPath, state.forecastResultRunPath)) return;
     const loadSuccess = window.HBVStudioForecastView.forecastResultLoadSuccessState(payload.data);
     Object.assign(state, loadSuccess.statePatch);

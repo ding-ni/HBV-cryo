@@ -233,6 +233,16 @@
     };
   }
 
+  function forecastResultDetailQueryState(model = {}) {
+    const targetPath = String(model.path || model.targetPath || "").trim();
+    return {
+      ready: Boolean(targetPath),
+      message: targetPath ? "" : "请选择预报结果。",
+      targetPath,
+      detailPath: `/api/run?path=${encodeURIComponent(targetPath)}`,
+    };
+  }
+
   function forecastResultLoadSuccessState(data = null) {
     return {
       statePatch: {
@@ -1231,6 +1241,7 @@
     forecastResultExportSuccess,
     forecastResultLoadErrorState,
     forecastResultLoadStartState,
+    forecastResultDetailQueryState,
     forecastResultLoadSuccessState,
     forecastResultPanelState,
     forecastResultSelectionState,
