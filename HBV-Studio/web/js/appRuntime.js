@@ -49,6 +49,19 @@
     return date.toLocaleString("zh-CN", { hour12: false });
   }
 
+  function shortPath(value = "") {
+    if (!value) return "\u2014";
+    return String(value || "").replace(/\\/g, "/").replace(/^.*\/([^/]+)$/, "$1");
+  }
+
+  function slashPath(value = "") {
+    return String(value || "").replace(/\\/g, "/");
+  }
+
+  function normalizePath(value = "") {
+    return slashPath(value).trim().toLowerCase();
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -212,6 +225,9 @@
     servicePillState,
     sidebarContextState,
     sidebarCountsState,
+    normalizePath,
+    shortPath,
+    slashPath,
     toastState,
     viewNavigationState,
     viewSelectionState,

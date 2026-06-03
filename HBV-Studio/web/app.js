@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -573,15 +573,21 @@ function formatDateTime(v) {
 }
 
 function shortPath(v) {
+  const runtimeShortPath = window.HBVStudioAppRuntime?.shortPath;
+  if (typeof runtimeShortPath === "function") return runtimeShortPath(v);
   if (!v) return "\u2014";
   return String(v).replace(/\\/g, "/").replace(/^.*\/([^/]+)$/, "$1");
 }
 
 function slashPath(v) {
+  const runtimeSlashPath = window.HBVStudioAppRuntime?.slashPath;
+  if (typeof runtimeSlashPath === "function") return runtimeSlashPath(v);
   return String(v || "").replace(/\\/g, "/");
 }
 
 function normalizePath(v) {
+  const runtimeNormalizePath = window.HBVStudioAppRuntime?.normalizePath;
+  if (typeof runtimeNormalizePath === "function") return runtimeNormalizePath(v);
   return slashPath(v).trim().toLowerCase();
 }
 

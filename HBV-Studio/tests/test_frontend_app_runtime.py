@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -71,6 +71,13 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.formatDateTime("bad-date") !== "bad-date" ||
                 runtime.formatDateTime(1700000000) !== expectedDateTime) {
               throw new Error("date runtime helper mismatch");
+            }
+
+            if (runtime.shortPath("") !== "\u2014" ||
+                runtime.shortPath("C:\\workspaces\\basin\\config.json") !== "config.json" ||
+                runtime.slashPath("C:\\workspaces\\basin") !== "C:/workspaces/basin" ||
+                runtime.normalizePath(" C:\\Workspaces\\Basin ") !== "c:/workspaces/basin") {
+              throw new Error("path runtime helpers mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });
