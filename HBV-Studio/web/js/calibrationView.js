@@ -34,6 +34,25 @@
     };
   }
 
+  function calibrationQuickTestGuidanceState(model = {}) {
+    const adviceHeadline = text(model.adviceHeadline ?? model.advice_headline);
+    const quickDays = Math.max(1, Number(model.quickDays ?? model.quick_days) || 30);
+    return {
+      smart: {
+        text: adviceHeadline ? `智能建议：${adviceHeadline}` : "智能建议：先完成输入完整性检查，再启动正式率定。",
+        className: "hint-box",
+      },
+      strategy: {
+        text: "输入预核算只执行限定时段前向计算，适合核对气象输入、地理数据和参数文件是否可用。",
+        className: "hint-box",
+      },
+      load: {
+        text: `当前只计算 ${quickDays} 天，不进行正式精细搜索。`,
+        className: "hint-box",
+      },
+    };
+  }
+
   function calibrationLoadState(model = {}) {
     const method = text(model.method, "mc_screen_de");
     const maxiter = Math.max(0, Number(model.maxiter) || 0);
@@ -147,6 +166,7 @@
   window.HBVStudioCalibrationView = {
     calibrationLoadState,
     calibrationPlainGuideState,
+    calibrationQuickTestGuidanceState,
     calibrationSelfCheckGuidanceState,
     calibrationStartRequestState,
     selfCheckStartRequestState,

@@ -317,7 +317,7 @@ const frontendModuleContracts = [
   {
     script: "./js/calibrationView.js",
     global: "HBVStudioCalibrationView",
-    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationSelfCheckGuidanceState", "calibrationStartRequestState", "selfCheckStartRequestState"],
+    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationQuickTestGuidanceState", "calibrationSelfCheckGuidanceState", "calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
     script: "./js/objectiveRuntime.js",
@@ -1875,6 +1875,22 @@ function updateCalibrationGuidance() {
     precSelect.title = locked ? "当前工程使用本地降水栅格，运行时直接读取工程独立降水目录。" : "";
   }
   if (kind === "quick_test") {
+    const runtimeGuidanceState = window.HBVStudioCalibrationView?.calibrationQuickTestGuidanceState;
+    const guidance = typeof runtimeGuidanceState === "function"
+      ? runtimeGuidanceState({
+        adviceHeadline: advice?.headline,
+        quickDays: $("#task-quick-days")?.value,
+      })
+      : null;
+    if (guidance?.smart?.text && guidance?.strategy?.text && guidance?.load?.text) {
+      smart.textContent = guidance.smart.text;
+      smart.className = guidance.smart.className || "hint-box";
+      strategy.textContent = guidance.strategy.text;
+      strategy.className = guidance.strategy.className || "hint-box";
+      load.textContent = guidance.load.text;
+      load.className = guidance.load.className || "hint-box";
+      return;
+    }
     smart.textContent = advice?.headline ? `智能建议：${advice.headline}` : "智能建议：先完成输入完整性检查，再启动正式率定。";
     smart.className = "hint-box";
     strategy.textContent = "输入预核算只执行限定时段前向计算，适合核对气象输入、地理数据和参数文件是否可用。";

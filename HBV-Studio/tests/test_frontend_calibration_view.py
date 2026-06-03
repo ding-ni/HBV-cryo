@@ -23,6 +23,7 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             const calibration = context.window.HBVStudioCalibrationView;
             if (!calibration?.calibrationLoadState ||
                 !calibration?.calibrationPlainGuideState ||
+                !calibration?.calibrationQuickTestGuidanceState ||
                 !calibration?.calibrationSelfCheckGuidanceState ||
                 !calibration?.calibrationStartRequestState ||
                 !calibration?.selfCheckStartRequestState) {
@@ -43,6 +44,19 @@ class FrontendCalibrationViewTests(unittest.TestCase):
                 !selfCheckGuidance.strategy.text.includes("\u4e0d\u4f1a\u542f\u52a8\u7387\u5b9a") ||
                 !selfCheckGuidance.load.text.includes("\u4e0d\u6d89\u53ca\u53c2\u6570\u641c\u7d22\u8d1f\u8f7d")) {
               throw new Error(`self-check guidance mismatch: ${JSON.stringify(selfCheckGuidance)}`);
+            }
+
+            const quickTestGuidance = calibration.calibrationQuickTestGuidanceState({
+              adviceHeadline: "\u8d44\u6599\u5b8c\u6574",
+              quickDays: "12",
+            });
+            if (quickTestGuidance.smart.className !== "hint-box" ||
+                quickTestGuidance.strategy.className !== "hint-box" ||
+                quickTestGuidance.load.className !== "hint-box" ||
+                !quickTestGuidance.smart.text.includes("\u8d44\u6599\u5b8c\u6574") ||
+                !quickTestGuidance.strategy.text.includes("\u6c14\u8c61\u8f93\u5165") ||
+                !quickTestGuidance.load.text.includes("12")) {
+              throw new Error(`quick-test guidance mismatch: ${JSON.stringify(quickTestGuidance)}`);
             }
 
             const mcOnlyLoad = calibration.calibrationLoadState({
