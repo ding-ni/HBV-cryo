@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -161,6 +161,46 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 readyContext.context.workflowText !== "可率定 · 7/7" ||
                 readyContext.context.nextStepText !== "可直接率定") {
               throw new Error(`ready sidebar context mismatch: ${JSON.stringify(readyContext)}`);
+            }
+
+            const calibrationNavigation = runtime.viewNavigationState({
+              currentView: "wizard",
+              targetView: "calibration",
+              workspacePath: " C:/ws/config.json ",
+            });
+            if (calibrationNavigation.currentView !== "wizard" ||
+                calibrationNavigation.targetView !== "calibration" ||
+                calibrationNavigation.workspacePath !== "C:/ws/config.json" ||
+                !calibrationNavigation.shouldSaveWizardStep ||
+                !calibrationNavigation.requiresCalibrationReadiness) {
+              throw new Error(`calibration navigation state mismatch: ${JSON.stringify(calibrationNavigation)}`);
+            }
+
+            const resultsNavigation = runtime.viewNavigationState({
+              currentView: "wizard",
+              targetView: "results",
+              workspacePath: "C:/ws/config.json",
+            });
+            if (!resultsNavigation.shouldSaveWizardStep || resultsNavigation.requiresCalibrationReadiness) {
+              throw new Error(`results navigation state mismatch: ${JSON.stringify(resultsNavigation)}`);
+            }
+
+            const dashboardNavigation = runtime.viewNavigationState({
+              currentView: "dashboard",
+              targetView: "calibration",
+              workspacePath: "C:/ws/config.json",
+            });
+            if (dashboardNavigation.shouldSaveWizardStep || dashboardNavigation.requiresCalibrationReadiness) {
+              throw new Error(`dashboard navigation should not save wizard step: ${JSON.stringify(dashboardNavigation)}`);
+            }
+
+            const missingWorkspaceNavigation = runtime.viewNavigationState({
+              currentView: "wizard",
+              targetView: "calibration",
+              workspacePath: " ",
+            });
+            if (missingWorkspaceNavigation.shouldSaveWizardStep || missingWorkspaceNavigation.requiresCalibrationReadiness) {
+              throw new Error(`missing workspace navigation should not save wizard step: ${JSON.stringify(missingWorkspaceNavigation)}`);
             }
 
             const viewMeta = {

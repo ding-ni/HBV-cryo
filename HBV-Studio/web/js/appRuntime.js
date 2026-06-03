@@ -125,6 +125,21 @@
     };
   }
 
+  function viewNavigationState(model = {}) {
+    const currentView = String(model.currentView || "");
+    const targetView = String(model.targetView || "");
+    const workspacePath = String(model.workspacePath || "").trim();
+    const shouldSaveWizardStep = currentView === "wizard" && targetView !== "wizard" && Boolean(workspacePath);
+    const requiresCalibrationReadiness = shouldSaveWizardStep && targetView === "calibration";
+    return {
+      currentView,
+      targetView,
+      workspacePath,
+      shouldSaveWizardStep,
+      requiresCalibrationReadiness,
+    };
+  }
+
   function viewSelectionState(view = "", viewMeta = {}) {
     const requestedView = String(view || "").trim();
     const selectedView = viewMeta && Object.prototype.hasOwnProperty.call(viewMeta, requestedView)
@@ -151,6 +166,7 @@
     servicePillState,
     sidebarContextState,
     sidebarCountsState,
+    viewNavigationState,
     viewSelectionState,
     windowUnloadRequestState,
   };

@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -5638,11 +5638,15 @@ function bindBrowseEvents() {
 function bindEvents() {
   // nav
   $all(".nav-item").forEach(btn => btn.addEventListener("click", async () => {
-    const targetView = btn.dataset.viewTarget;
-    if (state.currentView === "wizard" && targetView !== "wizard" && state.wizardWorkspacePath) {
+    const navigationState = window.HBVStudioAppRuntime.viewNavigationState({
+      currentView: state.currentView,
+      targetView: btn.dataset.viewTarget,
+      workspacePath: state.wizardWorkspacePath,
+    });
+    if (navigationState.shouldSaveWizardStep) {
       try {
         const validation = await saveCurrentWizardStep();
-        if (targetView === "calibration") {
+        if (navigationState.requiresCalibrationReadiness) {
           if (!enforceWizardValidation(validation)) return;
           const ready = await ensureReadyForCalibration({ forceCheck: false });
           if (!ready) {
@@ -5654,7 +5658,7 @@ function bindEvents() {
         return;
       }
     }
-    setView(targetView);
+    setView(navigationState.targetView);
   }));
 
   // refresh
