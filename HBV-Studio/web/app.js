@@ -268,6 +268,11 @@ const frontendModuleContracts = [
     exports: ["aliasForPath", "render", "workspaceLayoutHtml", "workspaceLayoutQueryState"],
   },
   {
+    script: "./js/pathBrowserView.js",
+    global: "HBVStudioPathBrowserView",
+    exports: ["normalizeExtensions", "pathListingQueryState", "pathListingState"],
+  },
+  {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
     exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
@@ -5540,20 +5545,14 @@ function closePathModal() {
 }
 
 async function loadPathListing(pathValue) {
-  const extParam = state.pathModal.extensions.length
-    ? `&extensions=${encodeURIComponent(state.pathModal.extensions.join(","))}`
-    : "";
-  const kindParam = `&kind=${encodeURIComponent(state.pathModal.kind || "file")}`;
-  const p = await apiGet(`/api/fs/list?path=${encodeURIComponent(pathValue || "")}${extParam}${kindParam}`);
-  // Map snake_case API keys to camelCase state keys (do NOT use Object.assign — it creates duplicate keys)
-  state.pathModal.currentPath = p.data.current_path || "";
-  state.pathModal.parentPath  = p.data.parent_path || null;
-  state.pathModal.roots       = p.data.roots || [];
-  state.pathModal.directories = p.data.directories || [];
-  state.pathModal.files       = p.data.files || [];
-  state.pathModal.fileCount = Number(p.data.file_count || 0);
-  state.pathModal.shownFileCount = Number(p.data.shown_file_count || state.pathModal.files.length || 0);
-  state.pathModal.filesTruncated = Boolean(p.data.files_truncated);
+  const query = window.HBVStudioPathBrowserView.pathListingQueryState({
+    path: pathValue,
+    extensions: state.pathModal.extensions,
+    kind: state.pathModal.kind,
+  });
+  const p = await apiGet(query.listingPath);
+  const listing = window.HBVStudioPathBrowserView.pathListingState(p.data);
+  Object.assign(state.pathModal, listing.statePatch);
 
   const isDir = state.pathModal.kind === "dir";
   $("#path-modal-title").textContent = isDir ? "选择文件夹" : "选择文件";
