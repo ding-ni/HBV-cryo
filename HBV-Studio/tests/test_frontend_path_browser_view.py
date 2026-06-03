@@ -21,7 +21,7 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"]) {
+            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
 
@@ -88,6 +88,10 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
                 modalOpen.statePatch.kind !== "dir" ||
                 modalOpen.statePatch.extensions.join("|") !== ".tif|.csv") {
               throw new Error(`path modal open state mismatch: ${JSON.stringify(modalOpen)}`);
+            }
+            const modalClose = view.pathModalCloseState();
+            if (modalClose.statePatch.open !== false || Object.keys(modalClose.statePatch).length !== 1) {
+              throw new Error(`path modal close state mismatch: ${JSON.stringify(modalClose)}`);
             }
 
             const query = view.pathListingQueryState({

@@ -45,6 +45,12 @@
     };
   }
 
+  function pathModalCloseState() {
+    return {
+      statePatch: { open: false },
+    };
+  }
+
   function pathListingQueryState(model = {}) {
     const path = String(model.path || model.pathValue || "").trim();
     const kind = String(model.kind || "file").trim() || "file";
@@ -114,6 +120,7 @@
     configDirectory,
     normalizeExtensions,
     openPathRequestState,
+    pathModalCloseState,
     pathModalOpenState,
     preferredPathForTarget,
     pathListingQueryState,

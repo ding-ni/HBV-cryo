@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"],
+    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -5565,7 +5565,7 @@ function openPathModal(target, kind, extensions) {
 
 function closePathModal() {
   $("#path-modal").classList.add("hidden");
-  state.pathModal.open = false;
+  Object.assign(state.pathModal, window.HBVStudioPathBrowserView.pathModalCloseState().statePatch);
 }
 
 async function loadPathListing(pathValue) {
