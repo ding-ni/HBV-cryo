@@ -310,6 +310,11 @@ const frontendModuleContracts = [
       "taskTypeLabel",
     ],
   },
+  {
+    script: "./js/calibrationView.js",
+    global: "HBVStudioCalibrationView",
+    exports: ["calibrationStartRequestState", "selfCheckStartRequestState"],
+  },
 ];
 
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
@@ -4113,7 +4118,8 @@ async function startCalibration() {
   const debugDays = (!quickTest && kind === "debug_calibration") ? quickDays : 0;
   try {
     if (kind === "self_check") {
-      const payload = await apiPost("/api/self-check/start", {});
+      const request = window.HBVStudioCalibrationView.selfCheckStartRequestState();
+      const payload = await apiPost(request.requestPath, request.payload);
       showToast(`已启动：${payload.task.label}`);
     } else {
       if (!state.wizardWorkspacePath) { showToast("请先选择工作区。", true); return; }
@@ -4123,27 +4129,28 @@ async function startCalibration() {
         showToast("输入检查未通过，已跳转到第 7 步。", true);
         return;
       }
-      const payload = await apiPost("/api/calibration/start", {
-        config_path: state.wizardWorkspacePath,
-        calibration_mode: state.currentWorkspace?.率定模式 || "daily",
-        objective_mode: objectiveMode,
-        prec_source: getTaskRuntimePrecipSource(),
-        glacier_mode: $("#task-glacier-mode").value,
+      const request = window.HBVStudioCalibrationView.calibrationStartRequestState({
+        configPath: state.wizardWorkspacePath,
+        calibrationMode: state.currentWorkspace?.率定模式 || "daily",
+        objectiveMode,
+        precipSource: getTaskRuntimePrecipSource(),
+        glacierMode: $("#task-glacier-mode").value,
         workers: Number($("#task-workers").value) || 4,
         maxiter: Number($("#task-maxiter").value) || 24,
         popsize: Number($("#task-popsize").value) || 6,
         seed: Number($("#task-seed").value) || 42,
         method,
-        mc_samples: Number($("#task-mc-samples").value) || 300,
-        param_bounds_profile: $("#task-param-bounds-profile")?.value || "qtp_alpine_default",
-        init_preset_id: initPresetId,
-        init_bound_shrink: Number($("#task-init-bound-shrink").value) || 0,
-        debug_days: debugDays,
-        quick_test: quickTest,
-        quick_days: quickDays,
-        refine_enabled: Boolean($("#task-refine-enabled")?.checked),
-        refine_maxiter: Math.max(0, Number($("#task-refine-maxiter")?.value) || 0),
+        mcSamples: Number($("#task-mc-samples").value) || 300,
+        paramBoundsProfile: $("#task-param-bounds-profile")?.value || "qtp_alpine_default",
+        initPresetId: initPresetId,
+        initBoundShrink: Number($("#task-init-bound-shrink").value) || 0,
+        debugDays,
+        quickTest,
+        quickDays,
+        refineEnabled: Boolean($("#task-refine-enabled")?.checked),
+        refineMaxiter: Math.max(0, Number($("#task-refine-maxiter")?.value) || 0),
       });
+      const payload = await apiPost(request.requestPath, request.payload);
       showToast(`已启动：${payload.task.label}`);
     }
     await loadTasks();
