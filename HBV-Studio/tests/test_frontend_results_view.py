@@ -39,7 +39,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
-            for (const name of ["deleteRunRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
+            for (const name of ["deleteRunRequestState", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
               if (typeof results?.[name] !== "function") {
                 throw new Error(`missing results view state export: ${name}`);
               }
@@ -917,6 +917,26 @@ class FrontendResultsViewTests(unittest.TestCase):
             });
             if (!starterFilteredEmpty.results.visible || starterFilteredEmpty.results.disabled) {
               throw new Error(`results starter should show for empty filtered workspace: ${JSON.stringify(starterFilteredEmpty)}`);
+            }
+            const starterMissingRequest = results.manualStarterRequestState({});
+            if (starterMissingRequest.ready || starterMissingRequest.reason !== "missing-workspace" ||
+                starterMissingRequest.requestPath !== "/api/manual-start/start" ||
+                starterMissingRequest.payload.config_path !== "") {
+              throw new Error(`manual starter missing request state wrong: ${JSON.stringify(starterMissingRequest)}`);
+            }
+            const starterRequest = results.manualStarterRequestState({
+              config_path: " C:/ws/A ",
+              calibration_mode: "daily",
+              objective_mode: "daily_unified_professional_v1",
+              prec_source: "station",
+              glacier_mode: "inline",
+            });
+            if (!starterRequest.ready || starterRequest.reason ||
+                starterRequest.requestPath !== "/api/manual-start/start" ||
+                starterRequest.payload.config_path !== "C:/ws/A" ||
+                starterRequest.payload.prec_source !== "station" ||
+                starterRequest.payload.glacier_mode !== "inline") {
+              throw new Error(`manual starter request state wrong: ${JSON.stringify(starterRequest)}`);
             }
 
             const metrics = results.renderMetricStrip([{ l: "NSE<率定>", v: "0.91&" }], helpers);

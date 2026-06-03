@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -908,13 +908,14 @@ async function startManualStarterResult({ workspacePath = "", openWhenDone = fal
     showToast("当前工作区尚未满足手调/重算条件，已跳转到第 7 步。", true);
     return null;
   }
-  const payload = await apiPost("/api/manual-start/start", {
+  const request = window.HBVStudioResultsView.manualStarterRequestState({
     config_path: targetPath,
     calibration_mode: state.currentWorkspace?.率定模式 || "daily",
     objective_mode: $("#task-objective-mode")?.value || "daily_unified_professional_v1",
     prec_source: getTaskRuntimePrecipSource(),
     glacier_mode: $("#task-glacier-mode")?.value || "inline",
   });
+  const payload = await apiPost(request.requestPath, request.payload);
   setRunWorkspaceFilter(targetPath);
   if (openWhenDone) {
     setView("results");

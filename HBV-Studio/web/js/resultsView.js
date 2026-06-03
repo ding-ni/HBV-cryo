@@ -823,6 +823,21 @@
     };
   }
 
+  function manualStarterRequestState(payload = {}) {
+    const configPath = String(payload?.config_path || "").trim();
+    const requestPayload = {
+      ...payload,
+      config_path: configPath,
+    };
+    return {
+      ready: Boolean(configPath),
+      reason: configPath ? "" : "missing-workspace",
+      message: configPath ? "" : "请选择工作区。",
+      requestPath: "/api/manual-start/start",
+      payload: requestPayload,
+    };
+  }
+
   function renderMetricStrip(items = [], helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     return (items || []).map(item => `
@@ -1395,6 +1410,7 @@
     forwardSimulationTaskUiState,
     latestEditableRunPath,
     manualStarterControlState,
+    manualStarterRequestState,
     resultFilterToolbarState,
     resultMetricItems,
     resultMetricStripState,
