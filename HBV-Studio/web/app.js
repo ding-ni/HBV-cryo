@@ -3607,6 +3607,7 @@ async function importGisFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
   const requestState = window.HBVStudioDataPrepView.gisImportRequestState({
+    configPath: state.wizardWorkspacePath,
     demPath: $("#wz-import-dem").value,
     flowaccPath: $("#wz-import-flowacc").value,
     flowdirPath: $("#wz-import-flowdir").value,
@@ -3615,10 +3616,7 @@ async function importGisFiles() {
   if (!requestState.ready) { showToast(requestState.message, true); return; }
   applyGisImportUiState(window.HBVStudioDataPrepView.gisImportStartingUiState());
   try {
-    const payload = await apiPost(requestState.requestPath, {
-      config_path: state.wizardWorkspacePath,
-      ...requestState.request,
-    });
+    const payload = await apiPost(requestState.requestPath, requestState.payload);
     applyGisImportUiState(window.HBVStudioDataPrepView.gisImportSuccessUiState(payload.data));
     await loadBootstrapStatus();
     await loadPrepSteps();
@@ -3635,6 +3633,7 @@ async function importMeteoFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
   const requestState = window.HBVStudioDataPrepView.meteoImportRequestState({
+    configPath: state.wizardWorkspacePath,
     sources: getWizardMeteoSources(),
     registeredDirs: {
       prec: $("#wz-custom-prec-dir")?.value || "",
@@ -3660,10 +3659,7 @@ async function importMeteoFiles() {
   });
   applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportCreatingUiState());
   try {
-    const payload = await apiPost(requestState.requestPath, {
-      config_path: state.wizardWorkspacePath,
-      ...requestState.request,
-    });
+    const payload = await apiPost(requestState.requestPath, requestState.payload);
     const task = payload.task;
     state.activeMeteoImportTaskId = task?.id || "";
     if (task) {
@@ -3680,13 +3676,11 @@ async function runBootstrap() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   try {
     const requestState = window.HBVStudioDataPrepView.bootstrapTaskRequestState({
+      configPath: state.wizardWorkspacePath,
       runtimePrecipSource: getEffectiveRuntimePrecipSource(),
     });
     if (!requestState.ready) { showToast(requestState.message, true); return; }
-    const payload = await apiPost(requestState.requestPath, {
-      config_path: state.wizardWorkspacePath,
-      ...requestState.request,
-    });
+    const payload = await apiPost(requestState.requestPath, requestState.payload);
     showToast(`已启动：${payload.task.label}`);
     await loadTasks();
     pollBootstrapLog(payload.task);
@@ -3909,15 +3903,13 @@ async function runPrepStep(stepId, { overwrite = false } = {}) {
       return;
     }
     const requestState = window.HBVStudioDataPrepView.prepTaskRequestState({
+      configPath: state.wizardWorkspacePath,
       stepId,
       runtimePrecipSource: getEffectiveRuntimePrecipSource(),
       overwrite,
     });
     if (!requestState.ready) { showToast(requestState.message, true); return; }
-    const payload = await apiPost(requestState.requestPath, {
-      config_path: state.wizardWorkspacePath,
-      ...requestState.request,
-    });
+    const payload = await apiPost(requestState.requestPath, requestState.payload);
     showToast(`已启动：${payload.task.label}`);
     await loadTasks();
     if (payload.task) {

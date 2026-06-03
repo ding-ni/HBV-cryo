@@ -226,14 +226,20 @@
   }
 
   function bootstrapTaskRequestState(model = {}) {
+    const configPath = String(model.configPath || model.config_path || "").trim();
     const runtimePrecipSource = String(model.runtimePrecipSource || "").trim();
     const ready = Boolean(runtimePrecipSource);
+    const request = {
+      prec_source: runtimePrecipSource,
+    };
     return {
       ready,
       message: ready ? "" : "请选择降水来源。",
       requestPath: "/api/bootstrap/start",
-      request: {
-        prec_source: runtimePrecipSource,
+      request,
+      payload: {
+        config_path: configPath,
+        ...request,
       },
     };
   }
@@ -266,6 +272,7 @@
 
   function gisImportRequestState(model = {}) {
     const cleanPath = value => String(value || "").trim();
+    const configPath = cleanPath(model.configPath || model.config_path);
     const demPath = cleanPath(model.demPath);
     const flowaccPath = cleanPath(model.flowaccPath);
     const flowdirPath = cleanPath(model.flowdirPath);
@@ -274,16 +281,21 @@
     if (!demPath) missing.push("dem_path");
     if (!flowaccPath) missing.push("flowacc_masked_path");
     const ready = missing.length === 0;
+    const request = {
+      dem_path: demPath,
+      flowacc_masked_path: flowaccPath,
+      flowdir_path: flowdirPath,
+      glacier_mask_path: glacierMaskPath,
+    };
     return {
       ready,
       missing,
       message: ready ? "" : "请至少选择裁剪后 DEM 和流量累积掩膜文件。",
       requestPath: "/api/gis/import",
-      request: {
-        dem_path: demPath,
-        flowacc_masked_path: flowaccPath,
-        flowdir_path: flowdirPath,
-        glacier_mask_path: glacierMaskPath,
+      request,
+      payload: {
+        config_path: configPath,
+        ...request,
       },
     };
   }
@@ -733,20 +745,26 @@
   }
 
   function meteoImportRequestState(model = {}) {
+    const configPath = String(model.configPath || model.config_path || "").trim();
     const directoryState = customMeteoImportDirectoryState(model);
     const dirs = directoryState.dirs || {};
     const ready = Boolean(directoryState.ready);
+    const request = {
+      prec_source: String(model.runtimePrecipSource || "").trim(),
+      prec_dir: String(dirs.prec || "").trim(),
+      temp_dir: String(dirs.temp || "").trim(),
+      evap_dir: String(dirs.pet || "").trim(),
+    };
     return {
       ready,
       message: ready ? "" : "请选择降水、气温和蒸散发三个目录。",
       missing: directoryState.missing,
       writeBackUpdates: directoryState.writeBackUpdates,
       requestPath: "/api/meteo/import/start",
-      request: {
-        prec_source: String(model.runtimePrecipSource || "").trim(),
-        prec_dir: String(dirs.prec || "").trim(),
-        temp_dir: String(dirs.temp || "").trim(),
-        evap_dir: String(dirs.pet || "").trim(),
+      request,
+      payload: {
+        config_path: configPath,
+        ...request,
       },
     };
   }
@@ -1058,16 +1076,22 @@
   }
 
   function prepTaskRequestState(model = {}) {
+    const configPath = String(model.configPath || model.config_path || "").trim();
     const stepId = String(model.stepId || "").trim();
     const ready = Boolean(stepId);
+    const request = {
+      step_id: stepId,
+      prec_source: String(model.runtimePrecipSource || "").trim(),
+      overwrite: Boolean(model.overwrite),
+    };
     return {
       ready,
       message: ready ? "" : "请选择要执行的数据处理步骤。",
       requestPath: "/api/data-prep/start",
-      request: {
-        step_id: stepId,
-        prec_source: String(model.runtimePrecipSource || "").trim(),
-        overwrite: Boolean(model.overwrite),
+      request,
+      payload: {
+        config_path: configPath,
+        ...request,
       },
     };
   }
