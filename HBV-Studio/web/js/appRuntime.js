@@ -87,6 +87,14 @@
     return `<span class="status-badge">${profileLabel(value)}</span>`;
   }
 
+  function focusStatusLabel(status = "") {
+    return ({ ok: "通过", warn: "注意", fail: "未通过" })[String(status || "").toLowerCase()] || "待检查";
+  }
+
+  function focusStatusClass(status = "") {
+    return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -245,6 +253,8 @@
     formatDateTime,
     formatDurationSeconds,
     formatNumber,
+    focusStatusClass,
+    focusStatusLabel,
     healthQueryState,
     pollingScheduleState,
     profileBadge,

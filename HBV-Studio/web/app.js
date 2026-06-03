@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1903,10 +1903,14 @@ function objectBadge(o) {
 }
 
 function focusStatusLabel(status) {
+  const runtimeFocusStatusLabel = window.HBVStudioAppRuntime?.focusStatusLabel;
+  if (typeof runtimeFocusStatusLabel === "function") return runtimeFocusStatusLabel(status);
   return ({ ok: "通过", warn: "注意", fail: "未通过" })[String(status || "").toLowerCase()] || "待检查";
 }
 
 function focusStatusClass(status) {
+  const runtimeFocusStatusClass = window.HBVStudioAppRuntime?.focusStatusClass;
+  if (typeof runtimeFocusStatusClass === "function") return runtimeFocusStatusClass(status);
   return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
 }
 

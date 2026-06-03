@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.profileBadge || !runtime?.profileLabel || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.focusStatusClass || !runtime?.focusStatusLabel || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.profileBadge || !runtime?.profileLabel || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -95,6 +95,15 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.profileLabel("") !== "未选择" ||
                 runtime.profileBadge("daily") !== '<span class="status-badge">日尺度</span>') {
               throw new Error("profile label runtime helper mismatch");
+            }
+            if (runtime.focusStatusLabel("ok") !== "通过" ||
+                runtime.focusStatusLabel("WARN") !== "注意" ||
+                runtime.focusStatusLabel("fail") !== "未通过" ||
+                runtime.focusStatusLabel("unknown") !== "待检查" ||
+                runtime.focusStatusClass("ok") !== "status-ok" ||
+                runtime.focusStatusClass("fail") !== "status-fail" ||
+                runtime.focusStatusClass("WARN") !== "status-warn") {
+              throw new Error("focus status runtime helper mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });
