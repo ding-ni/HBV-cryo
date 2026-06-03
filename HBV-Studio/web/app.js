@@ -280,7 +280,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "cdsApiStatusQueryState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardSaveStepRequestState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "cdsApiStatusQueryState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "currentMeteoImportTask", "currentPrepTask", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardSaveStepRequestState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -1295,7 +1295,12 @@ function hasRecentInputCheck({ requireReady = false, maxAgeMs = 45000, stage = "
       nowMs: Date.now(),
       maxAgeMs,
       requireReady,
-      hasRunningImport: Boolean(findCurrentMeteoImportTask({ runningOnly: true })),
+      hasRunningImport: Boolean(window.HBVStudioDataPrepView.currentMeteoImportTask(
+        state.tasks,
+        state.wizardWorkspacePath,
+        { runningOnly: true },
+        { samePath },
+      )),
     },
     { samePath },
   );
@@ -3393,26 +3398,6 @@ function applyMeteoImportUiState(uiState = {}) {
   }
 }
 
-function findCurrentMeteoImportTask({ runningOnly = false } = {}) {
-  if (!state.wizardWorkspacePath) return null;
-  const target = String(state.wizardWorkspacePath).trim();
-  return state.tasks.find(task =>
-    task.task_type === "meteo_import" &&
-    String(task.config_path || "").trim() === target &&
-    (!runningOnly || task.status === "running")
-  ) || null;
-}
-
-function findCurrentPrepTask({ runningOnly = false } = {}) {
-  if (!state.wizardWorkspacePath) return null;
-  const target = String(state.wizardWorkspacePath).trim();
-  return state.tasks.find(task =>
-    task.task_type === "data_prep" &&
-    String(task.config_path || "").trim() === target &&
-    (!runningOnly || task.status === "running")
-  ) || null;
-}
-
 function stopForwardSimPolling() {
   if (state.forwardSimPollTimer) {
     clearInterval(state.forwardSimPollTimer);
@@ -3918,7 +3903,12 @@ async function runPrepStep(stepId, { overwrite = false } = {}) {
 async function runInputCheck({ force = false, detail = false, stage = "calibration" } = {}) {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   const host = $("#wz-check-results");
-  const runningImport = findCurrentMeteoImportTask({ runningOnly: true });
+  const runningImport = window.HBVStudioDataPrepView.currentMeteoImportTask(
+    state.tasks,
+    state.wizardWorkspacePath,
+    { runningOnly: true },
+    { samePath },
+  );
   if (runningImport) {
     host.innerHTML = window.HBVStudioDataPrepView.renderInputCheckImportBlock(runningImport, { escapeHtml });
     return null;
@@ -5394,7 +5384,12 @@ async function loadTasks() {
   const finishedTaskIds = state.tasks
     .filter(task => previousTasks.get(task.id)?.status === "running" && task.status !== "running")
     .map(task => task.id);
-  const currentImport = findCurrentMeteoImportTask({ runningOnly: true });
+  const currentImport = window.HBVStudioDataPrepView.currentMeteoImportTask(
+    state.tasks,
+    state.wizardWorkspacePath,
+    { runningOnly: true },
+    { samePath },
+  );
   if (currentImport) {
     state.activeMeteoImportTaskId = currentImport.id;
     updateMeteoImportUi(currentImport);
@@ -5405,7 +5400,12 @@ async function loadTasks() {
     const activeImport = state.tasks.find(t => t.id === state.activeMeteoImportTaskId);
     if (activeImport) updateMeteoImportUi(activeImport);
   }
-  const currentPrep = findCurrentPrepTask({ runningOnly: true });
+  const currentPrep = window.HBVStudioDataPrepView.currentPrepTask(
+    state.tasks,
+    state.wizardWorkspacePath,
+    { runningOnly: true },
+    { samePath },
+  );
   if (currentPrep) {
     state.activePrepTaskId = currentPrep.id;
     updatePrepTaskUi(currentPrep);

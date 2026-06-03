@@ -25,6 +25,11 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewRequestState || !view?.boundaryPreviewState || !view?.cdsApiStatusQueryState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardSaveStepRequestState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
+            for (const name of ["currentMeteoImportTask", "currentPrepTask"]) {
+              if (typeof view?.[name] !== "function") {
+                throw new Error(`missing data prep task export: ${name}`);
+              }
+            }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
               "&": "&amp;",
               "<": "&lt;",
@@ -35,6 +40,9 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const helpers = {
               escapeHtml,
               isGisStepId: id => id === "gis_base",
+              samePath(a, b) {
+                return String(a || "").replace(/\\/g, "/") === String(b || "").replace(/\\/g, "/");
+              },
               formatNumber(value, digits = 0) {
                 const number = Number(value);
                 return Number.isFinite(number) ? number.toFixed(digits) : "—";
@@ -47,6 +55,29 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (view.formatPrepDisplayTitle(2, "01. 下载 ERA5") !== "2. 下载 ERA5") {
               throw new Error("display title should strip stale numbering");
             }
+            const dataPrepTasks = [
+              { id: "old-import", task_type: "meteo_import", config_path: "C:/ws/old.json", status: "running" },
+              { id: "done-import", task_type: "meteo_import", config_path: "C:/ws/A.json", status: "completed" },
+              { id: "running-import", task_type: "meteo_import", config_path: "C:/ws/A.json", status: "running" },
+              { id: "prep-running", task_type: "data_prep", config_path: "C:/ws/A.json", status: "running" },
+              { id: "calibration", task_type: "calibration", config_path: "C:/ws/A.json", status: "running" },
+            ];
+            const firstImport = view.currentMeteoImportTask(dataPrepTasks, "C:\\ws\\A.json", {}, helpers);
+            if (firstImport?.id !== "done-import") {
+              throw new Error(`current meteo import task should return first matching task: ${firstImport?.id}`);
+            }
+            const runningImport = view.currentMeteoImportTask(dataPrepTasks, "C:/ws/A.json", { runningOnly: true }, helpers);
+            if (runningImport?.id !== "running-import") {
+              throw new Error(`current meteo import task should honor runningOnly: ${runningImport?.id}`);
+            }
+            const runningPrep = view.currentPrepTask(dataPrepTasks, "C:\\ws\\A.json", { runningOnly: true }, helpers);
+            if (runningPrep?.id !== "prep-running") {
+              throw new Error(`current prep task should select data_prep only: ${runningPrep?.id}`);
+            }
+            if (view.currentPrepTask(dataPrepTasks, "", {}, helpers) !== null) {
+              throw new Error("current prep task should require a workspace path");
+            }
+
             if (view.toWizardInputTimeValue("2020-01-02 03:04", false) !== "2020-01-02") {
               throw new Error("daily wizard input value should keep date only");
             }

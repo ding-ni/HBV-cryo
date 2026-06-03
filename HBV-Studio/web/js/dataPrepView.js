@@ -9,6 +9,10 @@
     }[ch]));
   }
 
+  function defaultSamePath(a, b) {
+    return String(a || "") === String(b || "");
+  }
+
   function formatPrepDisplayTitle(index, title) {
     const clean = String(title || "").replace(/^\d+\.\s*/, "").trim();
     return `${index}. ${clean}`;
@@ -695,6 +699,27 @@
       hasLocalMeteoSourceConfigured: localLabels.length > 0,
       allMeteoSourcesUseLocalTif: localLabels.length === 3,
     };
+  }
+
+  function currentTaskForConfig(tasks = [], configPath = "", taskType = "", options = {}, helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const targetPath = String(configPath || "").trim();
+    const targetType = String(taskType || "").trim();
+    const runningOnly = Boolean(options?.runningOnly);
+    if (!targetPath || !targetType) return null;
+    return (Array.isArray(tasks) ? tasks : []).find(task =>
+      task?.task_type === targetType &&
+      samePath(String(task?.config_path || "").trim(), targetPath) &&
+      (!runningOnly || task?.status === "running")
+    ) || null;
+  }
+
+  function currentMeteoImportTask(tasks = [], configPath = "", options = {}, helpers = {}) {
+    return currentTaskForConfig(tasks, configPath, "meteo_import", options, helpers);
+  }
+
+  function currentPrepTask(tasks = [], configPath = "", options = {}, helpers = {}) {
+    return currentTaskForConfig(tasks, configPath, "data_prep", options, helpers);
   }
 
   function customMeteoImportCopyState(model = {}) {
@@ -1389,6 +1414,8 @@
     cdsApiStatusQueryState,
     customMeteoImportCopyState,
     customMeteoImportDirectoryState,
+    currentMeteoImportTask,
+    currentPrepTask,
     elevationSuggestionQueryState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
