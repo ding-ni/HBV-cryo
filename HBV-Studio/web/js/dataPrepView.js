@@ -251,6 +251,29 @@
     };
   }
 
+  function gisImportRequestState(model = {}) {
+    const cleanPath = value => String(value || "").trim();
+    const demPath = cleanPath(model.demPath);
+    const flowaccPath = cleanPath(model.flowaccPath);
+    const flowdirPath = cleanPath(model.flowdirPath);
+    const glacierMaskPath = cleanPath(model.glacierMaskPath);
+    const missing = [];
+    if (!demPath) missing.push("dem_path");
+    if (!flowaccPath) missing.push("flowacc_masked_path");
+    const ready = missing.length === 0;
+    return {
+      ready,
+      missing,
+      message: ready ? "" : "请至少选择裁剪后 DEM 和流量累积掩膜文件。",
+      request: {
+        dem_path: demPath,
+        flowacc_masked_path: flowaccPath,
+        flowdir_path: flowdirPath,
+        glacier_mask_path: glacierMaskPath,
+      },
+    };
+  }
+
   function gisModePanelState(mode = "") {
     const normalized = String(mode || "");
     return {
@@ -1170,6 +1193,7 @@
     formatPrepBlockedMessage,
     fromWizardInputTimeValue,
     gisImportErrorUiState,
+    gisImportRequestState,
     gisModePanelState,
     gisImportStartingUiState,
     gisImportSuccessUiState,

@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3578,17 +3578,18 @@ function applyGisImportUiState(uiState = {}) {
 async function importGisFiles() {
   if (!state.wizardWorkspacePath) { showToast("请先保存工作区。", true); return; }
   clearInputCheckCache();
-  const demPath = $("#wz-import-dem").value.trim();
-  const flowaccPath = $("#wz-import-flowacc").value.trim();
-  if (!demPath || !flowaccPath) { showToast("请至少选择裁剪后 DEM 和流量累积掩膜文件。", true); return; }
+  const requestState = window.HBVStudioDataPrepView.gisImportRequestState({
+    demPath: $("#wz-import-dem").value,
+    flowaccPath: $("#wz-import-flowacc").value,
+    flowdirPath: $("#wz-import-flowdir").value,
+    glacierMaskPath: $("#wz-import-glacier").value,
+  });
+  if (!requestState.ready) { showToast(requestState.message, true); return; }
   applyGisImportUiState(window.HBVStudioDataPrepView.gisImportStartingUiState());
   try {
     const payload = await apiPost("/api/gis/import", {
       config_path: state.wizardWorkspacePath,
-      dem_path: demPath,
-      flowacc_masked_path: flowaccPath,
-      flowdir_path: $("#wz-import-flowdir").value.trim() || "",
-      glacier_mask_path: $("#wz-import-glacier").value.trim() || "",
+      ...requestState.request,
     });
     applyGisImportUiState(window.HBVStudioDataPrepView.gisImportSuccessUiState(payload.data));
     await loadBootstrapStatus();

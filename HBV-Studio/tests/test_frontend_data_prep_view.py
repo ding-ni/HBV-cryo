@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -367,6 +367,33 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const gisError = view.gisImportErrorUiState(new Error("缺少 DEM"));
             if (gisError.hint.text !== "缺少 DEM" || gisError.hint.className !== "hint-box status-fail") {
               throw new Error(`GIS import error state mismatch: ${JSON.stringify(gisError)}`);
+            }
+            const missingGisRequest = view.gisImportRequestState({ demPath: " ", flowaccPath: "" });
+            if (missingGisRequest.ready || missingGisRequest.message !== "请至少选择裁剪后 DEM 和流量累积掩膜文件。" || missingGisRequest.missing.join(",") !== "dem_path,flowacc_masked_path") {
+              throw new Error(`GIS import missing request mismatch: ${JSON.stringify(missingGisRequest)}`);
+            }
+            const missingFlowaccRequest = view.gisImportRequestState({ demPath: "C:/data/dem.tif", flowaccPath: " " });
+            if (missingFlowaccRequest.ready || missingFlowaccRequest.missing.join(",") !== "flowacc_masked_path") {
+              throw new Error(`GIS import flowacc validation mismatch: ${JSON.stringify(missingFlowaccRequest)}`);
+            }
+            const gisRequest = view.gisImportRequestState({
+              demPath: "  C:/data/dem.tif  ",
+              flowaccPath: "  C:/data/flowacc_masked.tif ",
+              flowdirPath: " C:/data/flowdir.tif ",
+              glacierMaskPath: "  C:/data/glacier.tif ",
+            });
+            const expectedGisRequest = {
+              dem_path: "C:/data/dem.tif",
+              flowacc_masked_path: "C:/data/flowacc_masked.tif",
+              flowdir_path: "C:/data/flowdir.tif",
+              glacier_mask_path: "C:/data/glacier.tif",
+            };
+            if (!gisRequest.ready || gisRequest.message !== "" || gisRequest.missing.length || JSON.stringify(gisRequest.request) !== JSON.stringify(expectedGisRequest)) {
+              throw new Error(`GIS import request mismatch: ${JSON.stringify(gisRequest)}`);
+            }
+            const gisOptionalRequest = view.gisImportRequestState({ demPath: "dem.tif", flowaccPath: "flowacc.tif" });
+            if (!gisOptionalRequest.ready || gisOptionalRequest.request.flowdir_path !== "" || gisOptionalRequest.request.glacier_mask_path !== "") {
+              throw new Error(`GIS import optional request mismatch: ${JSON.stringify(gisOptionalRequest)}`);
             }
             const gisAutoPanel = view.gisModePanelState("auto");
             if (!gisAutoPanel.panels.autoVisible || gisAutoPanel.panels.importVisible) {
