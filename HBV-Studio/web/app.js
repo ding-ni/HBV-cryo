@@ -2296,6 +2296,22 @@ function floodEventRows(meta = {}) {
   });
 }
 
+function floodEventEvaluation(meta = {}) {
+  const evaluator = window.HBVStudioEventMode?.floodEventEvaluation;
+  if (typeof evaluator === "function") return evaluator(meta);
+  return meta?.flood_event_evaluation || meta?.diagnostics?.flood_event_evaluation || {};
+}
+
+function floodEventStatusText(evaluation = {}) {
+  const formatter = window.HBVStudioEventMode?.floodEventStatusText;
+  if (typeof formatter === "function") return formatter(evaluation);
+  if (!evaluation?.enabled) return "未启用";
+  const valid = Number(evaluation.valid_event_count || 0);
+  const total = Number(evaluation.event_count || 0);
+  const mode = evaluation.objective_enabled ? "事件目标函数" : "事件诊断";
+  return `${mode}：${valid}/${total} 场有效`;
+}
+
 function renderFloodEventChart(meta = {}, plotCfg = {}) {
   if (window.HBVStudioEventMode?.renderFloodEventChart) {
     window.HBVStudioEventMode.renderFloodEventChart(meta, plotCfg, { finiteNumber, formatMetricValue });

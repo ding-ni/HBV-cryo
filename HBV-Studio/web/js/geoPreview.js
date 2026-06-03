@@ -115,6 +115,75 @@
     return [Number.isFinite(x) ? x : pad, Number.isFinite(y) ? y : height - pad];
   }
 
+  function layerBounds(layer, fallbackBounds) {
+    const b = layer?.bounds || fallbackBounds || null;
+    if (!b) return null;
+    const west = Number(b.west);
+    const south = Number(b.south);
+    const east = Number(b.east);
+    const north = Number(b.north);
+    if (![west, south, east, north].every(Number.isFinite) || east <= west || north <= south) return null;
+    return { west, south, east, north };
+  }
+
+  function rectFromBounds(layer, bounds) {
+    const b = layerBounds(layer, bounds);
+    if (!b) return null;
+    const [x1, y1] = projectPoint([b.west, b.north], bounds);
+    const [x2, y2] = projectPoint([b.east, b.south], bounds);
+    const x = Math.min(x1, x2);
+    const y = Math.min(y1, y2);
+    const width = Math.max(2, Math.abs(x2 - x1));
+    const height = Math.max(2, Math.abs(y2 - y1));
+    return { x, y, width, height };
+  }
+
+  function renderRasterLayer(layer, bounds) {
+    const rect = rectFromBounds(layer, bounds);
+    if (!rect) return "";
+    const attrs = `x="${rect.x.toFixed(1)}" y="${rect.y.toFixed(1)}" width="${rect.width.toFixed(1)}" height="${rect.height.toFixed(1)}"`;
+    if (layer.id === "dem") {
+      return `
+        <g class="geo-raster-surface geo-layer geo-layer-dem">
+          <rect class="geo-dem-base" ${attrs} rx="3"></rect>
+          <rect class="geo-dem-shade geo-raster-band" ${attrs} rx="3"></rect>
+        </g>
+      `;
+    }
+    if (layer.id === "elevation_zone") {
+      const bandHeight = rect.height / 3;
+      return `
+        <g class="geo-raster-surface geo-layer geo-layer-elevation_zone">
+          ${["low", "mid", "high"].map((band, index) => `
+            <rect class="geo-elevation-band geo-elevation-band-${band}" x="${rect.x.toFixed(1)}" y="${(rect.y + bandHeight * index).toFixed(1)}" width="${rect.width.toFixed(1)}" height="${bandHeight.toFixed(1)}"></rect>
+          `).join("")}
+          <rect class="geo-raster-outline" ${attrs} rx="3"></rect>
+        </g>
+      `;
+    }
+    if (layer.id === "glacier") {
+      return `
+        <g class="geo-raster-surface geo-layer geo-layer-glacier">
+          <rect class="geo-glacier-fill" ${attrs} rx="3"></rect>
+          ${[0.2, 0.38, 0.56, 0.74].map(fraction => `
+            <line class="geo-glacier-stripe" x1="${rect.x.toFixed(1)}" y1="${(rect.y + rect.height * fraction).toFixed(1)}" x2="${(rect.x + rect.width).toFixed(1)}" y2="${(rect.y + rect.height * (fraction - 0.16)).toFixed(1)}"></line>
+          `).join("")}
+          <rect class="geo-raster-outline" ${attrs} rx="3"></rect>
+        </g>
+      `;
+    }
+    return "";
+  }
+
+  function renderRasterLayers(overview, bounds) {
+    const layers = Array.isArray(overview?.layers) ? overview.layers : [];
+    return ["dem", "elevation_zone", "glacier"]
+      .map(id => layers.find(layer => layer?.id === id && layer?.status === "ok"))
+      .filter(Boolean)
+      .map(layer => renderRasterLayer(layer, bounds))
+      .join("");
+  }
+
   function pathFromRing(ring, bounds) {
     const points = Array.isArray(ring?.points) ? ring.points : [];
     if (points.length < 2) return "";
@@ -179,7 +248,7 @@
   function renderLayerPaths(overview, bounds) {
     const layers = Array.isArray(overview?.layers) ? overview.layers : [];
     return layers
-      .filter(layer => layer?.status === "ok" && layer.id !== "dem" && layer.kind !== "point")
+      .filter(layer => layer?.status === "ok" && !["dem", "elevation_zone", "glacier"].includes(layer.id) && layer.kind !== "point")
       .map(layer => (layer.rings || [])
         .map(ring => pathFromRing(ring, bounds))
         .filter(Boolean)
@@ -204,7 +273,7 @@
     const layers = Array.isArray(overview?.layers) ? overview.layers : [];
     const drawableLayers = layers.filter(layer => {
       if (layer?.status !== "ok") return false;
-      if (layer.id === "dem") return true;
+      if (["dem", "elevation_zone", "glacier"].includes(layer.id)) return Boolean(layerBounds(layer, previewBounds(overview)));
       if (layer.kind === "point") return Array.isArray(layer.points) && layer.points.length > 0;
       return Array.isArray(layer.rings) && layer.rings.length > 0;
     });
@@ -331,7 +400,6 @@
         </section>
       `;
     }
-    const hasDem = layers.some(layer => layer.id === "dem" && layer.status === "ok");
     return `
       <section class="geo-preview-card" data-geo-layer-count="${escapeHtml(String(overview.available_layer_count || 0))}">
         <div class="geo-preview-head">
@@ -345,7 +413,7 @@
             ${renderLayerToggles(overview, escapeHtml)}
             <svg class="geo-preview-svg" viewBox="0 0 640 300" role="img" aria-label="工作区空间预览">
               <rect class="geo-preview-frame" x="1" y="1" width="638" height="298" rx="4"></rect>
-              ${hasDem ? '<rect class="geo-layer geo-layer-dem" x="26" y="26" width="588" height="248" rx="3"></rect>' : ""}
+              ${renderRasterLayers(overview, bounds)}
               ${renderLayerPaths(overview, bounds)}
               ${renderLayerPoints(overview, bounds, escapeHtml)}
               ${renderCoordinateFrame(bounds, escapeHtml)}

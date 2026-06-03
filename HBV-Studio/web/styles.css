@@ -1243,9 +1243,21 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   transition: opacity 140ms ease;
 }
 .geo-layer-dem {
+  color: rgba(71,85,105,0.30);
   fill: rgba(100,116,139,0.12);
   stroke: rgba(100,116,139,0.22);
   stroke-width: 1;
+}
+.geo-dem-base {
+  fill: #dbe7ec;
+  stroke: rgba(71,85,105,0.28);
+  stroke-width: 1;
+}
+.geo-dem-shade {
+  fill: rgba(51,65,85,0.10);
+}
+.geo-raster-band {
+  stroke: none;
 }
 .geo-layer-basin {
   fill: rgba(14,116,144,0.14);
@@ -1253,14 +1265,38 @@ input[readonly] { background: var(--surface-muted); color: var(--muted); }
   stroke-width: 2.2;
 }
 .geo-layer-elevation_zone {
+  color: rgba(37,99,235,0.55);
   fill: rgba(59,130,246,0.16);
   stroke: rgba(37,99,235,0.55);
   stroke-width: 1.4;
 }
+.geo-elevation-band-low {
+  fill: rgba(125,211,252,0.26);
+}
+.geo-elevation-band-mid {
+  fill: rgba(59,130,246,0.22);
+}
+.geo-elevation-band-high {
+  fill: rgba(30,64,175,0.18);
+}
 .geo-layer-glacier {
+  color: #0891b2;
   fill: rgba(34,211,238,0.22);
   stroke: #0891b2;
   stroke-width: 1.7;
+}
+.geo-glacier-fill {
+  fill: rgba(34,211,238,0.24);
+  stroke: none;
+}
+.geo-glacier-stripe {
+  stroke: rgba(8,145,178,0.62);
+  stroke-width: 1.2;
+}
+.geo-raster-outline {
+  fill: transparent;
+  stroke: currentColor;
+  stroke-width: 1.2;
 }
 .geo-layer-stations {
   fill: #475569;

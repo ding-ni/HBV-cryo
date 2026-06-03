@@ -96,6 +96,24 @@ class FrontendGeoPreviewTests(unittest.TestCase):
             if (!html.includes('data-map-plan-sources="1"')) throw new Error("offline map source count missing");
             if (!html.includes('data-map-plan-layers="1"')) throw new Error("offline map layer count missing");
             if (!html.includes("/api/geo/*")) throw new Error("offline map plan should mention local geo endpoints");
+
+            const rasterHtml = geo.renderOverview({
+              flow_name: "raster preview",
+              available_layer_count: 3,
+              focus_bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 },
+              layers: [
+                { id: "dem", label: "DEM", kind: "raster", status: "ok", bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 } },
+                { id: "elevation_zone", label: "高程分区", kind: "raster", status: "ok", bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 } },
+                { id: "glacier", label: "冰川", kind: "raster", status: "ok", bounds: { west: 90.5, south: 33.3, east: 92.6, north: 35.0 } },
+              ],
+            });
+            for (const item of ["geo-raster-surface", "geo-dem-base", "geo-elevation-band-low", "geo-elevation-band-mid", "geo-elevation-band-high", "geo-glacier-fill", "geo-glacier-stripe"]) {
+              if (!rasterHtml.includes(item)) throw new Error(`raster preview layer missing: ${item}`);
+            }
+            for (const key of ["dem", "elevation_zone", "glacier"]) {
+              if (!rasterHtml.includes(`data-geo-layer-toggle="${key}"`)) throw new Error(`raster layer toggle missing: ${key}`);
+              if (!rasterHtml.includes(`data-geo-layer-opacity="${key}:medium"`)) throw new Error(`raster layer opacity control missing: ${key}`);
+            }
             """
         )
         result = subprocess.run(

@@ -104,6 +104,15 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertIn('"rgba(181,69,56,0.32)"', app_js)
         self.assertIn('"rgba(20,79,84,0.28)"', app_js)
 
+    def test_event_mode_wrappers_remain_available_to_results_view(self) -> None:
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function floodEventEvaluation(meta = {})", app_js)
+        self.assertIn("function floodEventStatusText(evaluation = {})", app_js)
+        self.assertIn("componentFractionReport(meta);", app_js)
+        self.assertIn("floodEventEvaluation,", app_js)
+        self.assertIn("floodEventStatusText,", app_js)
+
     def test_migrated_request_guards_are_not_kept_in_state(self) -> None:
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         state_keys = js_object_keys(app_js, "state")
