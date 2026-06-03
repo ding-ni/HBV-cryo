@@ -185,9 +185,10 @@
     const shortPath = helpers.shortPath;
     const objectLabels = helpers.objectLabels || {};
     const selectedPath = String(helpers.selectedPath || "");
+    const samePath = typeof helpers.samePath === "function" ? helpers.samePath : defaultSamePath;
 
     return items.map(w => `
-    <div class="workspace-card ${selectedPath === w.path ? "selected" : ""}" data-workspace-path="${escapeHtml(w.path)}">
+    <div class="workspace-card ${samePath(selectedPath, w.path) ? "selected" : ""}" data-workspace-path="${escapeHtml(w.path)}">
       <div class="workspace-card-info" style="flex:1;min-width:0">
         <div class="list-item-head">
           <strong>${escapeHtml(w.flow_name || w.name)}</strong>

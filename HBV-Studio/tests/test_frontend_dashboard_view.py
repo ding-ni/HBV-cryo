@@ -234,6 +234,26 @@ class FrontendDashboardViewTests(unittest.TestCase):
             ], { ...helpers, selectedPath: "C:/workspaces/A/config.json" });
 
             if (!workspaceHtml.includes("workspace-card selected")) throw new Error(workspaceHtml);
+            const normalizedSelectedWorkspaceHtml = dashboard.renderWorkspaceCards([
+              {
+                path: "C:/workspaces/A/config.json",
+                flow_name: "测试<流域>",
+                calibration_mode: "daily",
+                object_type: "full_upstream_basin",
+                workflow: { ready_for_calibration: true, completed_count: 6, total_steps: 7, next_step_label: "率定", missing_count: 0 },
+                display_path: "C:/workspaces/A/config.json",
+                runtime_display_path: "C:/workspaces/A/runtime",
+              },
+            ], {
+              ...helpers,
+              selectedPath: "c:\\workspaces\\a\\config.json",
+              samePath(left, right) {
+                return String(left || "").replace(/\\/g, "/").toLowerCase() === String(right || "").replace(/\\/g, "/").toLowerCase();
+              },
+            });
+            if (!normalizedSelectedWorkspaceHtml.includes("workspace-card selected")) {
+              throw new Error("workspace card selection should use injected path comparator");
+            }
             if (!workspaceHtml.includes("测试&lt;流域&gt;")) throw new Error("workspace name should be escaped");
             if (!workspaceHtml.includes("可率定")) throw new Error("workflow status missing");
             if (!workspaceHtml.includes("步骤 6/7 · 下一步 率定")) throw new Error("workflow summary missing");

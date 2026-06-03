@@ -4032,6 +4032,7 @@ function renderWorkspaceCards() {
     escapeHtml,
     objectLabels,
     profileBadge,
+    samePath,
     selectedPath: state.dashboardLayoutPath,
     shortPath,
     workspaceNextStepText,
