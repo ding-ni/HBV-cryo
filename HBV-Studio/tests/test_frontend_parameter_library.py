@@ -298,6 +298,8 @@ class FrontendParameterLibraryTests(unittest.TestCase):
               "manualPresetSavePreflight",
               "manualPresetLoadPreflight",
               "manualPresetDeletePreflight",
+              "manualPresetSaveRequestState",
+              "manualPresetDeleteRequestState",
               "manualPresetSaveSuccessState",
               "manualPresetSaveSelectionState",
               "manualPresetLoadSuccessState",
@@ -402,10 +404,25 @@ class FrontendParameterLibraryTests(unittest.TestCase):
             if (savePayload.prec_source !== "custom_tif") throw new Error("precipitation source not normalized");
             if (savePayload.name !== "Trial set") throw new Error("name not trimmed");
             if (savePayload.params.TT !== 0.2) throw new Error("params not carried");
+            const saveRequest = library.manualPresetSaveRequestState(savePayload);
+            if (!saveRequest.ready ||
+                saveRequest.requestPath !== "/api/manual-preset/save" ||
+                saveRequest.payload.config_path !== "C:/workspaces/A/workspace.json" ||
+                saveRequest.payload.name !== "Trial set") {
+              throw new Error(`manual preset save request mismatch: ${JSON.stringify(saveRequest)}`);
+            }
 
             const deletePayload = library.manualPresetDeletePayload("C:/workspace.json", presets[1]);
             if (deletePayload.preset_id !== "global-1" || deletePayload.scope !== "global") {
               throw new Error("delete payload did not use parameter_set_id and scope");
+            }
+            const deleteRequest = library.manualPresetDeleteRequestState(deletePayload);
+            if (!deleteRequest.ready ||
+                deleteRequest.requestPath !== "/api/manual-preset/delete" ||
+                deleteRequest.payload.config_path !== "C:/workspace.json" ||
+                deleteRequest.payload.preset_id !== "global-1" ||
+                deleteRequest.payload.scope !== "global") {
+              throw new Error(`manual preset delete request mismatch: ${JSON.stringify(deleteRequest)}`);
             }
             const saveSuccess = library.manualPresetSaveSuccessState({
               preset: { id: "p1", name: "Trial set", scope: "global", params_adjusted: true },

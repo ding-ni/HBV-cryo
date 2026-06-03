@@ -164,6 +164,8 @@ const frontendModuleContracts = [
       "manualPresetDeletePreflight",
       "manualPresetSavePayload",
       "manualPresetDeletePayload",
+      "manualPresetSaveRequestState",
+      "manualPresetDeleteRequestState",
       "manualPresetSaveSuccessState",
       "manualPresetSaveSelectionState",
       "manualPresetLoadSuccessState",
@@ -4210,7 +4212,7 @@ async function saveCurrentManualPreset() {
     showToast(preflight.message, true);
     return;
   }
-  const payload = await apiPost("/api/manual-preset/save", window.HBVStudioParameterLibrary.manualPresetSavePayload({
+  const request = window.HBVStudioParameterLibrary.manualPresetSaveRequestState(window.HBVStudioParameterLibrary.manualPresetSavePayload({
     configPath,
     scope: $("#manual-preset-scope")?.value || "workspace",
     runData: state._runData,
@@ -4222,6 +4224,7 @@ async function saveCurrentManualPreset() {
     name,
     params: state._runParams,
   }));
+  const payload = await apiPost(request.requestPath, request.payload);
   await loadRunManualPresets(configPath, { silent: true });
   const taskSync = window.HBVStudioParameterLibrary.manualPresetTaskSyncState(configPath, getTaskManualPresetConfigPath(), {
     workspaceProfile: state.currentWorkspace?.率定模式,
@@ -4267,7 +4270,10 @@ async function deleteSelectedManualPreset() {
   }
   const deleteView = window.HBVStudioParameterLibrary.manualPresetDeleteViewState(preflight.presetName);
   if (!window.confirm(deleteView.confirmText)) return;
-  await apiPost("/api/manual-preset/delete", window.HBVStudioParameterLibrary.manualPresetDeletePayload(preflight.configPath, preflight.preset));
+  const request = window.HBVStudioParameterLibrary.manualPresetDeleteRequestState(
+    window.HBVStudioParameterLibrary.manualPresetDeletePayload(preflight.configPath, preflight.preset),
+  );
+  await apiPost(request.requestPath, request.payload);
   await loadRunManualPresets(preflight.configPath, { silent: true });
   const taskSync = window.HBVStudioParameterLibrary.manualPresetTaskSyncState(preflight.configPath, getTaskManualPresetConfigPath(), {
     workspaceProfile: state.currentWorkspace?.率定模式,

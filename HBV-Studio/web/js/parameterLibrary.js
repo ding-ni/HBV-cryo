@@ -485,6 +485,22 @@
     };
   }
 
+  function manualPresetSaveRequestState(payload = {}) {
+    return {
+      ready: true,
+      requestPath: "/api/manual-preset/save",
+      payload: payload || {},
+    };
+  }
+
+  function manualPresetDeleteRequestState(payload = {}) {
+    return {
+      ready: true,
+      requestPath: "/api/manual-preset/delete",
+      payload: payload || {},
+    };
+  }
+
   function manualPresetSaveSuccessState(responseData = {}, fallbackName = "") {
     const preset = responseData?.preset || {};
     const savedId = String(preset.id || preset.parameter_set_id || "").trim();
@@ -1010,6 +1026,8 @@
     manualPresetDeletePreflight,
     manualPresetSavePayload,
     manualPresetDeletePayload,
+    manualPresetSaveRequestState,
+    manualPresetDeleteRequestState,
     manualPresetSaveSuccessState,
     manualPresetSaveSelectionState,
     manualPresetLoadSuccessState,
