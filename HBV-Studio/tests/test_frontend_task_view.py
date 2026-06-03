@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "newlyCompletedTask", "newlyFinishedTaskIds", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskById", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
+            for (const name of ["filterTasks", "hasRunningTasks", "newlyCompletedTask", "newlyFinishedTaskIds", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskById", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -48,6 +48,12 @@ class FrontendTaskViewTests(unittest.TestCase):
             }
             if (taskView.taskById(taskLookupItems, "missing") !== null || taskView.taskById({ bad: true }, "7") !== null) {
               throw new Error("taskById should return null for missing or invalid task lists");
+            }
+            if (!taskView.hasRunningTasks([{ status: "completed" }, { status: "running" }])) {
+              throw new Error("hasRunningTasks should detect running tasks");
+            }
+            if (taskView.hasRunningTasks([{ status: "completed" }, { status: "failed" }]) || taskView.hasRunningTasks({ bad: true })) {
+              throw new Error("hasRunningTasks should be false without running tasks");
             }
 
             const taskTransitions = [

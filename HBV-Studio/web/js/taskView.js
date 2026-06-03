@@ -88,6 +88,10 @@
     return (Array.isArray(tasks) ? tasks : []).find(task => String(task?.id ?? "") === targetId) || null;
   }
 
+  function hasRunningTasks(tasks = []) {
+    return (Array.isArray(tasks) ? tasks : []).some(task => task?.status === "running");
+  }
+
   function previousTaskRecord(previousTasks = null, taskId = "") {
     if (!previousTasks || taskId === null || taskId === undefined) return null;
     if (typeof previousTasks.get === "function") {
@@ -831,6 +835,7 @@
   window.HBVStudioTaskView = {
     cleanTaskLogMessage,
     filterTasks,
+    hasRunningTasks,
     methodLabel,
     newlyCompletedTask,
     newlyFinishedTaskIds,

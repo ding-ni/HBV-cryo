@@ -288,6 +288,7 @@ const frontendModuleContracts = [
     exports: [
       "cleanTaskLogMessage",
       "filterTasks",
+      "hasRunningTasks",
       "methodLabel",
       "newlyCompletedTask",
       "newlyFinishedTaskIds",
@@ -6252,7 +6253,7 @@ function startPolling() {
     try {
       await loadTasks();
     } catch {}
-    const hasRunning = state.tasks.some(t => t.status === "running");
+    const hasRunning = window.HBVStudioTaskView.hasRunningTasks(state.tasks);
     if (hasRunning) {
       setTimeout(() => loadTasks().catch(() => {}), 1500);
     }
@@ -6261,7 +6262,7 @@ function startPolling() {
   };
 
   const pollRuns = async () => {
-    const hasRunning = state.tasks.some(t => t.status === "running");
+    const hasRunning = window.HBVStudioTaskView.hasRunningTasks(state.tasks);
     const shouldRefreshRuns = hasRunning || state.currentView === "dashboard" || state.currentView === "forecast" || state.currentView === "results";
     if (shouldRefreshRuns) {
       try {
