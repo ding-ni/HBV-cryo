@@ -83,6 +83,10 @@
     return value === "hourly" ? "小时尺度" : value === "daily" ? "日尺度" : "未选择";
   }
 
+  function profileBadge(value = "") {
+    return `<span class="status-badge">${profileLabel(value)}</span>`;
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -243,6 +247,7 @@
     formatNumber,
     healthQueryState,
     pollingScheduleState,
+    profileBadge,
     profileLabel,
     quitRequestState,
     servicePillState,

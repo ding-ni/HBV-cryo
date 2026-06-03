@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1893,6 +1893,8 @@ function profileLabel(p) {
 }
 
 function profileBadge(p) {
+  const runtimeProfileBadge = window.HBVStudioAppRuntime?.profileBadge;
+  if (typeof runtimeProfileBadge === "function") return runtimeProfileBadge(p);
   return `<span class="status-badge">${profileLabel(p)}</span>`;
 }
 
