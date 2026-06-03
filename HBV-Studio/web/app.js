@@ -270,7 +270,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -865,7 +865,12 @@ async function ensureWorkspaceReadyForExecution(workspacePath, { restoreView = "
     return true;
   }
   try {
-    const validation = await apiGet(`/api/config/validate?config_path=${encodeURIComponent(targetPath)}&stage=${encodeURIComponent(stage)}&prec_source=${encodeURIComponent(getTaskRuntimePrecipSource())}`);
+    const query = window.HBVStudioDataPrepView.inputCheckQueryState({
+      configPath: targetPath,
+      stage,
+      precipSource: getTaskRuntimePrecipSource(),
+    });
+    const validation = await apiGet(query.validationPath);
     if (validation.data?.valid) {
       return true;
     }
@@ -3120,10 +3125,11 @@ async function detectObs() {
   const path = $("#wz-obs-csv").value.trim();
   if (!path) return;
   try {
-    const targetStepHours = isHourlyTimescaleSelected() ? 1 : 24;
-    const payload = await apiGet(
-      `/api/obs-info?path=${encodeURIComponent(path)}&target_step_hours=${encodeURIComponent(targetStepHours)}`
-    );
+    const query = window.HBVStudioDataPrepView.observationInfoQueryState({
+      path,
+      targetStepHours: isHourlyTimescaleSelected() ? 1 : 24,
+    });
+    const payload = await apiGet(query.infoPath);
     const info = payload.data;
     state.obsInfo = info;
     // Auto-fill time range if empty
@@ -3218,10 +3224,8 @@ async function autoComputeElevation() {
   const demPath = $("#wz-dem-tif").value.trim() || "";
   if (!shpPath) return;
   try {
-    const demParam = demPath ? `&dem_path=${encodeURIComponent(demPath)}` : "";
-    const payload = await apiGet(
-      `/api/suggest/cfmax-threshold?shp_path=${encodeURIComponent(shpPath)}${demParam}`
-    );
+    const query = window.HBVStudioDataPrepView.elevationSuggestionQueryState({ shpPath, demPath });
+    const payload = await apiGet(query.suggestionPath);
     const d = payload.data;
     if (d.suggested_threshold_m) {
       $("#wz-cfmax").value = d.suggested_threshold_m;

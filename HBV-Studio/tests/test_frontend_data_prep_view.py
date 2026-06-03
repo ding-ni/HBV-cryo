@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -193,6 +193,41 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const stepBoundaryQuery = view.boundaryPreviewQueryState({ hourly: false });
             if (stepBoundaryQuery.source !== "step_hours" || JSON.stringify(stepBoundaryQuery.entries) !== JSON.stringify([["expected_step_hours", "24"]])) {
               throw new Error(`boundary step query mismatch: ${JSON.stringify(stepBoundaryQuery)}`);
+            }
+            const obsQuery = view.observationInfoQueryState({
+              path: " C:/观测资料/流量 A&B.csv ",
+              targetStepHours: 1,
+            });
+            if (!obsQuery.ready ||
+                obsQuery.message !== "" ||
+                obsQuery.path !== "C:/观测资料/流量 A&B.csv" ||
+                obsQuery.targetStepHours !== "1" ||
+                obsQuery.infoPath !== "/api/obs-info?path=C%3A%2F%E8%A7%82%E6%B5%8B%E8%B5%84%E6%96%99%2F%E6%B5%81%E9%87%8F%20A%26B.csv&target_step_hours=1") {
+              throw new Error(`observation info query mismatch: ${JSON.stringify(obsQuery)}`);
+            }
+            const emptyObsQuery = view.observationInfoQueryState({ path: " ", hourly: false });
+            if (emptyObsQuery.ready ||
+                emptyObsQuery.message !== "请选择观测流量 CSV。" ||
+                emptyObsQuery.targetStepHours !== "24" ||
+                emptyObsQuery.infoPath !== "/api/obs-info?path=&target_step_hours=24") {
+              throw new Error(`empty observation query mismatch: ${JSON.stringify(emptyObsQuery)}`);
+            }
+            const elevationQuery = view.elevationSuggestionQueryState({
+              shpPath: " C:/边界/流域 A&B.shp ",
+              demPath: " C:/DEM/海拔 30m.tif ",
+            });
+            if (!elevationQuery.ready ||
+                elevationQuery.message !== "" ||
+                elevationQuery.shpPath !== "C:/边界/流域 A&B.shp" ||
+                elevationQuery.demPath !== "C:/DEM/海拔 30m.tif" ||
+                elevationQuery.suggestionPath !== "/api/suggest/cfmax-threshold?shp_path=C%3A%2F%E8%BE%B9%E7%95%8C%2F%E6%B5%81%E5%9F%9F%20A%26B.shp&dem_path=C%3A%2FDEM%2F%E6%B5%B7%E6%8B%94%2030m.tif") {
+              throw new Error(`elevation suggestion query mismatch: ${JSON.stringify(elevationQuery)}`);
+            }
+            const emptyElevationQuery = view.elevationSuggestionQueryState({ shpPath: " ", demPath: " C:/DEM/a.tif " });
+            if (emptyElevationQuery.ready ||
+                emptyElevationQuery.message !== "请选择流域边界。" ||
+                emptyElevationQuery.suggestionPath !== "/api/suggest/cfmax-threshold?shp_path=&dem_path=C%3A%2FDEM%2Fa.tif") {
+              throw new Error(`empty elevation query mismatch: ${JSON.stringify(emptyElevationQuery)}`);
             }
             const boundaryPreview = view.boundaryPreviewState({
               suggested_calibration_mode: "hourly",

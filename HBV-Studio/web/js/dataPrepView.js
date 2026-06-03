@@ -371,6 +371,31 @@
     return { entries: [["expected_step_hours", stepHours]], source: "step_hours", stepHours };
   }
 
+  function observationInfoQueryState(model = {}) {
+    const path = String(model.path || "").trim();
+    const targetStepHours = String(model.targetStepHours || (model.hourly ? 1 : 24)).trim();
+    return {
+      ready: Boolean(path),
+      message: path ? "" : "请选择观测流量 CSV。",
+      path,
+      targetStepHours,
+      infoPath: `/api/obs-info?path=${encodeURIComponent(path)}&target_step_hours=${encodeURIComponent(targetStepHours)}`,
+    };
+  }
+
+  function elevationSuggestionQueryState(model = {}) {
+    const shpPath = String(model.shpPath || model.path || "").trim();
+    const demPath = String(model.demPath || "").trim();
+    const demParam = demPath ? `&dem_path=${encodeURIComponent(demPath)}` : "";
+    return {
+      ready: Boolean(shpPath),
+      message: shpPath ? "" : "请选择流域边界。",
+      shpPath,
+      demPath,
+      suggestionPath: `/api/suggest/cfmax-threshold?shp_path=${encodeURIComponent(shpPath)}${demParam}`,
+    };
+  }
+
   function defaultFormatNumber(value, digits = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number.toFixed(digits) : "—";
@@ -1280,6 +1305,7 @@
     boundaryPreviewState,
     customMeteoImportCopyState,
     customMeteoImportDirectoryState,
+    elevationSuggestionQueryState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
@@ -1302,6 +1328,7 @@
     meteoImportUiState,
     meteoSourceLabels,
     meteoSourceState,
+    observationInfoQueryState,
     observationHintState,
     prepPanelSummary,
     prepStatusQueryState,
