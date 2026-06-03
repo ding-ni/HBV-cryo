@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             for (const name of ["resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
@@ -211,6 +211,20 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (results.selectedRunPath({ currentRun: { run: { path: "nested-run" }, path: "fallback-run" } }) !== "nested-run") {
               throw new Error("selectedRunPath should use current run detail path before fallback path");
+            }
+            const detailQuery = results.runDetailQueryState({ path: " C:/结果/日 尺度/run & 1 " });
+            if (!detailQuery.ready ||
+                detailQuery.message !== "" ||
+                detailQuery.runPath !== "C:/结果/日 尺度/run & 1" ||
+                detailQuery.detailPath !== "/api/run?path=C%3A%2F%E7%BB%93%E6%9E%9C%2F%E6%97%A5%20%E5%B0%BA%E5%BA%A6%2Frun%20%26%201") {
+              throw new Error(`run detail query should trim and encode path: ${JSON.stringify(detailQuery)}`);
+            }
+            const emptyDetailQuery = results.runDetailQueryState({ path: "  " });
+            if (emptyDetailQuery.ready ||
+                emptyDetailQuery.message !== "请选择结果。" ||
+                emptyDetailQuery.runPath !== "" ||
+                emptyDetailQuery.detailPath !== "/api/run?path=") {
+              throw new Error(`empty run detail query should stay inactive: ${JSON.stringify(emptyDetailQuery)}`);
             }
             const clearedDetail = results.clearRunDetailState().statePatch;
             for (const key of ["currentRun", "selectedRunPath", "_runData", "_runParams", "_runOrigParams", "compareSeries", "compareMetrics", "compareLabel", "comparePresetId", "compareAdjusted", "lastRunExportPath", "runManualPresets", "runManualPresetConfigPath"]) {

@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5257,15 +5257,20 @@ async function loadRuns() {
 }
 
 async function loadRun(path) {
-  const targetPath = String(path || "").trim();
+  const query = window.HBVStudioResultsView.runDetailQueryState({ path });
+  const targetPath = query.runPath;
   const previousSelected = currentSelectedRunPath();
   const previousRunData = state.currentRun;
   const requestToken = runDetailRequestGuard.next();
+  if (!query.ready) {
+    clearRunDetail(query.message);
+    return;
+  }
   let detailLoaded = false;
   state.selectedRunPath = targetPath || previousSelected;
   renderRunList();
   try {
-    const p = await apiGet(`/api/run?path=${encodeURIComponent(path)}`);
+    const p = await apiGet(query.detailPath);
     if (!runDetailRequestGuard.isActive(requestToken)) return;
     const filtersChanged = alignRunFiltersForSelection(p.data?.run || {});
     if (filtersChanged) {

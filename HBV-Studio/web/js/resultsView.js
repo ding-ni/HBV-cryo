@@ -190,6 +190,16 @@
     return String(model.selectedRunPath || model.currentRun?.run?.path || model.currentRun?.path || "").trim();
   }
 
+  function runDetailQueryState(model = {}) {
+    const runPath = String(model.path || model.runPath || "").trim();
+    return {
+      ready: Boolean(runPath),
+      message: runPath ? "" : "请选择结果。",
+      runPath,
+      detailPath: `/api/run?path=${encodeURIComponent(runPath)}`,
+    };
+  }
+
   function clearRunComparisonState() {
     return {
       statePatch: {
@@ -1328,6 +1338,7 @@
     runComparisonRequestContext,
     runComparisonRequestStillCurrent,
     runComparisonSuccessState,
+    runDetailQueryState,
     runDetailState,
     runListState,
     runManualPresetLoadErrorState,
