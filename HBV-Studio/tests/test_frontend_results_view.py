@@ -39,7 +39,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartRequestState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestState || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
-            for (const name of ["currentForwardSimulationTask", "deleteRunRequestState", "isForwardSimulationTaskForRun", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
+            for (const name of ["currentForwardSimulationTask", "currentManualStartTask", "deleteRunRequestState", "isForwardSimulationTaskForRun", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
               if (typeof results?.[name] !== "function") {
                 throw new Error(`missing results view state export: ${name}`);
               }
@@ -84,6 +84,23 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (results.currentForwardSimulationTask(forwardTasks, "", {}, helpers) !== null) {
               throw new Error("missing run path should not select a forward task");
+            }
+            const manualStartTasks = [
+              { id: "old-manual", task_type: "manual_start", config_path: "C:/ws/old.json", status: "running" },
+              { id: "done-manual", task_type: "manual_start", config_path: "C:/ws/A.json", status: "completed" },
+              { id: "running-manual", task_type: "manual_start", config_path: "C:/ws/A.json", status: "running" },
+              { id: "prep", task_type: "data_prep", config_path: "C:/ws/A.json", status: "running" },
+            ];
+            const firstManualStart = results.currentManualStartTask(manualStartTasks, "C:\\ws\\A.json", {}, helpers);
+            if (firstManualStart?.id !== "done-manual") {
+              throw new Error(`expected first matching manual start task, got ${firstManualStart?.id}`);
+            }
+            const runningManualStart = results.currentManualStartTask(manualStartTasks, "C:/ws/A.json", { runningOnly: true }, helpers);
+            if (runningManualStart?.id !== "running-manual") {
+              throw new Error(`expected running manual start task, got ${runningManualStart?.id}`);
+            }
+            if (results.currentManualStartTask(manualStartTasks, "", {}, helpers) !== null) {
+              throw new Error("missing workspace path should not select a manual start task");
             }
 
             const toolbar = results.renderFilterToolbar({

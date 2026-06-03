@@ -622,6 +622,18 @@
     ) || null;
   }
 
+  function currentManualStartTask(tasks = [], workspacePath = "", options = {}, helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const targetPath = String(workspacePath || "").trim();
+    const runningOnly = Boolean(options?.runningOnly);
+    if (!targetPath) return null;
+    return (Array.isArray(tasks) ? tasks : []).find(task =>
+      task?.task_type === "manual_start" &&
+      samePath(String(task?.config_path || "").trim(), targetPath) &&
+      (!runningOnly || task?.status === "running")
+    ) || null;
+  }
+
   function forwardSimulationTaskUiState(task = null, options = {}, helpers = {}) {
     const formatDurationSeconds = helpers.formatDurationSeconds || (value => `${Math.max(0, Math.round(Number(value) || 0))}s`);
     const formatNumber = helpers.formatNumber || ((value, digits = 4) => {
@@ -1451,6 +1463,7 @@
     clearRunDetailState,
     clearRunDetailViewState,
     currentForwardSimulationTask,
+    currentManualStartTask,
     deleteRunRequestState,
     filterRuns,
     forwardSimulationErrorState,

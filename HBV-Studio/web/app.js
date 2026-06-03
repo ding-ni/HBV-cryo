@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "currentForwardSimulationTask", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartRequestState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestState", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "isForwardSimulationTaskForRun", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "currentForwardSimulationTask", "currentManualStartTask", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartRequestState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestState", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "isForwardSimulationTaskForRun", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -836,21 +836,21 @@ function manualStarterWorkspacePath() {
   return String(state.runWorkspaceFilterPath || state.wizardWorkspacePath || "").trim();
 }
 
-function findCurrentManualStartTask({ workspacePath = "", runningOnly = false } = {}) {
-  const target = String(workspacePath || manualStarterWorkspacePath()).trim();
-  if (!target) return null;
-  return state.tasks.find(task =>
-    task.task_type === "manual_start" &&
-    samePath(task.config_path, target) &&
-    (!runningOnly || task.status === "running")
-  ) || null;
-}
-
 function updateManualStarterButtons() {
   const calibrationWorkspacePath = String(state.wizardWorkspacePath || "").trim();
   const resultsWorkspacePath = manualStarterWorkspacePath();
-  const runningCalibrationTask = findCurrentManualStartTask({ workspacePath: calibrationWorkspacePath, runningOnly: true });
-  const runningResultsTask = findCurrentManualStartTask({ workspacePath: resultsWorkspacePath, runningOnly: true });
+  const runningCalibrationTask = window.HBVStudioResultsView.currentManualStartTask(
+    state.tasks,
+    calibrationWorkspacePath,
+    { runningOnly: true },
+    { samePath },
+  );
+  const runningResultsTask = window.HBVStudioResultsView.currentManualStartTask(
+    state.tasks,
+    resultsWorkspacePath,
+    { runningOnly: true },
+    { samePath },
+  );
   const resultsWorkspaceRunCount = resultsWorkspacePath ? runsForWorkspace(resultsWorkspacePath).length : 0;
   const controlState = window.HBVStudioResultsView.manualStarterControlState({
     calibrationWorkspacePath,
