@@ -82,6 +82,40 @@
     };
   }
 
+  function previousTaskRecord(previousTasks = null, taskId = "") {
+    if (!previousTasks || taskId === null || taskId === undefined) return null;
+    if (typeof previousTasks.get === "function") {
+      return previousTasks.get(taskId) || previousTasks.get(String(taskId)) || null;
+    }
+    if (Array.isArray(previousTasks)) {
+      return previousTasks.find(task => String(task?.id ?? "") === String(taskId ?? "")) || null;
+    }
+    if (typeof previousTasks === "object") {
+      return previousTasks[taskId] || previousTasks[String(taskId)] || null;
+    }
+    return null;
+  }
+
+  function taskWasRunning(previousTasks = null, task = null) {
+    return previousTaskRecord(previousTasks, task?.id)?.status === "running";
+  }
+
+  function newlyFinishedTaskIds(tasks = [], previousTasks = null) {
+    return (Array.isArray(tasks) ? tasks : [])
+      .filter(task => taskWasRunning(previousTasks, task) && task?.status !== "running")
+      .map(task => task.id);
+  }
+
+  function newlyCompletedTask(tasks = [], previousTasks = null, taskType = "") {
+    const targetType = String(taskType || "").trim();
+    if (!targetType) return null;
+    return (Array.isArray(tasks) ? tasks : []).find(task =>
+      task?.task_type === targetType &&
+      task?.status === "completed" &&
+      taskWasRunning(previousTasks, task)
+    ) || null;
+  }
+
   function normalizeTaskFilters(filters = {}) {
     return {
       workspaceMode: String(filters.workspaceMode || "current").trim().toLowerCase() || "current",
@@ -792,6 +826,8 @@
     cleanTaskLogMessage,
     filterTasks,
     methodLabel,
+    newlyCompletedTask,
+    newlyFinishedTaskIds,
     optimizationMethodLabel,
     renderTaskCard,
     renderTaskActions,

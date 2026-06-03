@@ -289,6 +289,8 @@ const frontendModuleContracts = [
       "cleanTaskLogMessage",
       "filterTasks",
       "methodLabel",
+      "newlyCompletedTask",
+      "newlyFinishedTaskIds",
       "optimizationMethodLabel",
       "renderTaskActions",
       "renderTaskCard",
@@ -5381,9 +5383,7 @@ async function loadTasks() {
   renderForecastView();
   updateCounts();
   updateManualStarterButtons();
-  const finishedTaskIds = state.tasks
-    .filter(task => previousTasks.get(task.id)?.status === "running" && task.status !== "running")
-    .map(task => task.id);
+  const finishedTaskIds = window.HBVStudioTaskView.newlyFinishedTaskIds(state.tasks, previousTasks);
   const currentImport = window.HBVStudioDataPrepView.currentMeteoImportTask(
     state.tasks,
     state.wizardWorkspacePath,
@@ -5452,21 +5452,9 @@ async function loadTasks() {
       }
     }
   }
-  const newlyCompletedManualStart = state.tasks.find(task =>
-    task.task_type === "manual_start" &&
-    task.status === "completed" &&
-    previousTasks.get(task.id)?.status === "running"
-  );
-  const newlyCompletedCalibration = state.tasks.find(task =>
-    task.task_type === "calibration" &&
-    task.status === "completed" &&
-    previousTasks.get(task.id)?.status === "running"
-  );
-  const newlyCompletedForecast = state.tasks.find(task =>
-    task.task_type === "forecast_restart" &&
-    task.status === "completed" &&
-    previousTasks.get(task.id)?.status === "running"
-  );
+  const newlyCompletedManualStart = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "manual_start");
+  const newlyCompletedCalibration = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "calibration");
+  const newlyCompletedForecast = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "forecast_restart");
   if (finishedTaskIds.length > 0) {
     clearInputCheckCache();
     await loadRuns();

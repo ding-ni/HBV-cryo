@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
+            for (const name of ["filterTasks", "newlyCompletedTask", "newlyFinishedTaskIds", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -37,6 +37,40 @@ class FrontendTaskViewTests(unittest.TestCase):
             const emptyTasks = taskView.taskListDataState({ bad: true });
             if (emptyTasks.tasks.length !== 0 || emptyTasks.statePatch.tasks.length !== 0) {
               throw new Error(`invalid task list data should normalize to empty array: ${JSON.stringify(emptyTasks)}`);
+            }
+
+            const taskTransitions = [
+              { id: "manual", task_type: "manual_start", status: "completed" },
+              { id: "calibration", task_type: "calibration", status: "completed" },
+              { id: "forecast", task_type: "forecast_restart", status: "failed" },
+              { id: "running", task_type: "calibration", status: "running" },
+              { id: "new-complete", task_type: "manual_start", status: "completed" },
+            ];
+            const previousTaskMap = new Map([
+              ["manual", { id: "manual", status: "running" }],
+              ["calibration", { id: "calibration", status: "running" }],
+              ["forecast", { id: "forecast", status: "running" }],
+              ["running", { id: "running", status: "running" }],
+            ]);
+            const finishedIds = taskView.newlyFinishedTaskIds(taskTransitions, previousTaskMap);
+            if (finishedIds.join("|") !== "manual|calibration|forecast") {
+              throw new Error(`newly finished task ids mismatch: ${finishedIds.join("|")}`);
+            }
+            const newlyCompletedCalibration = taskView.newlyCompletedTask(taskTransitions, previousTaskMap, "calibration");
+            if (newlyCompletedCalibration?.id !== "calibration") {
+              throw new Error(`newly completed calibration mismatch: ${newlyCompletedCalibration?.id}`);
+            }
+            const newlyCompletedForecast = taskView.newlyCompletedTask(taskTransitions, previousTaskMap, "forecast_restart");
+            if (newlyCompletedForecast !== null) {
+              throw new Error("failed forecast task should not count as newly completed");
+            }
+            const previousTaskObject = {
+              manual: { id: "manual", status: "running" },
+              "new-complete": { id: "new-complete", status: "completed" },
+            };
+            const newlyCompletedManual = taskView.newlyCompletedTask(taskTransitions, previousTaskObject, "manual_start");
+            if (newlyCompletedManual?.id !== "manual") {
+              throw new Error(`plain-object previous task lookup mismatch: ${newlyCompletedManual?.id}`);
             }
 
             const helpers = {
