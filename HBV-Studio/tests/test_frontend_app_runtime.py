@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -161,6 +161,29 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 readyContext.context.workflowText !== "可率定 · 7/7" ||
                 readyContext.context.nextStepText !== "可直接率定") {
               throw new Error(`ready sidebar context mismatch: ${JSON.stringify(readyContext)}`);
+            }
+
+            const viewMeta = {
+              dashboard: { title: "项目管理", subtitle: "管理工作区与内置模板" },
+              results: { title: "结果分析", subtitle: "查看率定结果与诊断图表" },
+            };
+            const resultsView = runtime.viewSelectionState("results", viewMeta);
+            const resultUpdates = Object.fromEntries(resultsView.domUpdates.map(update => [update.selector, update.text]));
+            if (resultsView.requestedView !== "results" ||
+                resultsView.selectedView !== "results" ||
+                resultsView.title !== "结果分析" ||
+                resultsView.subtitle !== "查看率定结果与诊断图表" ||
+                resultUpdates["#page-title"] !== "结果分析" ||
+                resultUpdates["#page-subtitle"] !== "查看率定结果与诊断图表") {
+              throw new Error(`view selection state mismatch: ${JSON.stringify(resultsView)}`);
+            }
+
+            const fallbackView = runtime.viewSelectionState("missing", viewMeta);
+            if (fallbackView.requestedView !== "missing" ||
+                fallbackView.selectedView !== "dashboard" ||
+                fallbackView.title !== "项目管理" ||
+                fallbackView.subtitle !== "管理工作区与内置模板") {
+              throw new Error(`view selection fallback mismatch: ${JSON.stringify(fallbackView)}`);
             }
             """
         )

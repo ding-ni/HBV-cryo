@@ -125,12 +125,33 @@
     };
   }
 
+  function viewSelectionState(view = "", viewMeta = {}) {
+    const requestedView = String(view || "").trim();
+    const selectedView = viewMeta && Object.prototype.hasOwnProperty.call(viewMeta, requestedView)
+      ? requestedView
+      : "dashboard";
+    const meta = viewMeta?.[selectedView] || {};
+    const title = String(meta.title || "");
+    const subtitle = String(meta.subtitle || "");
+    return {
+      requestedView,
+      selectedView,
+      title,
+      subtitle,
+      domUpdates: [
+        { selector: "#page-title", text: title },
+        { selector: "#page-subtitle", text: subtitle },
+      ],
+    };
+  }
+
   window.HBVStudioAppRuntime = {
     healthQueryState,
     quitRequestState,
     servicePillState,
     sidebarContextState,
     sidebarCountsState,
+    viewSelectionState,
     windowUnloadRequestState,
   };
 })();

@@ -65,7 +65,8 @@ class FrontendStructureTests(unittest.TestCase):
         self.assertIsNotNone(set_view)
         body = set_view.group("body")
 
-        self.assertIn("renderView(view)", body)
+        self.assertIn("viewSelectionState(view, viewMeta)", body)
+        self.assertIn("renderView(selectedView)", body)
         self.assertNotIn('view === "forecast"', body)
 
     def test_frontend_module_contracts_match_loaded_scripts(self) -> None:

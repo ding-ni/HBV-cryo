@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -2336,13 +2336,13 @@ function renderView(view) {
 }
 
 function setView(view) {
-  if (!viewMeta[view]) view = "dashboard";
-  state.currentView = view;
-  $all(".view").forEach(n => n.classList.toggle("active", n.dataset.view === view));
-  $all(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.viewTarget === view));
-  $("#page-title").textContent    = viewMeta[view].title;
-  $("#page-subtitle").textContent = viewMeta[view].subtitle;
-  renderView(view);
+  const selectionState = window.HBVStudioAppRuntime.viewSelectionState(view, viewMeta);
+  const selectedView = selectionState.selectedView;
+  state.currentView = selectedView;
+  $all(".view").forEach(n => n.classList.toggle("active", n.dataset.view === selectedView));
+  $all(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.viewTarget === selectedView));
+  applyDomUpdates(selectionState.domUpdates);
+  renderView(selectedView);
 }
 
 // --------------- sidebar ---------------
