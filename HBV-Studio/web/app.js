@@ -315,6 +315,11 @@ const frontendModuleContracts = [
     global: "HBVStudioCalibrationView",
     exports: ["calibrationStartRequestState", "selfCheckStartRequestState"],
   },
+  {
+    script: "./js/appRuntime.js",
+    global: "HBVStudioAppRuntime",
+    exports: ["healthQueryState", "quitRequestState", "windowUnloadRequestState"],
+  },
 ];
 
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
@@ -1091,26 +1096,27 @@ function taskLogText(taskId) {
 }
 
 function notifyWindowUnload() {
-  const payload = "{}";
+  const request = window.HBVStudioAppRuntime.windowUnloadRequestState();
   try {
     if (navigator.sendBeacon) {
-      const blob = new Blob([payload], { type: "application/json" });
-      navigator.sendBeacon("/api/app/window-unload", blob);
+      const blob = new Blob([request.body], { type: request.contentType });
+      navigator.sendBeacon(request.requestPath, blob);
       return;
     }
   } catch {}
   try {
-    fetch("/api/app/window-unload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-      keepalive: true,
+    fetch(request.requestPath, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      keepalive: request.keepalive,
     }).catch(() => {});
   } catch {}
 }
 
 async function requestQuitApp() {
-  await apiPost("/api/app/quit", {});
+  const request = window.HBVStudioAppRuntime.quitRequestState();
+  await apiPost(request.requestPath, request.payload);
   showToast("本地服务正在退出，可关闭当前页面。");
 }
 
@@ -6319,7 +6325,8 @@ async function init() {
   renderDashboardWorkspaceLayout();
 
   try {
-    const health = await apiGet("/api/health");
+    const healthQuery = window.HBVStudioAppRuntime.healthQueryState();
+    const health = await apiGet(healthQuery.healthPath);
     const connectedAt = health.server_time ? String(health.server_time).split(" ").pop() : new Date().toLocaleTimeString();
     setServiceState(true, `本地服务已连接 · ${connectedAt}`);
     await refreshAll();
