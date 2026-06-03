@@ -21,8 +21,55 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
+            }
+            const loadQuery = dashboard.dashboardLoadQueryState();
+            if (loadQuery.dashboardPath !== "/api/dashboard" ||
+                loadQuery.fallbackOrder.join("|") !== "templates|workspaces|runs|tasks" ||
+                loadQuery.fallbackPaths.templates !== "/api/templates" ||
+                loadQuery.fallbackPaths.workspaces !== "/api/workspaces" ||
+                loadQuery.fallbackPaths.runs !== "/api/runs" ||
+                loadQuery.fallbackPaths.tasks !== "/api/tasks") {
+              throw new Error(`dashboard load query mismatch: ${JSON.stringify(loadQuery)}`);
+            }
+            const aggregateState = dashboard.dashboardDataState({
+              templates: [{ id: "tpl" }],
+              workspaces: [{ id: "ws" }],
+              runs: [{ id: "run" }],
+              tasks: [{ id: "task" }],
+            }).statePatch;
+            if (aggregateState.templates[0].id !== "tpl" ||
+                aggregateState.workspaces[0].id !== "ws" ||
+                aggregateState.runs[0].id !== "run" ||
+                aggregateState.tasks[0].id !== "task") {
+              throw new Error(`dashboard aggregate state mismatch: ${JSON.stringify(aggregateState)}`);
+            }
+            const emptyAggregateState = dashboard.dashboardDataState({ templates: null }).statePatch;
+            if (emptyAggregateState.templates.length || emptyAggregateState.workspaces.length || emptyAggregateState.runs.length || emptyAggregateState.tasks.length) {
+              throw new Error(`empty aggregate state should use arrays: ${JSON.stringify(emptyAggregateState)}`);
+            }
+            const fallbackState = dashboard.dashboardFallbackState([
+              { status: "fulfilled", value: { data: [{ id: "tpl" }] } },
+              { status: "rejected", reason: new Error("workspaces failed") },
+              { status: "fulfilled", value: { data: [{ id: "run" }] } },
+              { status: "fulfilled", value: { data: "bad" } },
+            ]);
+            if (fallbackState.allFailed ||
+                fallbackState.statePatch.templates[0].id !== "tpl" ||
+                fallbackState.statePatch.workspaces.length !== 0 ||
+                fallbackState.statePatch.runs[0].id !== "run" ||
+                fallbackState.statePatch.tasks.length !== 0) {
+              throw new Error(`dashboard fallback state mismatch: ${JSON.stringify(fallbackState)}`);
+            }
+            const failedFallbackState = dashboard.dashboardFallbackState([
+              { status: "rejected" },
+              { status: "rejected" },
+              { status: "rejected" },
+              { status: "rejected" },
+            ]);
+            if (!failedFallbackState.allFailed) {
+              throw new Error(`failed fallback should be marked all failed: ${JSON.stringify(failedFallbackState)}`);
             }
             const workspaceQuery = dashboard.workspaceLoadQueryState({ path: " F:/工作区/A & B " });
             const encodedPath = encodeURIComponent("F:/工作区/A & B");

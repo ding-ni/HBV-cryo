@@ -17,6 +17,47 @@
     };
   }
 
+  function dashboardLoadQueryState() {
+    return {
+      dashboardPath: "/api/dashboard",
+      fallbackPaths: {
+        templates: "/api/templates",
+        workspaces: "/api/workspaces",
+        runs: "/api/runs",
+        tasks: "/api/tasks",
+      },
+      fallbackOrder: ["templates", "workspaces", "runs", "tasks"],
+    };
+  }
+
+  function dashboardDataState(data = {}) {
+    return {
+      statePatch: {
+        templates: Array.isArray(data?.templates) ? data.templates : [],
+        workspaces: Array.isArray(data?.workspaces) ? data.workspaces : [],
+        runs: Array.isArray(data?.runs) ? data.runs : [],
+        tasks: Array.isArray(data?.tasks) ? data.tasks : [],
+      },
+    };
+  }
+
+  function dashboardFallbackState(settled = []) {
+    const valueAt = index => (
+      settled[index]?.status === "fulfilled" && Array.isArray(settled[index]?.value?.data)
+        ? settled[index].value.data
+        : []
+    );
+    return {
+      statePatch: {
+        templates: valueAt(0),
+        workspaces: valueAt(1),
+        runs: valueAt(2),
+        tasks: valueAt(3),
+      },
+      allFailed: settled.every(item => item?.status !== "fulfilled"),
+    };
+  }
+
   function renderWorkspaceCards(workspaces, helpers = {}) {
     const items = Array.isArray(workspaces) ? workspaces : [];
     if (!items.length) return emptyWorkspaceHint();
@@ -100,6 +141,9 @@
   }
 
   window.HBVStudioDashboardView = {
+    dashboardDataState,
+    dashboardFallbackState,
+    dashboardLoadQueryState,
     renderTemplates,
     renderWorkspaceCards,
     templateListState,

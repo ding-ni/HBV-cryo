@@ -250,7 +250,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -5041,24 +5041,15 @@ function handleTaskActionClick(e) {
 // ===============================================================
 
 async function loadDashboard() {
+  const query = window.HBVStudioDashboardView.dashboardLoadQueryState();
   try {
-    const p = await apiGet("/api/dashboard");
-    state.templates  = p.data.templates  || [];
-    state.workspaces = p.data.workspaces || [];
-    state.runs       = p.data.runs       || [];
-    state.tasks      = p.data.tasks      || [];
+    const p = await apiGet(query.dashboardPath);
+    Object.assign(state, window.HBVStudioDashboardView.dashboardDataState(p.data).statePatch);
   } catch (err) {
-    const [templatesP, workspacesP, runsP, tasksP] = await Promise.allSettled([
-      apiGet("/api/templates"),
-      apiGet("/api/workspaces"),
-      apiGet("/api/runs"),
-      apiGet("/api/tasks"),
-    ]);
-    state.templates = templatesP.status === "fulfilled" ? (templatesP.value.data || []) : [];
-    state.workspaces = workspacesP.status === "fulfilled" ? (workspacesP.value.data || []) : [];
-    state.runs = runsP.status === "fulfilled" ? (runsP.value.data || []) : [];
-    state.tasks = tasksP.status === "fulfilled" ? (tasksP.value.data || []) : [];
-    if ([templatesP, workspacesP, runsP, tasksP].every(item => item.status !== "fulfilled")) {
+    const fallback = await Promise.allSettled(query.fallbackOrder.map(name => apiGet(query.fallbackPaths[name])));
+    const fallbackState = window.HBVStudioDashboardView.dashboardFallbackState(fallback);
+    Object.assign(state, fallbackState.statePatch);
+    if (fallbackState.allFailed) {
       throw err;
     }
     showToast(`首页聚合接口加载失败，已切换为分项加载：${err.message}`, true);
