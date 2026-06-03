@@ -26,18 +26,23 @@
     return Boolean(workspaceByPath(workspaces, path, helpers));
   }
 
+  function dashboardLayoutClearState(options = {}) {
+    const statePatch = {
+      dashboardWorkspaceLayout: null,
+      dashboardGeoOverview: null,
+    };
+    if (options.clearPath) {
+      statePatch.dashboardLayoutPath = "";
+    }
+    return { statePatch };
+  }
+
   function dashboardLayoutStaleState(workspaces = [], selectedPath = "", helpers = {}) {
     const path = String(selectedPath || "").trim();
     const stale = Boolean(path) && !workspaceExists(workspaces, path, helpers);
     return {
       stale,
-      statePatch: stale
-        ? {
-            dashboardLayoutPath: "",
-            dashboardWorkspaceLayout: null,
-            dashboardGeoOverview: null,
-          }
-        : {},
+      statePatch: stale ? dashboardLayoutClearState({ clearPath: true }).statePatch : {},
     };
   }
 
@@ -45,13 +50,7 @@
     const empty = !Array.isArray(workspaces) || workspaces.length === 0;
     return {
       empty,
-      statePatch: empty
-        ? {
-            dashboardLayoutPath: "",
-            dashboardWorkspaceLayout: null,
-            dashboardGeoOverview: null,
-          }
-        : {},
+      statePatch: empty ? dashboardLayoutClearState({ clearPath: true }).statePatch : {},
     };
   }
 
@@ -290,6 +289,7 @@
   window.HBVStudioDashboardView = {
     dashboardDataState,
     dashboardFallbackState,
+    dashboardLayoutClearState,
     dashboardLayoutStaleState,
     dashboardLoadQueryState,
     dashboardWorkspaceEmptyState,

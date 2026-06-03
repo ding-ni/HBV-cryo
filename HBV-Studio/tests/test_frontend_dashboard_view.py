@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.dashboardWorkspaceEmptyState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutClearState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.dashboardWorkspaceEmptyState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
             for (const name of ["templateInstantiateRequestState", "templateInstantiateSuccessState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceDeleteRequestState"]) {
@@ -123,6 +123,18 @@ class FrontendDashboardViewTests(unittest.TestCase):
                 dashboard.workspaceExists(lookupWorkspaces, "missing.json") ||
                 dashboard.workspaceExists(null, "C:/Workspaces/A/config.json")) {
               throw new Error("workspace lookup should handle missing paths and invalid lists");
+            }
+            const layoutClear = dashboard.dashboardLayoutClearState();
+            if (layoutClear.statePatch.dashboardWorkspaceLayout !== null ||
+                layoutClear.statePatch.dashboardGeoOverview !== null ||
+                Object.prototype.hasOwnProperty.call(layoutClear.statePatch, "dashboardLayoutPath")) {
+              throw new Error(`dashboard layout clear should preserve selected path by default: ${JSON.stringify(layoutClear)}`);
+            }
+            const layoutClearWithPath = dashboard.dashboardLayoutClearState({ clearPath: true });
+            if (layoutClearWithPath.statePatch.dashboardLayoutPath !== "" ||
+                layoutClearWithPath.statePatch.dashboardWorkspaceLayout !== null ||
+                layoutClearWithPath.statePatch.dashboardGeoOverview !== null) {
+              throw new Error(`dashboard layout clear should optionally clear selected path: ${JSON.stringify(layoutClearWithPath)}`);
             }
             const staleLayout = dashboard.dashboardLayoutStaleState(lookupWorkspaces, "missing.json");
             if (!staleLayout.stale ||

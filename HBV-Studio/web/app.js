@@ -255,7 +255,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "dashboardWorkspaceEmptyState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutClearState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "dashboardWorkspaceEmptyState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -594,6 +594,12 @@ function clearStaleDashboardLayout() {
     Object.assign(state, staleState.statePatch);
   }
   return staleState.stale;
+}
+
+function clearDashboardLayout(options = {}) {
+  const clearState = window.HBVStudioDashboardView.dashboardLayoutClearState(options);
+  Object.assign(state, clearState.statePatch);
+  return clearState.statePatch;
 }
 
 function workspaceLabelByPath(path) {
@@ -5196,8 +5202,7 @@ async function previewWorkspaceLayout(path, { silent = false } = {}) {
       configPath: state.dashboardLayoutPath,
     });
     if (!query.ready) {
-      state.dashboardWorkspaceLayout = null;
-      state.dashboardGeoOverview = null;
+      clearDashboardLayout();
       renderDashboardWorkspaceLayout();
       return null;
     }
@@ -5210,8 +5215,7 @@ async function previewWorkspaceLayout(path, { silent = false } = {}) {
     renderDashboardWorkspaceLayout();
     return state.dashboardWorkspaceLayout;
   } catch (err) {
-    state.dashboardWorkspaceLayout = null;
-    state.dashboardGeoOverview = null;
+    clearDashboardLayout();
     renderDashboardWorkspaceLayout();
     if (!silent) showToast(err.message, true);
     throw err;
