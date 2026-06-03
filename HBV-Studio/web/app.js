@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1887,6 +1887,8 @@ function updateCalibrationGuidance() {
 }
 
 function profileLabel(p) {
+  const runtimeProfileLabel = window.HBVStudioAppRuntime?.profileLabel;
+  if (typeof runtimeProfileLabel === "function") return runtimeProfileLabel(p);
   return p === "hourly" ? "小时尺度" : p === "daily" ? "日尺度" : "未选择";
 }
 

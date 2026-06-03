@@ -79,6 +79,10 @@
     return `${seconds}s`;
   }
 
+  function profileLabel(value = "") {
+    return value === "hourly" ? "小时尺度" : value === "daily" ? "日尺度" : "未选择";
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -239,6 +243,7 @@
     formatNumber,
     healthQueryState,
     pollingScheduleState,
+    profileLabel,
     quitRequestState,
     servicePillState,
     sidebarContextState,

@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.profileLabel || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -89,6 +89,11 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.samePath("", "") ||
                 runtime.samePath("C:/a", "C:/b")) {
               throw new Error("same path runtime helper mismatch");
+            }
+            if (runtime.profileLabel("daily") !== "日尺度" ||
+                runtime.profileLabel("hourly") !== "小时尺度" ||
+                runtime.profileLabel("") !== "未选择") {
+              throw new Error("profile label runtime helper mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });
