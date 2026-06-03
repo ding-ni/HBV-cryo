@@ -17,6 +17,31 @@
     };
   }
 
+  function calibrationLoadState(model = {}) {
+    const method = text(model.method, "mc_screen_de");
+    const maxiter = Math.max(0, Number(model.maxiter) || 0);
+    const popsize = Math.max(1, Number(model.popsize) || 1);
+    const mcSamples = Math.max(0, Number(model.mcSamples ?? model.mc_samples) || 0);
+    const workers = Math.max(1, Number(model.workers) || 1);
+    const paramCount = Math.max(0, Number(model.paramCount ?? model.param_count) || 0);
+    const population = popsize * paramCount;
+    let estimated = 0;
+    let label = "";
+    if (method === "mc_only") {
+      estimated = mcSamples;
+      label = "快速筛选";
+    } else if (method === "de") {
+      estimated = (maxiter + 1) * population;
+      label = "精细搜索";
+    } else {
+      estimated = mcSamples + (maxiter + 1) * population;
+      label = "快速筛选 + 精细搜索";
+    }
+    const perWorker = workers > 0 ? estimated / workers : estimated;
+    const level = estimated >= 12000 ? "heavy" : estimated >= 5000 ? "medium" : "light";
+    return { method, maxiter, popsize, mcSamples, workers, population, estimated, perWorker, label, level };
+  }
+
   function calibrationStartRequestState(model = {}) {
     const configPath = text(model.configPath ?? model.config_path);
     const quickTest = Boolean(model.quickTest ?? model.quick_test);
@@ -51,6 +76,7 @@
   }
 
   window.HBVStudioCalibrationView = {
+    calibrationLoadState,
     calibrationStartRequestState,
     selfCheckStartRequestState,
   };

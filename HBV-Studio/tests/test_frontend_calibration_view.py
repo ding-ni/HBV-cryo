@@ -21,7 +21,9 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/calibrationView.js", "utf8"), context);
 
             const calibration = context.window.HBVStudioCalibrationView;
-            if (!calibration?.calibrationStartRequestState || !calibration?.selfCheckStartRequestState) {
+            if (!calibration?.calibrationLoadState ||
+                !calibration?.calibrationStartRequestState ||
+                !calibration?.selfCheckStartRequestState) {
               throw new Error("calibration view module exports are missing");
             }
 
@@ -29,6 +31,50 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             if (!selfCheck.ready || selfCheck.requestPath !== "/api/self-check/start" ||
                 Object.keys(selfCheck.payload).length !== 0) {
               throw new Error(`self-check request state mismatch: ${JSON.stringify(selfCheck)}`);
+            }
+
+            const mcOnlyLoad = calibration.calibrationLoadState({
+              method: "mc_only",
+              mcSamples: "250",
+              workers: "5",
+              paramCount: 20,
+            });
+            if (mcOnlyLoad.estimated !== 250 ||
+                mcOnlyLoad.perWorker !== 50 ||
+                mcOnlyLoad.label !== "\u5feb\u901f\u7b5b\u9009" ||
+                mcOnlyLoad.level !== "light") {
+              throw new Error(`mc-only load mismatch: ${JSON.stringify(mcOnlyLoad)}`);
+            }
+
+            const deLoad = calibration.calibrationLoadState({
+              method: "de",
+              maxiter: "10",
+              popsize: "5",
+              workers: "2",
+              paramCount: 20,
+            });
+            if (deLoad.population !== 100 ||
+                deLoad.estimated !== 1100 ||
+                deLoad.perWorker !== 550 ||
+                deLoad.label !== "\u7cbe\u7ec6\u641c\u7d22" ||
+                deLoad.level !== "light") {
+              throw new Error(`de load mismatch: ${JSON.stringify(deLoad)}`);
+            }
+
+            const combinedLoad = calibration.calibrationLoadState({
+              method: "mc_screen_de",
+              maxiter: "24",
+              popsize: "10",
+              mcSamples: "1000",
+              workers: "4",
+              paramCount: 50,
+            });
+            if (combinedLoad.population !== 500 ||
+                combinedLoad.estimated !== 13500 ||
+                combinedLoad.perWorker !== 3375 ||
+                combinedLoad.label !== "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22" ||
+                combinedLoad.level !== "heavy") {
+              throw new Error(`combined load mismatch: ${JSON.stringify(combinedLoad)}`);
             }
 
             const missing = calibration.calibrationStartRequestState({ configPath: " ", method: "" });

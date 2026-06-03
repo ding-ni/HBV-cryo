@@ -317,7 +317,7 @@ const frontendModuleContracts = [
   {
     script: "./js/calibrationView.js",
     global: "HBVStudioCalibrationView",
-    exports: ["calibrationStartRequestState", "selfCheckStartRequestState"],
+    exports: ["calibrationLoadState", "calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
     script: "./js/objectiveRuntime.js",
@@ -1731,11 +1731,21 @@ function objectiveSummary(meta) {
 }
 
 function estimateCalibrationLoad() {
-  const method = $("#task-method")?.value || "mc_screen_de";
-  const maxiter = Math.max(0, Number($("#task-maxiter")?.value) || 0);
-  const popsize = Math.max(1, Number($("#task-popsize")?.value) || 1);
-  const mcSamples = Math.max(0, Number($("#task-mc-samples")?.value) || 0);
-  const workers = Math.max(1, Number($("#task-workers")?.value) || 1);
+  const runtimeLoadState = window.HBVStudioCalibrationView?.calibrationLoadState;
+  const model = {
+    method: $("#task-method")?.value || "mc_screen_de",
+    maxiter: $("#task-maxiter")?.value,
+    popsize: $("#task-popsize")?.value,
+    mcSamples: $("#task-mc-samples")?.value,
+    workers: $("#task-workers")?.value,
+    paramCount: CALIBRATION_PARAM_COUNT,
+  };
+  if (typeof runtimeLoadState === "function") return runtimeLoadState(model);
+  const method = model.method;
+  const maxiter = Math.max(0, Number(model.maxiter) || 0);
+  const popsize = Math.max(1, Number(model.popsize) || 1);
+  const mcSamples = Math.max(0, Number(model.mcSamples) || 0);
+  const workers = Math.max(1, Number(model.workers) || 1);
   const population = popsize * CALIBRATION_PARAM_COUNT;
   let estimated = 0;
   let label = "";
