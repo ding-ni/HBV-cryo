@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewRequestState || !view?.boundaryPreviewState || !view?.cdsApiStatusQueryState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewRequestState || !view?.boundaryPreviewState || !view?.cdsApiStatusQueryState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardSaveStepRequestState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -64,6 +64,28 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             }
             if (view.fromWizardInputTimeValue("2020-01-02T03:04", false) !== "2020-01-02") {
               throw new Error("daily wizard stored value should keep date only");
+            }
+            const missingWizardSave = view.wizardSaveStepRequestState({ workspacePath: " ", step: 2, data: { name: "A" } });
+            if (missingWizardSave.ready || missingWizardSave.reason !== "missing-workspace" ||
+                missingWizardSave.requestPath !== "/api/wizard/save-step" ||
+                missingWizardSave.payload.workspace_path !== "" ||
+                missingWizardSave.payload.step !== 2 ||
+                missingWizardSave.payload.data.name !== "A") {
+              throw new Error(`missing wizard save request state mismatch: ${JSON.stringify(missingWizardSave)}`);
+            }
+            const wizardSave = view.wizardSaveStepRequestState({
+              workspacePath: " C:/ws/A.json ",
+              step: 5,
+              data: { dem_path: "D:/dem.tif", glacier_mode: "inline" },
+            });
+            if (!wizardSave.ready || wizardSave.reason ||
+                wizardSave.requestPath !== "/api/wizard/save-step" ||
+                wizardSave.workspacePath !== "C:/ws/A.json" ||
+                wizardSave.payload.workspace_path !== "C:/ws/A.json" ||
+                wizardSave.payload.step !== 5 ||
+                wizardSave.payload.data.dem_path !== "D:/dem.tif" ||
+                wizardSave.payload.data.glacier_mode !== "inline") {
+              throw new Error(`wizard save request state mismatch: ${JSON.stringify(wizardSave)}`);
             }
             const blockedText = view.formatPrepBlockedMessage(
               { blocked_by: ["gis_base", "download_era5"] },

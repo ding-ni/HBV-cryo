@@ -311,6 +311,25 @@
     };
   }
 
+  function wizardSaveStepRequestState(model = {}) {
+    const workspacePath = String(model.workspacePath || model.workspace_path || "").trim();
+    const step = Number(model.step || 0);
+    const data = model.data && typeof model.data === "object" ? model.data : {};
+    return {
+      ready: Boolean(workspacePath),
+      reason: workspacePath ? "" : "missing-workspace",
+      message: workspacePath ? "" : "请选择工作区。",
+      workspacePath,
+      step,
+      requestPath: "/api/wizard/save-step",
+      payload: {
+        workspace_path: workspacePath,
+        step,
+        data,
+      },
+    };
+  }
+
   function projectFocusHintState(model = {}) {
     const hourly = Boolean(model.hourly);
     const objectType = String(model.objectType || "full_upstream_basin");
@@ -1388,6 +1407,7 @@
     visiblePrepSteps,
     workspaceReadinessQueryState,
     wizardConditionalFieldState,
+    wizardSaveStepRequestState,
     wizardValidationFailureState,
   };
 })();

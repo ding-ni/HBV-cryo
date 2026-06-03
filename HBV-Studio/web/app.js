@@ -280,7 +280,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "cdsApiStatusQueryState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "cdsApiStatusQueryState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardSaveStepRequestState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -2845,11 +2845,12 @@ async function saveCurrentWizardStep() {
   if (!state.wizardWorkspacePath) return;
 
   try {
-    const payload = await apiPost("/api/wizard/save-step", {
-      workspace_path: state.wizardWorkspacePath,
-      step: step,
-      data: data,
+    const request = window.HBVStudioDataPrepView.wizardSaveStepRequestState({
+      workspacePath: state.wizardWorkspacePath,
+      step,
+      data,
     });
+    const payload = await apiPost(request.requestPath, request.payload);
     const result = payload.data || {};
     if (result.path) {
       state.wizardWorkspacePath = result.path;
