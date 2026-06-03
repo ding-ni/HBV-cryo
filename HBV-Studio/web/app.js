@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "servicePillState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarCountsState", "windowUnloadRequestState"],
   },
 ];
 
@@ -2365,10 +2365,13 @@ function updateSidebar() {
 }
 
 function updateCounts() {
-  $("#count-templates").textContent  = String(state.templates.length);
-  $("#count-workspaces").textContent = String(state.workspaces.length);
-  $("#count-runs").textContent       = String(state.runs.length);
-  $("#count-tasks").textContent      = String(state.tasks.length);
+  const countsState = window.HBVStudioAppRuntime.sidebarCountsState({
+    templates: state.templates,
+    workspaces: state.workspaces,
+    runs: state.runs,
+    tasks: state.tasks,
+  });
+  applyDomUpdates(countsState.domUpdates);
 }
 
 // ===============================================================

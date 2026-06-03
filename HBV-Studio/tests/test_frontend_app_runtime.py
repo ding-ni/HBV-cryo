@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarCountsState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -74,6 +74,32 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 errorPill.className !== "service-pill error" ||
                 errorPill.domUpdates[0].className !== "service-pill error") {
               throw new Error(`error service pill state mismatch: ${JSON.stringify(errorPill)}`);
+            }
+
+            const counts = runtime.sidebarCountsState({
+              templates: [{ id: "tpl-1" }, { id: "tpl-2" }],
+              workspaces: [{ path: "ws" }],
+              runs: [{ path: "run-1" }, { path: "run-2" }, { path: "run-3" }],
+              tasks: [],
+            });
+            const countUpdates = Object.fromEntries(counts.domUpdates.map(update => [update.selector, update.text]));
+            if (counts.counts.templates !== 2 ||
+                counts.counts.workspaces !== 1 ||
+                counts.counts.runs !== 3 ||
+                counts.counts.tasks !== 0 ||
+                countUpdates["#count-templates"] !== "2" ||
+                countUpdates["#count-workspaces"] !== "1" ||
+                countUpdates["#count-runs"] !== "3" ||
+                countUpdates["#count-tasks"] !== "0") {
+              throw new Error(`sidebar counts state mismatch: ${JSON.stringify(counts)}`);
+            }
+
+            const emptyCounts = runtime.sidebarCountsState({ templates: null, workspaces: {}, runs: "", tasks: undefined });
+            if (emptyCounts.counts.templates !== 0 ||
+                emptyCounts.counts.workspaces !== 0 ||
+                emptyCounts.counts.runs !== 0 ||
+                emptyCounts.counts.tasks !== 0) {
+              throw new Error(`invalid sidebar counts should fall back to zero: ${JSON.stringify(emptyCounts)}`);
             }
             """
         )

@@ -44,10 +44,33 @@
     };
   }
 
+  function itemCount(value) {
+    return Array.isArray(value) ? value.length : 0;
+  }
+
+  function sidebarCountsState(model = {}) {
+    const counts = {
+      templates: itemCount(model.templates),
+      workspaces: itemCount(model.workspaces),
+      runs: itemCount(model.runs),
+      tasks: itemCount(model.tasks),
+    };
+    return {
+      counts,
+      domUpdates: [
+        { selector: "#count-templates", text: String(counts.templates) },
+        { selector: "#count-workspaces", text: String(counts.workspaces) },
+        { selector: "#count-runs", text: String(counts.runs) },
+        { selector: "#count-tasks", text: String(counts.tasks) },
+      ],
+    };
+  }
+
   window.HBVStudioAppRuntime = {
     healthQueryState,
     quitRequestState,
     servicePillState,
+    sidebarCountsState,
     windowUnloadRequestState,
   };
 })();
