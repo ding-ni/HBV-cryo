@@ -26,6 +26,21 @@
     return Boolean(workspaceByPath(workspaces, path, helpers));
   }
 
+  function dashboardLayoutStaleState(workspaces = [], selectedPath = "", helpers = {}) {
+    const path = String(selectedPath || "").trim();
+    const stale = Boolean(path) && !workspaceExists(workspaces, path, helpers);
+    return {
+      stale,
+      statePatch: stale
+        ? {
+            dashboardLayoutPath: "",
+            dashboardWorkspaceLayout: null,
+            dashboardGeoOverview: null,
+          }
+        : {},
+    };
+  }
+
   function workspaceLoadQueryState(model = {}) {
     const path = String(model.path || model.configPath || "").trim();
     return {
@@ -261,6 +276,7 @@
   window.HBVStudioDashboardView = {
     dashboardDataState,
     dashboardFallbackState,
+    dashboardLayoutStaleState,
     dashboardLoadQueryState,
     renderTemplates,
     renderWorkspaceCards,

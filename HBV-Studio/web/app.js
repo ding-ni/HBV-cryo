@@ -255,7 +255,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -582,6 +582,18 @@ function workspaceEntryByPath(path) {
 
 function workspaceExistsByPath(path) {
   return window.HBVStudioDashboardView.workspaceExists(state.workspaces, path, { samePath });
+}
+
+function clearStaleDashboardLayout() {
+  const staleState = window.HBVStudioDashboardView.dashboardLayoutStaleState(
+    state.workspaces,
+    state.dashboardLayoutPath,
+    { samePath },
+  );
+  if (staleState.stale) {
+    Object.assign(state, staleState.statePatch);
+  }
+  return staleState.stale;
 }
 
 function workspaceLabelByPath(path) {
@@ -5068,11 +5080,7 @@ async function loadDashboard() {
     }
     showToast(`首页聚合接口加载失败，已切换为分项加载：${err.message}`, true);
   }
-  if (state.dashboardLayoutPath && !workspaceExistsByPath(state.dashboardLayoutPath)) {
-    state.dashboardLayoutPath = "";
-    state.dashboardWorkspaceLayout = null;
-    state.dashboardGeoOverview = null;
-  }
+  clearStaleDashboardLayout();
   renderTemplates();
   renderWorkspaceCards();
   renderDashboardWorkspaceLayout();
@@ -5096,11 +5104,7 @@ async function loadTemplates() {
 async function loadWorkspaces() {
   const p = await apiGet(window.HBVStudioDashboardView.workspaceListQueryState().workspacesPath);
   Object.assign(state, window.HBVStudioDashboardView.workspaceListDataState(p.data).statePatch);
-  if (state.dashboardLayoutPath && !workspaceExistsByPath(state.dashboardLayoutPath)) {
-    state.dashboardLayoutPath = "";
-    state.dashboardWorkspaceLayout = null;
-    state.dashboardGeoOverview = null;
-  }
+  clearStaleDashboardLayout();
   renderWorkspaceCards();
   renderDashboardWorkspaceLayout();
   if (state.runs.length) {
