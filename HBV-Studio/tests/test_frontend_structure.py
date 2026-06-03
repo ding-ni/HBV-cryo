@@ -96,6 +96,14 @@ class FrontendStructureTests(unittest.TestCase):
         referenced = set(re.findall(r"window\.(HBVStudio[A-Za-z0-9_]+)", app_js))
         self.assertTrue(referenced <= registered, referenced - registered)
 
+    def test_show_toast_can_report_missing_runtime_module(self) -> None:
+        app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("window.HBVStudioAppRuntime?.toastState", app_js)
+        self.assertIn('typeof runtimeToastState === "function"', app_js)
+        self.assertIn('"rgba(181,69,56,0.32)"', app_js)
+        self.assertIn('"rgba(20,79,84,0.28)"', app_js)
+
     def test_migrated_request_guards_are_not_kept_in_state(self) -> None:
         app_js = (WEB_DIR / "app.js").read_text(encoding="utf-8")
         state_keys = js_object_keys(app_js, "state")

@@ -515,7 +515,15 @@ function escapeHtml(v) {
 
 function showToast(message, isError = false) {
   const t = $("#toast");
-  const toast = window.HBVStudioAppRuntime.toastState(message, isError);
+  const runtimeToastState = window.HBVStudioAppRuntime?.toastState;
+  const toast = typeof runtimeToastState === "function"
+    ? runtimeToastState(message, isError)
+    : {
+        text: String(message ?? ""),
+        borderColor: isError ? "rgba(181,69,56,0.32)" : "rgba(20,79,84,0.28)",
+        visibleClass: "visible",
+        autoHideDelayMs: 2800,
+      };
   t.textContent = toast.text;
   t.style.borderColor = toast.borderColor;
   t.classList.add(toast.visibleClass);
