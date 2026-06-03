@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.finiteNumber || !runtime?.focusStatusClass || !runtime?.focusStatusLabel || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.pollingScheduleState || !runtime?.profileBadge || !runtime?.profileLabel || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.focusStatusClass || !runtime?.focusStatusLabel || !runtime?.formatDateTime || !runtime?.formatDurationSeconds || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.normalizePath || !runtime?.objectiveLabel || !runtime?.pollingScheduleState || !runtime?.profileBadge || !runtime?.profileLabel || !runtime?.quitRequestState || !runtime?.samePath || !runtime?.servicePillState || !runtime?.shortPath || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.slashPath || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -104,6 +104,12 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 runtime.focusStatusClass("fail") !== "status-fail" ||
                 runtime.focusStatusClass("WARN") !== "status-warn") {
               throw new Error("focus status runtime helper mismatch");
+            }
+            if (runtime.objectiveLabel("daily_unified_professional_v1") !== "统一日尺度专业目标函数" ||
+                runtime.objectiveLabel("SINGLE_OBJECTIVE_NSE") !== "单指标纳什效率系数" ||
+                runtime.objectiveLabel("") !== "未设置" ||
+                runtime.objectiveLabel("custom_objective") !== "custom_objective") {
+              throw new Error("objective label runtime helper mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });

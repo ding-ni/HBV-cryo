@@ -95,6 +95,17 @@
     return status === "ok" ? "status-ok" : status === "fail" ? "status-fail" : "status-warn";
   }
 
+  function objectiveLabel(value = "") {
+    return ({
+      auto: "自动选择",
+      daily_unified_professional_v1: "统一日尺度专业目标函数",
+      flood_event_calibration_v1: "洪水事件率定（次洪）",
+      weighted_multi_criteria: "旧版多指标目标函数（历史结果）",
+      weighted_daily_universal: "旧版日尺度加权目标函数（历史结果）",
+      single_objective_nse: "单指标纳什效率系数",
+    })[String(value || "").toLowerCase()] || String(value || "未设置");
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -256,6 +267,7 @@
     focusStatusClass,
     focusStatusLabel,
     healthQueryState,
+    objectiveLabel,
     pollingScheduleState,
     profileBadge,
     profileLabel,
