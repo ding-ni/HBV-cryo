@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -424,6 +424,21 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const meteoPipelineLabels = view.meteoSourceLabels({ prec: "custom_tif", temp: "era5", pet: "custom_tif" }, "pipeline");
             if (meteoLocalLabels.join(",") !== "降水,蒸散发" || meteoPipelineLabels.join(",") !== "气温") {
               throw new Error(`meteo source labels mismatch: ${meteoLocalLabels} / ${meteoPipelineLabels}`);
+            }
+            const mixedSourceState = view.meteoSourceState({ prec: "custom_tif", temp: "era5", pet: "era5_fao56" });
+            if (mixedSourceState.localLabels.join(",") !== "降水" || mixedSourceState.pipelineLabels.join(",") !== "气温,蒸散发") {
+              throw new Error(`mixed meteo source labels mismatch: ${JSON.stringify(mixedSourceState)}`);
+            }
+            if (!mixedSourceState.needsEra5Download || mixedSourceState.needSignature !== "custom_tif|era5|era5_fao56" || !mixedSourceState.hasLocalMeteoSourceConfigured || mixedSourceState.allMeteoSourcesUseLocalTif) {
+              throw new Error(`mixed meteo source state mismatch: ${JSON.stringify(mixedSourceState)}`);
+            }
+            const allLocalSourceState = view.meteoSourceState({ prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" });
+            if (allLocalSourceState.needsEra5Download || allLocalSourceState.localLabels.length !== 3 || !allLocalSourceState.allMeteoSourcesUseLocalTif) {
+              throw new Error(`all-local meteo source state mismatch: ${JSON.stringify(allLocalSourceState)}`);
+            }
+            const pipelineSourceState = view.meteoSourceState({ prec: "era5", temp: "era5", pet: "era5_fao56" });
+            if (!pipelineSourceState.needsEra5Download || pipelineSourceState.localLabels.length !== 0 || pipelineSourceState.pipelineLabels.length !== 3 || pipelineSourceState.hasLocalMeteoSourceConfigured) {
+              throw new Error(`pipeline meteo source state mismatch: ${JSON.stringify(pipelineSourceState)}`);
             }
             const allLocalHint = view.meteoModeHintState({
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },

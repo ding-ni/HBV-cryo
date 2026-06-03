@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -2616,30 +2616,32 @@ function getWizardMeteoSources() {
   };
 }
 
+function getWizardMeteoSourceState() {
+  return window.HBVStudioDataPrepView.meteoSourceState(getWizardMeteoSources());
+}
+
 function wizardNeedsEra5Download() {
-  const sources = getWizardMeteoSources();
-  return sources.prec === "era5" || sources.temp !== "custom_tif" || sources.pet !== "custom_tif";
+  return getWizardMeteoSourceState().needsEra5Download;
 }
 
 function currentEra5NeedSignature() {
-  const sources = getWizardMeteoSources();
-  return `${sources.prec}|${sources.temp}|${sources.pet}`;
+  return getWizardMeteoSourceState().needSignature;
 }
 
 function getWizardLocalMeteoLabels() {
-  return window.HBVStudioDataPrepView.meteoSourceLabels(getWizardMeteoSources(), "local");
+  return getWizardMeteoSourceState().localLabels;
 }
 
 function getWizardPipelineMeteoLabels() {
-  return window.HBVStudioDataPrepView.meteoSourceLabels(getWizardMeteoSources(), "pipeline");
+  return getWizardMeteoSourceState().pipelineLabels;
 }
 
 function hasLocalMeteoSourceConfigured() {
-  return getWizardLocalMeteoLabels().length > 0;
+  return getWizardMeteoSourceState().hasLocalMeteoSourceConfigured;
 }
 
 function allMeteoSourcesUseLocalTif() {
-  return getWizardLocalMeteoLabels().length === 3;
+  return getWizardMeteoSourceState().allMeteoSourcesUseLocalTif;
 }
 
 function updateMeteoModeHint() {

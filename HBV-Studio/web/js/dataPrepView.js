@@ -532,6 +532,19 @@
     return labels;
   }
 
+  function meteoSourceState(sources = {}) {
+    const localLabels = meteoSourceLabels(sources, "local");
+    const pipelineLabels = meteoSourceLabels(sources, "pipeline");
+    return {
+      localLabels,
+      pipelineLabels,
+      needsEra5Download: sources.prec === "era5" || sources.temp !== "custom_tif" || sources.pet !== "custom_tif",
+      needSignature: `${sources.prec || ""}|${sources.temp || ""}|${sources.pet || ""}`,
+      hasLocalMeteoSourceConfigured: localLabels.length > 0,
+      allMeteoSourcesUseLocalTif: localLabels.length === 3,
+    };
+  }
+
   function meteoModeHintState(model = {}) {
     const sources = model.sources || {};
     const copiedLabels = Array.isArray(model.copiedLabels) ? model.copiedLabels : [];
@@ -1090,6 +1103,7 @@
     meteoImportErrorUiState,
     meteoImportUiState,
     meteoSourceLabels,
+    meteoSourceState,
     observationHintState,
     prepPanelSummary,
     prepStepRunningStatus,
