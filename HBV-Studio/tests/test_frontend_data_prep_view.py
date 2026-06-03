@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -153,6 +153,28 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const hourlyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: true });
             if (hourlyBoundaryGuidance.className !== "hint-box status-warn" || !hourlyBoundaryGuidance.text.includes("1 小时")) {
               throw new Error(`hourly boundary guidance mismatch: ${JSON.stringify(hourlyBoundaryGuidance)}`);
+            }
+            const rangeBoundaryQuery = view.boundaryPreviewQueryState({
+              hourly: true,
+              expectedStart: "2020-01-01 00:00",
+              expectedEnd: "2020-01-10 00:00",
+              workspacePath: "workspaces/demo.json",
+            });
+            if (rangeBoundaryQuery.source !== "expected_range" || rangeBoundaryQuery.stepHours !== "1" || JSON.stringify(rangeBoundaryQuery.entries) !== JSON.stringify([["expected_start", "2020-01-01 00:00"], ["expected_end", "2020-01-10 00:00"], ["expected_step_hours", "1"]])) {
+              throw new Error(`boundary range query mismatch: ${JSON.stringify(rangeBoundaryQuery)}`);
+            }
+            const workspaceBoundaryQuery = view.boundaryPreviewQueryState({
+              hourly: false,
+              expectedStart: "",
+              expectedEnd: "",
+              workspacePath: " workspaces/demo.json ",
+            });
+            if (workspaceBoundaryQuery.source !== "workspace" || workspaceBoundaryQuery.stepHours !== "24" || JSON.stringify(workspaceBoundaryQuery.entries) !== JSON.stringify([["config_path", "workspaces/demo.json"]])) {
+              throw new Error(`boundary workspace query mismatch: ${JSON.stringify(workspaceBoundaryQuery)}`);
+            }
+            const stepBoundaryQuery = view.boundaryPreviewQueryState({ hourly: false });
+            if (stepBoundaryQuery.source !== "step_hours" || JSON.stringify(stepBoundaryQuery.entries) !== JSON.stringify([["expected_step_hours", "24"]])) {
+              throw new Error(`boundary step query mismatch: ${JSON.stringify(stepBoundaryQuery)}`);
             }
             const boundaryPreview = view.boundaryPreviewState({
               suggested_calibration_mode: "hourly",

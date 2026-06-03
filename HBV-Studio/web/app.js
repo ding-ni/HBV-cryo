@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3276,20 +3276,13 @@ async function autoComputeElevation() {
 
 function currentBoundaryPreviewQuery() {
   const params = new URLSearchParams();
-  const stepHours = isHourlyTimescaleSelected() ? "1" : "24";
-  const expectedStart = getWizardTimeValue("#wz-warmup-start");
-  const expectedEnd = getWizardTimeValue("#wz-valid-end");
-  if (expectedStart || expectedEnd) {
-    if (expectedStart) params.set("expected_start", expectedStart);
-    if (expectedEnd) params.set("expected_end", expectedEnd);
-    params.set("expected_step_hours", stepHours);
-    return params;
-  }
-  if (state.wizardWorkspacePath) {
-    params.set("config_path", state.wizardWorkspacePath);
-    return params;
-  }
-  params.set("expected_step_hours", stepHours);
+  const query = window.HBVStudioDataPrepView.boundaryPreviewQueryState({
+    hourly: isHourlyTimescaleSelected(),
+    expectedStart: getWizardTimeValue("#wz-warmup-start"),
+    expectedEnd: getWizardTimeValue("#wz-valid-end"),
+    workspacePath: state.wizardWorkspacePath,
+  });
+  query.entries.forEach(([key, value]) => params.set(key, value));
   return params;
 }
 

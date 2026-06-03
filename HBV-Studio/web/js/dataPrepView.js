@@ -306,6 +306,24 @@
     };
   }
 
+  function boundaryPreviewQueryState(model = {}) {
+    const stepHours = model.hourly ? "1" : "24";
+    const expectedStart = String(model.expectedStart || "").trim();
+    const expectedEnd = String(model.expectedEnd || "").trim();
+    const workspacePath = String(model.workspacePath || "").trim();
+    if (expectedStart || expectedEnd) {
+      const entries = [];
+      if (expectedStart) entries.push(["expected_start", expectedStart]);
+      if (expectedEnd) entries.push(["expected_end", expectedEnd]);
+      entries.push(["expected_step_hours", stepHours]);
+      return { entries, source: "expected_range", stepHours };
+    }
+    if (workspacePath) {
+      return { entries: [["config_path", workspacePath]], source: "workspace", stepHours };
+    }
+    return { entries: [["expected_step_hours", stepHours]], source: "step_hours", stepHours };
+  }
+
   function defaultFormatNumber(value, digits = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number.toFixed(digits) : "—";
@@ -1083,6 +1101,7 @@
 
   window.HBVStudioDataPrepView = {
     boundaryGuidanceState,
+    boundaryPreviewQueryState,
     boundaryPreviewErrorState,
     boundaryPreviewState,
     era5ApiPanelState,
