@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -126,6 +126,24 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const noSteps = view.renderPrepStepList({ workspaceSelected: true, steps: [], noStepsText: "无步骤 <ok>" }, helpers);
             if (!noSteps.includes("无步骤 &lt;ok&gt;")) throw new Error("no steps text should be escaped");
 
+            const defaultConditionalFields = view.wizardConditionalFieldState({
+              fullUpstream: true,
+              precipMode: "grid_only",
+              timescale: "daily",
+              sources: { prec: "era5", temp: "era5", pet: "era5_fao56" },
+            });
+            if (!defaultConditionalFields.step3Skipped || defaultConditionalFields.stationFieldsVisible || defaultConditionalFields.hourlyPrecipVisible || defaultConditionalFields.customPrecVisible || defaultConditionalFields.customTempVisible || defaultConditionalFields.customPetVisible) {
+              throw new Error(`default conditional fields mismatch: ${JSON.stringify(defaultConditionalFields)}`);
+            }
+            const customConditionalFields = view.wizardConditionalFieldState({
+              fullUpstream: false,
+              precipMode: "grid_plus_station_bias",
+              timescale: "hourly",
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+            });
+            if (customConditionalFields.step3Skipped || !customConditionalFields.stationFieldsVisible || !customConditionalFields.hourlyPrecipVisible || !customConditionalFields.customPrecVisible || !customConditionalFields.customTempVisible || !customConditionalFields.customPetVisible) {
+              throw new Error(`custom conditional fields mismatch: ${JSON.stringify(customConditionalFields)}`);
+            }
             const dailyFullFocus = view.projectFocusHintState({ hourly: false, objectType: "full_upstream_basin" });
             if (dailyFullFocus.className !== "hint-box status-ok" || !dailyFullFocus.text.includes("日尺度 + 完整上游流域")) {
               throw new Error(`daily full-upstream focus mismatch: ${JSON.stringify(dailyFullFocus)}`);

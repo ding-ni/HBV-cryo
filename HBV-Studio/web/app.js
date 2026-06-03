@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -2672,64 +2672,30 @@ function applyStep6MeteoDefaults({ force = false, switchMode = false } = {}) {
 // --- conditional fields ---
 
 function updateConditionalFields() {
-  // step 3 skipped?
+  const fieldState = window.HBVStudioDataPrepView.wizardConditionalFieldState({
+    fullUpstream: isFullUpstream(),
+    precipMode: getSelectedRadio("wz-precip-mode"),
+    timescale: getSelectedRadio("wz-timescale"),
+    sources: getWizardMeteoSources(),
+  });
+
   const step3btn = $(`.wizard-step[data-step="3"]`);
-  if (isFullUpstream()) {
-    step3btn.classList.add("skipped");
-  } else {
-    step3btn.classList.remove("skipped");
-  }
+  if (step3btn) step3btn.classList.toggle("skipped", fieldState.step3Skipped);
 
-  // station fields
-  const precMode = getSelectedRadio("wz-precip-mode");
   const stationFields = $("#wz-station-fields");
-  if (precMode === "grid_only") {
-    stationFields.classList.add("hidden");
-  } else {
-    stationFields.classList.remove("hidden");
-  }
+  if (stationFields) stationFields.classList.toggle("hidden", !fieldState.stationFieldsVisible);
 
-  // hourly prec group: only show for hourly timescale
-  const timescale = getSelectedRadio("wz-timescale");
   const hourlyGroup = $("#wz-hourly-prec-group");
-  if (timescale === "daily") {
-    hourlyGroup.classList.add("hidden");
-  } else {
-    hourlyGroup.classList.remove("hidden");
-  }
+  if (hourlyGroup) hourlyGroup.classList.toggle("hidden", !fieldState.hourlyPrecipVisible);
 
-  // custom prec dir: only show when prec source is custom_tif
-  const precSource = $("#wz-prec-source")?.value || "era5";
   const customPrecGroup = $("#wz-custom-prec-group");
-  if (customPrecGroup) {
-    if (precSource === "custom_tif") {
-      customPrecGroup.classList.remove("hidden");
-    } else {
-      customPrecGroup.classList.add("hidden");
-    }
-  }
+  if (customPrecGroup) customPrecGroup.classList.toggle("hidden", !fieldState.customPrecVisible);
 
-  // temperature: custom tif directory
-  const tempSource = $("#wz-temp-source")?.value || "era5";
   const customTempGroup = $("#wz-custom-temp-group");
-  if (customTempGroup) {
-    if (tempSource === "custom_tif") {
-      customTempGroup.classList.remove("hidden");
-    } else {
-      customTempGroup.classList.add("hidden");
-    }
-  }
+  if (customTempGroup) customTempGroup.classList.toggle("hidden", !fieldState.customTempVisible);
 
-  // PET: custom tif directory
-  const petSource = $("#wz-pet-source")?.value || "era5_fao56";
   const customPetGroup = $("#wz-custom-pet-group");
-  if (customPetGroup) {
-    if (petSource === "custom_tif") {
-      customPetGroup.classList.remove("hidden");
-    } else {
-      customPetGroup.classList.add("hidden");
-    }
-  }
+  if (customPetGroup) customPetGroup.classList.toggle("hidden", !fieldState.customPetVisible);
 
   syncTaskPrecipSourceControl();
   syncWizardTimeInputMode();

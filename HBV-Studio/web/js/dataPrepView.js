@@ -262,6 +262,18 @@
     };
   }
 
+  function wizardConditionalFieldState(model = {}) {
+    const sources = model.sources || {};
+    return {
+      step3Skipped: Boolean(model.fullUpstream),
+      stationFieldsVisible: String(model.precipMode || "grid_only") !== "grid_only",
+      hourlyPrecipVisible: String(model.timescale || "daily") !== "daily",
+      customPrecVisible: sources.prec === "custom_tif",
+      customTempVisible: sources.temp === "custom_tif",
+      customPetVisible: sources.pet === "custom_tif",
+    };
+  }
+
   function projectFocusHintState(model = {}) {
     const hourly = Boolean(model.hourly);
     const objectType = String(model.objectType || "full_upstream_basin");
@@ -1137,6 +1149,7 @@
     renderPrepStepList,
     toWizardInputTimeValue,
     visiblePrepSteps,
+    wizardConditionalFieldState,
     wizardValidationFailureState,
   };
 })();
