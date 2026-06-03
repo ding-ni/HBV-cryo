@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5219,13 +5219,13 @@ async function loadWorkspace(path) {
 }
 
 async function loadRuns() {
-  const p = await apiGet("/api/runs");
+  const p = await apiGet(window.HBVStudioResultsView.runListQueryState().runsPath);
   const previousSelected = currentSelectedRunPath();
   const previousRun = state.currentRun?.run || {};
   const previousRunPath = String(previousRun.path || "").trim();
   const previousUpdatedAt = Number(previousRun.updated_at || 0);
   const previousUpdatedAtNs = Number(previousRun.updated_at_ns || 0);
-  state.runs = p.data;
+  Object.assign(state, window.HBVStudioResultsView.runListDataState(p.data).statePatch);
   const currentSelected = currentSelectedRunPath();
   const selectionStable =
     (!previousSelected && !currentSelected) ||

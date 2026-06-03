@@ -678,6 +678,20 @@
     return editable?.path || items[0]?.path || "";
   }
 
+  function runListQueryState() {
+    return {
+      runsPath: "/api/runs",
+    };
+  }
+
+  function runListDataState(data = []) {
+    const runs = Array.isArray(data) ? data : [];
+    return {
+      runs,
+      statePatch: { runs },
+    };
+  }
+
   function runListState(model = {}, helpers = {}) {
     const escapeHtml = helpers.escapeHtml || defaultEscapeHtml;
     const totalRuns = Number(model.totalRuns || 0);
@@ -1340,6 +1354,8 @@
     runComparisonSuccessState,
     runDetailQueryState,
     runDetailState,
+    runListDataState,
+    runListQueryState,
     runListState,
     runManualPresetLoadErrorState,
     runManualPresetLoadStartState,

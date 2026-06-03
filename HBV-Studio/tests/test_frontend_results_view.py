@@ -36,7 +36,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
 
             const results = context.window.HBVStudioResultsView;
-            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
+            if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
             for (const name of ["resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
@@ -202,6 +202,18 @@ class FrontendResultsViewTests(unittest.TestCase):
             }
             if (results.runsForWorkspace(runItems, "C:\\ws\\A", helpers).map(run => run.path).join("|") !== "r1|r2|r4") {
               throw new Error("runsForWorkspace should match normalized workspace paths");
+            }
+            const runListQuery = results.runListQueryState();
+            if (runListQuery.runsPath !== "/api/runs") {
+              throw new Error(`run list query mismatch: ${JSON.stringify(runListQuery)}`);
+            }
+            const runListData = results.runListDataState([{ path: "r1" }]);
+            if (runListData.runs[0].path !== "r1" || runListData.statePatch.runs !== runListData.runs) {
+              throw new Error(`run list data state mismatch: ${JSON.stringify(runListData)}`);
+            }
+            const emptyRunListData = results.runListDataState({ bad: true });
+            if (emptyRunListData.runs.length !== 0 || emptyRunListData.statePatch.runs.length !== 0) {
+              throw new Error(`invalid run list data should normalize to empty array: ${JSON.stringify(emptyRunListData)}`);
             }
             if (!results.workspaceHasEditableRun(runItems, "C:/ws/A", helpers) || results.workspaceHasEditableRun(runItems, "C:/ws/B", helpers)) {
               throw new Error("workspaceHasEditableRun should only be true when the workspace has editable runs");
