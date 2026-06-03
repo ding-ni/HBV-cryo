@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "objectiveLabel", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["effectiveObjectiveMode", "finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "objectiveDetail", "objectiveLabel", "objectiveSummary", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "requestedObjectiveMode", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -1688,6 +1688,8 @@ function objectiveLabel(value) {
 }
 
 function effectiveObjectiveMode(meta) {
+  const runtimeEffectiveObjectiveMode = window.HBVStudioAppRuntime?.effectiveObjectiveMode;
+  if (typeof runtimeEffectiveObjectiveMode === "function") return runtimeEffectiveObjectiveMode(meta);
   const normalizedMode = String(meta?.effective_objective_mode || meta?.optimization?.effective_objective_mode || "").trim().toLowerCase();
   if (normalizedMode) return normalizedMode;
   const profileMode = String(meta?.objective_profile?.type || meta?.objective?.type || "").trim().toLowerCase();
@@ -1696,10 +1698,14 @@ function effectiveObjectiveMode(meta) {
 }
 
 function requestedObjectiveMode(meta) {
+  const runtimeRequestedObjectiveMode = window.HBVStudioAppRuntime?.requestedObjectiveMode;
+  if (typeof runtimeRequestedObjectiveMode === "function") return runtimeRequestedObjectiveMode(meta);
   return String(meta?.requested_objective_mode || meta?.optimization?.requested_objective_mode || meta?.optimization?.objective_mode || "").trim().toLowerCase();
 }
 
 function objectiveDetail(meta) {
+  const runtimeObjectiveDetail = window.HBVStudioAppRuntime?.objectiveDetail;
+  if (typeof runtimeObjectiveDetail === "function") return runtimeObjectiveDetail(meta);
   const mode = effectiveObjectiveMode(meta) || meta?.objective_family || meta?.objective_profile?.type || meta?.objective?.type;
   if (String(mode || "").toLowerCase() === "daily_unified_professional_v1") {
     return "流量拟合优先，结合融雪、融冰、洪峰和退水过程进行综合评价";
@@ -1714,6 +1720,8 @@ function objectiveDetail(meta) {
 }
 
 function objectiveSummary(meta) {
+  const runtimeObjectiveSummary = window.HBVStudioAppRuntime?.objectiveSummary;
+  if (typeof runtimeObjectiveSummary === "function") return runtimeObjectiveSummary(meta);
   return [objectiveLabel(effectiveObjectiveMode(meta) || "—"), objectiveDetail(meta)].filter(Boolean).join(" · ");
 }
 
