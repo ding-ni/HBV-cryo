@@ -645,6 +645,24 @@
     };
   }
 
+  function meteoImportRequestState(model = {}) {
+    const directoryState = customMeteoImportDirectoryState(model);
+    const dirs = directoryState.dirs || {};
+    const ready = Boolean(directoryState.ready);
+    return {
+      ready,
+      message: ready ? "" : "请选择降水、气温和蒸散发三个目录。",
+      missing: directoryState.missing,
+      writeBackUpdates: directoryState.writeBackUpdates,
+      request: {
+        prec_source: String(model.runtimePrecipSource || "").trim(),
+        prec_dir: String(dirs.prec || "").trim(),
+        temp_dir: String(dirs.temp || "").trim(),
+        evap_dir: String(dirs.pet || "").trim(),
+      },
+    };
+  }
+
   function meteoModeHintState(model = {}) {
     const sources = model.sources || {};
     const copiedLabels = Array.isArray(model.copiedLabels) ? model.copiedLabels : [];
@@ -1205,6 +1223,7 @@
     meteoModeHintState,
     meteoImportCreatingUiState,
     meteoImportErrorUiState,
+    meteoImportRequestState,
     meteoImportUiState,
     meteoSourceLabels,
     meteoSourceState,

@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -543,6 +543,33 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             });
             if (incompleteImportDirState.ready || incompleteImportDirState.missing.join(",") !== "prec,pet" || incompleteImportDirState.writeBackUpdates.length) {
               throw new Error(`incomplete custom meteo import dir state mismatch: ${JSON.stringify(incompleteImportDirState)}`);
+            }
+            const meteoRequest = view.meteoImportRequestState({
+              sources: { prec: "custom_tif", temp: "era5", pet: "custom_tif" },
+              registeredDirs: { prec: " D:/meteo/prec ", temp: "D:/meteo/temp", pet: "D:/meteo/pet" },
+              importDirs: { prec: "", temp: " D:/manual/temp ", pet: "" },
+              runtimePrecipSource: " custom_tif ",
+            });
+            const expectedMeteoRequest = {
+              prec_source: "custom_tif",
+              prec_dir: "D:/meteo/prec",
+              temp_dir: "D:/manual/temp",
+              evap_dir: "D:/meteo/pet",
+            };
+            if (!meteoRequest.ready || meteoRequest.message !== "" || meteoRequest.missing.length || JSON.stringify(meteoRequest.request) !== JSON.stringify(expectedMeteoRequest)) {
+              throw new Error(`meteo import request mismatch: ${JSON.stringify(meteoRequest)}`);
+            }
+            if (JSON.stringify(meteoRequest.writeBackUpdates) !== JSON.stringify([{ key: "prec", value: "D:/meteo/prec" }, { key: "pet", value: "D:/meteo/pet" }])) {
+              throw new Error(`meteo import request writeback mismatch: ${JSON.stringify(meteoRequest.writeBackUpdates)}`);
+            }
+            const incompleteMeteoRequest = view.meteoImportRequestState({
+              sources: { prec: "era5", temp: "custom_tif", pet: "custom_tif" },
+              registeredDirs: { temp: "D:/meteo/temp", pet: "" },
+              importDirs: { prec: "", temp: "", pet: "" },
+              runtimePrecipSource: "era5",
+            });
+            if (incompleteMeteoRequest.ready || incompleteMeteoRequest.message !== "请选择降水、气温和蒸散发三个目录。" || incompleteMeteoRequest.missing.join(",") !== "prec,pet" || incompleteMeteoRequest.writeBackUpdates.length) {
+              throw new Error(`incomplete meteo import request mismatch: ${JSON.stringify(incompleteMeteoRequest)}`);
             }
             const allLocalHint = view.meteoModeHintState({
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
