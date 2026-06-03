@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -6241,23 +6241,25 @@ function startPolling() {
       await loadTasks();
     } catch {}
     const hasRunning = window.HBVStudioTaskView.hasRunningTasks(state.tasks);
-    if (hasRunning) {
-      setTimeout(() => loadTasks().catch(() => {}), 1500);
+    const schedule = window.HBVStudioAppRuntime.pollingScheduleState({ hasRunningTasks: hasRunning });
+    if (schedule.immediateTaskRefreshDelayMs > 0) {
+      setTimeout(() => loadTasks().catch(() => {}), schedule.immediateTaskRefreshDelayMs);
     }
-    const delay = hasRunning ? 3000 : 8000;
-    setTimeout(pollTasks, delay);
+    setTimeout(pollTasks, schedule.nextTaskPollDelayMs);
   };
 
   const pollRuns = async () => {
     const hasRunning = window.HBVStudioTaskView.hasRunningTasks(state.tasks);
-    const shouldRefreshRuns = hasRunning || state.currentView === "dashboard" || state.currentView === "forecast" || state.currentView === "results";
-    if (shouldRefreshRuns) {
+    const schedule = window.HBVStudioAppRuntime.pollingScheduleState({
+      currentView: state.currentView,
+      hasRunningTasks: hasRunning,
+    });
+    if (schedule.shouldRefreshRuns) {
       try {
         await loadRuns();
       } catch {}
     }
-    const delay = hasRunning ? 12000 : 20000;
-    setTimeout(pollRuns, delay);
+    setTimeout(pollRuns, schedule.nextRunPollDelayMs);
   };
 
   pollTasks();

@@ -32,6 +32,20 @@
     };
   }
 
+  function pollingScheduleState(model = {}) {
+    const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
+    const currentView = String(model.currentView || "");
+    const runRefreshViews = new Set(["dashboard", "forecast", "results"]);
+    return {
+      hasRunningTasks,
+      currentView,
+      immediateTaskRefreshDelayMs: hasRunningTasks ? 1500 : 0,
+      nextTaskPollDelayMs: hasRunningTasks ? 3000 : 8000,
+      shouldRefreshRuns: hasRunningTasks || runRefreshViews.has(currentView),
+      nextRunPollDelayMs: hasRunningTasks ? 12000 : 20000,
+    };
+  }
+
   function servicePillState(ok, message = "") {
     const connected = Boolean(ok);
     const text = String(message || "");
@@ -162,6 +176,7 @@
 
   window.HBVStudioAppRuntime = {
     healthQueryState,
+    pollingScheduleState,
     quitRequestState,
     servicePillState,
     sidebarContextState,

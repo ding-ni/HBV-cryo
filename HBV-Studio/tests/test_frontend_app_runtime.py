@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -56,6 +56,44 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             const health = runtime.healthQueryState();
             if (!health.ready || health.healthPath !== "/api/health") {
               throw new Error(`health query state mismatch: ${JSON.stringify(health)}`);
+            }
+
+            const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });
+            if (idleWizardSchedule.hasRunningTasks ||
+                idleWizardSchedule.currentView !== "wizard" ||
+                idleWizardSchedule.immediateTaskRefreshDelayMs !== 0 ||
+                idleWizardSchedule.nextTaskPollDelayMs !== 8000 ||
+                idleWizardSchedule.shouldRefreshRuns ||
+                idleWizardSchedule.nextRunPollDelayMs !== 20000) {
+              throw new Error(`idle wizard polling schedule mismatch: ${JSON.stringify(idleWizardSchedule)}`);
+            }
+
+            const runningResultsSchedule = runtime.pollingScheduleState({ currentView: "results", hasRunningTasks: true });
+            if (!runningResultsSchedule.hasRunningTasks ||
+                runningResultsSchedule.currentView !== "results" ||
+                runningResultsSchedule.immediateTaskRefreshDelayMs !== 1500 ||
+                runningResultsSchedule.nextTaskPollDelayMs !== 3000 ||
+                !runningResultsSchedule.shouldRefreshRuns ||
+                runningResultsSchedule.nextRunPollDelayMs !== 12000) {
+              throw new Error(`running polling schedule mismatch: ${JSON.stringify(runningResultsSchedule)}`);
+            }
+
+            for (const currentView of ["dashboard", "forecast", "results"]) {
+              const schedule = runtime.pollingScheduleState({ currentView, hasRunningTasks: false });
+              if (!schedule.shouldRefreshRuns ||
+                  schedule.nextRunPollDelayMs !== 20000 ||
+                  schedule.nextTaskPollDelayMs !== 8000 ||
+                  schedule.immediateTaskRefreshDelayMs !== 0) {
+                throw new Error(`idle refresh view schedule mismatch: ${JSON.stringify(schedule)}`);
+              }
+            }
+
+            const legacyAliasSchedule = runtime.pollingScheduleState({ currentView: "calibration", hasRunning: true });
+            if (!legacyAliasSchedule.hasRunningTasks ||
+                !legacyAliasSchedule.shouldRefreshRuns ||
+                legacyAliasSchedule.nextTaskPollDelayMs !== 3000 ||
+                legacyAliasSchedule.nextRunPollDelayMs !== 12000) {
+              throw new Error(`legacy hasRunning alias schedule mismatch: ${JSON.stringify(legacyAliasSchedule)}`);
             }
 
             const connectedPill = runtime.servicePillState(true, "本地服务已连接");
