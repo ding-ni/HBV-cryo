@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "formatNumber", "healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -550,11 +550,15 @@ function validateFrontendModules() {
 }
 
 function formatNumber(v, digits = 3) {
+  const runtimeFormatNumber = window.HBVStudioAppRuntime?.formatNumber;
+  if (typeof runtimeFormatNumber === "function") return runtimeFormatNumber(v, digits);
   if (v === null || v === undefined || Number.isNaN(Number(v))) return "\u2014";
   return Number(v).toFixed(digits);
 }
 
 function finiteNumber(v) {
+  const runtimeFiniteNumber = window.HBVStudioAppRuntime?.finiteNumber;
+  if (typeof runtimeFiniteNumber === "function") return runtimeFiniteNumber(v);
   const numeric = Number(v);
   return Number.isFinite(numeric) ? numeric : null;
 }

@@ -32,6 +32,16 @@
     };
   }
 
+  function formatNumber(value, digits = 3) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "\u2014";
+    return Number(value).toFixed(digits);
+  }
+
+  function finiteNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
   function pollingScheduleState(model = {}) {
     const hasRunningTasks = Boolean(model.hasRunningTasks || model.hasRunning);
     const currentView = String(model.currentView || "");
@@ -186,6 +196,8 @@
   }
 
   window.HBVStudioAppRuntime = {
+    finiteNumber,
+    formatNumber,
     healthQueryState,
     pollingScheduleState,
     quitRequestState,

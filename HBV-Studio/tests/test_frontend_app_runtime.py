@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.finiteNumber || !runtime?.formatNumber || !runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -56,6 +56,14 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             const health = runtime.healthQueryState();
             if (!health.ready || health.healthPath !== "/api/health") {
               throw new Error(`health query state mismatch: ${JSON.stringify(health)}`);
+            }
+
+            if (runtime.formatNumber(1.23456, 2) !== "1.23" ||
+                runtime.formatNumber("bad", 2) !== "\u2014" ||
+                runtime.formatNumber(null, 2) !== "\u2014" ||
+                runtime.finiteNumber("3.5") !== 3.5 ||
+                runtime.finiteNumber("bad") !== null) {
+              throw new Error("numeric runtime helpers mismatch");
             }
 
             const idleWizardSchedule = runtime.pollingScheduleState({ currentView: "wizard", hasRunningTasks: false });
