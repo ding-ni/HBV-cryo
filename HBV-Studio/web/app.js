@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3276,7 +3276,12 @@ async function previewBoundary() {
 async function loadBootstrapStatus() {
   if (!state.wizardWorkspacePath) return;
   try {
-    const payload = await apiGet(`/api/data-prep/status?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&prec_source=${encodeURIComponent(getTaskRuntimePrecipSource())}`);
+    const query = window.HBVStudioDataPrepView.prepStatusQueryState({
+      configPath: state.wizardWorkspacePath,
+      precipSource: getTaskRuntimePrecipSource(),
+    });
+    if (!query.ready) return;
+    const payload = await apiGet(query.statusPath);
     const items = (payload.data || []).filter(s => GIS_STEP_IDS.has(s.id));
     const host = $("#bootstrap-status");
     if (!host) return;
@@ -3752,9 +3757,14 @@ async function refreshEra5ApiStatus({ force = false } = {}) {
 async function loadPrepSteps() {
   if (!state.wizardWorkspacePath) return;
   try {
+    const query = window.HBVStudioDataPrepView.prepStatusQueryState({
+      configPath: state.wizardWorkspacePath,
+      precipSource: getTaskRuntimePrecipSource(),
+    });
+    if (!query.ready) return;
     const [stepsP, statusP] = await Promise.all([
-      apiGet(`/api/data-prep/steps?config_path=${encodeURIComponent(state.wizardWorkspacePath)}`),
-      apiGet(`/api/data-prep/status?config_path=${encodeURIComponent(state.wizardWorkspacePath)}&prec_source=${encodeURIComponent(getTaskRuntimePrecipSource())}`),
+      apiGet(query.stepsPath),
+      apiGet(query.statusPath),
     ]);
     state.prepSteps  = stepsP.data || [];
     state.prepStatus = Object.fromEntries((statusP.data || []).map(i => [i.id, i]));

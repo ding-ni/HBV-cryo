@@ -989,6 +989,20 @@
     };
   }
 
+  function prepStatusQueryState(model = {}) {
+    const configPath = String(model.configPath || "").trim();
+    const precipSource = String(model.precipSource || "").trim();
+    const encodedConfigPath = encodeURIComponent(configPath);
+    return {
+      ready: Boolean(configPath),
+      message: configPath ? "" : "请先保存工作区。",
+      configPath,
+      precipSource,
+      stepsPath: `/api/data-prep/steps?config_path=${encodedConfigPath}`,
+      statusPath: `/api/data-prep/status?config_path=${encodedConfigPath}&prec_source=${encodeURIComponent(precipSource)}`,
+    };
+  }
+
   function prepStepRunningStatus(existing = {}) {
     return {
       ...(existing || {}),
@@ -1276,6 +1290,7 @@
     meteoSourceState,
     observationHintState,
     prepPanelSummary,
+    prepStatusQueryState,
     prepStepRunningStatus,
     prepTaskRequestState,
     prepTaskErrorUiState,
