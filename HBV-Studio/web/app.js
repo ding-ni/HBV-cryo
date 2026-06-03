@@ -3598,7 +3598,7 @@ async function importGisFiles() {
   if (!requestState.ready) { showToast(requestState.message, true); return; }
   applyGisImportUiState(window.HBVStudioDataPrepView.gisImportStartingUiState());
   try {
-    const payload = await apiPost("/api/gis/import", {
+    const payload = await apiPost(requestState.requestPath, {
       config_path: state.wizardWorkspacePath,
       ...requestState.request,
     });
@@ -3643,7 +3643,7 @@ async function importMeteoFiles() {
   });
   applyMeteoImportUiState(window.HBVStudioDataPrepView.meteoImportCreatingUiState());
   try {
-    const payload = await apiPost("/api/meteo/import/start", {
+    const payload = await apiPost(requestState.requestPath, {
       config_path: state.wizardWorkspacePath,
       ...requestState.request,
     });
@@ -3666,7 +3666,7 @@ async function runBootstrap() {
       runtimePrecipSource: getEffectiveRuntimePrecipSource(),
     });
     if (!requestState.ready) { showToast(requestState.message, true); return; }
-    const payload = await apiPost("/api/bootstrap/start", {
+    const payload = await apiPost(requestState.requestPath, {
       config_path: state.wizardWorkspacePath,
       ...requestState.request,
     });
@@ -3897,7 +3897,7 @@ async function runPrepStep(stepId, { overwrite = false } = {}) {
       overwrite,
     });
     if (!requestState.ready) { showToast(requestState.message, true); return; }
-    const payload = await apiPost("/api/data-prep/start", {
+    const payload = await apiPost(requestState.requestPath, {
       config_path: state.wizardWorkspacePath,
       ...requestState.request,
     });

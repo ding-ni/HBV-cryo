@@ -231,6 +231,7 @@
     return {
       ready,
       message: ready ? "" : "请选择降水来源。",
+      requestPath: "/api/bootstrap/start",
       request: {
         prec_source: runtimePrecipSource,
       },
@@ -277,6 +278,7 @@
       ready,
       missing,
       message: ready ? "" : "请至少选择裁剪后 DEM 和流量累积掩膜文件。",
+      requestPath: "/api/gis/import",
       request: {
         dem_path: demPath,
         flowacc_masked_path: flowaccPath,
@@ -720,6 +722,7 @@
       message: ready ? "" : "请选择降水、气温和蒸散发三个目录。",
       missing: directoryState.missing,
       writeBackUpdates: directoryState.writeBackUpdates,
+      requestPath: "/api/meteo/import/start",
       request: {
         prec_source: String(model.runtimePrecipSource || "").trim(),
         prec_dir: String(dirs.prec || "").trim(),
@@ -1041,6 +1044,7 @@
     return {
       ready,
       message: ready ? "" : "请选择要执行的数据处理步骤。",
+      requestPath: "/api/data-prep/start",
       request: {
         step_id: stepId,
         prec_source: String(model.runtimePrecipSource || "").trim(),

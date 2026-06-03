@@ -414,7 +414,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const emptyBootstrap = view.renderBootstrapStatus([], helpers);
             if (!emptyBootstrap.includes("暂无 GIS 步骤状态信息。")) throw new Error("empty bootstrap state missing");
             const bootstrapRequest = view.bootstrapTaskRequestState({ runtimePrecipSource: " cmfd " });
-            if (!bootstrapRequest.ready || bootstrapRequest.message !== "" || JSON.stringify(bootstrapRequest.request) !== JSON.stringify({ prec_source: "cmfd" })) {
+            if (!bootstrapRequest.ready || bootstrapRequest.message !== "" || bootstrapRequest.requestPath !== "/api/bootstrap/start" || JSON.stringify(bootstrapRequest.request) !== JSON.stringify({ prec_source: "cmfd" })) {
               throw new Error(`bootstrap request mismatch: ${JSON.stringify(bootstrapRequest)}`);
             }
             const missingBootstrapRequest = view.bootstrapTaskRequestState({ runtimePrecipSource: " " });
@@ -457,7 +457,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               flowdir_path: "C:/data/flowdir.tif",
               glacier_mask_path: "C:/data/glacier.tif",
             };
-            if (!gisRequest.ready || gisRequest.message !== "" || gisRequest.missing.length || JSON.stringify(gisRequest.request) !== JSON.stringify(expectedGisRequest)) {
+            if (!gisRequest.ready || gisRequest.message !== "" || gisRequest.requestPath !== "/api/gis/import" || gisRequest.missing.length || JSON.stringify(gisRequest.request) !== JSON.stringify(expectedGisRequest)) {
               throw new Error(`GIS import request mismatch: ${JSON.stringify(gisRequest)}`);
             }
             const gisOptionalRequest = view.gisImportRequestState({ demPath: "dem.tif", flowaccPath: "flowacc.tif" });
@@ -629,7 +629,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               temp_dir: "D:/manual/temp",
               evap_dir: "D:/meteo/pet",
             };
-            if (!meteoRequest.ready || meteoRequest.message !== "" || meteoRequest.missing.length || JSON.stringify(meteoRequest.request) !== JSON.stringify(expectedMeteoRequest)) {
+            if (!meteoRequest.ready || meteoRequest.message !== "" || meteoRequest.requestPath !== "/api/meteo/import/start" || meteoRequest.missing.length || JSON.stringify(meteoRequest.request) !== JSON.stringify(expectedMeteoRequest)) {
               throw new Error(`meteo import request mismatch: ${JSON.stringify(meteoRequest)}`);
             }
             if (JSON.stringify(meteoRequest.writeBackUpdates) !== JSON.stringify([{ key: "prec", value: "D:/meteo/prec" }, { key: "pet", value: "D:/meteo/pet" }])) {
@@ -739,7 +739,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               prec_source: "era5",
               overwrite: true,
             };
-            if (!prepRequest.ready || prepRequest.message !== "" || JSON.stringify(prepRequest.request) !== JSON.stringify(expectedPrepRequest)) {
+            if (!prepRequest.ready || prepRequest.message !== "" || prepRequest.requestPath !== "/api/data-prep/start" || JSON.stringify(prepRequest.request) !== JSON.stringify(expectedPrepRequest)) {
               throw new Error(`prep task request mismatch: ${JSON.stringify(prepRequest)}`);
             }
             const missingPrepRequest = view.prepTaskRequestState({ stepId: " ", runtimePrecipSource: "cmfd" });
