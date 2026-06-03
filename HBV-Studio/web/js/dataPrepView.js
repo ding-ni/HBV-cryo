@@ -1078,6 +1078,20 @@
     };
   }
 
+  function workspaceReadinessQueryState(model = {}) {
+    const configPath = String(model.configPath || "").trim();
+    const precipSource = String(model.precipSource || "").trim();
+    const query = `config_path=${encodeURIComponent(configPath)}&prec_source=${encodeURIComponent(precipSource)}`;
+    return {
+      ready: Boolean(configPath),
+      message: configPath ? "" : "请先保存工作区。",
+      configPath,
+      precipSource,
+      completenessPath: `/api/workspace/completeness?${query}`,
+      advicePath: `/api/workspace/advice?${query}`,
+    };
+  }
+
   function emptyInputCheckCache() {
     return {
       configPath: "",
@@ -1304,6 +1318,7 @@
     renderPrepStepList,
     toWizardInputTimeValue,
     visiblePrepSteps,
+    workspaceReadinessQueryState,
     wizardConditionalFieldState,
     wizardValidationFailureState,
   };

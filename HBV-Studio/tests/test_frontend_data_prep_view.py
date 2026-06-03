@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -797,6 +797,20 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const missingCheckQuery = view.inputCheckQueryState({ configPath: " ", precipSource: "era5" });
             if (missingCheckQuery.ready || missingCheckQuery.message !== "请先保存工作区。" || !missingCheckQuery.validationPath.includes("config_path=")) {
               throw new Error(`missing input check query mismatch: ${JSON.stringify(missingCheckQuery)}`);
+            }
+            const readinessQuery = view.workspaceReadinessQueryState({
+              configPath: " C:/工作区/A & B ",
+              precipSource: " era5 ",
+            });
+            if (!readinessQuery.ready || readinessQuery.message !== "" || readinessQuery.configPath !== "C:/工作区/A & B" || readinessQuery.precipSource !== "era5") {
+              throw new Error(`workspace readiness query mismatch: ${JSON.stringify(readinessQuery)}`);
+            }
+            if (readinessQuery.completenessPath !== `/api/workspace/completeness?config_path=${encodedConfigPath}&prec_source=era5` || readinessQuery.advicePath !== `/api/workspace/advice?config_path=${encodedConfigPath}&prec_source=era5`) {
+              throw new Error(`workspace readiness paths mismatch: ${JSON.stringify(readinessQuery)}`);
+            }
+            const missingReadinessQuery = view.workspaceReadinessQueryState({ configPath: " ", precipSource: "cmfd" });
+            if (missingReadinessQuery.ready || missingReadinessQuery.message !== "请先保存工作区。" || !missingReadinessQuery.completenessPath.includes("prec_source=cmfd")) {
+              throw new Error(`missing workspace readiness query mismatch: ${JSON.stringify(missingReadinessQuery)}`);
             }
             const emptyCache = view.emptyInputCheckCache();
             if (emptyCache.configPath !== "" || emptyCache.stage !== "calibration" || emptyCache.result !== null || emptyCache.html !== "") {
