@@ -58,6 +58,34 @@
     };
   }
 
+  function templateListQueryState() {
+    return {
+      templatesPath: "/api/templates",
+    };
+  }
+
+  function templateListDataState(data = []) {
+    const templates = Array.isArray(data) ? data : [];
+    return {
+      templates,
+      statePatch: { templates },
+    };
+  }
+
+  function workspaceListQueryState() {
+    return {
+      workspacesPath: "/api/workspaces",
+    };
+  }
+
+  function workspaceListDataState(data = []) {
+    const workspaces = Array.isArray(data) ? data : [];
+    return {
+      workspaces,
+      statePatch: { workspaces },
+    };
+  }
+
   function renderWorkspaceCards(workspaces, helpers = {}) {
     const items = Array.isArray(workspaces) ? workspaces : [];
     if (!items.length) return emptyWorkspaceHint();
@@ -146,8 +174,12 @@
     dashboardLoadQueryState,
     renderTemplates,
     renderWorkspaceCards,
+    templateListDataState,
+    templateListQueryState,
     templateListState,
     workspaceCardsState,
+    workspaceListDataState,
+    workspaceListQueryState,
     workspaceLoadQueryState,
   };
 })();

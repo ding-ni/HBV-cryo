@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
             const loadQuery = dashboard.dashboardLoadQueryState();
@@ -70,6 +70,30 @@ class FrontendDashboardViewTests(unittest.TestCase):
             ]);
             if (!failedFallbackState.allFailed) {
               throw new Error(`failed fallback should be marked all failed: ${JSON.stringify(failedFallbackState)}`);
+            }
+            const templateQuery = dashboard.templateListQueryState();
+            if (templateQuery.templatesPath !== "/api/templates") {
+              throw new Error(`template query mismatch: ${JSON.stringify(templateQuery)}`);
+            }
+            const templateData = dashboard.templateListDataState([{ id: "tpl" }]);
+            if (templateData.templates[0].id !== "tpl" || templateData.statePatch.templates !== templateData.templates) {
+              throw new Error(`template data state mismatch: ${JSON.stringify(templateData)}`);
+            }
+            const emptyTemplateData = dashboard.templateListDataState({ bad: true });
+            if (emptyTemplateData.templates.length !== 0 || emptyTemplateData.statePatch.templates.length !== 0) {
+              throw new Error(`invalid template data should normalize to empty array: ${JSON.stringify(emptyTemplateData)}`);
+            }
+            const workspaceListQuery = dashboard.workspaceListQueryState();
+            if (workspaceListQuery.workspacesPath !== "/api/workspaces") {
+              throw new Error(`workspace list query mismatch: ${JSON.stringify(workspaceListQuery)}`);
+            }
+            const workspaceListData = dashboard.workspaceListDataState([{ path: "C:/ws/A.json" }]);
+            if (workspaceListData.workspaces[0].path !== "C:/ws/A.json" || workspaceListData.statePatch.workspaces !== workspaceListData.workspaces) {
+              throw new Error(`workspace list data state mismatch: ${JSON.stringify(workspaceListData)}`);
+            }
+            const emptyWorkspaceListData = dashboard.workspaceListDataState(null);
+            if (emptyWorkspaceListData.workspaces.length !== 0 || emptyWorkspaceListData.statePatch.workspaces.length !== 0) {
+              throw new Error(`invalid workspace data should normalize to empty array: ${JSON.stringify(emptyWorkspaceListData)}`);
             }
             const workspaceQuery = dashboard.workspaceLoadQueryState({ path: " F:/工作区/A & B " });
             const encodedPath = encodeURIComponent("F:/工作区/A & B");

@@ -250,7 +250,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateListState", "workspaceCardsState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateListDataState", "templateListQueryState", "templateListState", "workspaceCardsState", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -5076,15 +5076,15 @@ async function loadDashboard() {
 }
 
 async function loadTemplates() {
-  const p = await apiGet("/api/templates");
-  state.templates = p.data;
+  const p = await apiGet(window.HBVStudioDashboardView.templateListQueryState().templatesPath);
+  Object.assign(state, window.HBVStudioDashboardView.templateListDataState(p.data).statePatch);
   renderTemplates();
   updateCounts();
 }
 
 async function loadWorkspaces() {
-  const p = await apiGet("/api/workspaces");
-  state.workspaces = p.data;
+  const p = await apiGet(window.HBVStudioDashboardView.workspaceListQueryState().workspacesPath);
+  Object.assign(state, window.HBVStudioDashboardView.workspaceListDataState(p.data).statePatch);
   if (state.dashboardLayoutPath && !state.workspaces.some(w => w.path === state.dashboardLayoutPath)) {
     state.dashboardLayoutPath = "";
     state.dashboardWorkspaceLayout = null;
