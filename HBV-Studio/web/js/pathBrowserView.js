@@ -39,8 +39,23 @@
     };
   }
 
+  function openPathRequestState(model = {}) {
+    const path = String(model.path || model.pathValue || "").trim();
+    const label = String(model.label || "目录").trim() || "目录";
+    return {
+      ready: Boolean(path),
+      message: path ? "" : `没有可打开的${label}。`,
+      path,
+      label,
+      requestPath: "/api/fs/open-path",
+      payload: { path },
+      toastText: `已打开${label}。`,
+    };
+  }
+
   window.HBVStudioPathBrowserView = {
     normalizeExtensions,
+    openPathRequestState,
     pathListingQueryState,
     pathListingState,
   };

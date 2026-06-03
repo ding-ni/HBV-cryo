@@ -270,7 +270,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["normalizeExtensions", "pathListingQueryState", "pathListingState"],
+    exports: ["normalizeExtensions", "openPathRequestState", "pathListingQueryState", "pathListingState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -1104,13 +1104,13 @@ async function requestQuitApp() {
 }
 
 async function openLocalPath(path, label = "目录") {
-  const value = String(path || "").trim();
-  if (!value) {
-    showToast(`没有可打开的${label}。`, true);
+  const request = window.HBVStudioPathBrowserView.openPathRequestState({ path, label });
+  if (!request.ready) {
+    showToast(request.message, true);
     return;
   }
-  await apiPost("/api/fs/open-path", { path: value });
-  showToast(`已打开${label}。`);
+  await apiPost(request.requestPath, request.payload);
+  showToast(request.toastText);
 }
 
 async function jumpToWorkspaceTarget(configPath, step) {

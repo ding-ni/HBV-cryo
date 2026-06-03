@@ -21,7 +21,7 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["normalizeExtensions", "pathListingQueryState", "pathListingState"]) {
+            for (const name of ["normalizeExtensions", "openPathRequestState", "pathListingQueryState", "pathListingState"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
 
@@ -52,6 +52,27 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
                 emptyQuery.extensions.length !== 0 ||
                 emptyQuery.listingPath !== "/api/fs/list?path=&kind=file") {
               throw new Error(`empty path listing query mismatch: ${JSON.stringify(emptyQuery)}`);
+            }
+            const openRequest = view.openPathRequestState({
+              path: " C:/结果/运行 A&B ",
+              label: "结果目录",
+            });
+            if (!openRequest.ready ||
+                openRequest.message !== "" ||
+                openRequest.path !== "C:/结果/运行 A&B" ||
+                openRequest.label !== "结果目录" ||
+                openRequest.requestPath !== "/api/fs/open-path" ||
+                openRequest.payload.path !== "C:/结果/运行 A&B" ||
+                openRequest.toastText !== "已打开结果目录。") {
+              throw new Error(`open path request mismatch: ${JSON.stringify(openRequest)}`);
+            }
+            const missingOpenRequest = view.openPathRequestState({ path: " ", label: "导出文件" });
+            if (missingOpenRequest.ready ||
+                missingOpenRequest.message !== "没有可打开的导出文件。" ||
+                missingOpenRequest.requestPath !== "/api/fs/open-path" ||
+                missingOpenRequest.payload.path !== "" ||
+                missingOpenRequest.toastText !== "已打开导出文件。") {
+              throw new Error(`missing open path request mismatch: ${JSON.stringify(missingOpenRequest)}`);
             }
 
             const listing = view.pathListingState({
