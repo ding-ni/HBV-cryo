@@ -317,7 +317,7 @@ const frontendModuleContracts = [
   {
     script: "./js/calibrationView.js",
     global: "HBVStudioCalibrationView",
-    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationStartRequestState", "selfCheckStartRequestState"],
+    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationSelfCheckGuidanceState", "calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
     script: "./js/objectiveRuntime.js",
@@ -1848,6 +1848,17 @@ function updateCalibrationGuidance() {
     stepBtn.title = workflow?.ready_for_calibration ? "当前输入检查已通过，无需再回到向导补步骤。" : "";
   }
   if (kind === "self_check") {
+    const runtimeGuidanceState = window.HBVStudioCalibrationView?.calibrationSelfCheckGuidanceState;
+    const guidance = typeof runtimeGuidanceState === "function" ? runtimeGuidanceState() : null;
+    if (guidance?.smart?.text && guidance?.strategy?.text && guidance?.load?.text) {
+      smart.textContent = guidance.smart.text;
+      smart.className = guidance.smart.className || "hint-box";
+      strategy.textContent = guidance.strategy.text;
+      strategy.className = guidance.strategy.className || "hint-box";
+      load.textContent = guidance.load.text;
+      load.className = guidance.load.className || "hint-box";
+      return;
+    }
     smart.textContent = "智能建议：系统自检只核对环境和脚本状态，不涉及率定策略。";
     smart.className = "hint-box";
     strategy.textContent = "系统自检不会启动率定，仅核对本地运行环境。";

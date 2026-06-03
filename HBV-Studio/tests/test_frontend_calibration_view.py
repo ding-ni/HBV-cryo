@@ -23,6 +23,7 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             const calibration = context.window.HBVStudioCalibrationView;
             if (!calibration?.calibrationLoadState ||
                 !calibration?.calibrationPlainGuideState ||
+                !calibration?.calibrationSelfCheckGuidanceState ||
                 !calibration?.calibrationStartRequestState ||
                 !calibration?.selfCheckStartRequestState) {
               throw new Error("calibration view module exports are missing");
@@ -32,6 +33,16 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             if (!selfCheck.ready || selfCheck.requestPath !== "/api/self-check/start" ||
                 Object.keys(selfCheck.payload).length !== 0) {
               throw new Error(`self-check request state mismatch: ${JSON.stringify(selfCheck)}`);
+            }
+
+            const selfCheckGuidance = calibration.calibrationSelfCheckGuidanceState();
+            if (selfCheckGuidance.smart.className !== "hint-box" ||
+                selfCheckGuidance.strategy.className !== "hint-box" ||
+                selfCheckGuidance.load.className !== "hint-box" ||
+                !selfCheckGuidance.smart.text.includes("\u4e0d\u6d89\u53ca\u7387\u5b9a\u7b56\u7565") ||
+                !selfCheckGuidance.strategy.text.includes("\u4e0d\u4f1a\u542f\u52a8\u7387\u5b9a") ||
+                !selfCheckGuidance.load.text.includes("\u4e0d\u6d89\u53ca\u53c2\u6570\u641c\u7d22\u8d1f\u8f7d")) {
+              throw new Error(`self-check guidance mismatch: ${JSON.stringify(selfCheckGuidance)}`);
             }
 
             const mcOnlyLoad = calibration.calibrationLoadState({

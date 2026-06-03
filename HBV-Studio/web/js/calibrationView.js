@@ -17,6 +17,23 @@
     };
   }
 
+  function calibrationSelfCheckGuidanceState() {
+    return {
+      smart: {
+        text: "智能建议：系统自检只核对环境和脚本状态，不涉及率定策略。",
+        className: "hint-box",
+      },
+      strategy: {
+        text: "系统自检不会启动率定，仅核对本地运行环境。",
+        className: "hint-box",
+      },
+      load: {
+        text: "当前任务不涉及参数搜索负载。",
+        className: "hint-box",
+      },
+    };
+  }
+
   function calibrationLoadState(model = {}) {
     const method = text(model.method, "mc_screen_de");
     const maxiter = Math.max(0, Number(model.maxiter) || 0);
@@ -130,6 +147,7 @@
   window.HBVStudioCalibrationView = {
     calibrationLoadState,
     calibrationPlainGuideState,
+    calibrationSelfCheckGuidanceState,
     calibrationStartRequestState,
     selfCheckStartRequestState,
   };
