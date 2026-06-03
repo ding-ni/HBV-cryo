@@ -423,6 +423,16 @@
     };
   }
 
+  function forecastResultExportRequestState(payload = null) {
+    return {
+      ready: Boolean(payload),
+      reason: payload ? "" : "missing-export-payload",
+      message: payload ? "" : "当前没有可导出的预报结果。",
+      requestPath: "/api/run/export-excel",
+      payload: payload || null,
+    };
+  }
+
   function forecastResultExportSuccess(responseData = {}, lastExportPath = "", helpers = {}) {
     const shortPath = helpers.shortPath || (value => String(value || ""));
     const rowCount = Number(responseData?.row_count || 0);
@@ -1237,6 +1247,7 @@
     forecastResultButtonState,
     forecastResultDetailState,
     forecastResultExportPayload,
+    forecastResultExportRequestState,
     forecastResultExportState,
     forecastResultExportSuccess,
     forecastResultLoadErrorState,

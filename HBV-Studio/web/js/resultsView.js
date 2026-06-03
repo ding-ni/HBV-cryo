@@ -1342,6 +1342,17 @@
     };
   }
 
+  function runExportRequestState(exportPayloadState = {}) {
+    const ok = Boolean(exportPayloadState?.ok);
+    return {
+      ready: ok,
+      reason: ok ? "" : String(exportPayloadState?.reason || "blocked"),
+      message: ok ? "" : String(exportPayloadState?.message || ""),
+      requestPath: "/api/run/export-excel",
+      payload: ok ? (exportPayloadState.payload || {}) : null,
+    };
+  }
+
   function runExportSuccess(responseData = {}, helpers = {}) {
     const shortPath = helpers.shortPath || (value => String(value || ""));
     const exportPath = String(responseData?.path || "");
@@ -1404,6 +1415,7 @@
     runExportFieldsState,
     runExportPanelState,
     runExportPayload,
+    runExportRequestState,
     runExportSuccess,
     runComparisonClearViewState,
     runComparisonErrorState,

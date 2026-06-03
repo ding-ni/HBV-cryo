@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -209,6 +209,7 @@ const frontendModuleContracts = [
       "forecastResultButtonState",
       "forecastResultDetailState",
       "forecastResultExportPayload",
+      "forecastResultExportRequestState",
       "forecastResultExportState",
       "forecastResultExportSuccess",
       "forecastResultDetailQueryState",
@@ -4421,7 +4422,8 @@ async function exportCurrentRunExcel() {
     showToast(exportRequest.message, true);
     return;
   }
-  const payload = await apiPost("/api/run/export-excel", exportRequest.payload);
+  const request = window.HBVStudioResultsView.runExportRequestState(exportRequest);
+  const payload = await apiPost(request.requestPath, request.payload);
   const exportSuccess = window.HBVStudioResultsView.runExportSuccess(payload.data || {}, { shortPath });
   Object.assign(state, exportSuccess.statePatch);
   applyDomUpdates(exportSuccess.domUpdates);
@@ -4921,7 +4923,8 @@ async function exportForecastResultExcel() {
     showToast("当前没有可导出的预报结果。", true);
     return;
   }
-  const payload = await apiPost("/api/run/export-excel", exportPayload);
+  const request = window.HBVStudioForecastView.forecastResultExportRequestState(exportPayload);
+  const payload = await apiPost(request.requestPath, request.payload);
   const exportState = window.HBVStudioForecastView.forecastResultExportState(payload.data || {});
   Object.assign(state, exportState.statePatch);
   setForecastResultButtons(run || data?.run);

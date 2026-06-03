@@ -39,7 +39,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
-            for (const name of ["deleteRunRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
+            for (const name of ["deleteRunRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
               if (typeof results?.[name] !== "function") {
                 throw new Error(`missing results view state export: ${name}`);
               }
@@ -1092,6 +1092,22 @@ class FrontendResultsViewTests(unittest.TestCase):
                 exportPayload.payload.end_date !== "H:2020-01-02T00:00" ||
                 exportPayload.payload.fields.join("|") !== "q_sim|q_ice") {
               throw new Error(`unexpected export payload: ${JSON.stringify(exportPayload)}`);
+            }
+            const exportRequest = results.runExportRequestState(exportPayload);
+            if (!exportRequest.ready ||
+                exportRequest.reason !== "" ||
+                exportRequest.message !== "" ||
+                exportRequest.requestPath !== "/api/run/export-excel" ||
+                exportRequest.payload.path !== "C:/runs/hourly" ||
+                exportRequest.payload.fields.join("|") !== "q_sim|q_ice") {
+              throw new Error(`unexpected export request: ${JSON.stringify(exportRequest)}`);
+            }
+            const blockedExportRequest = results.runExportRequestState(missingRunPayload);
+            if (blockedExportRequest.ready ||
+                blockedExportRequest.reason !== "missing-run" ||
+                blockedExportRequest.requestPath !== "/api/run/export-excel" ||
+                blockedExportRequest.payload !== null) {
+              throw new Error(`blocked export request mismatch: ${JSON.stringify(blockedExportRequest)}`);
             }
 
             const exportSuccess = results.runExportSuccess({

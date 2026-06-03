@@ -768,6 +768,9 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (typeof view?.forecastResultExportPayload !== "function") {
               throw new Error("missing forecast result export payload helper");
             }
+            if (typeof view?.forecastResultExportRequestState !== "function") {
+              throw new Error("missing forecast result export request helper");
+            }
 
             const payload = view.forecastResultExportPayload({
               run: { path: " C:/runs/forecast-result " },
@@ -786,6 +789,15 @@ class FrontendForecastViewTests(unittest.TestCase):
             if (payload.fields.join(",") !== "q_sim,q_rain,q_snow,q_ice,q_boundary_inflow") {
               throw new Error(`boundary field missing: ${payload.fields.join(",")}`);
             }
+            const request = view.forecastResultExportRequestState(payload);
+            if (!request.ready ||
+                request.reason !== "" ||
+                request.message !== "" ||
+                request.requestPath !== "/api/run/export-excel" ||
+                request.payload.path !== "C:/runs/forecast-result" ||
+                request.payload.fields.join(",") !== "q_sim,q_rain,q_snow,q_ice,q_boundary_inflow") {
+              throw new Error(`forecast export request mismatch: ${JSON.stringify(request)}`);
+            }
 
             const fallback = view.forecastResultExportPayload({
               metadata: { forecast_result: { forecast_start: "2026-05-01" } },
@@ -801,6 +813,14 @@ class FrontendForecastViewTests(unittest.TestCase):
 
             if (view.forecastResultExportPayload({ series: { dates: ["2026-01-01"] } }, null) !== null) {
               throw new Error("missing run path should return null");
+            }
+            const missingRequest = view.forecastResultExportRequestState(null);
+            if (missingRequest.ready ||
+                missingRequest.reason !== "missing-export-payload" ||
+                missingRequest.message !== "当前没有可导出的预报结果。" ||
+                missingRequest.requestPath !== "/api/run/export-excel" ||
+                missingRequest.payload !== null) {
+              throw new Error(`missing forecast export request mismatch: ${JSON.stringify(missingRequest)}`);
             }
             """
         )
