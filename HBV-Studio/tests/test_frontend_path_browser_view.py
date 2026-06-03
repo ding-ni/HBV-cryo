@@ -21,9 +21,16 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"]) {
+            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "selectedPathState"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
+            const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              "\"": "&quot;",
+              "'": "&#39;",
+            }[ch]));
 
             const normalizedArray = view.normalizeExtensions([" .csv ", "", ".xlsx"]);
             if (normalizedArray.join("|") !== ".csv|.xlsx") {
@@ -166,6 +173,52 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
                 emptyListing.shownFileCount !== 0 ||
                 emptyListing.filesTruncated !== false) {
               throw new Error(`empty listing state mismatch: ${JSON.stringify(emptyListing)}`);
+            }
+
+            const dirDom = view.pathListingDomState({
+              kind: "dir",
+              currentPath: "C:/ws",
+              roots: ["C:/", "D:/"],
+              directories: [{ name: "data<raw>", path: "C:/ws/data&raw" }],
+              files: [{ name: "a.csv" }],
+              fileCount: 12,
+              shownFileCount: 1,
+              filesTruncated: true,
+            }, { escapeHtml });
+            const dirDomBySelector = Object.fromEntries(dirDom.domUpdates.map(update => [update.selector, update]));
+            if (dirDom.title !== "选择文件夹" ||
+                !dirDom.useCurrentVisible ||
+                dirDom.currentPath !== "C:/ws" ||
+                !dirDom.rootsHtml.includes('data-root-path="C:/"') ||
+                !dirDom.directoriesHtml.includes("data&lt;raw&gt;") ||
+                !dirDom.directoriesHtml.includes("data-select-dir") ||
+                !dirDom.filesHtml.includes("仅预览前 1 个文件") ||
+                !dirDom.filesHtml.includes("browser-entry-preview") ||
+                dirDomBySelector["#path-modal-title"].text !== "选择文件夹" ||
+                dirDomBySelector["#path-modal-use-current"].visible !== true ||
+                dirDomBySelector["#path-modal-current"].value !== "C:/ws" ||
+                dirDomBySelector["#path-modal-files"].html !== dirDom.filesHtml) {
+              throw new Error(`directory DOM state mismatch: ${JSON.stringify(dirDom)}`);
+            }
+            const fileDom = view.pathListingDomState({
+              kind: "file",
+              currentPath: "C:/ws",
+              directories: [],
+              files: [{ name: "a<raw>.csv", path: "C:/ws/a&raw.csv" }],
+              fileCount: 1,
+              shownFileCount: 1,
+              filesTruncated: false,
+            }, { escapeHtml });
+            if (fileDom.title !== "选择文件" ||
+                fileDom.useCurrentVisible ||
+                !fileDom.directoriesHtml.includes("当前目录下没有子文件夹") ||
+                !fileDom.filesHtml.includes('data-file-path="C:/ws/a&amp;raw.csv"') ||
+                !fileDom.filesHtml.includes("a&lt;raw&gt;.csv")) {
+              throw new Error(`file DOM state mismatch: ${JSON.stringify(fileDom)}`);
+            }
+            const emptyFileDom = view.pathListingDomState({ kind: "file", files: [] }, { escapeHtml });
+            if (!emptyFileDom.filesHtml.includes("当前目录下没有符合条件的文件")) {
+              throw new Error(`empty file DOM state mismatch: ${JSON.stringify(emptyFileDom)}`);
             }
 
             const selectedDir = view.selectedPathState("D:/runtime/forcing", {

@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"],
+    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "selectedPathState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -5578,36 +5578,8 @@ async function loadPathListing(pathValue) {
   const listing = window.HBVStudioPathBrowserView.pathListingState(p.data);
   Object.assign(state.pathModal, listing.statePatch);
 
-  const isDir = state.pathModal.kind === "dir";
-  $("#path-modal-title").textContent = isDir ? "选择文件夹" : "选择文件";
-  $("#path-modal-use-current").style.display = isDir ? "" : "none";
-  $("#path-modal-current").value = state.pathModal.currentPath;
-  $("#path-modal-roots").innerHTML = state.pathModal.roots.map(r =>
-    `<button class="browser-entry" data-root-path="${escapeHtml(r)}">${escapeHtml(r)}</button>`
-  ).join("");
-  $("#path-modal-directories").innerHTML = state.pathModal.directories.map(d =>
-    `<div class="browser-entry-row">
-      <button class="browser-entry browser-entry-nav" data-dir-path="${escapeHtml(d.path)}">${escapeHtml(d.name)}</button>
-      ${isDir ? `<button class="browser-entry-select" data-select-dir="${escapeHtml(d.path)}" title="选取此文件夹">✓</button>` : ""}
-    </div>`
-  ).join("") || '<div class="hint-box">当前目录下没有子文件夹。</div>';
-  if (isDir) {
-    const previewFiles = state.pathModal.files.map(f =>
-      `<div class="browser-entry browser-entry-preview">${escapeHtml(f.name)}</div>`
-    ).join("");
-    const previewHint = state.pathModal.files.length
-      ? `<div class="hint-box ${state.pathModal.filesTruncated ? "status-warn" : ""}">当前为文件夹选择模式，仅预览前 ${state.pathModal.shownFileCount} 个文件${state.pathModal.fileCount ? `（共识别 ${state.pathModal.fileCount} 个）` : ""}，不会展开完整文件列表，因此大栅格目录仍会更快。</div>`
-      : '<div class="hint-box">当前为文件夹选择模式。这里仅做内容预览，不会展开完整文件列表，因此大栅格目录会更快。</div>';
-    $("#path-modal-files").innerHTML = `${previewHint}${previewFiles}`;
-  } else {
-    const fileButtons = state.pathModal.files.map(f =>
-      `<button class="browser-entry" data-file-path="${escapeHtml(f.path)}">${escapeHtml(f.name)}</button>`
-    ).join("");
-    const truncateHint = state.pathModal.filesTruncated
-      ? `<div class="hint-box status-warn">当前目录文件较多，仅显示前 ${state.pathModal.shownFileCount} 个，共 ${state.pathModal.fileCount} 个。</div>`
-      : "";
-    $("#path-modal-files").innerHTML = `${truncateHint}${fileButtons}` || '<div class="hint-box">当前目录下没有符合条件的文件。</div>';
-  }
+  const rendered = window.HBVStudioPathBrowserView.pathListingDomState(state.pathModal, { escapeHtml });
+  applyDomUpdates(rendered.domUpdates);
 }
 
 function applySelectedPath(pathValue) {
