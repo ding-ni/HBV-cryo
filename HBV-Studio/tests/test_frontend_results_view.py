@@ -39,7 +39,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
-            for (const name of ["resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
+            for (const name of ["deleteRunRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState"]) {
               if (typeof results?.[name] !== "function") {
                 throw new Error(`missing results view state export: ${name}`);
               }
@@ -237,6 +237,83 @@ class FrontendResultsViewTests(unittest.TestCase):
                 emptyDetailQuery.runPath !== "" ||
                 emptyDetailQuery.detailPath !== "/api/run?path=") {
               throw new Error(`empty run detail query should stay inactive: ${JSON.stringify(emptyDetailQuery)}`);
+            }
+            const renameRequest = results.renameRunRequestState({
+              path: " C:/runs/A ",
+              title: " 新标题 ",
+              currentCustomTitle: "旧标题",
+            });
+            if (!renameRequest.ready ||
+                renameRequest.reason !== "" ||
+                renameRequest.message !== "" ||
+                renameRequest.path !== "C:/runs/A" ||
+                renameRequest.title !== "新标题" ||
+                renameRequest.currentCustomTitle !== "旧标题" ||
+                renameRequest.requestPath !== "/api/run/rename" ||
+                renameRequest.payload.path !== "C:/runs/A" ||
+                renameRequest.payload.title !== "新标题") {
+              throw new Error(`rename run request mismatch: ${JSON.stringify(renameRequest)}`);
+            }
+            const autoRenameRequest = results.renameRunRequestState({
+              path: "C:/runs/A",
+              title: " ",
+              currentCustomTitle: "",
+            });
+            if (autoRenameRequest.ready ||
+                autoRenameRequest.reason !== "already-automatic" ||
+                autoRenameRequest.message !== "当前已经在使用系统自动命名。") {
+              throw new Error(`automatic rename request mismatch: ${JSON.stringify(autoRenameRequest)}`);
+            }
+            const unchangedRenameRequest = results.renameRunRequestState({
+              path: "C:/runs/A",
+              title: "旧标题",
+              currentCustomTitle: "旧标题",
+            });
+            if (unchangedRenameRequest.ready ||
+                unchangedRenameRequest.reason !== "unchanged-title" ||
+                unchangedRenameRequest.message !== "") {
+              throw new Error(`unchanged rename request mismatch: ${JSON.stringify(unchangedRenameRequest)}`);
+            }
+            const missingRenameRequest = results.renameRunRequestState({
+              path: " ",
+              title: "新标题",
+              currentCustomTitle: "旧标题",
+            });
+            if (missingRenameRequest.ready ||
+                missingRenameRequest.reason !== "missing-run" ||
+                missingRenameRequest.payload.path !== "" ||
+                missingRenameRequest.payload.title !== "新标题") {
+              throw new Error(`missing rename request mismatch: ${JSON.stringify(missingRenameRequest)}`);
+            }
+            const renameSuccess = results.renameRunSuccessState({ title: "新标题", finalName: "展示名" });
+            if (renameSuccess.toastText !== "已更新结果标题：展示名") {
+              throw new Error(`rename success mismatch: ${JSON.stringify(renameSuccess)}`);
+            }
+            const restoreSuccess = results.renameRunSuccessState({ title: "", finalName: "系统名" });
+            if (restoreSuccess.toastText !== "已恢复系统自动命名：系统名") {
+              throw new Error(`rename restore success mismatch: ${JSON.stringify(restoreSuccess)}`);
+            }
+            const deleteRequest = results.deleteRunRequestState({
+              path: " C:/runs/A ",
+              name: "结果A",
+            });
+            if (!deleteRequest.ready ||
+                deleteRequest.reason !== "" ||
+                deleteRequest.path !== "C:/runs/A" ||
+                deleteRequest.name !== "结果A" ||
+                deleteRequest.requestPath !== "/api/run/delete" ||
+                deleteRequest.payload.path !== "C:/runs/A" ||
+                !deleteRequest.confirmText.includes("结果A") ||
+                deleteRequest.clearedMessage !== "当前结果已删除，请从左侧重新选择结果。" ||
+                deleteRequest.toastText !== "已删除结果：结果A") {
+              throw new Error(`delete run request mismatch: ${JSON.stringify(deleteRequest)}`);
+            }
+            const missingDeleteRequest = results.deleteRunRequestState({ path: " " });
+            if (missingDeleteRequest.ready ||
+                missingDeleteRequest.reason !== "missing-run" ||
+                missingDeleteRequest.message !== "请选择要删除的结果。" ||
+                missingDeleteRequest.payload.path !== "") {
+              throw new Error(`missing delete request mismatch: ${JSON.stringify(missingDeleteRequest)}`);
             }
             const clearedDetail = results.clearRunDetailState().statePatch;
             for (const key of ["currentRun", "selectedRunPath", "_runData", "_runParams", "_runOrigParams", "compareSeries", "compareMetrics", "compareLabel", "comparePresetId", "compareAdjusted", "lastRunExportPath", "runManualPresets", "runManualPresetConfigPath"]) {

@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -5329,18 +5329,26 @@ async function renameRun(path) {
   );
   if (nextTitle === null) return;
   const title = nextTitle.trim();
-  if (!title && !currentCustomTitle) {
-    showToast("当前已经在使用系统自动命名。");
+  const request = window.HBVStudioResultsView.renameRunRequestState({
+    path: targetPath,
+    title,
+    currentCustomTitle,
+  });
+  if (!request.ready) {
+    if (request.message) showToast(request.message);
     return;
   }
-  if (title === currentCustomTitle) return;
-  const response = await apiPost("/api/run/rename", { path: targetPath, title });
+  const response = await apiPost(request.requestPath, request.payload);
   await loadRuns();
   if (currentSelectedRunPath() && samePath(currentSelectedRunPath(), targetPath)) {
     await loadRun(targetPath).catch(() => {});
   }
   const finalName = runDisplayName(response.data?.run || run);
-  showToast(title ? `已更新结果标题：${finalName}` : `已恢复系统自动命名：${finalName}`);
+  const success = window.HBVStudioResultsView.renameRunSuccessState({
+    title: request.title,
+    finalName,
+  });
+  showToast(success.toastText);
 }
 
 async function deleteRun(path) {
@@ -5348,14 +5356,19 @@ async function deleteRun(path) {
   if (!targetPath) return;
   const run = state.runs.find(item => samePath(item.path, targetPath)) || (samePath(state.currentRun?.run?.path, targetPath) ? state.currentRun?.run : null);
   const name = runDisplayName(run) || shortPath(targetPath);
-  if (!confirm(`确定要删除结果“${name}”吗？此操作会删除该结果目录下的图表、指标和参数记录。`)) return;
-  await apiPost("/api/run/delete", { path: targetPath });
+  const request = window.HBVStudioResultsView.deleteRunRequestState({ path: targetPath, name });
+  if (!request.ready) {
+    if (request.message) showToast(request.message, true);
+    return;
+  }
+  if (!confirm(request.confirmText)) return;
+  await apiPost(request.requestPath, request.payload);
   if (currentSelectedRunPath() && samePath(currentSelectedRunPath(), targetPath)) {
-    clearRunDetail("当前结果已删除，请从左侧重新选择结果。");
+    clearRunDetail(request.clearedMessage);
   }
   await loadRuns();
   await loadTasks();
-  showToast(`已删除结果：${name}`);
+  showToast(request.toastText);
 }
 
 async function loadTasks() {

@@ -200,6 +200,62 @@
     };
   }
 
+  function renameRunRequestState(model = {}) {
+    const path = String(model.path || model.targetPath || "").trim();
+    const title = String(model.title ?? "").trim();
+    const currentCustomTitle = String(model.currentCustomTitle ?? "").trim();
+    let reason = "";
+    let message = "";
+    if (!path) {
+      reason = "missing-run";
+    } else if (!title && !currentCustomTitle) {
+      reason = "already-automatic";
+      message = "当前已经在使用系统自动命名。";
+    } else if (title === currentCustomTitle) {
+      reason = "unchanged-title";
+    }
+    return {
+      ready: !reason,
+      reason,
+      message,
+      path,
+      title,
+      currentCustomTitle,
+      requestPath: "/api/run/rename",
+      payload: { path, title },
+    };
+  }
+
+  function renameRunSuccessState(model = {}) {
+    const title = String(model.title ?? "").trim();
+    const finalName = String(model.finalName || "").trim();
+    return {
+      title,
+      finalName,
+      toastText: title ? `已更新结果标题：${finalName}` : `已恢复系统自动命名：${finalName}`,
+    };
+  }
+
+  function deleteRunRequestState(model = {}) {
+    const path = String(model.path || model.targetPath || "").trim();
+    const name = String(model.name || "").trim();
+    const displayName = name || path;
+    return {
+      ready: Boolean(path),
+      reason: path ? "" : "missing-run",
+      message: path ? "" : "请选择要删除的结果。",
+      path,
+      name,
+      requestPath: "/api/run/delete",
+      payload: { path },
+      confirmText: displayName
+        ? `确定要删除结果“${displayName}”吗？此操作会删除该结果目录下的图表、指标和参数记录。`
+        : "确定要删除该结果吗？此操作会删除该结果目录下的图表、指标和参数记录。",
+      clearedMessage: "当前结果已删除，请从左侧重新选择结果。",
+      toastText: `已删除结果：${displayName}`,
+    };
+  }
+
   function clearRunComparisonState() {
     return {
       statePatch: {
@@ -1317,6 +1373,7 @@
     clearRunComparisonState,
     clearRunDetailState,
     clearRunDetailViewState,
+    deleteRunRequestState,
     filterRuns,
     forwardSimulationErrorState,
     forwardSimulationPollingErrorState,
@@ -1337,6 +1394,8 @@
     renderRunDetailMetadata,
     renderRunEngineeringSummary,
     renderRunExportFields,
+    renameRunRequestState,
+    renameRunSuccessState,
     resultChartPayloads,
     resultsFilterBreakdown,
     resultsFilterHint,
