@@ -963,6 +963,20 @@
     };
   }
 
+  function prepTaskRequestState(model = {}) {
+    const stepId = String(model.stepId || "").trim();
+    const ready = Boolean(stepId);
+    return {
+      ready,
+      message: ready ? "" : "请选择要执行的数据处理步骤。",
+      request: {
+        step_id: stepId,
+        prec_source: String(model.runtimePrecipSource || "").trim(),
+        overwrite: Boolean(model.overwrite),
+      },
+    };
+  }
+
   function prepStepRunningStatus(existing = {}) {
     return {
       ...(existing || {}),
@@ -1230,6 +1244,7 @@
     observationHintState,
     prepPanelSummary,
     prepStepRunningStatus,
+    prepTaskRequestState,
     prepTaskErrorUiState,
     prepTaskUiState,
     projectFocusHintState,

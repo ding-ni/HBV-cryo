@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -655,6 +655,23 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const prepErrorState = view.prepTaskErrorUiState(new Error("轮询失败"));
             if (prepErrorState.hint.text !== "轮询失败" || prepErrorState.hint.className !== "hint-box status-fail" || prepErrorState.log !== null) {
               throw new Error(`prep task error state mismatch: ${JSON.stringify(prepErrorState)}`);
+            }
+            const prepRequest = view.prepTaskRequestState({
+              stepId: " meteo_align ",
+              runtimePrecipSource: " era5 ",
+              overwrite: 1,
+            });
+            const expectedPrepRequest = {
+              step_id: "meteo_align",
+              prec_source: "era5",
+              overwrite: true,
+            };
+            if (!prepRequest.ready || prepRequest.message !== "" || JSON.stringify(prepRequest.request) !== JSON.stringify(expectedPrepRequest)) {
+              throw new Error(`prep task request mismatch: ${JSON.stringify(prepRequest)}`);
+            }
+            const missingPrepRequest = view.prepTaskRequestState({ stepId: " ", runtimePrecipSource: "cmfd" });
+            if (missingPrepRequest.ready || missingPrepRequest.message !== "请选择要执行的数据处理步骤。" || missingPrepRequest.request.step_id !== "" || missingPrepRequest.request.prec_source !== "cmfd" || missingPrepRequest.request.overwrite) {
+              throw new Error(`missing prep task request mismatch: ${JSON.stringify(missingPrepRequest)}`);
             }
             const prepStepRunning = view.prepStepRunningStatus({ done: true, message: "旧消息" });
             if (!prepStepRunning.done || !prepStepRunning.running || prepStepRunning.message !== "正在执行，请看下方日志。") {

@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3870,11 +3870,15 @@ async function runPrepStep(stepId, { overwrite = false } = {}) {
     if (overwrite && !confirm(`将覆盖步骤「${stepId}」已生成的结果文件，是否继续？`)) {
       return;
     }
+    const requestState = window.HBVStudioDataPrepView.prepTaskRequestState({
+      stepId,
+      runtimePrecipSource: getEffectiveRuntimePrecipSource(),
+      overwrite,
+    });
+    if (!requestState.ready) { showToast(requestState.message, true); return; }
     const payload = await apiPost("/api/data-prep/start", {
       config_path: state.wizardWorkspacePath,
-      step_id: stepId,
-      prec_source: getEffectiveRuntimePrecipSource(),
-      overwrite,
+      ...requestState.request,
     });
     showToast(`已启动：${payload.task.label}`);
     await loadTasks();
