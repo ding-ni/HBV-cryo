@@ -41,6 +41,20 @@
     };
   }
 
+  function dashboardWorkspaceEmptyState(workspaces = []) {
+    const empty = !Array.isArray(workspaces) || workspaces.length === 0;
+    return {
+      empty,
+      statePatch: empty
+        ? {
+            dashboardLayoutPath: "",
+            dashboardWorkspaceLayout: null,
+            dashboardGeoOverview: null,
+          }
+        : {},
+    };
+  }
+
   function workspaceLoadQueryState(model = {}) {
     const path = String(model.path || model.configPath || "").trim();
     return {
@@ -278,6 +292,7 @@
     dashboardFallbackState,
     dashboardLayoutStaleState,
     dashboardLoadQueryState,
+    dashboardWorkspaceEmptyState,
     renderTemplates,
     renderWorkspaceCards,
     templateInstantiateRequestState,

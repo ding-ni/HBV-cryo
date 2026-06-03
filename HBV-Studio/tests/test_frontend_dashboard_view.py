@@ -21,7 +21,7 @@ class FrontendDashboardViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dashboardView.js", "utf8"), context);
 
             const dashboard = context.window.HBVStudioDashboardView;
-            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
+            if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLayoutStaleState || !dashboard?.dashboardLoadQueryState || !dashboard?.dashboardWorkspaceEmptyState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceByPath || !dashboard?.workspaceCardsState || !dashboard?.workspaceExists || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
             for (const name of ["templateInstantiateRequestState", "templateInstantiateSuccessState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceDeleteRequestState"]) {
@@ -146,6 +146,21 @@ class FrontendDashboardViewTests(unittest.TestCase):
             });
             if (normalizedCurrentLayout.stale || Object.keys(normalizedCurrentLayout.statePatch).length !== 0) {
               throw new Error(`dashboard layout stale check should use injected path comparator: ${JSON.stringify(normalizedCurrentLayout)}`);
+            }
+            const emptyWorkspaceState = dashboard.dashboardWorkspaceEmptyState([]);
+            if (!emptyWorkspaceState.empty ||
+                emptyWorkspaceState.statePatch.dashboardLayoutPath !== "" ||
+                emptyWorkspaceState.statePatch.dashboardWorkspaceLayout !== null ||
+                emptyWorkspaceState.statePatch.dashboardGeoOverview !== null) {
+              throw new Error(`empty workspace state should request dashboard clear patch: ${JSON.stringify(emptyWorkspaceState)}`);
+            }
+            const invalidWorkspaceState = dashboard.dashboardWorkspaceEmptyState(null);
+            if (!invalidWorkspaceState.empty || invalidWorkspaceState.statePatch.dashboardLayoutPath !== "") {
+              throw new Error(`invalid workspace state should be treated as empty: ${JSON.stringify(invalidWorkspaceState)}`);
+            }
+            const populatedWorkspaceState = dashboard.dashboardWorkspaceEmptyState(lookupWorkspaces);
+            if (populatedWorkspaceState.empty || Object.keys(populatedWorkspaceState.statePatch).length !== 0) {
+              throw new Error(`populated workspace state should not request clear patch: ${JSON.stringify(populatedWorkspaceState)}`);
             }
             const instantiateRequest = dashboard.templateInstantiateRequestState({
               templateId: " tpl-1 ",

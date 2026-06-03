@@ -255,7 +255,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLayoutStaleState", "dashboardLoadQueryState", "dashboardWorkspaceEmptyState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceByPath", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceExists", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -4032,10 +4032,9 @@ async function runInputCheck({ force = false, detail = false, stage = "calibrati
 // ===============================================================
 
 function renderWorkspaceCards() {
-  if (!state.workspaces.length) {
-    state.dashboardWorkspaceLayout = null;
-    state.dashboardGeoOverview = null;
-    state.dashboardLayoutPath = "";
+  const emptyState = window.HBVStudioDashboardView.dashboardWorkspaceEmptyState(state.workspaces);
+  if (emptyState.empty) {
+    Object.assign(state, emptyState.statePatch);
     const cards = window.HBVStudioDashboardView.workspaceCardsState([], { escapeHtml });
     applyDomUpdates(cards.domUpdates);
     return;
