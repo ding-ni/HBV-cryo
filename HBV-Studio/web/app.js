@@ -86,7 +86,7 @@ const frontendModuleContracts = [
   {
     script: "./js/resultsView.js",
     global: "HBVStudioResultsView",
-    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartRequestState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestState", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "runStepHours", "workspaceHasEditableRun"],
+    exports: ["alignedRunFiltersForSelection", "clearRunComparisonState", "clearRunDetailState", "clearRunDetailViewState", "currentForwardSimulationTask", "deleteRunRequestState", "filterRuns", "forwardSimulationErrorState", "forwardSimulationPollingErrorState", "forwardSimulationPreflight", "forwardSimulationRequestContext", "forwardSimulationResultState", "forwardSimulationStartRequestState", "forwardSimulationStartState", "forwardSimulationTaskUiState", "latestEditableRunPath", "manualStarterControlState", "manualStarterRequestState", "resultFilterToolbarState", "resultMetricItems", "resultMetricStripState", "renderFilterToolbar", "renderMetricStrip", "renderRunCard", "renderRunCards", "renderRunDetailMetadata", "renderRunEngineeringSummary", "renderRunExportFields", "renameRunRequestState", "renameRunSuccessState", "resultChartPayloads", "resultsFilterBreakdown", "resultsFilterHint", "runCardsState", "runComparisonClearViewState", "runComparisonErrorState", "runComparisonPreflight", "runComparisonRequestContext", "runComparisonRequestState", "runComparisonRequestStillCurrent", "runComparisonSuccessState", "runDetailQueryState", "runDetailState", "runExportFields", "runExportFieldsState", "runExportPanelState", "runExportPayload", "runExportRequestState", "runExportSuccess", "runListDataState", "runListQueryState", "runListState", "runManualPresetLoadErrorState", "runManualPresetLoadStartState", "runManualPresetLoadSuccessState", "runProfileValue", "runsForWorkspace", "selectedRunExportFields", "selectedRunPath", "isForwardSimulationTaskForRun", "runStepHours", "workspaceHasEditableRun"],
   },
   {
     script: "./js/stationPrecip.js",
@@ -3420,22 +3420,6 @@ function stopForwardSimPolling() {
   }
 }
 
-function isForwardSimTaskForCurrentRun(task, sourceRunPath = "") {
-  const currentRunPath = String(state._runData?.run?.path || "").trim();
-  const taskSourceRunPath = String(sourceRunPath || task?.run_path || "").trim();
-  return Boolean(currentRunPath && taskSourceRunPath && samePath(currentRunPath, taskSourceRunPath));
-}
-
-function findCurrentForwardSimTask({ runningOnly = false } = {}) {
-  const runPath = String(state._runData?.run?.path || "").trim();
-  if (!runPath) return null;
-  return state.tasks.find(task =>
-    task.task_type === "forward_sim" &&
-    String(task.run_path || "").trim() === runPath &&
-    (!runningOnly || task.status === "running")
-  ) || null;
-}
-
 function updateForwardSimUi(task) {
   const logBox = $("#resim-log");
   if (!logBox || !task) return;
@@ -3476,7 +3460,13 @@ async function pollForwardSimulationTask(taskId, sourceRunPath = "") {
       const task = state.tasks.find(item => item.id === taskId);
       if (!task) return;
       const taskSourceRunPath = String(task.run_path || state.activeForwardSimSourceRunPath || "").trim();
-      if (isForwardSimTaskForCurrentRun(task, taskSourceRunPath)) {
+      const taskBelongsToCurrentRun = window.HBVStudioResultsView.isForwardSimulationTaskForRun(
+        task,
+        state._runData?.run?.path || "",
+        taskSourceRunPath,
+        { samePath },
+      );
+      if (taskBelongsToCurrentRun) {
         updateForwardSimUi(task);
       }
       if (task.status !== "running") {
@@ -3484,10 +3474,10 @@ async function pollForwardSimulationTask(taskId, sourceRunPath = "") {
         state.activeForwardSimTaskId = "";
         state.activeForwardSimSourceRunPath = "";
         if (task.status === "completed" && task.result) {
-          if (task.result.run_path && isForwardSimTaskForCurrentRun(task, taskSourceRunPath)) {
+          if (task.result.run_path && taskBelongsToCurrentRun) {
             await loadRuns().catch(() => {});
             await openLatestRunAndSwitch(task.result.run_path, { workspacePath: task.result.workspace_config || state.wizardWorkspacePath || "" });
-          } else if (!task.result.run_path && isForwardSimTaskForCurrentRun(task, taskSourceRunPath)) {
+          } else if (!task.result.run_path && taskBelongsToCurrentRun) {
             applyForwardSimulationResult(task.result);
           } else {
             showToast("保存并重算已完成，可在任务列表中查看结果。");
@@ -5423,7 +5413,12 @@ async function loadTasks() {
     const activePrep = state.tasks.find(t => t.id === state.activePrepTaskId);
     if (activePrep) updatePrepTaskUi(activePrep);
   }
-  const currentForward = findCurrentForwardSimTask({ runningOnly: true });
+  const currentForward = window.HBVStudioResultsView.currentForwardSimulationTask(
+    state.tasks,
+    state._runData?.run?.path || "",
+    { runningOnly: true },
+    { samePath },
+  );
   if (currentForward) {
     state.activeForwardSimTaskId = currentForward.id;
     state.activeForwardSimSourceRunPath = String(currentForward.run_path || "").trim();
@@ -5432,17 +5427,23 @@ async function loadTasks() {
     const finishedForward = state.tasks.find(t => t.id === state.activeForwardSimTaskId);
     if (finishedForward) {
       const taskSourceRunPath = String(finishedForward.run_path || state.activeForwardSimSourceRunPath || "").trim();
-      if (isForwardSimTaskForCurrentRun(finishedForward, taskSourceRunPath)) {
+      const taskBelongsToCurrentRun = window.HBVStudioResultsView.isForwardSimulationTaskForRun(
+        finishedForward,
+        state._runData?.run?.path || "",
+        taskSourceRunPath,
+        { samePath },
+      );
+      if (taskBelongsToCurrentRun) {
         updateForwardSimUi(finishedForward);
       }
       if (finishedForward.status !== "running") {
         state.activeForwardSimTaskId = "";
         state.activeForwardSimSourceRunPath = "";
         if (finishedForward.status === "completed" && finishedForward.result) {
-          if (finishedForward.result.run_path && isForwardSimTaskForCurrentRun(finishedForward, taskSourceRunPath)) {
+          if (finishedForward.result.run_path && taskBelongsToCurrentRun) {
             await loadRuns().catch(() => {});
             await openLatestRunAndSwitch(finishedForward.result.run_path, { workspacePath: finishedForward.result.workspace_config || state.wizardWorkspacePath || "" });
-          } else if (!finishedForward.result.run_path && isForwardSimTaskForCurrentRun(finishedForward, taskSourceRunPath)) {
+          } else if (!finishedForward.result.run_path && taskBelongsToCurrentRun) {
             applyForwardSimulationResult(finishedForward.result);
           } else {
             showToast("保存并重算已完成，可在任务列表中查看结果。");

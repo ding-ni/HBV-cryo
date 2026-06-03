@@ -39,7 +39,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!results?.alignedRunFiltersForSelection || !results?.clearRunComparisonState || !results?.clearRunDetailState || !results?.clearRunDetailViewState || !results?.filterRuns || !results?.forwardSimulationErrorState || !results?.forwardSimulationPollingErrorState || !results?.forwardSimulationPreflight || !results?.forwardSimulationRequestContext || !results?.forwardSimulationResultState || !results?.forwardSimulationStartRequestState || !results?.forwardSimulationStartState || !results?.forwardSimulationTaskUiState || !results?.latestEditableRunPath || !results?.manualStarterControlState || !results?.renderFilterToolbar || !results?.renderRunDetailMetadata || !results?.resultsFilterBreakdown || !results?.resultsFilterHint || !results?.resultMetricItems || !results?.runComparisonClearViewState || !results?.runComparisonErrorState || !results?.runComparisonPreflight || !results?.runComparisonRequestContext || !results?.runComparisonRequestState || !results?.runComparisonRequestStillCurrent || !results?.runComparisonSuccessState || !results?.runDetailQueryState || !results?.runDetailState || !results?.runExportFields || !results?.runExportPanelState || !results?.runExportPayload || !results?.runExportSuccess || !results?.runListDataState || !results?.runListQueryState || !results?.runListState || !results?.runManualPresetLoadErrorState || !results?.runManualPresetLoadStartState || !results?.runManualPresetLoadSuccessState || !results?.runProfileValue || !results?.runsForWorkspace || !results?.selectedRunExportFields || !results?.selectedRunPath || !results?.runStepHours || !results?.workspaceHasEditableRun) {
               throw new Error("results view module exports are missing");
             }
-            for (const name of ["deleteRunRequestState", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
+            for (const name of ["currentForwardSimulationTask", "deleteRunRequestState", "isForwardSimulationTaskForRun", "manualStarterRequestState", "renameRunRequestState", "renameRunSuccessState", "resultFilterToolbarState", "resultMetricStripState", "runCardsState", "runExportFieldsState", "runExportRequestState"]) {
               if (typeof results?.[name] !== "function") {
                 throw new Error(`missing results view state export: ${name}`);
               }
@@ -58,6 +58,33 @@ class FrontendResultsViewTests(unittest.TestCase):
                 return String(a || "").replace(/\\/g, "/") === String(b || "").replace(/\\/g, "/");
               },
             };
+
+            const forwardTasks = [
+              { id: "old", task_type: "forward_sim", run_path: "C:/runs/old", status: "running" },
+              { id: "prep", task_type: "data_prep", run_path: "C:/runs/current", status: "running" },
+              { id: "done", task_type: "forward_sim", run_path: "C:/runs/current", status: "completed" },
+              { id: "running", task_type: "forward_sim", run_path: "C:/runs/current", status: "running" },
+            ];
+            if (!results.isForwardSimulationTaskForRun(forwardTasks[3], "C:\\runs\\current", "", helpers)) {
+              throw new Error("forward simulation task should match the normalized current run path");
+            }
+            if (!results.isForwardSimulationTaskForRun({ task_type: "forward_sim" }, "C:/runs/current", "C:\\runs\\current", helpers)) {
+              throw new Error("forward simulation task match should accept an explicit source run path");
+            }
+            if (results.isForwardSimulationTaskForRun(forwardTasks[0], "C:/runs/current", "", helpers)) {
+              throw new Error("forward simulation task should not match a different run path");
+            }
+            const firstCurrentForward = results.currentForwardSimulationTask(forwardTasks, "C:\\runs\\current", {}, helpers);
+            if (firstCurrentForward?.id !== "done") {
+              throw new Error(`expected the first matching forward task, got ${firstCurrentForward?.id}`);
+            }
+            const runningCurrentForward = results.currentForwardSimulationTask(forwardTasks, "C:/runs/current", { runningOnly: true }, helpers);
+            if (runningCurrentForward?.id !== "running") {
+              throw new Error(`expected running forward task, got ${runningCurrentForward?.id}`);
+            }
+            if (results.currentForwardSimulationTask(forwardTasks, "", {}, helpers) !== null) {
+              throw new Error("missing run path should not select a forward task");
+            }
 
             const toolbar = results.renderFilterToolbar({
               workspaceOptions: [

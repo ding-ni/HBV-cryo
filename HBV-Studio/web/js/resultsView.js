@@ -603,6 +603,25 @@
     };
   }
 
+  function isForwardSimulationTaskForRun(task = null, runPath = "", sourceRunPath = "", helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const currentRunPath = String(runPath || "").trim();
+    const taskSourceRunPath = String(sourceRunPath || task?.run_path || "").trim();
+    return Boolean(currentRunPath && taskSourceRunPath && samePath(currentRunPath, taskSourceRunPath));
+  }
+
+  function currentForwardSimulationTask(tasks = [], runPath = "", options = {}, helpers = {}) {
+    const samePath = helpers.samePath || defaultSamePath;
+    const targetRunPath = String(runPath || "").trim();
+    const runningOnly = Boolean(options?.runningOnly);
+    if (!targetRunPath) return null;
+    return (Array.isArray(tasks) ? tasks : []).find(task =>
+      task?.task_type === "forward_sim" &&
+      samePath(String(task?.run_path || "").trim(), targetRunPath) &&
+      (!runningOnly || task?.status === "running")
+    ) || null;
+  }
+
   function forwardSimulationTaskUiState(task = null, options = {}, helpers = {}) {
     const formatDurationSeconds = helpers.formatDurationSeconds || (value => `${Math.max(0, Math.round(Number(value) || 0))}s`);
     const formatNumber = helpers.formatNumber || ((value, digits = 4) => {
@@ -1431,6 +1450,7 @@
     clearRunComparisonState,
     clearRunDetailState,
     clearRunDetailViewState,
+    currentForwardSimulationTask,
     deleteRunRequestState,
     filterRuns,
     forwardSimulationErrorState,
@@ -1485,6 +1505,7 @@
     runsForWorkspace,
     selectedRunExportFields,
     selectedRunPath,
+    isForwardSimulationTaskForRun,
     runStepHours,
     workspaceHasEditableRun,
   };
