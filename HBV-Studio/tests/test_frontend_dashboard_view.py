@@ -24,6 +24,11 @@ class FrontendDashboardViewTests(unittest.TestCase):
             if (!dashboard?.dashboardDataState || !dashboard?.dashboardFallbackState || !dashboard?.dashboardLoadQueryState || !dashboard?.renderWorkspaceCards || !dashboard?.renderTemplates || !dashboard?.templateListDataState || !dashboard?.templateListQueryState || !dashboard?.templateListState || !dashboard?.workspaceCardsState || !dashboard?.workspaceListDataState || !dashboard?.workspaceListQueryState || !dashboard?.workspaceLoadQueryState) {
               throw new Error("dashboard view module exports are missing");
             }
+            for (const name of ["templateInstantiateRequestState", "templateInstantiateSuccessState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceDeleteRequestState"]) {
+              if (typeof dashboard?.[name] !== "function") {
+                throw new Error(`missing dashboard request state export: ${name}`);
+              }
+            }
             const loadQuery = dashboard.dashboardLoadQueryState();
             if (loadQuery.dashboardPath !== "/api/dashboard" ||
                 loadQuery.fallbackOrder.join("|") !== "templates|workspaces|runs|tasks" ||
@@ -94,6 +99,78 @@ class FrontendDashboardViewTests(unittest.TestCase):
             const emptyWorkspaceListData = dashboard.workspaceListDataState(null);
             if (emptyWorkspaceListData.workspaces.length !== 0 || emptyWorkspaceListData.statePatch.workspaces.length !== 0) {
               throw new Error(`invalid workspace data should normalize to empty array: ${JSON.stringify(emptyWorkspaceListData)}`);
+            }
+            const instantiateRequest = dashboard.templateInstantiateRequestState({
+              templateId: " tpl-1 ",
+              workspaceName: " 工作区A ",
+            });
+            if (!instantiateRequest.ready ||
+                instantiateRequest.reason !== "" ||
+                instantiateRequest.templateId !== "tpl-1" ||
+                instantiateRequest.workspaceName !== "工作区A" ||
+                instantiateRequest.requestPath !== "/api/template/instantiate" ||
+                instantiateRequest.payload.template_id !== "tpl-1" ||
+                instantiateRequest.payload.workspace_name !== "工作区A") {
+              throw new Error(`template instantiate request mismatch: ${JSON.stringify(instantiateRequest)}`);
+            }
+            const missingTemplateRequest = dashboard.templateInstantiateRequestState({
+              templateId: " ",
+              workspaceName: "工作区A",
+            });
+            if (missingTemplateRequest.ready ||
+                missingTemplateRequest.reason !== "missing-template" ||
+                missingTemplateRequest.message !== "请选择要复制的模板。") {
+              throw new Error(`missing template request mismatch: ${JSON.stringify(missingTemplateRequest)}`);
+            }
+            const missingWorkspaceNameRequest = dashboard.templateInstantiateRequestState({
+              templateId: "tpl-1",
+              workspaceName: " ",
+            });
+            if (missingWorkspaceNameRequest.ready ||
+                missingWorkspaceNameRequest.reason !== "missing-name" ||
+                missingWorkspaceNameRequest.message !== "请输入工作区名称。") {
+              throw new Error(`missing workspace name request mismatch: ${JSON.stringify(missingWorkspaceNameRequest)}`);
+            }
+            const instantiateSuccess = dashboard.templateInstantiateSuccessState({
+              workspace_path: "C:/workspaces/A/config.json",
+            }, {
+              shortPath(value) { return String(value).split("/").pop(); },
+            });
+            if (instantiateSuccess.workspacePath !== "C:/workspaces/A/config.json" ||
+                instantiateSuccess.toastText !== "已复制模板：config.json") {
+              throw new Error(`template instantiate success mismatch: ${JSON.stringify(instantiateSuccess)}`);
+            }
+            const syncRequest = dashboard.templateSyncRequestState();
+            if (!syncRequest.ready ||
+                syncRequest.requestPath !== "/api/template/sync-tuotuohe" ||
+                Object.keys(syncRequest.payload).length !== 0) {
+              throw new Error(`template sync request mismatch: ${JSON.stringify(syncRequest)}`);
+            }
+            const syncSuccess = dashboard.templateSyncSuccessState({ task: { label: "同步沱沱河数据" } });
+            if (syncSuccess.label !== "同步沱沱河数据" ||
+                syncSuccess.toastText !== "已启动：同步沱沱河数据") {
+              throw new Error(`template sync success mismatch: ${JSON.stringify(syncSuccess)}`);
+            }
+            const workspaceDeleteRequest = dashboard.workspaceDeleteRequestState({
+              path: " C:/workspaces/A/config.json ",
+              name: "工作区A",
+            });
+            if (!workspaceDeleteRequest.ready ||
+                workspaceDeleteRequest.reason !== "" ||
+                workspaceDeleteRequest.path !== "C:/workspaces/A/config.json" ||
+                workspaceDeleteRequest.name !== "工作区A" ||
+                workspaceDeleteRequest.requestPath !== "/api/workspace/delete" ||
+                workspaceDeleteRequest.payload.path !== "C:/workspaces/A/config.json" ||
+                !workspaceDeleteRequest.confirmText.includes("工作区A") ||
+                workspaceDeleteRequest.toastText !== "已删除工作区") {
+              throw new Error(`workspace delete request mismatch: ${JSON.stringify(workspaceDeleteRequest)}`);
+            }
+            const missingWorkspaceDeleteRequest = dashboard.workspaceDeleteRequestState({ path: " " });
+            if (missingWorkspaceDeleteRequest.ready ||
+                missingWorkspaceDeleteRequest.reason !== "missing-workspace" ||
+                missingWorkspaceDeleteRequest.message !== "请选择要删除的工作区。" ||
+                missingWorkspaceDeleteRequest.payload.path !== "") {
+              throw new Error(`missing workspace delete request mismatch: ${JSON.stringify(missingWorkspaceDeleteRequest)}`);
             }
             const workspaceQuery = dashboard.workspaceLoadQueryState({ path: " F:/工作区/A & B " });
             const encodedPath = encodeURIComponent("F:/工作区/A & B");

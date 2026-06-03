@@ -250,7 +250,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dashboardView.js",
     global: "HBVStudioDashboardView",
-    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateListDataState", "templateListQueryState", "templateListState", "workspaceCardsState", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
+    exports: ["dashboardDataState", "dashboardFallbackState", "dashboardLoadQueryState", "renderTemplates", "renderWorkspaceCards", "templateInstantiateRequestState", "templateInstantiateSuccessState", "templateListDataState", "templateListQueryState", "templateListState", "templateSyncRequestState", "templateSyncSuccessState", "workspaceCardsState", "workspaceDeleteRequestState", "workspaceListDataState", "workspaceListQueryState", "workspaceLoadQueryState"],
   },
   {
     script: "./js/mapLayerPlan.js",
@@ -5488,11 +5488,20 @@ async function instantiateTemplate(templateId) {
   const suggested = templateId === "tuotuohe-daily-builtin" ? "沱沱河_工作区" : "新流域工作区";
   const name = window.prompt("复制后的工作区名称", suggested);
   if (!name) return;
+  const request = window.HBVStudioDashboardView.templateInstantiateRequestState({
+    templateId,
+    workspaceName: name,
+  });
+  if (!request.ready) {
+    if (request.message) showToast(request.message, true);
+    return;
+  }
   try {
-    const p = await apiPost("/api/template/instantiate", { template_id: templateId, workspace_name: name });
-    showToast(`已复制模板：${shortPath(p.data.workspace_path)}`);
+    const p = await apiPost(request.requestPath, request.payload);
+    const success = window.HBVStudioDashboardView.templateInstantiateSuccessState(p.data || {}, { shortPath });
+    showToast(success.toastText);
     await loadDashboard();
-    await loadWorkspace(p.data.workspace_path);
+    await loadWorkspace(success.workspacePath);
     navigateWizardStep(1);
     setView("wizard");
   } catch (err) {
@@ -5501,9 +5510,11 @@ async function instantiateTemplate(templateId) {
 }
 
 async function syncTuotuoheData() {
+  const request = window.HBVStudioDashboardView.templateSyncRequestState();
   try {
-    const p = await apiPost("/api/template/sync-tuotuohe", {});
-    showToast(`已启动：${p.task.label}`);
+    const p = await apiPost(request.requestPath, request.payload);
+    const success = window.HBVStudioDashboardView.templateSyncSuccessState(p);
+    showToast(success.toastText);
     await loadTasks();
   } catch (err) {
     showToast(err.message, true);
@@ -5684,9 +5695,17 @@ function bindEvents() {
     if (delBtn) {
       e.stopPropagation();
       const name = delBtn.closest(".workspace-card")?.querySelector("strong")?.textContent || "";
-      if (!confirm(`确定要删除工作区「${name}」吗？此操作仅删除配置文件，不会删除运行目录中的数据。`)) return;
-      apiPost("/api/workspace/delete", { path: delBtn.dataset.deletePath })
-        .then(() => { showToast("已删除工作区"); loadDashboard(); })
+      const request = window.HBVStudioDashboardView.workspaceDeleteRequestState({
+        path: delBtn.dataset.deletePath,
+        name,
+      });
+      if (!request.ready) {
+        if (request.message) showToast(request.message, true);
+        return;
+      }
+      if (!confirm(request.confirmText)) return;
+      apiPost(request.requestPath, request.payload)
+        .then(() => { showToast(request.toastText); loadDashboard(); })
         .catch(err => showToast(err.message, true));
       return;
     }

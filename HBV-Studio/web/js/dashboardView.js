@@ -86,6 +86,76 @@
     };
   }
 
+  function templateInstantiateRequestState(model = {}) {
+    const templateId = String(model.templateId || model.id || "").trim();
+    const workspaceName = String(model.workspaceName || model.name || "").trim();
+    let reason = "";
+    let message = "";
+    if (!templateId) {
+      reason = "missing-template";
+      message = "请选择要复制的模板。";
+    } else if (!workspaceName) {
+      reason = "missing-name";
+      message = "请输入工作区名称。";
+    }
+    return {
+      ready: !reason,
+      reason,
+      message,
+      templateId,
+      workspaceName,
+      requestPath: "/api/template/instantiate",
+      payload: {
+        template_id: templateId,
+        workspace_name: workspaceName,
+      },
+    };
+  }
+
+  function templateInstantiateSuccessState(data = {}, helpers = {}) {
+    const shortPath = helpers.shortPath || (value => String(value || ""));
+    const workspacePath = String(data?.workspace_path || data?.path || "");
+    return {
+      workspacePath,
+      toastText: `已复制模板：${shortPath(workspacePath)}`,
+    };
+  }
+
+  function templateSyncRequestState() {
+    return {
+      ready: true,
+      requestPath: "/api/template/sync-tuotuohe",
+      payload: {},
+    };
+  }
+
+  function templateSyncSuccessState(data = {}) {
+    const label = String(data?.task?.label || data?.label || "同步任务").trim() || "同步任务";
+    return {
+      label,
+      toastText: `已启动：${label}`,
+    };
+  }
+
+  function workspaceDeleteRequestState(model = {}) {
+    const path = String(model.path || model.deletePath || "").trim();
+    const name = String(model.name || "").trim();
+    const displayName = name || path;
+    return {
+      ready: Boolean(path),
+      reason: path ? "" : "missing-workspace",
+      message: path ? "" : "请选择要删除的工作区。",
+      path,
+      name,
+      requestPath: "/api/workspace/delete",
+      payload: { path },
+      confirmText: displayName
+        ? `确定要删除工作区「${displayName}」吗？此操作仅删除配置文件，不会删除运行目录中的数据。`
+        : "确定要删除该工作区吗？此操作仅删除配置文件，不会删除运行目录中的数据。",
+      toastText: "已删除工作区",
+    };
+  }
+
   function renderWorkspaceCards(workspaces, helpers = {}) {
     const items = Array.isArray(workspaces) ? workspaces : [];
     if (!items.length) return emptyWorkspaceHint();
@@ -174,10 +244,15 @@
     dashboardLoadQueryState,
     renderTemplates,
     renderWorkspaceCards,
+    templateInstantiateRequestState,
+    templateInstantiateSuccessState,
     templateListDataState,
     templateListQueryState,
     templateListState,
+    templateSyncRequestState,
+    templateSyncSuccessState,
     workspaceCardsState,
+    workspaceDeleteRequestState,
     workspaceListDataState,
     workspaceListQueryState,
     workspaceLoadQueryState,
