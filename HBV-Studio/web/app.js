@@ -269,7 +269,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationHintState", "prepPanelSummary", "prepStepRunningStatus", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -2578,34 +2578,30 @@ function syncWizardTimeInputMode() {
 }
 
 function syncCustomMeteoImportInputs(force = false) {
-  let copied = 0;
-  const mappings = [
-    {
-      sourceSel: "#wz-custom-prec-dir",
-      targetSel: "#wz-import-prec-dir",
-      enabled: () => ($("#wz-prec-source")?.value || "era5") === "custom_tif",
+  const copyState = window.HBVStudioDataPrepView.customMeteoImportCopyState({
+    sources: getWizardMeteoSources(),
+    registeredDirs: {
+      prec: $("#wz-custom-prec-dir")?.value || "",
+      temp: $("#wz-custom-temp-dir")?.value || "",
+      pet: $("#wz-custom-pet-dir")?.value || "",
     },
-    {
-      sourceSel: "#wz-custom-temp-dir",
-      targetSel: "#wz-import-temp-dir",
-      enabled: () => ($("#wz-temp-source")?.value || "era5") === "custom_tif",
+    importDirs: {
+      prec: $("#wz-import-prec-dir")?.value || "",
+      temp: $("#wz-import-temp-dir")?.value || "",
+      pet: $("#wz-import-evap-dir")?.value || "",
     },
-    {
-      sourceSel: "#wz-custom-pet-dir",
-      targetSel: "#wz-import-evap-dir",
-      enabled: () => ($("#wz-pet-source")?.value || "era5_fao56") === "custom_tif",
-    },
-  ];
-  mappings.forEach(({ sourceSel, targetSel, enabled }) => {
-    const source = $(sourceSel);
-    const target = $(targetSel);
-    if (!source || !target || !enabled()) return;
-    if (source.value.trim() && (force || !target.value.trim())) {
-      target.value = source.value.trim();
-      copied += 1;
-    }
+    force,
   });
-  return copied;
+  const targets = {
+    prec: "#wz-import-prec-dir",
+    temp: "#wz-import-temp-dir",
+    pet: "#wz-import-evap-dir",
+  };
+  copyState.updates.forEach(update => {
+    const target = $(targets[update.key]);
+    if (target) target.value = update.value;
+  });
+  return copyState.copiedCount;
 }
 
 function getWizardMeteoSources() {

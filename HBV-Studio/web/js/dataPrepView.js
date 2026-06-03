@@ -575,6 +575,30 @@
     };
   }
 
+  function customMeteoImportCopyState(model = {}) {
+    const sources = model.sources || {};
+    const registeredDirs = model.registeredDirs || {};
+    const importDirs = model.importDirs || {};
+    const force = Boolean(model.force);
+    const fields = [
+      { key: "prec", label: "降水" },
+      { key: "temp", label: "气温" },
+      { key: "pet", label: "蒸散发" },
+    ];
+    const updates = fields.flatMap(field => {
+      if (sources[field.key] !== "custom_tif") return [];
+      const value = String(registeredDirs[field.key] || "").trim();
+      const current = String(importDirs[field.key] || "").trim();
+      if (!value || (!force && current)) return [];
+      return [{ key: field.key, value, label: field.label }];
+    });
+    return {
+      updates,
+      copiedCount: updates.length,
+      copiedLabels: updates.map(item => item.label),
+    };
+  }
+
   function meteoModeHintState(model = {}) {
     const sources = model.sources || {};
     const copiedLabels = Array.isArray(model.copiedLabels) ? model.copiedLabels : [];
@@ -1116,6 +1140,7 @@
     boundaryPreviewQueryState,
     boundaryPreviewErrorState,
     boundaryPreviewState,
+    customMeteoImportCopyState,
     era5ApiPanelState,
     formatPrepDisplayTitle,
     formatPrepBlockedMessage,
