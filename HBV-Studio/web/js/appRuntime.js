@@ -46,6 +46,17 @@
     };
   }
 
+  function toastState(message = "", isError = false) {
+    const error = Boolean(isError);
+    return {
+      text: String(message ?? ""),
+      isError: error,
+      borderColor: error ? "rgba(181,69,56,0.32)" : "rgba(20,79,84,0.28)",
+      visibleClass: "visible",
+      autoHideDelayMs: 2800,
+    };
+  }
+
   function servicePillState(ok, message = "") {
     const connected = Boolean(ok);
     const text = String(message || "");
@@ -181,6 +192,7 @@
     servicePillState,
     sidebarContextState,
     sidebarCountsState,
+    toastState,
     viewNavigationState,
     viewSelectionState,
     windowUnloadRequestState,

@@ -322,7 +322,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["healthQueryState", "pollingScheduleState", "quitRequestState", "servicePillState", "sidebarContextState", "sidebarCountsState", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
 ];
 
@@ -515,11 +515,12 @@ function escapeHtml(v) {
 
 function showToast(message, isError = false) {
   const t = $("#toast");
-  t.textContent = message;
-  t.style.borderColor = isError ? "rgba(181,69,56,0.32)" : "rgba(20,79,84,0.28)";
-  t.classList.add("visible");
+  const toast = window.HBVStudioAppRuntime.toastState(message, isError);
+  t.textContent = toast.text;
+  t.style.borderColor = toast.borderColor;
+  t.classList.add(toast.visibleClass);
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => t.classList.remove("visible"), 2800);
+  showToast._t = setTimeout(() => t.classList.remove(toast.visibleClass), toast.autoHideDelayMs);
 }
 
 function validateFrontendModules() {

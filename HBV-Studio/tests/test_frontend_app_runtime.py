@@ -21,7 +21,7 @@ class FrontendAppRuntimeTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/appRuntime.js", "utf8"), context);
 
             const runtime = context.window.HBVStudioAppRuntime;
-            if (!runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
+            if (!runtime?.healthQueryState || !runtime?.pollingScheduleState || !runtime?.quitRequestState || !runtime?.servicePillState || !runtime?.sidebarContextState || !runtime?.sidebarCountsState || !runtime?.toastState || !runtime?.viewNavigationState || !runtime?.viewSelectionState || !runtime?.windowUnloadRequestState) {
               throw new Error("app runtime module exports are missing");
             }
 
@@ -94,6 +94,29 @@ class FrontendAppRuntimeTests(unittest.TestCase):
                 legacyAliasSchedule.nextTaskPollDelayMs !== 3000 ||
                 legacyAliasSchedule.nextRunPollDelayMs !== 12000) {
               throw new Error(`legacy hasRunning alias schedule mismatch: ${JSON.stringify(legacyAliasSchedule)}`);
+            }
+
+            const successToast = runtime.toastState("Saved", false);
+            if (successToast.text !== "Saved" ||
+                successToast.isError ||
+                successToast.borderColor !== "rgba(20,79,84,0.28)" ||
+                successToast.visibleClass !== "visible" ||
+                successToast.autoHideDelayMs !== 2800) {
+              throw new Error(`success toast state mismatch: ${JSON.stringify(successToast)}`);
+            }
+
+            const errorToast = runtime.toastState("Failed", true);
+            if (errorToast.text !== "Failed" ||
+                !errorToast.isError ||
+                errorToast.borderColor !== "rgba(181,69,56,0.32)" ||
+                errorToast.visibleClass !== "visible" ||
+                errorToast.autoHideDelayMs !== 2800) {
+              throw new Error(`error toast state mismatch: ${JSON.stringify(errorToast)}`);
+            }
+
+            const emptyToast = runtime.toastState(null);
+            if (emptyToast.text !== "" || emptyToast.isError) {
+              throw new Error(`empty toast state mismatch: ${JSON.stringify(emptyToast)}`);
             }
 
             const connectedPill = runtime.servicePillState(true, "本地服务已连接");
