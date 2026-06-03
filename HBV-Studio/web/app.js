@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["normalizeExtensions", "openPathRequestState", "pathListingQueryState", "pathListingState"],
+    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -5547,36 +5547,20 @@ async function syncTuotuoheData() {
 //  PATH MODAL
 // ===============================================================
 
-function workspaceRuntimeRoot() {
-  return String(state.currentWorkspace?.运行目录 || "").trim();
-}
-
-function workspaceConfigDir() {
-  const raw = String(state.wizardWorkspacePath || "").trim().replace(/\\/g, "/");
-  if (!raw.includes("/")) return "";
-  return raw.slice(0, raw.lastIndexOf("/"));
-}
-
-function preferredPathForTarget(target, kind = "file") {
-  const remembered = state.pathModal.lastVisited?.[target];
-  if (remembered) return remembered;
-  const runtimeRoot = workspaceRuntimeRoot();
-  if (kind === "dir" && runtimeRoot) return runtimeRoot;
-  if (/^wz-import-(prec|temp|evap)-dir$/.test(target) && runtimeRoot) return runtimeRoot;
-  if (/^wz-custom-/.test(target) && runtimeRoot) return runtimeRoot;
-  if (target === "wz-hourly-prec-dir" && runtimeRoot) return runtimeRoot;
-  return workspaceConfigDir() || runtimeRoot || "";
-}
-
 function openPathModal(target, kind, extensions) {
-  state.pathModal.open = true;
-  state.pathModal.target = target;
-  state.pathModal.kind = kind;
-  state.pathModal.extensions = extensions;
-  $("#path-modal").classList.remove("hidden");
   const currentValue = document.getElementById(target)?.value.trim() || "";
-  const startPath = currentValue || preferredPathForTarget(target, kind);
-  loadPathListing(startPath).catch(err => showToast(err.message, true));
+  const modalState = window.HBVStudioPathBrowserView.pathModalOpenState({
+    target,
+    kind,
+    extensions,
+    currentValue,
+    lastVisited: state.pathModal.lastVisited,
+    runtimeRoot: state.currentWorkspace?.运行目录 || "",
+    configPath: state.wizardWorkspacePath,
+  });
+  Object.assign(state.pathModal, modalState.statePatch);
+  $("#path-modal").classList.remove("hidden");
+  loadPathListing(modalState.startPath).catch(err => showToast(err.message, true));
 }
 
 function closePathModal() {

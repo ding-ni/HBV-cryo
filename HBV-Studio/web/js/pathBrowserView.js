@@ -8,6 +8,43 @@
       .filter(Boolean);
   }
 
+  function configDirectory(configPath = "") {
+    const raw = String(configPath || "").trim().replace(/\\/g, "/");
+    if (!raw.includes("/")) return "";
+    return raw.slice(0, raw.lastIndexOf("/"));
+  }
+
+  function preferredPathForTarget(model = {}) {
+    const target = String(model.target || "").trim();
+    const kind = String(model.kind || "file").trim() || "file";
+    const currentValue = String(model.currentValue || "").trim();
+    if (currentValue) return currentValue;
+    const lastVisited = model.lastVisited || {};
+    const remembered = target ? String(lastVisited[target] || "").trim() : "";
+    if (remembered) return remembered;
+    const runtimeRoot = String(model.runtimeRoot || "").trim();
+    if (kind === "dir" && runtimeRoot) return runtimeRoot;
+    if (/^wz-import-(prec|temp|evap)-dir$/.test(target) && runtimeRoot) return runtimeRoot;
+    if (/^wz-custom-/.test(target) && runtimeRoot) return runtimeRoot;
+    if (target === "wz-hourly-prec-dir" && runtimeRoot) return runtimeRoot;
+    return configDirectory(model.configPath) || runtimeRoot || "";
+  }
+
+  function pathModalOpenState(model = {}) {
+    const target = String(model.target || "").trim();
+    const kind = String(model.kind || "file").trim() || "file";
+    const extensions = normalizeExtensions(model.extensions);
+    return {
+      startPath: preferredPathForTarget({ ...model, target, kind }),
+      statePatch: {
+        open: true,
+        target,
+        kind,
+        extensions,
+      },
+    };
+  }
+
   function pathListingQueryState(model = {}) {
     const path = String(model.path || model.pathValue || "").trim();
     const kind = String(model.kind || "file").trim() || "file";
@@ -54,8 +91,11 @@
   }
 
   window.HBVStudioPathBrowserView = {
+    configDirectory,
     normalizeExtensions,
     openPathRequestState,
+    pathModalOpenState,
+    preferredPathForTarget,
     pathListingQueryState,
     pathListingState,
   };

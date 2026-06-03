@@ -21,7 +21,7 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["normalizeExtensions", "openPathRequestState", "pathListingQueryState", "pathListingState"]) {
+            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
 
@@ -32,6 +32,62 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             const normalizedString = view.normalizeExtensions(" .tif, .shp ,, ");
             if (normalizedString.join("|") !== ".tif|.shp") {
               throw new Error(`string extensions not normalized: ${JSON.stringify(normalizedString)}`);
+            }
+            if (view.configDirectory(" C:\\ws\\A\\workspace.json ") !== "C:/ws/A") {
+              throw new Error("config directory should normalize backslashes and remove file name");
+            }
+            if (view.configDirectory("workspace.json") !== "") {
+              throw new Error("config directory should be empty without a directory separator");
+            }
+            const currentPreferred = view.preferredPathForTarget({
+              target: "wz-import-dem",
+              currentValue: " C:/current/file.tif ",
+              runtimeRoot: "D:/runtime",
+              configPath: "C:/ws/A/workspace.json",
+            });
+            if (currentPreferred !== "C:/current/file.tif") {
+              throw new Error(`current value should win preferred path: ${currentPreferred}`);
+            }
+            const rememberedPreferred = view.preferredPathForTarget({
+              target: "wz-import-dem",
+              lastVisited: { "wz-import-dem": " D:/remembered " },
+              runtimeRoot: "D:/runtime",
+              configPath: "C:/ws/A/workspace.json",
+            });
+            if (rememberedPreferred !== "D:/remembered") {
+              throw new Error(`remembered path should win preferred path: ${rememberedPreferred}`);
+            }
+            const runtimeDirPreferred = view.preferredPathForTarget({
+              target: "wz-import-prec-dir",
+              kind: "file",
+              runtimeRoot: "D:/runtime",
+              configPath: "C:/ws/A/workspace.json",
+            });
+            if (runtimeDirPreferred !== "D:/runtime") {
+              throw new Error(`runtime root should be preferred for meteo dirs: ${runtimeDirPreferred}`);
+            }
+            const configFallbackPreferred = view.preferredPathForTarget({
+              target: "wz-import-dem",
+              kind: "file",
+              runtimeRoot: "D:/runtime",
+              configPath: "C:/ws/A/workspace.json",
+            });
+            if (configFallbackPreferred !== "C:/ws/A") {
+              throw new Error(`config directory should be preferred before runtime for file targets: ${configFallbackPreferred}`);
+            }
+            const modalOpen = view.pathModalOpenState({
+              target: "wz-import-prec-dir",
+              kind: "dir",
+              extensions: " .tif, .csv ",
+              runtimeRoot: "D:/runtime",
+              configPath: "C:/ws/A/workspace.json",
+            });
+            if (modalOpen.startPath !== "D:/runtime" ||
+                !modalOpen.statePatch.open ||
+                modalOpen.statePatch.target !== "wz-import-prec-dir" ||
+                modalOpen.statePatch.kind !== "dir" ||
+                modalOpen.statePatch.extensions.join("|") !== ".tif|.csv") {
+              throw new Error(`path modal open state mismatch: ${JSON.stringify(modalOpen)}`);
             }
 
             const query = view.pathListingQueryState({
