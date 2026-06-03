@@ -21,8 +21,17 @@ class FrontendWorkspaceLayoutTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/workspaceLayout.js", "utf8"), context);
 
             const layout = context.window.HBVStudioWorkspaceLayout;
-            if (!layout?.workspaceLayoutHtml || !layout?.render) {
+            if (!layout?.workspaceLayoutHtml || !layout?.workspaceLayoutQueryState || !layout?.render) {
               throw new Error("workspace layout exports are missing");
+            }
+            const layoutQuery = layout.workspaceLayoutQueryState({ configPath: " F:/工作区/A & B " });
+            const encodedPath = encodeURIComponent("F:/工作区/A & B");
+            if (!layoutQuery.ready || layoutQuery.configPath !== "F:/工作区/A & B" || layoutQuery.layoutPath !== `/api/workspace/layout?config_path=${encodedPath}`) {
+              throw new Error(`workspace layout query mismatch: ${JSON.stringify(layoutQuery)}`);
+            }
+            const missingLayoutQuery = layout.workspaceLayoutQueryState({ configPath: " " });
+            if (missingLayoutQuery.ready || missingLayoutQuery.message !== "请选择工作区。" || !missingLayoutQuery.layoutPath.includes("config_path=")) {
+              throw new Error(`missing workspace layout query mismatch: ${JSON.stringify(missingLayoutQuery)}`);
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
               "&": "&amp;",

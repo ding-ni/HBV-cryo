@@ -264,7 +264,7 @@ const frontendModuleContracts = [
   {
     script: "./js/workspaceLayout.js",
     global: "HBVStudioWorkspaceLayout",
-    exports: ["aliasForPath", "render", "workspaceLayoutHtml"],
+    exports: ["aliasForPath", "render", "workspaceLayoutHtml", "workspaceLayoutQueryState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -5161,7 +5161,11 @@ async function refreshCurrentWorkspaceLayout() {
     refreshWizardWorkspacePreview();
     return null;
   }
-  const p = await apiGet(`/api/workspace/layout?config_path=${encodeURIComponent(state.wizardWorkspacePath)}`);
+  const query = window.HBVStudioWorkspaceLayout.workspaceLayoutQueryState({
+    configPath: state.wizardWorkspacePath,
+  });
+  if (!query.ready) return null;
+  const p = await apiGet(query.layoutPath);
   state.currentWorkspaceLayout = p.data || null;
   state.currentWorkspaceLayoutPath = state.wizardWorkspacePath;
   state.currentWorkspaceGeoOverview = await loadWorkspaceGeoOverview(state.wizardWorkspacePath);
@@ -5176,9 +5180,18 @@ async function previewWorkspaceLayout(path, { silent = false } = {}) {
   state.dashboardLayoutPath = String(path || "").trim();
   renderWorkspaceCards();
   try {
-    const p = await apiGet(`/api/workspace/layout?config_path=${encodeURIComponent(path)}`);
+    const query = window.HBVStudioWorkspaceLayout.workspaceLayoutQueryState({
+      configPath: state.dashboardLayoutPath,
+    });
+    if (!query.ready) {
+      state.dashboardWorkspaceLayout = null;
+      state.dashboardGeoOverview = null;
+      renderDashboardWorkspaceLayout();
+      return null;
+    }
+    const p = await apiGet(query.layoutPath);
     state.dashboardWorkspaceLayout = p.data || null;
-    state.dashboardGeoOverview = await loadWorkspaceGeoOverview(path);
+    state.dashboardGeoOverview = await loadWorkspaceGeoOverview(query.configPath);
     if (state.dashboardWorkspaceLayout) {
       state.dashboardWorkspaceLayout.geo_overview = state.dashboardGeoOverview;
     }

@@ -19,6 +19,16 @@
     return Number(item.count || 0) > 0 ? "status-ok" : "status-warn";
   }
 
+  function workspaceLayoutQueryState(model = {}) {
+    const configPath = String(model.configPath || model.path || "").trim();
+    return {
+      ready: Boolean(configPath),
+      message: configPath ? "" : "请选择工作区。",
+      configPath,
+      layoutPath: `/api/workspace/layout?config_path=${encodeURIComponent(configPath)}`,
+    };
+  }
+
   function aliasForPath(path, helpers = {}) {
     const slashPath = helpers.slashPath || defaultSlashPath;
     const text = slashPath(path);
@@ -138,6 +148,7 @@
 
   window.HBVStudioWorkspaceLayout = {
     aliasForPath,
+    workspaceLayoutQueryState,
     workspaceLayoutHtml,
     render,
   };
