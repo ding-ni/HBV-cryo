@@ -82,13 +82,19 @@
     };
   }
 
+  function taskById(tasks = [], taskId = "") {
+    if (taskId === null || taskId === undefined) return null;
+    const targetId = String(taskId);
+    return (Array.isArray(tasks) ? tasks : []).find(task => String(task?.id ?? "") === targetId) || null;
+  }
+
   function previousTaskRecord(previousTasks = null, taskId = "") {
     if (!previousTasks || taskId === null || taskId === undefined) return null;
     if (typeof previousTasks.get === "function") {
       return previousTasks.get(taskId) || previousTasks.get(String(taskId)) || null;
     }
     if (Array.isArray(previousTasks)) {
-      return previousTasks.find(task => String(task?.id ?? "") === String(taskId ?? "")) || null;
+      return taskById(previousTasks, taskId);
     }
     if (typeof previousTasks === "object") {
       return previousTasks[taskId] || previousTasks[String(taskId)] || null;
@@ -838,6 +844,7 @@
     taskContextSummary,
     taskDebugDetails,
     taskLastMeaningfulLog,
+    taskById,
     taskListDataState,
     taskListQueryState,
     taskPrimaryTitle,

@@ -300,6 +300,7 @@ const frontendModuleContracts = [
       "taskContextSummary",
       "taskDebugDetails",
       "taskLastMeaningfulLog",
+      "taskById",
       "taskListDataState",
       "taskListQueryState",
       "taskPrimaryTitle",
@@ -1093,7 +1094,7 @@ function restoreVisibleLogViewports(selector = "[data-log-key]") {
 }
 
 function taskLogText(taskId) {
-  const task = state.tasks.find(item => String(item.id || "") === String(taskId || ""));
+  const task = window.HBVStudioTaskView.taskById(state.tasks, taskId);
   return task ? (task.output || []).join("\n") : "";
 }
 
@@ -3444,7 +3445,7 @@ async function pollForwardSimulationTask(taskId, sourceRunPath = "") {
       Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
-      const task = state.tasks.find(item => item.id === taskId);
+      const task = window.HBVStudioTaskView.taskById(state.tasks, taskId);
       if (!task) return;
       const taskSourceRunPath = String(task.run_path || state.activeForwardSimSourceRunPath || "").trim();
       const taskBelongsToCurrentRun = window.HBVStudioResultsView.isForwardSimulationTaskForRun(
@@ -3540,7 +3541,7 @@ async function pollMeteoImportTask(taskId) {
       Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
-      const task = state.tasks.find(item => item.id === taskId);
+      const task = window.HBVStudioTaskView.taskById(state.tasks, taskId);
       if (!task) return;
       updateMeteoImportUi(task);
       if (task.status !== "running") {
@@ -3852,7 +3853,7 @@ async function pollPrepTask(taskId) {
       Object.assign(state, window.HBVStudioTaskView.taskListDataState(payload.data).statePatch);
       renderTasks();
       updateCounts();
-      const task = state.tasks.find(item => item.id === taskId);
+      const task = window.HBVStudioTaskView.taskById(state.tasks, taskId);
       if (!task) return;
       updatePrepTaskUi(task);
       if (task.status !== "running") {
@@ -4606,7 +4607,7 @@ function renderTaskProgressCharts() {
   document.querySelectorAll("[data-task-progress-chart]").forEach(host => {
     const taskId = host.dataset.taskProgressChart;
     const stage = host.dataset.taskProgressStage || "global";
-    const task = state.tasks.find(item => item.id === taskId);
+    const task = window.HBVStudioTaskView.taskById(state.tasks, taskId);
     const histories = task?.progress?.stages || {};
     const stageHistory = histories?.[stage]?.history || task?.progress?.history || [];
     const chart = window.HBVStudioTaskView.taskProgressChartData(stageHistory, taskStageLabel(stage), { colors });
@@ -5397,7 +5398,7 @@ async function loadTasks() {
       runInputCheck().catch(() => {});
     }
   } else if (state.activeMeteoImportTaskId) {
-    const activeImport = state.tasks.find(t => t.id === state.activeMeteoImportTaskId);
+    const activeImport = window.HBVStudioTaskView.taskById(state.tasks, state.activeMeteoImportTaskId);
     if (activeImport) updateMeteoImportUi(activeImport);
   }
   const currentPrep = window.HBVStudioDataPrepView.currentPrepTask(
@@ -5410,7 +5411,7 @@ async function loadTasks() {
     state.activePrepTaskId = currentPrep.id;
     updatePrepTaskUi(currentPrep);
   } else if (state.activePrepTaskId) {
-    const activePrep = state.tasks.find(t => t.id === state.activePrepTaskId);
+    const activePrep = window.HBVStudioTaskView.taskById(state.tasks, state.activePrepTaskId);
     if (activePrep) updatePrepTaskUi(activePrep);
   }
   const currentForward = window.HBVStudioResultsView.currentForwardSimulationTask(
@@ -5424,7 +5425,7 @@ async function loadTasks() {
     state.activeForwardSimSourceRunPath = String(currentForward.run_path || "").trim();
     updateForwardSimUi(currentForward);
   } else if (state.activeForwardSimTaskId) {
-    const finishedForward = state.tasks.find(t => t.id === state.activeForwardSimTaskId);
+    const finishedForward = window.HBVStudioTaskView.taskById(state.tasks, state.activeForwardSimTaskId);
     if (finishedForward) {
       const taskSourceRunPath = String(finishedForward.run_path || state.activeForwardSimSourceRunPath || "").trim();
       const taskBelongsToCurrentRun = window.HBVStudioResultsView.isForwardSimulationTaskForRun(

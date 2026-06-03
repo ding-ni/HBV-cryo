@@ -21,7 +21,7 @@ class FrontendTaskViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/taskView.js", "utf8"), context);
 
             const taskView = context.window.HBVStudioTaskView;
-            for (const name of ["filterTasks", "newlyCompletedTask", "newlyFinishedTaskIds", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
+            for (const name of ["filterTasks", "newlyCompletedTask", "newlyFinishedTaskIds", "renderTaskCard", "renderTaskFilterToolbar", "renderTaskList", "taskById", "taskListDataState", "taskListQueryState", "taskListState", "taskProgressChartData"]) {
               if (typeof taskView?.[name] !== "function") {
                 throw new Error(`missing task view export: ${name}`);
               }
@@ -37,6 +37,17 @@ class FrontendTaskViewTests(unittest.TestCase):
             const emptyTasks = taskView.taskListDataState({ bad: true });
             if (emptyTasks.tasks.length !== 0 || emptyTasks.statePatch.tasks.length !== 0) {
               throw new Error(`invalid task list data should normalize to empty array: ${JSON.stringify(emptyTasks)}`);
+            }
+
+            const taskLookupItems = [{ id: 7, label: "numeric" }, { id: "task-8", label: "string" }];
+            if (taskView.taskById(taskLookupItems, "7")?.label !== "numeric") {
+              throw new Error("taskById should match numeric ids by string value");
+            }
+            if (taskView.taskById(taskLookupItems, "task-8")?.label !== "string") {
+              throw new Error("taskById should match string ids");
+            }
+            if (taskView.taskById(taskLookupItems, "missing") !== null || taskView.taskById({ bad: true }, "7") !== null) {
+              throw new Error("taskById should return null for missing or invalid task lists");
             }
 
             const taskTransitions = [
@@ -71,6 +82,11 @@ class FrontendTaskViewTests(unittest.TestCase):
             const newlyCompletedManual = taskView.newlyCompletedTask(taskTransitions, previousTaskObject, "manual_start");
             if (newlyCompletedManual?.id !== "manual") {
               throw new Error(`plain-object previous task lookup mismatch: ${newlyCompletedManual?.id}`);
+            }
+            const previousTaskArray = [{ id: "manual", status: "running" }];
+            const arraySnapshotManual = taskView.newlyCompletedTask(taskTransitions, previousTaskArray, "manual_start");
+            if (arraySnapshotManual?.id !== "manual") {
+              throw new Error(`array previous task lookup mismatch: ${arraySnapshotManual?.id}`);
             }
 
             const helpers = {
