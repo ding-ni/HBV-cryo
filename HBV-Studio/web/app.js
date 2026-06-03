@@ -317,7 +317,7 @@ const frontendModuleContracts = [
   {
     script: "./js/calibrationView.js",
     global: "HBVStudioCalibrationView",
-    exports: ["calibrationLoadState", "calibrationStartRequestState", "selfCheckStartRequestState"],
+    exports: ["calibrationLoadState", "calibrationPlainGuideState", "calibrationStartRequestState", "selfCheckStartRequestState"],
   },
   {
     script: "./js/objectiveRuntime.js",
@@ -1771,6 +1771,23 @@ function updateCalibrationPlainGuide() {
   const method = $("#task-method")?.value || "mc_screen_de";
   const objectiveMode = $("#task-objective-mode")?.value || CURRENT_OBJECTIVE_FAMILY;
   const loadInfo = estimateCalibrationLoad();
+  const runtimePlainGuideState = window.HBVStudioCalibrationView?.calibrationPlainGuideState;
+  if (typeof runtimePlainGuideState === "function") {
+    const guide = runtimePlainGuideState({
+      kind,
+      method,
+      objectiveMode,
+      currentObjectiveFamily: CURRENT_OBJECTIVE_FAMILY,
+      floodEventObjectiveFamily: FLOOD_EVENT_OBJECTIVE_FAMILY,
+      paramCount: CALIBRATION_PARAM_COUNT,
+      loadInfo,
+    });
+    if (guide?.text) {
+      host.textContent = guide.text;
+      host.className = guide.className || "hint-box";
+      return;
+    }
+  }
   if (kind === "self_check") {
     host.textContent = "系统自检仅核对本地环境、依赖和关键脚本状态，不读取率定参数。";
     host.className = "hint-box";

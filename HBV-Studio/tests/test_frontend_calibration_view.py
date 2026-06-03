@@ -22,6 +22,7 @@ class FrontendCalibrationViewTests(unittest.TestCase):
 
             const calibration = context.window.HBVStudioCalibrationView;
             if (!calibration?.calibrationLoadState ||
+                !calibration?.calibrationPlainGuideState ||
                 !calibration?.calibrationStartRequestState ||
                 !calibration?.selfCheckStartRequestState) {
               throw new Error("calibration view module exports are missing");
@@ -75,6 +76,34 @@ class FrontendCalibrationViewTests(unittest.TestCase):
                 combinedLoad.label !== "\u5feb\u901f\u7b5b\u9009 + \u7cbe\u7ec6\u641c\u7d22" ||
                 combinedLoad.level !== "heavy") {
               throw new Error(`combined load mismatch: ${JSON.stringify(combinedLoad)}`);
+            }
+
+            const selfCheckGuide = calibration.calibrationPlainGuideState({ kind: "self_check" });
+            if (selfCheckGuide.className !== "hint-box" ||
+                !selfCheckGuide.text.includes("\u7cfb\u7edf\u81ea\u68c0\u4ec5\u6838\u5bf9\u672c\u5730\u73af\u5883")) {
+              throw new Error(`self-check guide mismatch: ${JSON.stringify(selfCheckGuide)}`);
+            }
+
+            const quickTestGuide = calibration.calibrationPlainGuideState({ kind: "quick_test" });
+            if (quickTestGuide.className !== "hint-box status-ok" ||
+                !quickTestGuide.text.includes("\u8f93\u5165\u9884\u6838\u7b97")) {
+              throw new Error(`quick-test guide mismatch: ${JSON.stringify(quickTestGuide)}`);
+            }
+
+            const floodGuide = calibration.calibrationPlainGuideState({
+              kind: "calibration",
+              method: "de",
+              objectiveMode: "flood_event_calibration_v1",
+              floodEventObjectiveFamily: "flood_event_calibration_v1",
+              paramCount: 50,
+              loadInfo: { popsize: 10, population: 500 },
+            });
+            if (floodGuide.className !== "hint-box" ||
+                !floodGuide.text.includes("50") ||
+                !floodGuide.text.includes("500") ||
+                !floodGuide.text.includes("\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a") ||
+                !floodGuide.text.includes("\u76f4\u63a5\u8fdb\u5165\u7cbe\u7ec6\u641c\u7d22")) {
+              throw new Error(`flood guide mismatch: ${JSON.stringify(floodGuide)}`);
             }
 
             const missing = calibration.calibrationStartRequestState({ configPath: " ", method: "" });

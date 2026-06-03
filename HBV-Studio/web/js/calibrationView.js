@@ -42,6 +42,58 @@
     return { method, maxiter, popsize, mcSamples, workers, population, estimated, perWorker, label, level };
   }
 
+  function calibrationPlainGuideState(model = {}) {
+    const kind = text(model.kind, "calibration");
+    if (kind === "self_check") {
+      return {
+        text: "系统自检仅核对本地环境、依赖和关键脚本状态，不读取率定参数。",
+        className: "hint-box",
+      };
+    }
+    if (kind === "quick_test") {
+      return {
+        text: "输入预核算只执行限定时段前向计算，不做正式参数搜索，用于确认输入资料可用。",
+        className: "hint-box status-ok",
+      };
+    }
+    if (kind === "debug_calibration") {
+      return {
+        text: "快速试算（短窗口）会使用率定开始后的前 N 天进行搜索，仅作为参数敏感性的快速参考，不替代正式率定。",
+        className: "hint-box status-ok",
+      };
+    }
+    const method = text(model.method, "mc_screen_de");
+    const objectiveMode = text(
+      model.objectiveMode ?? model.objective_mode,
+      text(model.currentObjectiveFamily ?? model.current_objective_family, "daily_unified_professional_v1"),
+    );
+    const floodEventObjectiveFamily = text(
+      model.floodEventObjectiveFamily ?? model.flood_event_objective_family,
+      "flood_event_calibration_v1",
+    );
+    const paramCount = Math.max(0, Number(model.paramCount ?? model.param_count) || 0);
+    const loadInfo = model.loadInfo ?? model.load_info ?? calibrationLoadState({
+      method,
+      maxiter: model.maxiter,
+      popsize: model.popsize,
+      mcSamples: model.mcSamples ?? model.mc_samples,
+      workers: model.workers,
+      paramCount,
+    });
+    const methodText = method === "de"
+      ? "当前策略直接进入精细搜索，步骤最少，但耗时较长。"
+      : method === "mc_only"
+        ? "当前策略仅快速筛选，用来快速看参数敏感性和候选区间。"
+        : "当前策略先快速筛选，再把更好的候选送入精细搜索，是默认更稳妥的方案。";
+    const objectiveText = objectiveMode === floodEventObjectiveFamily
+      ? "当前评分标准为洪水事件率定；连续资料按完整时段运行并在事件窗口评分，事件资料模式按场独立预热并只要求事件内资料完整。"
+      : "当前评分标准为综合水文目标函数，优先保证连续径流拟合，并兼顾冰雪融水过程。";
+    return {
+      text: `运行说明：快速筛选样本数表示前期候选参数组数；搜索轮数表示后续优化轮数；每轮候选数倍率=${loadInfo.popsize}，每轮样本数约为参数数 ${paramCount} × ${loadInfo.popsize} = ${loadInfo.population}。${objectiveText}${methodText}`,
+      className: "hint-box",
+    };
+  }
+
   function calibrationStartRequestState(model = {}) {
     const configPath = text(model.configPath ?? model.config_path);
     const quickTest = Boolean(model.quickTest ?? model.quick_test);
@@ -77,6 +129,7 @@
 
   window.HBVStudioCalibrationView = {
     calibrationLoadState,
+    calibrationPlainGuideState,
     calibrationStartRequestState,
     selfCheckStartRequestState,
   };
