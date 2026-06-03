@@ -371,6 +371,35 @@
     return { entries: [["expected_step_hours", stepHours]], source: "step_hours", stepHours };
   }
 
+  function encodeQueryEntries(entries = []) {
+    return entries
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value || ""))}`)
+      .join("&");
+  }
+
+  function boundaryPreviewRequestState(model = {}) {
+    const csvPath = String(model.csvPath || model.path || "").trim();
+    const dateField = String(model.dateField || "date").trim() || "date";
+    const flowField = String(model.flowField || "inflow_m3s").trim() || "inflow_m3s";
+    const base = boundaryPreviewQueryState(model);
+    const entries = [
+      ...base.entries,
+      ["path", csvPath],
+      ["date_field", dateField],
+      ["flow_field", flowField],
+    ];
+    return {
+      ...base,
+      ready: Boolean(csvPath),
+      message: csvPath ? "" : "请先选择边界入流 CSV。",
+      csvPath,
+      dateField,
+      flowField,
+      entries,
+      previewPath: `/api/boundary-preview?${encodeQueryEntries(entries)}`,
+    };
+  }
+
   function observationInfoQueryState(model = {}) {
     const path = String(model.path || "").trim();
     const targetStepHours = String(model.targetStepHours || (model.hourly ? 1 : 24)).trim();
@@ -1301,6 +1330,7 @@
     boundaryGuidanceState,
     bootstrapTaskRequestState,
     boundaryPreviewQueryState,
+    boundaryPreviewRequestState,
     boundaryPreviewErrorState,
     boundaryPreviewState,
     customMeteoImportCopyState,

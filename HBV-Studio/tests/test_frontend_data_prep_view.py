@@ -22,7 +22,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/dataPrepView.js", "utf8"), context);
 
             const view = context.window.HBVStudioDataPrepView;
-            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
+            if (!view?.boundaryGuidanceState || !view?.bootstrapTaskRequestState || !view?.boundaryPreviewErrorState || !view?.boundaryPreviewQueryState || !view?.boundaryPreviewRequestState || !view?.boundaryPreviewState || !view?.customMeteoImportCopyState || !view?.customMeteoImportDirectoryState || !view?.elevationSuggestionQueryState || !view?.emptyInputCheckCache || !view?.era5ApiPanelState || !view?.formatPrepDisplayTitle || !view?.formatPrepBlockedMessage || !view?.fromWizardInputTimeValue || !view?.gisImportErrorUiState || !view?.gisImportRequestState || !view?.gisModePanelState || !view?.gisImportStartingUiState || !view?.gisImportSuccessUiState || !view?.hasRecentInputCheckCache || !view?.inputCheckCacheEntry || !view?.inputCheckCompletionState || !view?.inputCheckQueryState || !view?.meteoImportCreatingUiState || !view?.meteoImportErrorUiState || !view?.meteoImportRequestState || !view?.meteoImportUiState || !view?.meteoModeHintState || !view?.meteoModePanelState || !view?.meteoSourceLabels || !view?.meteoSourceState || !view?.observationInfoQueryState || !view?.observationHintState || !view?.prepPanelSummary || !view?.prepStatusQueryState || !view?.prepStepRunningStatus || !view?.prepTaskRequestState || !view?.prepTaskErrorUiState || !view?.prepTaskUiState || !view?.projectFocusHintState || !view?.renderBootstrapStatus || !view?.renderInputCheckError || !view?.renderInputCheckImportBlock || !view?.renderInputCheckProgress || !view?.renderInputCheckResults || !view?.renderPrepStepList || !view?.toWizardInputTimeValue || !view?.visiblePrepSteps || !view?.workspaceReadinessQueryState || !view?.wizardConditionalFieldState || !view?.wizardValidationFailureState) {
               throw new Error("data prep view exports are missing");
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -193,6 +193,32 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             const stepBoundaryQuery = view.boundaryPreviewQueryState({ hourly: false });
             if (stepBoundaryQuery.source !== "step_hours" || JSON.stringify(stepBoundaryQuery.entries) !== JSON.stringify([["expected_step_hours", "24"]])) {
               throw new Error(`boundary step query mismatch: ${JSON.stringify(stepBoundaryQuery)}`);
+            }
+            const boundaryRequest = view.boundaryPreviewRequestState({
+              hourly: true,
+              expectedStart: "2020-01-01 00:00",
+              expectedEnd: "2020-01-10 00:00",
+              csvPath: " C:/边界入流/入流 A&B.csv ",
+              dateField: " 时间 字段 ",
+              flowField: " 流量&m3s ",
+            });
+            if (!boundaryRequest.ready ||
+                boundaryRequest.source !== "expected_range" ||
+                boundaryRequest.csvPath !== "C:/边界入流/入流 A&B.csv" ||
+                boundaryRequest.dateField !== "时间 字段" ||
+                boundaryRequest.flowField !== "流量&m3s" ||
+                boundaryRequest.previewPath !== "/api/boundary-preview?expected_start=2020-01-01%2000%3A00&expected_end=2020-01-10%2000%3A00&expected_step_hours=1&path=C%3A%2F%E8%BE%B9%E7%95%8C%E5%85%A5%E6%B5%81%2F%E5%85%A5%E6%B5%81%20A%26B.csv&date_field=%E6%97%B6%E9%97%B4%20%E5%AD%97%E6%AE%B5&flow_field=%E6%B5%81%E9%87%8F%26m3s") {
+              throw new Error(`boundary preview request mismatch: ${JSON.stringify(boundaryRequest)}`);
+            }
+            const emptyBoundaryRequest = view.boundaryPreviewRequestState({
+              hourly: false,
+              workspacePath: " C:/工作区/A.json ",
+            });
+            if (emptyBoundaryRequest.ready ||
+                emptyBoundaryRequest.message !== "请先选择边界入流 CSV。" ||
+                emptyBoundaryRequest.source !== "workspace" ||
+                emptyBoundaryRequest.previewPath !== "/api/boundary-preview?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2FA.json&path=&date_field=date&flow_field=inflow_m3s") {
+              throw new Error(`empty boundary request mismatch: ${JSON.stringify(emptyBoundaryRequest)}`);
             }
             const obsQuery = view.observationInfoQueryState({
               path: " C:/观测资料/流量 A&B.csv ",

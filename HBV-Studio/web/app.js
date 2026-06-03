@@ -270,7 +270,7 @@ const frontendModuleContracts = [
   {
     script: "./js/dataPrepView.js",
     global: "HBVStudioDataPrepView",
-    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
+    exports: ["boundaryGuidanceState", "bootstrapTaskRequestState", "boundaryPreviewErrorState", "boundaryPreviewQueryState", "boundaryPreviewRequestState", "boundaryPreviewState", "customMeteoImportCopyState", "customMeteoImportDirectoryState", "elevationSuggestionQueryState", "emptyInputCheckCache", "era5ApiPanelState", "formatPrepBlockedMessage", "formatPrepDisplayTitle", "fromWizardInputTimeValue", "gisImportErrorUiState", "gisImportRequestState", "gisModePanelState", "gisImportStartingUiState", "gisImportSuccessUiState", "hasRecentInputCheckCache", "inputCheckCacheEntry", "inputCheckCompletionState", "inputCheckQueryState", "meteoImportCreatingUiState", "meteoImportErrorUiState", "meteoImportRequestState", "meteoImportUiState", "meteoModeHintState", "meteoModePanelState", "meteoSourceLabels", "meteoSourceState", "observationInfoQueryState", "observationHintState", "prepPanelSummary", "prepStatusQueryState", "prepStepRunningStatus", "prepTaskRequestState", "prepTaskErrorUiState", "prepTaskUiState", "projectFocusHintState", "renderBootstrapStatus", "renderInputCheckError", "renderInputCheckImportBlock", "renderInputCheckProgress", "renderInputCheckResults", "renderPrepStepList", "toWizardInputTimeValue", "visiblePrepSteps", "workspaceReadinessQueryState", "wizardConditionalFieldState", "wizardValidationFailureState"],
   },
   {
     script: "./js/taskView.js",
@@ -3241,29 +3241,22 @@ async function autoComputeElevation() {
 
 // --- boundary preview ---
 
-function currentBoundaryPreviewQuery() {
-  const params = new URLSearchParams();
-  const query = window.HBVStudioDataPrepView.boundaryPreviewQueryState({
-    hourly: isHourlyTimescaleSelected(),
-    expectedStart: getWizardTimeValue("#wz-warmup-start"),
-    expectedEnd: getWizardTimeValue("#wz-valid-end"),
-    workspacePath: state.wizardWorkspacePath,
-  });
-  query.entries.forEach(([key, value]) => params.set(key, value));
-  return params;
-}
-
 async function previewBoundary() {
   const csvPath   = $("#wz-boundary-csv").value.trim();
   const dateField = $("#wz-boundary-date").value.trim() || "date";
   const flowField = $("#wz-boundary-flow").value.trim() || "inflow_m3s";
   if (!csvPath) { showToast("请先选择边界入流 csv。", true); return; }
   try {
-    const params = currentBoundaryPreviewQuery();
-    params.set("path", csvPath);
-    params.set("date_field", dateField);
-    params.set("flow_field", flowField);
-    const payload = await apiGet(`/api/boundary-preview?${params.toString()}`);
+    const query = window.HBVStudioDataPrepView.boundaryPreviewRequestState({
+      csvPath,
+      dateField,
+      flowField,
+      hourly: isHourlyTimescaleSelected(),
+      expectedStart: getWizardTimeValue("#wz-warmup-start"),
+      expectedEnd: getWizardTimeValue("#wz-valid-end"),
+      workspacePath: state.wizardWorkspacePath,
+    });
+    const payload = await apiGet(query.previewPath);
     const preview = window.HBVStudioDataPrepView.boundaryPreviewState(payload.data, {
       escapeHtml,
       formatNumber,
