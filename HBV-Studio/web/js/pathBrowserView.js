@@ -76,6 +76,26 @@
     };
   }
 
+  function selectedPathState(pathValue = "", model = {}) {
+    const selectedPath = String(pathValue || "");
+    const target = String(model.target || "").trim();
+    const kind = String(model.kind || "file").trim() || "file";
+    const lastVisited = model.lastVisited && typeof model.lastVisited === "object"
+      ? model.lastVisited
+      : {};
+    const rememberedPath = kind === "dir"
+      ? selectedPath
+      : selectedPath.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+    const nextLastVisited = target
+      ? { ...lastVisited, [target]: rememberedPath }
+      : { ...lastVisited };
+    return {
+      selectedPath,
+      rememberedPath,
+      statePatch: { lastVisited: nextLastVisited },
+    };
+  }
+
   function openPathRequestState(model = {}) {
     const path = String(model.path || model.pathValue || "").trim();
     const label = String(model.label || "目录").trim() || "目录";
@@ -98,5 +118,6 @@
     preferredPathForTarget,
     pathListingQueryState,
     pathListingState,
+    selectedPathState,
   };
 })();

@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState"],
+    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -5613,10 +5613,13 @@ async function loadPathListing(pathValue) {
 function applySelectedPath(pathValue) {
   const input = document.getElementById(state.pathModal.target);
   if (!input) return;
-  input.value = pathValue;
-  state.pathModal.lastVisited[state.pathModal.target] = state.pathModal.kind === "dir"
-    ? pathValue
-    : String(pathValue || "").replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+  const selectedState = window.HBVStudioPathBrowserView.selectedPathState(pathValue, {
+    target: state.pathModal.target,
+    kind: state.pathModal.kind,
+    lastVisited: state.pathModal.lastVisited,
+  });
+  input.value = selectedState.selectedPath;
+  Object.assign(state.pathModal, selectedState.statePatch);
   input.dispatchEvent(new Event("change", { bubbles: true }));
   closePathModal();
 }

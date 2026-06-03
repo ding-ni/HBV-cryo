@@ -21,7 +21,7 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState"]) {
+            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingState", "selectedPathState"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
 
@@ -162,6 +162,36 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
                 emptyListing.shownFileCount !== 0 ||
                 emptyListing.filesTruncated !== false) {
               throw new Error(`empty listing state mismatch: ${JSON.stringify(emptyListing)}`);
+            }
+
+            const selectedDir = view.selectedPathState("D:/runtime/forcing", {
+              target: "wz-import-prec-dir",
+              kind: "dir",
+              lastVisited: { other: "C:/old" },
+            });
+            if (selectedDir.selectedPath !== "D:/runtime/forcing" ||
+                selectedDir.rememberedPath !== "D:/runtime/forcing" ||
+                selectedDir.statePatch.lastVisited["wz-import-prec-dir"] !== "D:/runtime/forcing" ||
+                selectedDir.statePatch.lastVisited.other !== "C:/old") {
+              throw new Error(`selected directory state mismatch: ${JSON.stringify(selectedDir)}`);
+            }
+            const selectedFile = view.selectedPathState("D:\\runtime\\forcing\\prec.tif", {
+              target: "wz-import-prec",
+              kind: "file",
+              lastVisited: {},
+            });
+            if (selectedFile.selectedPath !== "D:\\runtime\\forcing\\prec.tif" ||
+                selectedFile.rememberedPath !== "D:/runtime/forcing" ||
+                selectedFile.statePatch.lastVisited["wz-import-prec"] !== "D:/runtime/forcing") {
+              throw new Error(`selected file state mismatch: ${JSON.stringify(selectedFile)}`);
+            }
+            const untargetedSelection = view.selectedPathState("D:/runtime/forcing/prec.tif", {
+              kind: "file",
+              lastVisited: { other: "C:/old" },
+            });
+            if (untargetedSelection.statePatch.lastVisited.other !== "C:/old" ||
+                Object.keys(untargetedSelection.statePatch.lastVisited).length !== 1) {
+              throw new Error(`untargeted selection should preserve existing last visited map: ${JSON.stringify(untargetedSelection)}`);
             }
             """
         )
