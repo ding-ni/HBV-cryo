@@ -211,6 +211,18 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertEqual(calls[1], ("error", "未知接口。", 404))
         self.assertEqual(calls[2], ("error", "bad input", 400))
 
+    def test_query_helpers_decode_aliases_defaults_and_numbers(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+
+        self.assertEqual(handler._query_value({"path": ["F%3A%2Fworkspace%20A%26B"]}, "path"), "F:/workspace A&B")
+        self.assertEqual(
+            handler._query_workspace_path({"ws": [""], "config_path": ["C%3A%2Fws.json"], "path": ["ignored.json"]}),
+            "C:/ws.json",
+        )
+        self.assertEqual(handler._query_value({}, "scope", default="workspace"), "workspace")
+        self.assertEqual(handler._query_float({"target_step_hours": ["1.5"]}, "target_step_hours"), 1.5)
+        self.assertIsNone(handler._query_float({"target_step_hours": [""]}, "target_step_hours"))
+
     def test_geo_dem_handler_sends_png_with_geo_headers(self) -> None:
         handler = object.__new__(svc.StudioHandler)
         calls: list[tuple[bytes, str, dict[str, str]]] = []
