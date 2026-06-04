@@ -1,5 +1,379 @@
 {
-  "source": "HBV-Studio/studio_service.py",
+  "source": "HBV-Studio/services/api_routes.py",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/boundary-preview",
+      "handler": "_api_get_boundary_preview",
+      "group": "boundary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cdsapi/status",
+      "handler": "_api_get_cdsapi_status",
+      "group": "meteo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "handler": "_api_get_workspace",
+      "group": "workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/validate",
+      "handler": "_api_get_config_validate",
+      "group": "workspace_validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/configs",
+      "handler": "_api_get_workspaces",
+      "group": "workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard",
+      "handler": "_api_get_dashboard",
+      "group": "dashboard"
+    },
+    {
+      "method": "GET",
+      "path": "/api/data-prep/status",
+      "handler": "_api_get_data_prep_status",
+      "group": "data_prep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/data-prep/steps",
+      "handler": "_api_get_data_prep_steps",
+      "group": "data_prep"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/list",
+      "handler": "_api_get_fs_list",
+      "group": "filesystem"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/basin",
+      "handler": "_api_get_geo_basin",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/dem",
+      "handler": "_api_get_geo_dem",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/elevation-zones",
+      "handler": "_api_get_geo_elevation_zones",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/elevation-zones.png",
+      "handler": "_api_get_geo_elevation_zones_png",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/glacier",
+      "handler": "_api_get_geo_glacier",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/glacier.png",
+      "handler": "_api_get_geo_glacier_png",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/overview",
+      "handler": "_api_get_geo_overview",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/geo/stations",
+      "handler": "_api_get_geo_stations",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "handler": "_api_get_health",
+      "group": "system"
+    },
+    {
+      "method": "GET",
+      "path": "/api/manual-presets",
+      "handler": "_api_get_manual_presets",
+      "group": "manual_presets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/obs-info",
+      "handler": "_api_get_obs_info",
+      "group": "observed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/run",
+      "handler": "_api_get_run",
+      "group": "runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runs",
+      "handler": "_api_get_runs",
+      "group": "runs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/suggest/bbox",
+      "handler": "_api_get_suggest_bbox",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/suggest/cfmax-threshold",
+      "handler": "_api_get_suggest_cfmax_threshold",
+      "group": "geo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks",
+      "handler": "_api_get_tasks",
+      "group": "tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/api/templates",
+      "handler": "_api_get_templates",
+      "group": "workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wizard/validate-step",
+      "handler": "_api_get_wizard_validate_step",
+      "group": "wizard"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace",
+      "handler": "_api_get_workspace",
+      "group": "workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/advice",
+      "handler": "_api_get_workspace_advice",
+      "group": "workspace_validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/completeness",
+      "handler": "_api_get_workspace_completeness",
+      "group": "workspace_validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/detailed-check",
+      "handler": "_api_get_workspace_detailed_check",
+      "group": "workspace_validation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layout",
+      "handler": "_api_get_workspace_layout",
+      "group": "workspace"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces",
+      "handler": "_api_get_workspaces",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/app/quit",
+      "handler": "_api_post_app_quit",
+      "group": "system"
+    },
+    {
+      "method": "POST",
+      "path": "/api/app/window-unload",
+      "handler": "_api_post_app_window_unload",
+      "group": "system"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auto-config",
+      "handler": "_api_post_import_workspace",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bootstrap/start",
+      "handler": "_api_post_bootstrap_start",
+      "group": "tasks"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calibration/start",
+      "handler": "_api_post_calibration_start",
+      "group": "calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/config/save",
+      "handler": "_api_post_workspace_save",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/data-prep/start",
+      "handler": "_api_post_data_prep_start",
+      "group": "data_prep"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forecast/input-check",
+      "handler": "_api_post_forecast_input_check",
+      "group": "forecast"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forecast/restart",
+      "handler": "_api_post_forecast_restart",
+      "group": "forecast"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forecast/restart/start",
+      "handler": "_api_post_forecast_restart_start",
+      "group": "forecast"
+    },
+    {
+      "method": "POST",
+      "path": "/api/fs/open-path",
+      "handler": "_api_post_fs_open_path",
+      "group": "filesystem"
+    },
+    {
+      "method": "POST",
+      "path": "/api/gis/import",
+      "handler": "_api_post_gis_import",
+      "group": "geo"
+    },
+    {
+      "method": "POST",
+      "path": "/api/import-workspace",
+      "handler": "_api_post_import_workspace",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/manual-preset/delete",
+      "handler": "_api_post_manual_preset_delete",
+      "group": "manual_presets"
+    },
+    {
+      "method": "POST",
+      "path": "/api/manual-preset/save",
+      "handler": "_api_post_manual_preset_save",
+      "group": "manual_presets"
+    },
+    {
+      "method": "POST",
+      "path": "/api/manual-start/start",
+      "handler": "_api_post_manual_start_start",
+      "group": "manual_calibration"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meteo/import",
+      "handler": "_api_post_meteo_import",
+      "group": "meteo"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meteo/import/start",
+      "handler": "_api_post_meteo_import_start",
+      "group": "meteo"
+    },
+    {
+      "method": "POST",
+      "path": "/api/run/delete",
+      "handler": "_api_post_run_delete",
+      "group": "runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/run/export-excel",
+      "handler": "_api_post_run_export_excel",
+      "group": "runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/run/rename",
+      "handler": "_api_post_run_rename",
+      "group": "runs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/self-check/start",
+      "handler": "_api_post_self_check_start",
+      "group": "system"
+    },
+    {
+      "method": "POST",
+      "path": "/api/simulate/forward",
+      "handler": "_api_post_simulate_forward",
+      "group": "simulation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/simulate/forward/start",
+      "handler": "_api_post_simulate_forward_start",
+      "group": "simulation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/template/instantiate",
+      "handler": "_api_post_template_instantiate",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/template/sync-tuotuohe",
+      "handler": "_api_post_template_sync_tuotuohe",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wizard/save-step",
+      "handler": "_api_post_wizard_save_step",
+      "group": "wizard"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/delete",
+      "handler": "_api_post_workspace_delete",
+      "group": "workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/save",
+      "handler": "_api_post_workspace_save",
+      "group": "workspace"
+    }
+  ],
   "get": [
     "/api/boundary-preview",
     "/api/cdsapi/status",
@@ -10,7 +384,14 @@
     "/api/data-prep/status",
     "/api/data-prep/steps",
     "/api/fs/list",
+    "/api/geo/basin",
+    "/api/geo/dem",
+    "/api/geo/elevation-zones",
+    "/api/geo/elevation-zones.png",
+    "/api/geo/glacier",
+    "/api/geo/glacier.png",
     "/api/geo/overview",
+    "/api/geo/stations",
     "/api/health",
     "/api/manual-presets",
     "/api/obs-info",
@@ -59,5 +440,5 @@
     "/api/workspace/delete",
     "/api/workspace/save"
   ],
-  "total": 55
+  "total": 62
 }

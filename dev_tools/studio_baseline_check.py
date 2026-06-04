@@ -26,7 +26,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GUI_ROOT = REPO_ROOT / "HBV-Studio"
-SERVICE_FILE = GUI_ROOT / "studio_service.py"
+API_ROUTES_FILE = GUI_ROOT / "services" / "api_routes.py"
 SNAPSHOT_PATH = Path(__file__).resolve().parent / "baseline" / "studio_api_routes.json"
 
 PYTHON_GLOBS = (
@@ -123,33 +123,41 @@ def shutil_which(command: str) -> str | None:
     return None
 
 
-class ApiRouteCollector(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.routes: set[str] = set()
-
-    def visit_Constant(self, node: ast.Constant) -> Any:
-        if isinstance(node.value, str) and node.value.startswith("/api/"):
-            self.routes.add(node.value)
-
-
-def collect_routes_from_function(tree: ast.AST, function_name: str) -> list[str]:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            collector = ApiRouteCollector()
-            collector.visit(node)
-            return sorted(collector.routes)
-    raise CheckError(f"Function not found in studio_service.py: {function_name}")
+def load_api_route_specs() -> list[Any]:
+    spec = importlib.util.spec_from_file_location("hbvstudio_api_routes_baseline", API_ROUTES_FILE)
+    if spec is None or spec.loader is None:
+        raise CheckError(f"Unable to inspect API routes: {rel(API_ROUTES_FILE)}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    route_specs = list(getattr(module, "API_ROUTE_SPECS", ()))
+    if not route_specs:
+        raise CheckError("API route registry is empty.")
+    return route_specs
 
 
 def current_api_snapshot() -> dict[str, Any]:
-    tree = ast.parse(SERVICE_FILE.read_text(encoding="utf-8-sig"), filename=str(SERVICE_FILE))
-    get_routes = collect_routes_from_function(tree, "handle_api_get")
-    post_routes = collect_routes_from_function(tree, "handle_api_post")
+    route_specs = load_api_route_specs()
+    routes = [
+        {
+            "method": spec.method,
+            "path": spec.path,
+            "handler": spec.handler,
+            "group": spec.group,
+        }
+        for spec in route_specs
+    ]
+    get_routes = sorted(item["path"] for item in routes if item["method"] == "GET")
+    post_routes = sorted(item["path"] for item in routes if item["method"] == "POST")
     return {
-        "source": rel(SERVICE_FILE),
+        "source": rel(API_ROUTES_FILE),
+        "routes": sorted(routes, key=lambda item: (item["method"], item["path"])),
         "get": get_routes,
         "post": post_routes,
-        "total": len(set(get_routes) | set(post_routes)),
+        "total": len(routes),
     }
 
 

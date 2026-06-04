@@ -162,6 +162,8 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
         self.assertTrue(all(spec.group for spec in api_routes.API_ROUTE_SPECS))
         self.assertEqual(svc.StudioHandler.GET_ROUTE_HANDLERS, api_routes.route_handlers("GET"))
         self.assertEqual(svc.StudioHandler.POST_ROUTE_HANDLERS, api_routes.route_handlers("POST"))
+        for spec in api_routes.API_ROUTE_SPECS:
+            self.assertTrue(hasattr(svc.StudioHandler, spec.handler), spec.handler)
 
     def test_api_route_group_index_covers_all_specs(self) -> None:
         expected_groups = {
