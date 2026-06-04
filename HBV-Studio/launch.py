@@ -121,6 +121,7 @@ def latest_source_mtime() -> tuple[float, str]:
         root / "web" / "js" / "eventMode.js",
         root / "web" / "js" / "parameterLibrary.js",
         root / "web" / "js" / "stationPrecip.js",
+        root / "web" / "js" / "appDataFlow.js",
     ]
     latest = 0.0
     latest_file = ""

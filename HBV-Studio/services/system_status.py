@@ -32,6 +32,7 @@ def source_files_latest_mtime(context: HealthContext) -> tuple[float, str]:
         context.gui_root / "web" / "js" / "stationPrecip.js",
         context.gui_root / "web" / "js" / "taskView.js",
         context.gui_root / "web" / "js" / "workspaceLayout.js",
+        context.gui_root / "web" / "js" / "appDataFlow.js",
     ]
     services_dir = context.gui_root / "services"
     if services_dir.exists():

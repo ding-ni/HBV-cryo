@@ -329,6 +329,11 @@ const frontendModuleContracts = [
     global: "HBVStudioAppRuntime",
     exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
+  {
+    script: "./js/appDataFlow.js",
+    global: "HBVStudioAppDataFlow",
+    exports: ["taskCompletionState"],
+  },
 ];
 
 const GIS_STEP_IDS = new Set(["clip_dem", "flow_acc", "masked_flow", "elevation_zone", "glacier_mask", "glacier_elev"]);
@@ -5528,7 +5533,10 @@ async function loadTasks() {
   renderForecastView();
   updateCounts();
   updateManualStarterButtons();
-  const finishedTaskIds = window.HBVStudioTaskView.newlyFinishedTaskIds(state.tasks, previousTasks);
+  const completion = window.HBVStudioAppDataFlow.taskCompletionState(state.tasks, previousTasks, {
+    taskView: window.HBVStudioTaskView,
+    latestEditableRunPath,
+  });
   const currentImport = window.HBVStudioDataPrepView.currentMeteoImportTask(
     state.tasks,
     state.wizardWorkspacePath,
@@ -5597,10 +5605,7 @@ async function loadTasks() {
       }
     }
   }
-  const newlyCompletedManualStart = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "manual_start");
-  const newlyCompletedCalibration = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "calibration");
-  const newlyCompletedForecast = window.HBVStudioTaskView.newlyCompletedTask(state.tasks, previousTasks, "forecast_restart");
-  if (finishedTaskIds.length > 0) {
+  if (completion.hasFinishedTasks) {
     clearInputCheckCache();
     await loadRuns();
     await loadWorkspaces();
@@ -5608,22 +5613,22 @@ async function loadTasks() {
       await Promise.allSettled([loadBootstrapStatus(), loadPrepSteps(), refreshCurrentWorkspaceWorkflow()]);
       refreshCurrentWorkspaceAdvice().catch(() => {});
     }
-    if (newlyCompletedManualStart) {
-      const runPath = newlyCompletedManualStart.result?.run_path || newlyCompletedManualStart.run_path || "";
+    if (completion.manualStartTask) {
+      const runPath = completion.manualStartRunPath;
       if (runPath) {
-        await openLatestRunAndSwitch(runPath, { workspacePath: newlyCompletedManualStart.config_path || "" });
+        await openLatestRunAndSwitch(runPath, { workspacePath: completion.manualStartWorkspacePath });
         showToast("手调起点已生成，已打开结果页。");
       }
     }
-    if (newlyCompletedCalibration) {
-      const runPath = newlyCompletedCalibration.result?.run_path || newlyCompletedCalibration.run_path || newlyCompletedCalibration.detected_runs?.[0] || latestEditableRunPath();
+    if (completion.calibrationTask) {
+      const runPath = completion.calibrationRunPath;
       if (runPath) {
-        await openLatestRunAndSwitch(runPath, { workspacePath: newlyCompletedCalibration.result?.workspace_config || newlyCompletedCalibration.config_path || "" });
+        await openLatestRunAndSwitch(runPath, { workspacePath: completion.calibrationWorkspacePath });
         showToast("率定完成，已打开结果页，可继续手动调参。");
       }
     }
-    if (newlyCompletedForecast) {
-      const completedResult = window.HBVStudioForecastView.forecastCompletedResultState(newlyCompletedForecast);
+    if (completion.forecastTask) {
+      const completedResult = window.HBVStudioForecastView.forecastCompletedResultState(completion.forecastTask);
       if (completedResult.ok) {
         await loadRuns().catch(() => {});
         Object.assign(state, completedResult.statePatch);
