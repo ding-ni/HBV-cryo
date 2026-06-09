@@ -87,7 +87,15 @@ def detect_column(columns: list[str], candidates: list[str]) -> str | None:
 
 
 def detect_time_column(frame: pd.DataFrame) -> str:
+    time_names = {"time", "datetime", "date", "时间", "日期"}
     for column in frame.columns:
+        if str(column).strip().lower() in time_names:
+            parsed = pd.to_datetime(frame[column], errors="coerce")
+            if parsed.notna().sum() >= max(1, len(frame) // 3):
+                return column
+    for column in frame.columns:
+        if pd.api.types.is_numeric_dtype(frame[column]):
+            continue
         parsed = pd.to_datetime(frame[column], errors="coerce")
         if parsed.notna().sum() >= max(1, len(frame) // 3):
             return column
@@ -338,16 +346,19 @@ def load_station_precip(path: Path) -> tuple[pd.DataFrame, str]:
         data["time"] = pd.to_datetime(data["time"], errors="coerce")
         data["station_id"] = data["station_id"].astype(str).str.strip()
         data["value"] = pd.to_numeric(data["value"], errors="coerce")
+        data = data.dropna(subset=["time"])
         wide = data.pivot_table(index="time", columns="station_id", values="value", aggfunc="mean")
         wide.columns = [str(col).strip() for col in wide.columns]
         return wide.sort_index(), "long"
 
     wide = frame.copy()
     wide[time_col] = pd.to_datetime(wide[time_col], errors="coerce")
-    wide = wide.set_index(time_col).sort_index()
+    wide = wide.dropna(subset=[time_col]).set_index(time_col).sort_index()
     wide.columns = [str(col).strip() for col in wide.columns]
     for column in list(wide.columns):
         wide[column] = pd.to_numeric(wide[column], errors="coerce")
+    if wide.index.has_duplicates:
+        wide = wide.groupby(level=0).mean(numeric_only=True).sort_index()
     return wide, "wide"
 
 
@@ -683,6 +694,29 @@ def write_raster(output_path: Path, profile: dict[str, Any], data: np.ndarray) -
         dst.write(data.astype(profile["dtype"]), 1)
 
 
+def station_values_for_time(station_series: pd.DataFrame, ts: pd.Timestamp, station_ids: list[str]) -> np.ndarray:
+    if ts not in station_series.index:
+        return np.full(len(station_ids), np.nan)
+    values = station_series.loc[ts, station_ids]
+    if isinstance(values, pd.DataFrame):
+        values = values.mean(axis=0, numeric_only=True)
+    return values.to_numpy(dtype="float64")
+
+
+def no_available_station_steps(
+    records: list[tuple[pd.Timestamp, Path]],
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+) -> list[pd.Timestamp]:
+    station_ids = stations["station_id"].tolist()
+    missing: list[pd.Timestamp] = []
+    for ts, _ in records:
+        obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
+        if not np.any(np.isfinite(obs) & (obs >= 0.0)):
+            missing.append(pd.Timestamp(ts))
+    return missing
+
+
 def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_dir: Path, stations: pd.DataFrame, station_series: pd.DataFrame, overwrite: bool) -> int:
     written = 0
     no_station_step_count = 0
@@ -702,7 +736,7 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
             if nodata is not None:
                 arr[arr == nodata] = np.nan
             grid_station = sample_station_values(src, stations)
-            obs = station_series.loc[ts, station_ids].to_numpy(dtype="float64") if ts in station_series.index else np.full(len(station_ids), np.nan)
+            obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
             valid = np.isfinite(obs) & np.isfinite(grid_station) & (obs >= 0.0) & (grid_station >= 0.0) & (weights > 0)
             out = arr.copy()
             if np.any(valid):
@@ -812,7 +846,7 @@ def apply_thiessen(
                 arr[arr == nodata] = np.nan
             if valid_mask is None:
                 valid_mask = np.isfinite(arr)
-            obs = station_series.loc[ts, station_ids].to_numpy(dtype="float64") if ts in station_series.index else np.full(len(station_ids), np.nan)
+            obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
             out = np.full(arr.shape, np.nan, dtype="float64")
             mask = valid_mask if valid_mask is not None else np.isfinite(arr)
             available = tuple(int(idx) for idx in np.where(np.isfinite(obs) & (obs >= 0.0))[0])
@@ -830,7 +864,7 @@ def apply_thiessen(
                 out[rows, cols] = available_values[nearest_map[rows, cols]]
             else:
                 no_station_step_count += 1
-                out[mask] = 0.0
+                raise ValueError(f"纯站点泰森分配在 {format_time(ts, 1.0)} 没有任何可用站点，已停止生成。")
             profile = src.profile.copy()
             profile.update(dtype="float32", compress="lzw")
             if nodata is None:
@@ -903,6 +937,15 @@ def main() -> None:
     stations = stations[stations["station_id"].isin(available_ids)].copy()
     if stations.empty:
         raise ValueError("站点信息与站点降水之间没有可匹配的站号。")
+    if mode == "thiessen_station_only":
+        no_station_steps = no_available_station_steps(records, stations, station_series)
+        if no_station_steps:
+            step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+            sample = "、".join(format_time(ts, step_hours) for ts in no_station_steps[:5])
+            raise ValueError(
+                f"纯站点泰森分配存在 {len(no_station_steps)} 个无可用站点时间步，例如：{sample}。"
+                "请补齐站点资料、改用格点+站点偏差订正，或缩短运行时段。"
+            )
 
     print(f"率定模式: {profile}")
     print(f"降水方案: {mode}")

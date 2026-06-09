@@ -57,7 +57,15 @@ def detect_table_column(columns: list[str], candidates: list[str]) -> str | None
 
 
 def detect_table_time_column(frame: pd.DataFrame) -> str | None:
+    time_names = {"time", "datetime", "date", "\u65f6\u95f4", "\u65e5\u671f"}
     for column in frame.columns:
+        if str(column).strip().lower() in time_names:
+            parsed = pd.to_datetime(frame[column], errors="coerce")
+            if int(parsed.notna().sum()) >= max(1, len(frame) // 3):
+                return str(column)
+    for column in frame.columns:
+        if pd.api.types.is_numeric_dtype(frame[column]):
+            continue
         parsed = pd.to_datetime(frame[column], errors="coerce")
         if int(parsed.notna().sum()) >= max(1, len(frame) // 3):
             return str(column)
@@ -103,6 +111,8 @@ def load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None
     wide.columns = [str(col).strip() for col in wide.columns]
     for column in list(wide.columns):
         wide[column] = pd.to_numeric(wide[column], errors="coerce")
+    if wide.index.has_duplicates:
+        wide = wide.groupby(level=0).mean(numeric_only=True).sort_index()
     return wide, "\u5bbd\u8868", time_col
 
 
@@ -180,11 +190,30 @@ def station_precip_id_match_summary(
     precip_ids = [str(col).strip() for col in station_series.columns if str(col).strip()]
     meta_values = station_meta["_station_id"].tolist() if "_station_id" in station_meta.columns else []
     meta_ids = [str(item).strip() for item in meta_values if str(item).strip()]
+    valid_meta_ids = meta_ids
+    invalid_coord_ids: list[str] = []
+    lon_col = meta_columns.get("lon")
+    lat_col = meta_columns.get("lat")
+    if lon_col and lat_col and lon_col in station_meta.columns and lat_col in station_meta.columns:
+        lon_values = pd.to_numeric(station_meta[lon_col], errors="coerce")
+        lat_values = pd.to_numeric(station_meta[lat_col], errors="coerce")
+        valid_mask = lon_values.notna() & lat_values.notna()
+        valid_meta_ids = [
+            str(item).strip()
+            for item in station_meta.loc[valid_mask, "_station_id"].tolist()
+            if str(item).strip()
+        ]
+        invalid_coord_ids = [
+            str(item).strip()
+            for item in station_meta.loc[~valid_mask, "_station_id"].tolist()
+            if str(item).strip()
+        ]
     precip_id_set = set(precip_ids)
     meta_id_set = set(meta_ids)
-    matched_ids = sorted(precip_id_set & meta_id_set)
-    missing_in_precip = sorted(meta_id_set - precip_id_set)
-    missing_in_meta = sorted(precip_id_set - meta_id_set)
+    valid_meta_id_set = set(valid_meta_ids)
+    matched_ids = sorted(precip_id_set & valid_meta_id_set)
+    missing_in_precip = sorted(valid_meta_id_set - precip_id_set)
+    missing_in_meta = sorted(precip_id_set - valid_meta_id_set)
 
     missing: list[str] = []
     warnings: list[str] = []
@@ -194,17 +223,23 @@ def station_precip_id_match_summary(
         warnings.append(f"{len(missing_in_precip)} \u4e2a\u7ad9\u70b9\u5728\u7ad9\u70b9\u4fe1\u606f\u4e2d\u5b58\u5728\uff0c\u4f46\u7ad9\u70b9\u964d\u6c34\u8868\u6ca1\u6709\u5bf9\u5e94\u5217\u3002")
     if missing_in_meta:
         warnings.append(f"{len(missing_in_meta)} \u4e2a\u7ad9\u70b9\u964d\u6c34\u5217\u6ca1\u6709\u5bf9\u5e94\u7ad9\u70b9\u4fe1\u606f\u3002")
+    if invalid_coord_ids:
+        sample = "\u3001".join(invalid_coord_ids[:5])
+        warnings.append(f"{len(invalid_coord_ids)} \u4e2a\u7ad9\u70b9\u4fe1\u606f\u7f3a\u5c11\u6709\u6548\u7ecf\u7eac\u5ea6\uff0c\u4e0d\u4f1a\u53c2\u4e0e\u8fd0\u884c\uff0c\u4f8b\u5982\uff1a{sample}\u3002")
     if not meta_columns.get("lon") or not meta_columns.get("lat"):
         warnings.append("\u7ad9\u70b9\u4fe1\u606f\u672a\u8bc6\u522b\u5230\u7ecf\u7eac\u5ea6\u6216\u5750\u6807\u5b57\u6bb5\uff0c\u6267\u884c\u964d\u6c34\u65b9\u6848\u65f6\u4f1a\u5931\u8d25\u3002")
 
     return {
         "precip_ids": precip_ids,
         "meta_ids": meta_ids,
+        "valid_meta_ids": valid_meta_ids,
+        "invalid_coordinate_ids": invalid_coord_ids,
         "matched_ids": matched_ids,
         "missing_in_precip": missing_in_precip,
         "missing_in_meta": missing_in_meta,
         "precip_station_count": int(len(precip_id_set)),
-        "station_count": int(len(meta_id_set)),
+        "station_count": int(len(valid_meta_id_set)),
+        "metadata_station_count": int(len(meta_id_set)),
         "missing": missing,
         "warnings": warnings,
     }
@@ -232,7 +267,7 @@ def station_precip_expected_coverage(
         if expected_count > 0 and not matched_series.empty:
             present = matched_series.reindex(expected_index)
             quality_series = present
-            available_counts = present.notna().sum(axis=1)
+            available_counts = ((present.notna()) & (present >= 0.0)).sum(axis=1)
             covered_count = int((available_counts > 0).sum())
             coverage_ratio = covered_count / expected_count
             zero_flags = available_counts == 0
@@ -285,7 +320,7 @@ def station_precip_event_coverage_summary(
             event_max_zero = int(len(event_index))
         else:
             event_present = matched_series.reindex(event_index)
-            event_available_counts = event_present.notna().sum(axis=1)
+            event_available_counts = ((event_present.notna()) & (event_present >= 0.0)).sum(axis=1)
             event_zero_flags = event_available_counts == 0
             covered_event = int((event_available_counts > 0).sum())
             zero_event = int(event_zero_flags.sum())

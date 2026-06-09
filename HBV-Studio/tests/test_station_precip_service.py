@@ -137,6 +137,23 @@ class StationPrecipServiceTests(unittest.TestCase):
         self.assertEqual(list(table.index), [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")])
         self.assertEqual(float(table.loc[pd.Timestamp("2026-01-01"), "S1"]), 5.0)
 
+    def test_load_station_precip_table_drops_bad_time_and_aggregates_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "station_precip.csv"
+            pd.DataFrame(
+                [
+                    {"time": "bad-time", "S1": 99.0},
+                    {"time": "2026-01-01", "S1": 1.0},
+                    {"time": "2026-01-01", "S1": 3.0},
+                ]
+            ).to_csv(path, index=False, encoding="utf-8-sig")
+
+            table, table_format, _ = load_station_precip_table(path)
+
+        self.assertEqual(table_format, "\u5bbd\u8868")
+        self.assertEqual(list(table.index), [pd.Timestamp("2026-01-01")])
+        self.assertEqual(float(table.loc[pd.Timestamp("2026-01-01"), "S1"]), 2.0)
+
     def test_load_station_precip_table_pivots_long_format(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "station_precip_long.csv"
@@ -241,6 +258,32 @@ class StationPrecipServiceTests(unittest.TestCase):
         self.assertIn("\u6ca1\u6709\u5bf9\u5e94\u5217", summary["warnings"][0])
         self.assertIn("\u6ca1\u6709\u5bf9\u5e94\u7ad9\u70b9\u4fe1\u606f", summary["warnings"][1])
         self.assertIn("\u7ecf\u7eac\u5ea6", summary["warnings"][2])
+
+    def test_station_precip_id_match_summary_excludes_invalid_coordinates(self) -> None:
+        station_series = pd.DataFrame(
+            {"S1": [1.0], "S2": [2.0], "S3": [3.0]},
+            index=pd.date_range("2026-01-01", periods=1, freq="1D"),
+        )
+        station_meta = pd.DataFrame(
+            {
+                "_station_id": ["S1", "S2", "S4"],
+                "lon": [92.1, None, 92.4],
+                "lat": [34.1, 34.2, None],
+            }
+        )
+
+        summary = station_precip_id_match_summary(
+            station_series,
+            station_meta,
+            {"id": "station_id", "lon": "lon", "lat": "lat"},
+        )
+
+        self.assertEqual(summary["matched_ids"], ["S1"])
+        self.assertEqual(summary["station_count"], 1)
+        self.assertEqual(summary["metadata_station_count"], 3)
+        self.assertEqual(summary["invalid_coordinate_ids"], ["S2", "S4"])
+        self.assertEqual(summary["missing_in_meta"], ["S2", "S3"])
+        self.assertIn("\u7f3a\u5c11\u6709\u6548\u7ecf\u7eac\u5ea6", summary["warnings"][-1])
 
     def test_station_precip_expected_coverage_warns_when_target_window_is_partial(self) -> None:
         matched_series = pd.DataFrame(
