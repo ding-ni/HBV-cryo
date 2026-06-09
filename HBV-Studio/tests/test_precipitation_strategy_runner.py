@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -51,6 +53,44 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
         missing = runner.no_available_station_steps(records, stations, station_series)
 
         self.assertEqual(missing, [pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-03")])
+
+    def test_grid_bias_reports_existing_outputs_skipped_without_recomputing_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raster_path = root / "2026.01.01.tif"
+            output_dir = root / "out"
+            output_dir.mkdir()
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(0.0, 2.0, 1.0, 1.0),
+                "nodata": -9999.0,
+            }
+            with rasterio.open(raster_path, "w", **profile) as dst:
+                dst.write(np.ones((2, 2), dtype="float32"), 1)
+            with rasterio.open(output_dir / raster_path.name, "w", **profile) as dst:
+                dst.write(np.full((2, 2), 2.0, dtype="float32"), 1)
+            stations = pd.DataFrame({"station_id": ["S1"], "x": [0.5], "y": [1.5], "weight": [1.0]})
+            station_series = pd.DataFrame({"S1": [10.0]}, index=[pd.Timestamp("2026-01-01")])
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                written = runner.apply_grid_bias_correction(
+                    [(pd.Timestamp("2026-01-01"), raster_path)],
+                    output_dir,
+                    stations,
+                    station_series,
+                    overwrite=False,
+                )
+
+        self.assertEqual(written, 1)
+        log = stdout.getvalue()
+        self.assertIn("\u5df2\u6709\u8f93\u51fa\u8df3\u8fc7 1", log)
+        self.assertIn("\u672c\u6b21\u6ca1\u6709\u91cd\u65b0\u8ba1\u7b97", log)
 
     def test_apply_thiessen_raises_instead_of_writing_zero_when_no_station_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -795,6 +795,8 @@ def no_available_station_steps(
 
 def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_dir: Path, stations: pd.DataFrame, station_series: pd.DataFrame, overwrite: bool) -> int:
     written = 0
+    processed_count = 0
+    skipped_existing_count = 0
     no_station_step_count = 0
     clipped_step_count = 0
     occurrence_repair_count = 0
@@ -804,6 +806,7 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
     for ts, path in records:
         output = target_dir / path.name
         if output.exists() and not overwrite:
+            skipped_existing_count += 1
             written += 1
             continue
         with rasterio.open(path) as src:
@@ -885,14 +888,19 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
                 profile["nodata"] = -9999.0
             out_to_write = np.where(np.isfinite(out), out, profile["nodata"]).astype("float32")
             write_raster(output, profile, out_to_write)
+            processed_count += 1
             written += 1
     print(
         "空间订正摘要: "
+        f"本次实际处理时段 {processed_count}；"
+        f"已有输出跳过 {skipped_existing_count}；"
         f"有效站点-时段样本 {total_valid_station_steps}；"
         f"无可用站点时段 {no_station_step_count}；"
         f"倍率裁剪时段 {clipped_step_count}；"
         f"格点漏报降水修复时段 {occurrence_repair_count}"
     )
+    if skipped_existing_count and processed_count == 0:
+        print("提示: 本次没有重新计算已有订正文件；如需刷新空间订正统计和结果，请启用覆盖。")
     return written
 
 
@@ -906,6 +914,8 @@ def apply_thiessen(
     use_timestamp_names: bool = False,
 ) -> int:
     written = 0
+    processed_count = 0
+    skipped_existing_count = 0
     station_ids = stations["station_id"].tolist()
     nearest_cache: dict[tuple[int, ...], np.ndarray] = {}
     valid_mask: np.ndarray | None = None
@@ -913,6 +923,7 @@ def apply_thiessen(
     for ts, path in records:
         output = target_dir / (raster_name_from_timestamp(ts) if use_timestamp_names else path.name)
         if output.exists() and not overwrite:
+            skipped_existing_count += 1
             written += 1
             continue
         with rasterio.open(path) as src:
@@ -947,13 +958,17 @@ def apply_thiessen(
                 profile["nodata"] = -9999.0
             out_to_write = np.where(np.isfinite(out), out, profile["nodata"]).astype("float32")
             write_raster(output, profile, out_to_write)
+            processed_count += 1
             written += 1
     print(
         "泰森分配摘要: "
-        f"输出时段 {written}；"
+        f"本次实际处理时段 {processed_count}；"
+        f"已有输出跳过 {skipped_existing_count}；"
         f"可用站点组合 {len(nearest_cache)}；"
         f"无可用站点时段 {no_station_step_count}"
     )
+    if skipped_existing_count and processed_count == 0:
+        print("提示: 本次没有重新计算已有泰森分配文件；如需刷新结果，请启用覆盖。")
     return written
 
 
@@ -1072,7 +1087,7 @@ def main() -> None:
         written=written,
     )
     summary_path = write_strategy_summary(target_dir, summary)
-    print(f"完成：{written} 个文件写入 {target_dir}")
+    print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")
     print(f"降水方案摘要: {summary_path}")
 
 
