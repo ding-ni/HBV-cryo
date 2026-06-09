@@ -2447,7 +2447,15 @@ def current_project_object_type():
 
 
 def current_q_score_basis():
-    return "q_local" if current_project_object_type() == "interbasin_with_boundary" else "q_total"
+    return "q_total"
+
+
+def q_score_basis_label(basis: str) -> str:
+    labels = {
+        "q_total": "出口总流量（本地产流 + 上游边界入流）",
+        "q_local": "区间本地产流",
+    }
+    return labels.get(str(basis or "").strip(), str(basis or ""))
 
 
 def scoring_series(sim):
@@ -7531,6 +7539,8 @@ def save_results(result):
             "zone_high_cells": int(ZONE_HIGH.sum()),
         },
         "project_object_type": current_project_object_type(),
+        "q_score_basis": q_score_basis,
+        "q_score_basis_label": q_score_basis_label(q_score_basis),
         "calibration_workflow": result_workflow,
         "calibration_workflow_status": result_workflow_status,
         "calibration_phases": list(workflow_metadata.get("calibration_phases", []) or []),

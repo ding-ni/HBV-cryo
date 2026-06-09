@@ -61,6 +61,22 @@ def component_basis_text(value: Any) -> str:
     return "率定期模拟径流口径"
 
 
+def q_score_basis_text(metadata: dict[str, Any]) -> str:
+    explicit = str(metadata.get("q_score_basis_label") or "").strip()
+    if explicit:
+        return explicit
+    key = str(
+        metadata.get("q_score_basis")
+        or flood_event_evaluation(metadata).get("evaluation_basis")
+        or ""
+    ).strip()
+    if key == "q_total":
+        return "出口总流量（本地产流 + 上游边界入流）"
+    if key == "q_local":
+        return "区间本地产流"
+    return "未记录"
+
+
 def metric_text(value: Any, digits: int = 4, suffix: str = "") -> str:
     num = safe_float(value)
     if num is None:
@@ -195,6 +211,7 @@ def build_hydrology_summary(metadata: dict[str, Any], run_dir: Path, context: Ru
         "workflow_label_zh": workflow_label_zh(metadata),
         "objective_label_zh": objective_label_zh(metadata),
         "flow_status_zh": flow_status_zh(metadata),
+        "q_score_basis_zh": q_score_basis_text(metadata),
         "ice_status_zh": ice_status_zh(metadata),
         "diagnostics_detail_path": str(report_path.resolve(strict=False)),
         "diagnostics_detail_display_path": context.to_display_path(report_path),
@@ -218,6 +235,7 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
         "",
         f"- 率定流程：{summary.get('workflow_label_zh', '—')}",
         f"- 评分标准：{summary.get('objective_label_zh', '—')}",
+        f"- 径流评价口径：{summary.get('q_score_basis_zh', '—')}",
         f"- 结果时间：{metadata.get('run_time', '—')}",
         f"- 运行目录：{summary.get('diagnostics_detail_display_path', '—')}",
         "",

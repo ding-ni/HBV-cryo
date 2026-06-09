@@ -120,6 +120,50 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertEqual(message, "泰森插值降水文件数：1")
         self.assertEqual(count, 1)
 
+    def test_station_bias_summary_includes_hydrological_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            corrected = root / "corrected"
+            (corrected / "prec_2021.01.01.tif").write_bytes(b"")
+            (corrected / "precipitation_strategy_summary.json").write_text(
+                json.dumps(
+                    {
+                        "time_basis_label": "连续时段",
+                        "selected_steps": 1,
+                        "written_files": 1,
+                        "hydrological_diagnostics": {
+                            "station_day_samples_available": 24,
+                            "station_day_samples_total": 25,
+                            "station_day_missing_rate_percent": 4.0,
+                            "station_point_before": {"sample_count": 24, "mae_mm": 3.5, "pbias_percent": -20.0},
+                            "station_point_after": {"sample_count": 24, "mae_mm": 1.2, "pbias_percent": -5.0},
+                            "basin_precip_total_before_mm": 100.0,
+                            "basin_precip_total_after_mm": 120.0,
+                            "basin_precip_total_change_percent": 20.0,
+                            "correction_factor_mean": 1.2,
+                            "ratio_clip_step_count": 1,
+                            "grid_missed_precip_repair_step_count": 0,
+                            "hydrological_time_basis_note": "小时站点降水已按水文日 08:00-次日08:00 累计为日降水。",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ok, message, count = check_precip_strategy_outputs(
+                {"气象策略": {"降水方案": "grid_plus_station_bias"}},
+                context,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(count, 1)
+        self.assertIn("站点日样本：24/25，缺测率 4.0%", message)
+        self.assertIn("站点处MAE：3.50 mm→1.20 mm；PBIAS：-20.0%→-5.0%", message)
+        self.assertIn("流域面降水总量：100.0 mm→120.0 mm（20.0%）", message)
+        self.assertIn("时间口径：小时站点降水已按水文日 08:00-次日08:00 累计为日降水。", message)
+
 
 if __name__ == "__main__":
     unittest.main()

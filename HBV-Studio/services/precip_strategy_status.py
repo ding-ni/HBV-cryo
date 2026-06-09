@@ -17,6 +17,57 @@ class PrecipStrategyStatusContext:
     read_json_file: Callable[[Path], dict[str, Any]]
 
 
+def _fmt_float(value: Any, digits: int = 1, suffix: str = "") -> str:
+    try:
+        number = float(value)
+    except Exception:
+        return "未形成"
+    if not (number == number):
+        return "未形成"
+    return f"{number:.{digits}f}{suffix}"
+
+
+def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
+    hydro = dict(summary.get("hydrological_diagnostics", {}) or {})
+    if not hydro:
+        return []
+    parts: list[str] = []
+    available = hydro.get("station_day_samples_available")
+    total = hydro.get("station_day_samples_total")
+    missing_rate = hydro.get("station_day_missing_rate_percent")
+    if total:
+        parts.append(f"站点日样本：{available}/{total}，缺测率 {_fmt_float(missing_rate, 1, '%')}")
+    before = dict(hydro.get("station_point_before", {}) or {})
+    after = dict(hydro.get("station_point_after", {}) or {})
+    if before.get("sample_count") and after.get("sample_count"):
+        parts.append(
+            "站点处MAE："
+            f"{_fmt_float(before.get('mae_mm'), 2, ' mm')}→{_fmt_float(after.get('mae_mm'), 2, ' mm')}；"
+            "PBIAS："
+            f"{_fmt_float(before.get('pbias_percent'), 1, '%')}→{_fmt_float(after.get('pbias_percent'), 1, '%')}"
+        )
+    basin_before = hydro.get("basin_precip_total_before_mm")
+    basin_after = hydro.get("basin_precip_total_after_mm")
+    basin_change = hydro.get("basin_precip_total_change_percent")
+    if basin_before is not None and basin_after is not None:
+        parts.append(
+            "流域面降水总量："
+            f"{_fmt_float(basin_before, 1, ' mm')}→{_fmt_float(basin_after, 1, ' mm')}"
+            f"（{_fmt_float(basin_change, 1, '%')}）"
+        )
+    factor = hydro.get("correction_factor_mean")
+    if factor is not None:
+        parts.append(f"平均订正倍率：{_fmt_float(factor, 2)}")
+    clipped = int(hydro.get("ratio_clip_step_count", 0) or 0)
+    repaired = int(hydro.get("grid_missed_precip_repair_step_count", 0) or 0)
+    if clipped or repaired:
+        parts.append(f"倍率裁剪日：{clipped}；格点漏报修复日：{repaired}")
+    note = str(hydro.get("hydrological_time_basis_note", "") or "").strip()
+    if note:
+        parts.append(f"时间口径：{note}")
+    return parts
+
+
 def check_precip_strategy_outputs(
     config: dict[str, Any],
     context: PrecipStrategyStatusContext,
@@ -59,6 +110,7 @@ def check_precip_strategy_outputs(
                 parts.append(f"无可用站点时段：{zero_steps}")
             if skipped_steps:
                 parts.append(f"已忽略口径外时段：{skipped_steps}")
+            parts.extend(_hydro_diagnostic_message(summary))
             return count > 0, "；".join(parts), count
         except Exception:
             pass

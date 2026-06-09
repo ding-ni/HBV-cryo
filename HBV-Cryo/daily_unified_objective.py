@@ -158,8 +158,6 @@ def _normalized_doy(dates: pd.DatetimeIndex) -> np.ndarray:
 
 
 def _select_q_score_base(bundle: dict[str, Any], project_object_type: str) -> tuple[np.ndarray | None, str, str]:
-    if project_object_type == "interbasin_with_boundary":
-        return _as_series(bundle, "q_local"), "q_local", "local_runoff_calibration_period"
     return _as_series(bundle, "q_total"), "q_total", "total_runoff_calibration_period"
 
 
@@ -554,9 +552,9 @@ def _run_hard_checks(bundle: dict[str, Any], diagnostics: dict[str, Any], eviden
     if project_object_type not in {"regression_validation", "full_upstream_basin", "interbasin_with_boundary"}:
         project_object_type = "interbasin_with_boundary" if np.any(np.abs(q_boundary) > EPS) else "full_upstream_basin"
 
-    eval_basis_key = "q_local" if project_object_type == "interbasin_with_boundary" else "q_total"
-    eval_basis_label = "local_runoff_calibration_period" if eval_basis_key == "q_local" else "total_runoff_calibration_period"
-    q_score_base = q_local if eval_basis_key == "q_local" else q_total
+    eval_basis_key = "q_total"
+    eval_basis_label = "total_runoff_calibration_period"
+    q_score_base = q_total
 
     calib_idx = np.asarray(calib_mask, dtype=bool)
     calib_dates = dates[calib_idx]

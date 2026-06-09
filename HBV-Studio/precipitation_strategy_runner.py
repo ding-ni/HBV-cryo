@@ -517,6 +517,243 @@ def max_consecutive_true(values: Any) -> int:
     return int(longest)
 
 
+def finite_array(values: Any) -> np.ndarray:
+    arr = np.asarray(values, dtype="float64")
+    return arr[np.isfinite(arr)]
+
+
+def safe_stat(values: Any, fn: Any) -> float | None:
+    arr = finite_array(values)
+    if arr.size == 0:
+        return None
+    return float(fn(arr))
+
+
+def ratio_percent(numerator: float | int | None, denominator: float | int | None) -> float | None:
+    try:
+        den = float(denominator)
+        if den <= 0:
+            return None
+        return float(numerator or 0.0) / den * 100.0
+    except Exception:
+        return None
+
+
+def relative_change_percent(after: float | None, before: float | None) -> float | None:
+    if before is None or after is None or abs(float(before)) <= 1e-12:
+        return None
+    return (float(after) - float(before)) / float(before) * 100.0
+
+
+def raster_hydro_stats(path: Path) -> dict[str, float | int | None]:
+    with rasterio.open(path) as src:
+        arr = src.read(1).astype("float64")
+        nodata = src.nodata
+        if nodata is not None:
+            arr[arr == nodata] = np.nan
+        arr[arr < -9000] = np.nan
+    valid = finite_array(arr)
+    if valid.size == 0:
+        return {
+            "valid_pixels": 0,
+            "mean_mm": None,
+            "max_mm": None,
+            "wet_pixel_ratio": None,
+        }
+    wet_pixels = int(np.sum(valid >= WET_STATION_MEAN_MM))
+    return {
+        "valid_pixels": int(valid.size),
+        "mean_mm": float(np.mean(valid)),
+        "max_mm": float(np.max(valid)),
+        "wet_pixel_ratio": float(wet_pixels / valid.size),
+    }
+
+
+def paired_station_metrics(obs_values: list[float], sim_values: list[float]) -> dict[str, Any]:
+    obs = np.asarray(obs_values, dtype="float64")
+    sim = np.asarray(sim_values, dtype="float64")
+    count = min(obs.size, sim.size)
+    if count <= 0:
+        return {
+            "sample_count": 0,
+            "mean_observed_mm": None,
+            "mean_simulated_mm": None,
+            "mae_mm": None,
+            "rmse_mm": None,
+            "pbias_percent": None,
+        }
+    obs = obs[:count]
+    sim = sim[:count]
+    mask = np.isfinite(obs) & np.isfinite(sim)
+    if not np.any(mask):
+        return {
+            "sample_count": 0,
+            "mean_observed_mm": None,
+            "mean_simulated_mm": None,
+            "mae_mm": None,
+            "rmse_mm": None,
+            "pbias_percent": None,
+        }
+    diff = sim[mask] - obs[mask]
+    obs_sum = float(np.sum(obs[mask]))
+    pbias_value = float(np.sum(diff) / obs_sum * 100.0) if abs(obs_sum) > 1e-12 else None
+    return {
+        "sample_count": int(np.sum(mask)),
+        "mean_observed_mm": float(np.mean(obs[mask])),
+        "mean_simulated_mm": float(np.mean(sim[mask])),
+        "mae_mm": float(np.mean(np.abs(diff))),
+        "rmse_mm": float(np.sqrt(np.mean(diff * diff))),
+        "pbias_percent": pbias_value,
+    }
+
+
+def summarize_precipitation_hydro_diagnostics(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    mode: str,
+    *,
+    use_timestamp_names: bool = False,
+) -> dict[str, Any]:
+    station_ids = [str(item) for item in stations["station_id"].tolist()]
+    base_basin_means: list[float] = []
+    corrected_basin_means: list[float] = []
+    base_daily_max: list[float] = []
+    corrected_daily_max: list[float] = []
+    base_wet_ratios: list[float] = []
+    corrected_wet_ratios: list[float] = []
+    correction_factors: list[float] = []
+    obs_for_base: list[float] = []
+    base_at_station: list[float] = []
+    obs_for_corrected: list[float] = []
+    corrected_at_station: list[float] = []
+    available_station_counts: list[int] = []
+    clipped_step_count = 0
+    clipped_station_sample_count = 0
+    occurrence_repair_step_count = 0
+    target_file_count = 0
+
+    for ts, path in records:
+        output = target_dir / (raster_name_from_timestamp(ts) if use_timestamp_names else path.name)
+        obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
+        obs_valid = np.isfinite(obs) & (obs >= 0.0)
+        available_station_counts.append(int(np.sum(obs_valid)))
+
+        base_station_values = np.full(len(station_ids), np.nan, dtype="float64")
+        base_mean = None
+        if path.exists():
+            base_stats = raster_hydro_stats(path)
+            base_mean = base_stats["mean_mm"]
+            if base_mean is not None:
+                base_basin_means.append(float(base_mean))
+            if base_stats["max_mm"] is not None:
+                base_daily_max.append(float(base_stats["max_mm"]))
+            if base_stats["wet_pixel_ratio"] is not None:
+                base_wet_ratios.append(float(base_stats["wet_pixel_ratio"]))
+            with rasterio.open(path) as src:
+                base_station_values = sample_station_values(src, stations)
+
+        corrected_station_values = np.full(len(station_ids), np.nan, dtype="float64")
+        corrected_mean = None
+        if output.exists():
+            target_file_count += 1
+            corrected_stats = raster_hydro_stats(output)
+            corrected_mean = corrected_stats["mean_mm"]
+            if corrected_mean is not None:
+                corrected_basin_means.append(float(corrected_mean))
+            if corrected_stats["max_mm"] is not None:
+                corrected_daily_max.append(float(corrected_stats["max_mm"]))
+            if corrected_stats["wet_pixel_ratio"] is not None:
+                corrected_wet_ratios.append(float(corrected_stats["wet_pixel_ratio"]))
+            with rasterio.open(output) as src:
+                corrected_station_values = sample_station_values(src, stations)
+
+        station_base_mask = obs_valid & np.isfinite(base_station_values) & (base_station_values >= 0.0)
+        if np.any(station_base_mask):
+            obs_for_base.extend(obs[station_base_mask].astype("float64").tolist())
+            base_at_station.extend(base_station_values[station_base_mask].astype("float64").tolist())
+            raw_ratios = obs[station_base_mask] / np.maximum(base_station_values[station_base_mask], MIN_GRID_PRECIP_MM)
+            clipped = np.abs(raw_ratios - np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])) > 1e-9
+            if np.any(clipped):
+                clipped_step_count += 1
+                clipped_station_sample_count += int(np.sum(clipped))
+            obs_mean = float(np.mean(obs[station_base_mask]))
+            grid_mean = float(np.mean(base_station_values[station_base_mask]))
+            if grid_mean < MIN_GRID_PRECIP_MM and obs_mean >= WET_STATION_MEAN_MM:
+                occurrence_repair_step_count += 1
+
+        station_corrected_mask = obs_valid & np.isfinite(corrected_station_values) & (corrected_station_values >= 0.0)
+        if np.any(station_corrected_mask):
+            obs_for_corrected.extend(obs[station_corrected_mask].astype("float64").tolist())
+            corrected_at_station.extend(corrected_station_values[station_corrected_mask].astype("float64").tolist())
+
+        if base_mean is not None and corrected_mean is not None and float(base_mean) >= MIN_GRID_PRECIP_MM:
+            correction_factors.append(float(corrected_mean) / max(float(base_mean), MIN_GRID_PRECIP_MM))
+
+    base_total = safe_stat(base_basin_means, np.sum)
+    corrected_total = safe_stat(corrected_basin_means, np.sum)
+    before_metrics = paired_station_metrics(obs_for_base, base_at_station)
+    after_metrics = paired_station_metrics(obs_for_corrected, corrected_at_station)
+    possible_station_day_samples = int(len(records) * len(station_ids))
+    valid_station_day_samples = int(sum(available_station_counts))
+    missing_station_day_samples = max(0, possible_station_day_samples - valid_station_day_samples)
+    mae_before = before_metrics.get("mae_mm")
+    mae_after = after_metrics.get("mae_mm")
+    pbias_before = before_metrics.get("pbias_percent")
+    pbias_after = after_metrics.get("pbias_percent")
+    mae_change = relative_change_percent(float(mae_after), float(mae_before)) if mae_before is not None and mae_after is not None else None
+    pbias_abs_change = (
+        relative_change_percent(abs(float(pbias_after)), abs(float(pbias_before)))
+        if pbias_before is not None and pbias_after is not None and abs(float(pbias_before)) > 1e-12
+        else None
+    )
+
+    return {
+        "schema": "precipitation_hydro_diagnostics_v1",
+        "mode": mode,
+        "target_file_count": int(target_file_count),
+        "time_step_count": int(len(records)),
+        "station_count": int(len(station_ids)),
+        "station_day_samples_total": possible_station_day_samples,
+        "station_day_samples_available": valid_station_day_samples,
+        "station_day_samples_missing": missing_station_day_samples,
+        "station_day_missing_rate_percent": ratio_percent(missing_station_day_samples, possible_station_day_samples),
+        "min_available_station_count": int(min(available_station_counts)) if available_station_counts else None,
+        "mean_available_station_count": safe_stat(available_station_counts, np.mean),
+        "basin_precip_total_before_mm": base_total,
+        "basin_precip_total_after_mm": corrected_total,
+        "basin_precip_total_change_mm": (
+            float(corrected_total) - float(base_total)
+            if corrected_total is not None and base_total is not None
+            else None
+        ),
+        "basin_precip_total_change_percent": relative_change_percent(corrected_total, base_total),
+        "basin_mean_daily_before_mm": safe_stat(base_basin_means, np.mean),
+        "basin_mean_daily_after_mm": safe_stat(corrected_basin_means, np.mean),
+        "basin_max_daily_before_mm": safe_stat(base_daily_max, np.max),
+        "basin_max_daily_after_mm": safe_stat(corrected_daily_max, np.max),
+        "wet_day_count_before": int(np.sum(np.asarray(base_basin_means) >= WET_STATION_MEAN_MM)) if base_basin_means else None,
+        "wet_day_count_after": int(np.sum(np.asarray(corrected_basin_means) >= WET_STATION_MEAN_MM)) if corrected_basin_means else None,
+        "mean_wet_pixel_ratio_before_percent": (safe_stat(base_wet_ratios, np.mean) or 0.0) * 100.0 if base_wet_ratios else None,
+        "mean_wet_pixel_ratio_after_percent": (safe_stat(corrected_wet_ratios, np.mean) or 0.0) * 100.0 if corrected_wet_ratios else None,
+        "station_point_before": before_metrics,
+        "station_point_after": after_metrics,
+        "station_point_mae_change_percent": mae_change,
+        "station_point_abs_pbias_change_percent": pbias_abs_change,
+        "correction_factor_mean": safe_stat(correction_factors, np.mean),
+        "correction_factor_min": safe_stat(correction_factors, np.min),
+        "correction_factor_max": safe_stat(correction_factors, np.max),
+        "ratio_clip_step_count": int(clipped_step_count),
+        "ratio_clip_station_sample_count": int(clipped_station_sample_count),
+        "grid_missed_precip_repair_step_count": int(occurrence_repair_step_count),
+        "hydrological_time_basis_note": (
+            "小时站点降水已按水文日 08:00-次日08:00 累计为日降水；"
+            "日尺度栅格降水、气温和蒸散发按文件日期使用，若来源产品不是 08:00-08:00，日峰时间可能存在半天到一天偏差。"
+        ),
+    }
+
+
 def format_time(value: Any, step_hours: float) -> str:
     if value in (None, ""):
         return ""
@@ -543,6 +780,7 @@ def summarize_record_participation(
     base_dir: Path,
     target_dir: Path,
     written: int,
+    use_timestamp_names: bool = False,
 ) -> dict[str, Any]:
     step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
     time_basis = task_time_basis(config, context="calibration")
@@ -565,12 +803,16 @@ def summarize_record_participation(
             for station_id, rate in station_missing.head(20).items()
         ]
     else:
+        available_counts = pd.Series(dtype="int64")
         covered_station_steps = 0
         zero_station_steps = int(len(timestamps))
         max_zero = int(len(timestamps))
         min_available = None
         mean_available = None
         station_missing_rates = []
+    possible_station_day_samples = int(len(timestamps) * len(station_ids))
+    valid_station_day_samples = int(available_counts.sum()) if not available_counts.empty else 0
+    missing_station_day_samples = max(0, possible_station_day_samples - valid_station_day_samples)
 
     event_info = normalized_event_windows(config, step_hours=step_hours) if time_basis == TIME_BASIS_EVENT_WINDOWS else {"valid_events": []}
     record_set = {pd.Timestamp(ts) for ts in timestamps}
@@ -622,6 +864,14 @@ def summarize_record_participation(
                 "status": status,
             }
         )
+    hydro_diagnostics = summarize_precipitation_hydro_diagnostics(
+        records,
+        target_dir,
+        stations,
+        station_series,
+        mode,
+        use_timestamp_names=use_timestamp_names,
+    )
 
     return {
         "schema": "precipitation_strategy_summary_v1",
@@ -645,10 +895,15 @@ def summarize_record_participation(
         "covered_station_steps": int(covered_station_steps),
         "zero_available_station_steps": int(zero_station_steps),
         "max_consecutive_zero_station_steps": int(max_zero),
+        "station_day_samples_total": possible_station_day_samples,
+        "station_day_samples_available": valid_station_day_samples,
+        "station_day_samples_missing": missing_station_day_samples,
+        "station_day_missing_rate_percent": ratio_percent(missing_station_day_samples, possible_station_day_samples),
         "min_available_station_count": min_available,
         "mean_available_station_count": mean_available,
         "station_missing_rates": station_missing_rates,
         "event_coverage": event_coverage,
+        "hydrological_diagnostics": hydro_diagnostics,
         "base_dir": str(base_dir.resolve(strict=False)),
         "target_dir": str(target_dir.resolve(strict=False)),
     }
@@ -1085,6 +1340,7 @@ def main() -> None:
         base_dir=base_dir,
         target_dir=target_dir,
         written=written,
+        use_timestamp_names=use_timestamp_names,
     )
     summary_path = write_strategy_summary(target_dir, summary)
     print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")

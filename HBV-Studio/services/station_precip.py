@@ -516,7 +516,9 @@ def station_precip_analysis_items(
     negative_count: int,
     extreme_count: int,
     event_coverage: list[dict[str, Any]],
+    station_time_aggregation: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    aggregation = dict(station_time_aggregation or {})
     items = [
         {"label": "\u964d\u6c34\u65b9\u6848", "value": "\u683c\u70b9+\u7ad9\u70b9\u504f\u5dee\u8ba2\u6b63" if mode == "grid_plus_station_bias" else "\u7ad9\u70b9\u6cf0\u68ee\u5206\u914d", "status": "ok"},
         {"label": "\u68c0\u67e5\u53e3\u5f84", "value": task_context["headline"], "status": str(task_context.get("status", "warn"))},
@@ -533,6 +535,18 @@ def station_precip_analysis_items(
         {"label": "\u8d1f\u964d\u6c34\u8bb0\u5f55", "value": str(negative_count), "status": "ok" if negative_count == 0 else "warn"},
         {"label": "\u5f02\u5e38\u5927\u503c\u8bb0\u5f55", "value": str(extreme_count), "status": "ok" if extreme_count == 0 else "warn"},
     ]
+    if aggregation.get("enabled"):
+        items.append(
+            {
+                "label": "\u7ad9\u70b9\u65f6\u95f4\u5904\u7406",
+                "value": (
+                    f"\u5c0f\u65f6\u8d44\u6599\u6309\u6c34\u6587\u65e5 {int(aggregation.get('day_start_hour', 8)):02d}:00-\u6b21\u65e5{int(aggregation.get('day_start_hour', 8)):02d}:00 \u7d2f\u8ba1\uff1b"
+                    f"\u6709\u6548\u65e5 {int(aggregation.get('valid_days', 0) or 0)} \u5929\uff1b"
+                    f"\u4e0d\u8db3 {int(aggregation.get('min_hours_per_day', 24) or 24)} \u5c0f\u65f6\u7684\u7ad9\u65e5 {int(aggregation.get('insufficient_station_days', 0) or 0)} \u4e2a"
+                ),
+                "status": "warn" if int(aggregation.get("insufficient_station_days", 0) or 0) else "ok",
+            }
+        )
     for event_item in event_coverage[:5]:
         ratio = event_item.get("coverage_ratio")
         station_text = station_count_text(
@@ -731,6 +745,7 @@ def analyze_station_precip_inputs(
         mode=mode,
         task_context=task_context,
         time_basis_label=time_basis_label,
+        station_time_aggregation=station_time_aggregation,
         matched_station_count=len(matched_ids),
         station_count=station_count,
         missing_in_precip=missing_in_precip,

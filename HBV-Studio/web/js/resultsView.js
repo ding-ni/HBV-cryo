@@ -1103,6 +1103,7 @@
     const cards = [
       { label: "率定流程", value: hydrologySummaryValue(summary, "workflow_label_zh", runTypeLabel(data?.run?.run_type, manual ? "手调结果" : starter ? "手调起点" : editable ? "单流程参数率定" : "历史率定结果")), detail: "当前页面显示水文摘要，详细数据见本地结果目录" },
       { label: "评分标准", value: hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数"), detail: "径流拟合与三水源构成综合评分" },
+      { label: "径流评价口径", value: hydrologySummaryValue(summary, "q_score_basis_zh", "出口总流量"), detail: "率定指标与观测径流比较所用流量序列" },
       { label: "径流拟合", value: hydrologySummaryValue(summary, "flow_status_zh"), detail: "综合 NSE、KGE、PBIAS 径流指标" },
       ...(floodEval?.enabled ? [{ label: "洪水事件", value: floodEventStatusText(floodEval), detail: floodEval.objective_enabled ? "本次按事件窗口参与率定评分" : "本次输出逐场洪水诊断" }] : []),
       { label: "三水源构成", value: componentFractionText(componentReport), detail: componentFractionBasisText(componentReport) },
@@ -1187,6 +1188,7 @@
       metadataSection("水文结果摘要", [
         ["率定流程", hydrologySummaryValue(summary, "workflow_label_zh", "单流程参数率定")],
         ["评分标准", hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数")],
+        ["径流评价口径", hydrologySummaryValue(summary, "q_score_basis_zh", meta.q_score_basis_label || "出口总流量")],
         ["参数范围", meta.param_bounds_profile_label || meta.parameter_profile?.bounds_profile_label || paramBoundsProfileLabels[meta.param_bounds_profile] || paramBoundsProfileLabels[meta.parameter_profile?.bounds_profile] || "当前运行范围"],
         ["径流拟合", hydrologySummaryValue(summary, "flow_status_zh")],
         ["三水源构成", componentFractionText(componentReport)],
