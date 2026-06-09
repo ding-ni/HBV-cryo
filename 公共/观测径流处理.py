@@ -38,6 +38,7 @@ FLOW_KEYWORDS = (
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030")
 EXCEL_SUFFIXES = {".xlsx", ".xls", ".xlsm"}
 DEFAULT_MIN_DAILY_HOURS = 18
+HYDROLOGICAL_DAY_START_HOUR = 8
 
 
 def normalize_time_step_hours(value: Any) -> float:
@@ -185,20 +186,26 @@ def _aggregate_hourly_series_to_daily(
     grouped: pd.Series,
     *,
     min_daily_hours: int = DEFAULT_MIN_DAILY_HOURS,
+    day_start_hour: int = HYDROLOGICAL_DAY_START_HOUR,
 ) -> tuple[pd.Series, dict[str, Any]]:
     if grouped.empty:
         return grouped.astype("float64"), {
             "enabled": True,
             "min_hours_per_day": int(min_daily_hours),
+            "day_start_hour": int(day_start_hour),
+            "day_label": "start",
             "valid_days": 0,
             "insufficient_days": 0,
             "hourly_rows": 0,
         }
-    daily_frame = grouped.groupby(grouped.index.normalize()).agg(["mean", "count"])
+    hydrological_day = (pd.DatetimeIndex(grouped.index) - pd.Timedelta(hours=int(day_start_hour))).normalize()
+    daily_frame = grouped.groupby(hydrological_day).agg(["mean", "count"])
     daily_series = daily_frame["mean"].where(daily_frame["count"] >= int(min_daily_hours))
     return daily_series.astype("float64"), {
         "enabled": True,
         "min_hours_per_day": int(min_daily_hours),
+        "day_start_hour": int(day_start_hour),
+        "day_label": "start",
         "valid_days": int(daily_series.notna().sum()),
         "insufficient_days": int((daily_frame["count"] < int(min_daily_hours)).sum()),
         "hourly_rows": int(len(grouped)),

@@ -244,10 +244,10 @@
               <div class="panel-head"><h3>上游边界入流</h3><span class="panel-note">仅区间流域需要设置</span></div>
               <div class="field-grid two">
                 <div class="field-group">
-                  <label>上游边界入流 csv</label>
+                  <label>上游边界入流文件</label>
                   <div class="path-input">
-                    <input id="wz-boundary-csv" type="text" placeholder="选择边界入流文件">
-                    <button class="browse-button" data-target="wz-boundary-csv" data-browse-kind="file" data-extensions=".csv">选择</button>
+                    <input id="wz-boundary-csv" type="text" placeholder="选择 .csv / .xlsx / .xls">
+                    <button class="browse-button" data-target="wz-boundary-csv" data-browse-kind="file" data-extensions=".csv,.xlsx,.xls,.xlsm">选择</button>
                   </div>
                 </div>
                 <div class="field-group">
@@ -258,7 +258,7 @@
                   </select>
                 </div>
                 <div class="field-group"><label>时间字段名</label><input id="wz-boundary-date" type="text" value="date"></div>
-                <div class="field-group"><label>流量字段名</label><input id="wz-boundary-flow" type="text" value="inflow_m3s"></div>
+                <div class="field-group"><label>流量字段名</label><input id="wz-boundary-flow" type="text" value="flow"></div>
               </div>
               <div class="action-row">
                 <button class="ghost-button" id="wz-boundary-preview-btn">预览边界入流数据</button>

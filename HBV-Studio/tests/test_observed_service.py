@@ -52,7 +52,7 @@ class ObservedServiceTests(unittest.TestCase):
         obs_info: dict[str, Any] = {
             "effective_calibration_mode": "daily",
             "resampled_to_daily": True,
-            "daily_aggregation": {"valid_days": 365, "insufficient_days": 3},
+            "daily_aggregation": {"valid_days": 365, "insufficient_days": 3, "day_start_hour": 8},
             "coverage_ratio": 0.9,
             "start": "2020-01-01",
             "end": "2020-12-31",
@@ -64,7 +64,7 @@ class ObservedServiceTests(unittest.TestCase):
         self.assertEqual(
             warnings,
             [
-                "观测径流已从小时尺度按自然日聚合为日平均流量；有效日数 365 天，小时覆盖不足天数 3 天。",
+                "观测径流已从小时尺度按水文日（08:00 至次日 08:00）聚合为日平均流量；有效日数 365 天，小时覆盖不足天数 3 天。",
                 "观测径流在当前模拟时段内覆盖率只有 90.0%，目标函数会只在部分时间步上计算。",
             ],
         )

@@ -3133,7 +3133,7 @@ function populateWizardFromConfig(cfg, path) {
   $("#wz-boundary-csv").value  = cfg.边界条件?.上游边界入流_csv || "";
   $("#wz-gap-fill").value      = cfg.边界条件?.缺失填补 || "zero";
   $("#wz-boundary-date").value = cfg.边界条件?.时间字段 || "date";
-  $("#wz-boundary-flow").value = cfg.边界条件?.流量字段 || "inflow_m3s";
+  $("#wz-boundary-flow").value = cfg.边界条件?.流量字段 || "flow";
 
   // step 4
   setRadioAndCard("wz-precip-mode", cfg.气象策略?.降水方案 || "grid_only");
@@ -3236,7 +3236,7 @@ function resetWizard() {
   if ($("#wz-time-basis")) $("#wz-time-basis").value = "continuous";
   $("#wz-gap-fill").value = "zero";
   $("#wz-boundary-date").value = "date";
-  $("#wz-boundary-flow").value = "inflow_m3s";
+  $("#wz-boundary-flow").value = "flow";
   setRadioAndCard("wz-precip-mode", "grid_only");
   setRadioValue("wz-meteo-mode", "pipeline");
   $("#wz-prec-source").value = "era5";
@@ -3439,8 +3439,8 @@ async function autoComputeElevation() {
 async function previewBoundary() {
   const csvPath   = $("#wz-boundary-csv").value.trim();
   const dateField = $("#wz-boundary-date").value.trim() || "date";
-  const flowField = $("#wz-boundary-flow").value.trim() || "inflow_m3s";
-  if (!csvPath) { showToast("请先选择边界入流 csv。", true); return; }
+  const flowField = $("#wz-boundary-flow").value.trim() || "flow";
+  if (!csvPath) { showToast("请先选择边界入流文件。", true); return; }
   try {
     const query = window.HBVStudioDataPrepView.boundaryPreviewRequestState({
       csvPath,

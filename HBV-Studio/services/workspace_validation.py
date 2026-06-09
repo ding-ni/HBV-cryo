@@ -103,7 +103,7 @@ def build_engineering_focus_checks(
             summary = "观测径流识别为小时尺度，和当前日尺度项目不一致。"
         elif resampled_to_daily:
             status = "ok"
-            summary = "观测径流原始时步为小时尺度，已按自然日聚合为日平均流量后用于日尺度项目。"
+            summary = "观测径流原始时步为小时尺度，已按水文日（08:00 至次日 08:00）聚合为日平均流量后用于日尺度项目。"
         elif forcing is not None and not forcing_ok:
             status = "warn"
             summary = f"日尺度主流程已选定，但气象驱动在{time_basis_label}内的覆盖或文件命名仍有问题。"
@@ -120,11 +120,12 @@ def build_engineering_focus_checks(
         ]
         if resampled_to_daily:
             aggregation = dict(obs_info.get("daily_aggregation") or {})
+            start_hour = int(aggregation.get("day_start_hour", 8) or 8)
             items.append(
                 {
                     "label": "小时观测转日尺度",
                     "value": (
-                        f"已聚合（日均；至少 {aggregation.get('min_hours_per_day', context.default_min_daily_hours)} 小时/天）"
+                        f"已按水文日 {start_hour:02d}:00 聚合（日均；至少 {aggregation.get('min_hours_per_day', context.default_min_daily_hours)} 小时/天）"
                     ),
                     "status": "ok",
                 }
@@ -186,7 +187,7 @@ def build_engineering_focus_checks(
                 {
                     "id": "boundary_inflow",
                     "title": "上游边界入流专项检查",
-                    "summary": "区间流域必须提供上游边界入流 CSV。",
+                    "summary": "区间流域必须提供上游边界入流文件。",
                     "status": "fail",
                     "target_step": 3,
                     "items": [

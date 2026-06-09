@@ -357,7 +357,7 @@
     }
     if (!hourly && objectType === "interbasin_with_boundary") {
       return {
-        text: "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流 CSV：时间步要和项目一致、覆盖预热到验证全时段、不能有重复时间戳。",
+        text: "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流文件：可直接使用日尺度流量，小时流量会按水文日 08:00 起算聚合为日平均；覆盖预热到验证全时段，不能有重复时间戳。",
         className: "hint-box status-warn",
       };
     }
@@ -384,8 +384,8 @@
     const hourly = Boolean(model.hourly);
     return {
       text: hourly
-        ? "区间流域小时项目对边界入流最敏感。建议先确认 CSV 时间步为 1 小时、覆盖预热至验证全时段、零值不是误填缺测。"
-        : "区间流域日尺度项目建议先确认边界入流为 24 小时间隔，并覆盖预热、率定、验证全时段；重复时间戳和负值要先清掉。",
+        ? "区间流域小时项目对边界入流最敏感。建议先确认文件时间步为 1 小时、覆盖预热至验证全时段、零值不是误填缺测。"
+        : "区间流域日尺度项目可导入日尺度或小时尺度边界流量；小时流量会按水文日 08:00 起算聚合为日平均，并覆盖预热、率定、验证全时段。",
       className: "hint-box status-warn",
     };
   }
@@ -417,7 +417,7 @@
   function boundaryPreviewRequestState(model = {}) {
     const csvPath = String(model.csvPath || model.path || "").trim();
     const dateField = String(model.dateField || "date").trim() || "date";
-    const flowField = String(model.flowField || "inflow_m3s").trim() || "inflow_m3s";
+    const flowField = String(model.flowField || "flow").trim() || "flow";
     const base = boundaryPreviewQueryState(model);
     const entries = [
       ...base.entries,
@@ -428,7 +428,7 @@
     return {
       ...base,
       ready: Boolean(csvPath),
-      message: csvPath ? "" : "请先选择边界入流 CSV。",
+      message: csvPath ? "" : "请先选择边界入流文件。",
       csvPath,
       dateField,
       flowField,
@@ -618,7 +618,8 @@
       issues.push(`观测序列更像${info.suggested_calibration_mode === "hourly" ? "小时尺度" : "日尺度"}，和当前项目模式不一致。`);
     } else if (selectedProfile === "daily" && info.resampled_to_daily) {
       const minHours = info.daily_aggregation?.min_hours_per_day || 18;
-      warnings.push(`当前项目为日尺度，系统会把小时观测按自然日聚合为日平均流量（至少 ${minHours} 小时/天）。`);
+      const startHour = String(info.daily_aggregation?.day_start_hour ?? 8).padStart(2, "0");
+      warnings.push(`当前项目为日尺度，系统会把小时观测按水文日（${startHour}:00 至次日 ${startHour}:00）聚合为日平均流量（至少 ${minHours} 小时/天）。`);
     }
     if (timeBasis === "event_windows") {
       warnings.push("当前按洪水事件检查资料；观测覆盖将在第 7 步按各场洪水时段核验。");

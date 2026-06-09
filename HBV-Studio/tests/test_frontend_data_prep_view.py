@@ -202,7 +202,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               throw new Error(`daily full-upstream focus mismatch: ${JSON.stringify(dailyFullFocus)}`);
             }
             const dailyBoundaryFocus = view.projectFocusHintState({ hourly: false, objectType: "interbasin_with_boundary" });
-            if (dailyBoundaryFocus.className !== "hint-box status-warn" || !dailyBoundaryFocus.text.includes("上游边界入流 CSV")) {
+            if (dailyBoundaryFocus.className !== "hint-box status-warn" || !dailyBoundaryFocus.text.includes("上游边界入流文件")) {
               throw new Error(`daily boundary focus mismatch: ${JSON.stringify(dailyBoundaryFocus)}`);
             }
             const hourlyFullFocus = view.projectFocusHintState({ hourly: true, objectType: "full_upstream_basin" });
@@ -218,7 +218,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               throw new Error(`full-upstream boundary guidance mismatch: ${JSON.stringify(fullBoundaryGuidance)}`);
             }
             const dailyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: false });
-            if (dailyBoundaryGuidance.className !== "hint-box status-warn" || !dailyBoundaryGuidance.text.includes("24 小时间隔")) {
+            if (dailyBoundaryGuidance.className !== "hint-box status-warn" || !dailyBoundaryGuidance.text.includes("水文日 08:00")) {
               throw new Error(`daily boundary guidance mismatch: ${JSON.stringify(dailyBoundaryGuidance)}`);
             }
             const hourlyBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: true });
@@ -268,9 +268,9 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               workspacePath: " C:/工作区/A.json ",
             });
             if (emptyBoundaryRequest.ready ||
-                emptyBoundaryRequest.message !== "请先选择边界入流 CSV。" ||
+                emptyBoundaryRequest.message !== "请先选择边界入流文件。" ||
                 emptyBoundaryRequest.source !== "workspace" ||
-                emptyBoundaryRequest.previewPath !== "/api/boundary-preview?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2FA.json&path=&date_field=date&flow_field=inflow_m3s") {
+                emptyBoundaryRequest.previewPath !== "/api/boundary-preview?config_path=C%3A%2F%E5%B7%A5%E4%BD%9C%E5%8C%BA%2FA.json&path=&date_field=date&flow_field=flow") {
               throw new Error(`empty boundary request mismatch: ${JSON.stringify(emptyBoundaryRequest)}`);
             }
             const obsQuery = view.observationInfoQueryState({

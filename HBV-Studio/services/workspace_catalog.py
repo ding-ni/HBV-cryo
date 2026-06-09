@@ -190,7 +190,7 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
         "边界条件": {
             "上游边界入流_csv": "",
             "时间字段": "date",
-            "流量字段": "inflow_m3s",
+            "流量字段": "flow",
             "缺失填补": "zero",
         },
         "气象策略": {
@@ -300,7 +300,7 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
     boundary = dict(config.get("边界条件", {}))
     boundary.setdefault("上游边界入流_csv", "")
     boundary.setdefault("时间字段", "date")
-    boundary.setdefault("流量字段", "inflow_m3s")
+    boundary.setdefault("流量字段", "flow")
     boundary.setdefault("缺失填补", "zero")
     config["边界条件"] = boundary
 

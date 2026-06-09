@@ -1084,7 +1084,7 @@ def _boundary_inflow_inspect_context() -> BoundaryInflowInspectContext:
 def inspect_boundary_inflow_csv(
     csv_path_raw: str,
     date_field: str = "date",
-    flow_field: str = "inflow_m3s",
+    flow_field: str = "flow",
     *,
     expected_index: pd.DatetimeIndex | None = None,
     expected_step_hours: float | None = None,
@@ -2566,7 +2566,7 @@ def _boundary_preview_context() -> BoundaryPreviewContext:
 def boundary_preview(
     csv_path_raw: str,
     date_field: str = "date",
-    flow_field: str = "inflow_m3s",
+    flow_field: str = "flow",
     *,
     config_path_raw: str = "",
     expected_start: str = "",
@@ -4385,7 +4385,7 @@ class StudioHandler(BaseHTTPRequestHandler):
     def _api_get_boundary_preview(self, query: dict[str, list[str]]) -> None:
         csv_path = self._query_value(query, "path")
         date_field = query.get("date_field", ["date"])[0] or "date"
-        flow_field = query.get("flow_field", ["inflow_m3s"])[0] or "inflow_m3s"
+        flow_field = query.get("flow_field", ["flow"])[0] or "flow"
         config_path = self._query_value(query, "config_path")
         expected_start = query.get("expected_start", [""])[0] or ""
         expected_end = query.get("expected_end", [""])[0] or ""

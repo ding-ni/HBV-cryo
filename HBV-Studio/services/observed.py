@@ -59,8 +59,10 @@ def observed_window_messages(
         aggregation = dict(obs_info.get("daily_aggregation") or {})
         valid_days = int(aggregation.get("valid_days", 0) or 0)
         insufficient_days = int(aggregation.get("insufficient_days", 0) or 0)
+        start_hour = int(aggregation.get("day_start_hour", 8) or 8)
         warnings.append(
-            f"观测径流已从小时尺度按自然日聚合为日平均流量；有效日数 {valid_days} 天，小时覆盖不足天数 {insufficient_days} 天。"
+            f"观测径流已从小时尺度按水文日（{start_hour:02d}:00 至次日 {start_hour:02d}:00）"
+            f"聚合为日平均流量；有效日数 {valid_days} 天，小时覆盖不足天数 {insufficient_days} 天。"
         )
     coverage_ratio = obs_info.get("coverage_ratio")
     if coverage_ratio is not None:

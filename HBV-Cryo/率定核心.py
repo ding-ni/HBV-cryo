@@ -4568,8 +4568,9 @@ def load_observed_discharge_series(csv_path, target_index):
         log_msg(f"[WARN] 观测径流存在 {duplicate_count} 个重复时间戳，运行时将按同一时刻求平均。")
     if bool(info.get("resampled_to_daily")):
         aggregation = dict(info.get("daily_aggregation") or {})
+        day_start_hour = int(aggregation.get("day_start_hour", 8) or 8)
         log_msg(
-            "[INFO] 观测径流已从小时尺度按自然日聚合为日平均流量："
+            f"[INFO] 观测径流已从小时尺度按水文日（{day_start_hour:02d}:00 至次日 {day_start_hour:02d}:00）聚合为日平均流量："
             f"有效日数={int(aggregation.get('valid_days', 0) or 0)} "
             f"覆盖不足日数={int(aggregation.get('insufficient_days', 0) or 0)} "
             f"阈值={int(aggregation.get('min_hours_per_day', DEFAULT_MIN_DAILY_HOURS) or DEFAULT_MIN_DAILY_HOURS)}h"
