@@ -77,7 +77,31 @@ class RunHydrologyServiceTests(unittest.TestCase):
         self.assertIn("## 4. 洪水事件评价", report)
         self.assertIn("| E1 | calibration | -3.20% | 2.0 h | 4.50% | 0.8100 |", report)
         self.assertIn("| 降雨产流 | 60.0% |", report)
-        self.assertIn("- 口径：率定期模拟总流量口径", report)
+        self.assertIn("- 出口构成口径：率定期模拟总流量口径", report)
+
+    def test_report_separates_boundary_inflow_from_local_components(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            metadata = self.sample_metadata()
+            metadata["diagnostics"]["component_fraction_report"] = {
+                "boundary_inflow_fraction": 0.68,
+                "local_runoff_fraction": 0.32,
+                "rain_fraction": 0.248,
+                "snow_fraction": 0.001,
+                "ice_fraction": 0.071,
+                "local_rain_fraction": 0.775,
+                "local_snow_fraction": 0.003,
+                "local_ice_fraction": 0.222,
+                "evaluation_period": "total_runoff_calibration_period",
+            }
+            summary = build_hydrology_summary(metadata, run_dir, self.context())
+            report = hydrology_diagnostic_report_text(metadata, summary)
+
+        self.assertEqual(summary["ice_status_zh"], "边界 68.0% / 区间 32.0%")
+        self.assertIn("| 上游边界入流 | 68.0% |", report)
+        self.assertIn("| 区间本地产流 | 32.0% |", report)
+        self.assertIn("| 降雨产流 | 77.5% |", report)
+        self.assertIn("上游边界入流来自边界条件", report)
 
     def test_diagnostic_report_writer_updates_current_and_legacy_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

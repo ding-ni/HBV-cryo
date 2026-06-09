@@ -474,6 +474,11 @@ def _build_initial_payload(bundle: dict[str, Any], metrics: dict[str, Any], bad_
                 "snow_fraction": None,
                 "ice_fraction": None,
                 "glacier_total_fraction": None,
+                "boundary_inflow_fraction": None,
+                "local_runoff_fraction": None,
+                "local_rain_fraction": None,
+                "local_snow_fraction": None,
+                "local_ice_fraction": None,
                 "evaluation_period": "calibration_period",
             },
             "process_signature_report": {},
@@ -1537,17 +1542,25 @@ def _compute_component_diagnostics(
     q_snow: np.ndarray,
     q_ice: np.ndarray,
     q_glacier_total: np.ndarray,
+    q_local: np.ndarray,
+    q_boundary: np.ndarray,
     q_score_base: np.ndarray,
     calib_mask: np.ndarray,
     evaluation_period: str,
 ) -> dict[str, Any]:
     total = float(np.sum(q_score_base[calib_mask])) if np.any(calib_mask) else 0.0
+    local_total = float(np.sum(q_local[calib_mask])) if np.any(calib_mask) else 0.0
     if total <= EPS:
         return {
             "rain_fraction": None,
             "snow_fraction": None,
             "ice_fraction": None,
             "glacier_total_fraction": None,
+            "boundary_inflow_fraction": None,
+            "local_runoff_fraction": None,
+            "local_rain_fraction": None,
+            "local_snow_fraction": None,
+            "local_ice_fraction": None,
             "evaluation_period": evaluation_period,
         }
     return {
@@ -1555,6 +1568,11 @@ def _compute_component_diagnostics(
         "snow_fraction": float(np.sum(q_snow[calib_mask]) / total),
         "ice_fraction": float(np.sum(q_ice[calib_mask]) / total),
         "glacier_total_fraction": float(np.sum(q_glacier_total[calib_mask]) / total),
+        "boundary_inflow_fraction": float(np.sum(q_boundary[calib_mask]) / total),
+        "local_runoff_fraction": float(np.sum(q_local[calib_mask]) / total),
+        "local_rain_fraction": float(np.sum(q_rain[calib_mask]) / local_total) if local_total > EPS else None,
+        "local_snow_fraction": float(np.sum(q_snow[calib_mask]) / local_total) if local_total > EPS else None,
+        "local_ice_fraction": float(np.sum(q_ice[calib_mask]) / local_total) if local_total > EPS else None,
         "evaluation_period": evaluation_period,
     }
 
@@ -2180,6 +2198,8 @@ def evaluate_daily_unified_objective(bundle: dict[str, Any], metrics: dict[str, 
             q_snow,
             q_ice,
             q_glacier_total,
+            q_local,
+            q_boundary,
             q_score_base,
             calib_mask,
             evaluation_basis,

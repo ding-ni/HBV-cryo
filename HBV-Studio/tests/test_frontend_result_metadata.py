@@ -181,6 +181,26 @@ class FrontendResultMetadataTests(unittest.TestCase):
             if (basis !== "率定期本地径流口径，不含上游边界入流") {
               throw new Error(`unexpected basis text: ${basis}`);
             }
+            const boundaryReport = meta.componentFractionReport({
+              diagnostics: {
+                component_fraction_report: {
+                  boundary_inflow_fraction: 0.68,
+                  local_runoff_fraction: 0.32,
+                  local_rain_fraction: 0.775,
+                  local_snow_fraction: 0.003,
+                  local_ice_fraction: 0.222,
+                  evaluation_period: "total_runoff_calibration_period",
+                },
+              },
+            });
+            const boundaryText = meta.componentFractionText(boundaryReport);
+            if (boundaryText !== "边界 68.0% / 区间 32.0%") {
+              throw new Error(`unexpected boundary component text: ${boundaryText}`);
+            }
+            const boundaryBasis = meta.componentFractionBasisText(boundaryReport);
+            if (!boundaryBasis.includes("区间本地产流内部：降雨77.5% / 融雪0.3% / 融冰22.2%")) {
+              throw new Error(`unexpected boundary basis text: ${boundaryBasis}`);
+            }
             if (meta.componentFractionText({}) !== "未记录") {
               throw new Error("empty component fraction should be unrecorded");
             }

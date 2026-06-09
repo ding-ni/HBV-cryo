@@ -7264,6 +7264,10 @@ def save_results(result):
 
     q_sim_calib = q_sim[CALIB_MASK]
     q_sim_valid = q_sim[VALID_MASK]
+    q_local_calib = q_local[CALIB_MASK]
+    q_local_valid = q_local[VALID_MASK]
+    q_boundary_calib = q_boundary[CALIB_MASK]
+    q_boundary_valid = q_boundary[VALID_MASK]
     rain_calib = q_rain[CALIB_MASK]
     snow_calib = q_snow[CALIB_MASK]
     ice_calib = q_ice[CALIB_MASK]
@@ -7282,12 +7286,24 @@ def save_results(result):
 
     den_q_cal = np.nansum(q_sim_calib)
     den_q_val = np.nansum(q_sim_valid)
+    den_local_cal = np.nansum(q_local_calib)
+    den_local_val = np.nansum(q_local_valid)
+    boundary_frac_cal = float(np.nansum(q_boundary_calib) / den_q_cal) if den_q_cal > 0 else 0.0
+    local_frac_cal = float(np.nansum(q_local_calib) / den_q_cal) if den_q_cal > 0 else 0.0
+    boundary_frac_val = float(np.nansum(q_boundary_valid) / den_q_val) if den_q_val > 0 else 0.0
+    local_frac_val = float(np.nansum(q_local_valid) / den_q_val) if den_q_val > 0 else 0.0
     rain_frac_cal = float(np.nansum(rain_calib) / den_q_cal) if den_q_cal > 0 else 0.0
     snow_frac_cal = float(np.nansum(snow_calib) / den_q_cal) if den_q_cal > 0 else 0.0
     ice_frac_cal = float(np.nansum(ice_calib) / den_q_cal) if den_q_cal > 0 else 0.0
+    local_rain_frac_cal = float(np.nansum(rain_calib) / den_local_cal) if den_local_cal > 0 else 0.0
+    local_snow_frac_cal = float(np.nansum(snow_calib) / den_local_cal) if den_local_cal > 0 else 0.0
+    local_ice_frac_cal = float(np.nansum(ice_calib) / den_local_cal) if den_local_cal > 0 else 0.0
     rain_frac_val = float(np.nansum(rain_valid) / den_q_val) if den_q_val > 0 else 0.0
     snow_frac_val = float(np.nansum(snow_valid) / den_q_val) if den_q_val > 0 else 0.0
     ice_frac_val = float(np.nansum(ice_valid) / den_q_val) if den_q_val > 0 else 0.0
+    local_rain_frac_val = float(np.nansum(rain_valid) / den_local_val) if den_local_val > 0 else 0.0
+    local_snow_frac_val = float(np.nansum(snow_valid) / den_local_val) if den_local_val > 0 else 0.0
+    local_ice_frac_val = float(np.nansum(ice_valid) / den_local_val) if den_local_val > 0 else 0.0
 
     run_dir = os.path.join(RUNS_DIR, f"hbv_cryo_{args.prec_source}_{args.glacier_mode}_{RUN_ID}")
     os.makedirs(run_dir, exist_ok=True)
@@ -7637,9 +7653,14 @@ def save_results(result):
                 "log_nse": round(metrics["log_nse_cal"], 4) if np.isfinite(metrics["log_nse_cal"]) else None,
                 "pbias": round(metrics["pbias_cal"], 2) if np.isfinite(metrics["pbias_cal"]) else None,
                 "rmse_m3s": round(metrics["rmse_cal"], 4) if np.isfinite(metrics["rmse_cal"]) else None,
+                "boundary_inflow_fraction": round(boundary_frac_cal, 4),
+                "local_runoff_fraction": round(local_frac_cal, 4),
                 "rain_fraction": round(rain_frac_cal, 4),
                 "snow_fraction": round(snow_frac_cal, 4),
                 "ice_fraction": round(ice_frac_cal, 4),
+                "local_rain_fraction": round(local_rain_frac_cal, 4),
+                "local_snow_fraction": round(local_snow_frac_cal, 4),
+                "local_ice_fraction": round(local_ice_frac_cal, 4),
             },
             "validation": {
                 "sample_count": int(metrics["obs_count_val"]),
@@ -7651,9 +7672,14 @@ def save_results(result):
                 "log_nse": round(metrics["log_nse_val"], 4) if np.isfinite(metrics["log_nse_val"]) else None,
                 "pbias": round(metrics["pbias_val"], 2) if np.isfinite(metrics["pbias_val"]) else None,
                 "rmse_m3s": round(metrics["rmse_val"], 4) if np.isfinite(metrics["rmse_val"]) else None,
+                "boundary_inflow_fraction": round(boundary_frac_val, 4),
+                "local_runoff_fraction": round(local_frac_val, 4),
                 "rain_fraction": round(rain_frac_val, 4),
                 "snow_fraction": round(snow_frac_val, 4),
                 "ice_fraction": round(ice_frac_val, 4),
+                "local_rain_fraction": round(local_rain_frac_val, 4),
+                "local_snow_fraction": round(local_snow_frac_val, 4),
+                "local_ice_fraction": round(local_ice_frac_val, 4),
             },
         },
         "glacier_reference_comparison": {

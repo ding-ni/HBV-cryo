@@ -220,6 +220,11 @@
   }
 
   function componentFractionText(report = {}) {
+    const boundary = Number(report.boundary_inflow_fraction);
+    const local = Number(report.local_runoff_fraction);
+    if (Number.isFinite(boundary) || Number.isFinite(local)) {
+      return `边界 ${formatPercentValue(report.boundary_inflow_fraction)} / 区间 ${formatPercentValue(report.local_runoff_fraction)}`;
+    }
     const values = [
       ["降雨", report.rain_fraction],
       ["融雪", report.snow_fraction],
@@ -235,6 +240,19 @@
       return "率定期本地径流口径，不含上游边界入流";
     }
     if (basis === "total_runoff_calibration_period" || basis === "calibration_period") {
+      if (Number.isFinite(Number(report.boundary_inflow_fraction)) || Number.isFinite(Number(report.local_runoff_fraction))) {
+        const localText = [
+          ["降雨", report.local_rain_fraction],
+          ["融雪", report.local_snow_fraction],
+          ["融冰", report.local_ice_fraction],
+        ]
+          .filter(([, value]) => Number.isFinite(Number(value)))
+          .map(([label, value]) => `${label}${formatPercentValue(value)}`)
+          .join(" / ");
+        return localText
+          ? `率定期出口总流量口径；区间本地产流内部：${localText}`
+          : "率定期出口总流量口径，含上游边界入流";
+      }
       return "率定期模拟总流量口径";
     }
     return "率定期模拟径流口径";

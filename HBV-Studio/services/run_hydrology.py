@@ -61,6 +61,21 @@ def component_basis_text(value: Any) -> str:
     return "率定期模拟径流口径"
 
 
+def component_fraction_report(metadata: dict[str, Any]) -> dict[str, Any]:
+    return dict(metadata.get("diagnostics", {}).get("component_fraction_report", {}) or {})
+
+
+def local_component_fraction(report: dict[str, Any], key: str) -> Any:
+    explicit = report.get(f"local_{key}_fraction")
+    if explicit is not None:
+        return explicit
+    local = safe_float(report.get("local_runoff_fraction"))
+    value = safe_float(report.get(f"{key}_fraction"))
+    if local is None or value is None or abs(local) <= 1e-12:
+        return None
+    return value / local
+
+
 def q_score_basis_text(metadata: dict[str, Any]) -> str:
     explicit = str(metadata.get("q_score_basis_label") or "").strip()
     if explicit:
@@ -191,13 +206,19 @@ def ice_status_zh(metadata: dict[str, Any]) -> str:
     glacier_enabled = bool(metadata.get("optional_modules", {}).get("glacier", {}).get("enabled"))
     if not glacier_enabled:
         return "未启用冰川模块"
-    diagnostics = dict(metadata.get("diagnostics", {}) or {})
-    component_report = dict(diagnostics.get("component_fraction_report", {}) or {})
+    component_report = component_fraction_report(metadata)
+    boundary = component_report.get("boundary_inflow_fraction")
+    local = component_report.get("local_runoff_fraction")
     rain = component_report.get("rain_fraction")
     snow = component_report.get("snow_fraction")
     ice = component_report.get("ice_fraction")
     if rain is None and snow is None and ice is None:
         return "已启用冰川模块"
+    if boundary is not None or local is not None:
+        return (
+            f"边界 {percent_text(boundary)} / "
+            f"区间 {percent_text(local)}"
+        )
     return (
         f"降雨 {percent_text(rain)} / "
         f"融雪 {percent_text(snow)} / "
@@ -223,8 +244,13 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
     metrics = dict(metadata.get("metrics", {}) or {})
     cal = dict(metrics.get("calibration", {}) or {})
     val = dict(metrics.get("validation", {}) or {})
-    diagnostics = dict(metadata.get("diagnostics", {}) or {})
-    component_report = dict(diagnostics.get("component_fraction_report", {}) or {})
+    component_report = component_fraction_report(metadata)
+    boundary_fraction = component_report.get("boundary_inflow_fraction")
+    local_fraction = component_report.get("local_runoff_fraction")
+    has_boundary_components = boundary_fraction is not None or local_fraction is not None
+    local_rain = local_component_fraction(component_report, "rain")
+    local_snow = local_component_fraction(component_report, "snow")
+    local_ice = local_component_fraction(component_report, "ice")
 
     lines = [
         "# 水文模拟结果说明",
@@ -245,19 +271,38 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
         f"- 验证期 NSE / KGE / PBIAS / RMSE：{metric_text(val.get('nse'))} / {metric_text(val.get('kge'))} / {metric_text(val.get('pbias'), 2, '%')} / {metric_text(val.get('rmse'))}",
         f"- 综合判断：{summary.get('flow_status_zh', '—')}",
         "",
-        "## 3. 三水源分量年合计",
+        "## 3. 出口流量构成与区间三水源",
         "",
-        "依据 HBV 模型水源追踪机制，模拟总流量按降雨产流、融雪径流、裸冰融化三类水源分别累计，率定期内构成如下：",
+        "对区间流域项目，出口模拟总流量由上游边界入流和区间本地产流共同组成；区间本地产流再按降雨产流、融雪径流、裸冰融化拆分。",
         "",
-        "| 水源类型 | 占模拟总流量比例 |",
+        "| 分量 | 占出口模拟总流量比例 |",
         "| --- | --- |",
+        *(
+            [
+                f"| 上游边界入流 | {percent_text(boundary_fraction)} |",
+                f"| 区间本地产流 | {percent_text(local_fraction)} |",
+            ]
+            if has_boundary_components
+            else []
+        ),
         f"| 降雨产流 | {percent_text(component_report.get('rain_fraction'))} |",
         f"| 融雪径流 | {percent_text(component_report.get('snow_fraction'))} |",
         f"| 裸冰融化 | {percent_text(component_report.get('ice_fraction'))} |",
         "",
-        f"- 口径：{component_basis_text(component_report.get('evaluation_period'))}",
+        f"- 出口构成口径：{component_basis_text(component_report.get('evaluation_period'))}",
         "",
     ]
+    if has_boundary_components:
+        lines.extend(
+            [
+                "| 区间本地产流水源 | 占区间本地产流比例 |",
+                "| --- | --- |",
+                f"| 降雨产流 | {percent_text(local_rain)} |",
+                f"| 融雪径流 | {percent_text(local_snow)} |",
+                f"| 裸冰融化 | {percent_text(local_ice)} |",
+                "",
+            ]
+        )
     event_lines = flood_event_report_lines(metadata)
     if event_lines:
         lines.extend(event_lines)
@@ -267,7 +312,7 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
     lines.extend([
         remarks_title,
         "",
-        "- 三水源比例为模型按 HBV 标准三水源追踪算法逐时步累加得到的全流域汇总值。",
+        "- 区间三水源比例为模型按 HBV 标准三水源追踪算法逐时步累加得到；上游边界入流来自边界条件，不再拆分为区间三水源。",
         "- 具体数值受流域冰川面积、气温递减率、降水相态划分和参数率定结果共同影响。",
         "",
     ])
