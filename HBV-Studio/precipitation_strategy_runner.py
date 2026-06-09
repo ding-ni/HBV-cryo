@@ -27,6 +27,8 @@ RATIO_CLIP = (0.2, 5.0)
 IDW_POWER = 2.0
 IDW_MIN_DISTANCE_M = 100.0
 IDW_CHUNK_SIZE = 200_000
+HYDROLOGICAL_DAY_START_HOUR = 8
+MIN_DAILY_PRECIP_HOURS = 24
 TIME_BASIS_CONTINUOUS = "continuous"
 TIME_BASIS_EVENT_WINDOWS = "event_windows"
 TIME_BASIS_FORECAST_WINDOW = "forecast_window"
@@ -135,6 +137,78 @@ def normalize_time_step_hours(value: Any) -> float:
     except Exception:
         step = 24.0
     return step if step > 0 else 24.0
+
+
+def detect_station_series_step_hours(index: Any) -> float | None:
+    try:
+        timestamps = pd.DatetimeIndex(pd.to_datetime(index, errors="coerce"))
+    except Exception:
+        return None
+    timestamps = timestamps[timestamps.notna()].drop_duplicates().sort_values()
+    if len(timestamps) < 2:
+        return None
+    diffs = pd.Series(timestamps).diff().dropna()
+    if diffs.empty:
+        return None
+    median_hours = float(diffs.median() / pd.Timedelta(hours=1))
+    return 1.0 if median_hours <= 1.5 else 24.0
+
+
+def aggregate_station_precip_for_model_step(
+    station_series: pd.DataFrame,
+    target_step_hours: float,
+    *,
+    min_daily_hours: int = MIN_DAILY_PRECIP_HOURS,
+    day_start_hour: int = HYDROLOGICAL_DAY_START_HOUR,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    source_step_hours = detect_station_series_step_hours(station_series.index)
+    meta: dict[str, Any] = {
+        "enabled": False,
+        "method": "none",
+        "source_time_step_hours": source_step_hours,
+        "effective_time_step_hours": float(target_step_hours),
+    }
+    if (
+        station_series.empty
+        or float(target_step_hours) < 24.0
+        or source_step_hours is None
+        or float(source_step_hours) > 1.5
+    ):
+        return station_series, meta
+
+    working = station_series.copy()
+    source_index = pd.DatetimeIndex(pd.to_datetime(working.index, errors="coerce"))
+    valid_index = source_index.notna()
+    working = working.loc[valid_index].copy()
+    source_index = pd.DatetimeIndex(source_index[valid_index])
+    hydrological_day = (source_index - pd.Timedelta(hours=int(day_start_hour))).normalize()
+    working.index = hydrological_day
+    grouped = working.groupby(level=0)
+    hourly_counts = grouped.count()
+    daily_sum = grouped.sum(min_count=1).where(hourly_counts >= int(min_daily_hours))
+    daily_sum.index.name = station_series.index.name
+
+    day_has_any_station = (hourly_counts >= int(min_daily_hours)).any(axis=1) if not hourly_counts.empty else pd.Series(dtype=bool)
+    meta.update(
+        {
+            "enabled": True,
+            "method": "hourly_sum_to_hydrological_day",
+            "source_time_step_hours": source_step_hours,
+            "effective_time_step_hours": 24.0,
+            "day_start_hour": int(day_start_hour),
+            "day_label": "start",
+            "min_hours_per_day": int(min_daily_hours),
+            "source_rows": int(len(station_series)),
+            "daily_rows": int(len(daily_sum)),
+            "valid_days": int(day_has_any_station.sum()) if len(day_has_any_station) else 0,
+            "insufficient_station_days": int((hourly_counts < int(min_daily_hours)).sum().sum()) if not hourly_counts.empty else 0,
+            "source_start": str(source_index.min()) if len(source_index) else "",
+            "source_end": str(source_index.max()) if len(source_index) else "",
+            "effective_start": str(daily_sum.index.min()) if len(daily_sum.index) else "",
+            "effective_end": str(daily_sum.index.max()) if len(daily_sum.index) else "",
+        }
+    )
+    return daily_sum.sort_index(), meta
 
 
 def flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -465,6 +539,7 @@ def summarize_record_participation(
     stations: pd.DataFrame,
     station_series: pd.DataFrame,
     station_format: str,
+    station_time_aggregation: dict[str, Any] | None,
     base_dir: Path,
     target_dir: Path,
     written: int,
@@ -565,6 +640,7 @@ def summarize_record_participation(
         "actual_start": format_time(timestamps[0], step_hours) if len(timestamps) else "",
         "actual_end": format_time(timestamps[-1], step_hours) if len(timestamps) else "",
         "station_format": station_format,
+        "station_time_aggregation": station_time_aggregation or {"enabled": False},
         "matched_station_count": int(len(station_ids)),
         "covered_station_steps": int(covered_station_steps),
         "zero_available_station_steps": int(zero_station_steps),
@@ -905,6 +981,11 @@ def main() -> None:
     station_series, fmt = load_station_precip(station_prec_path)
     station_series.index = pd.to_datetime(station_series.index)
     station_series.columns = [str(col).strip() for col in station_series.columns]
+    model_step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    station_series, station_time_aggregation = aggregate_station_precip_for_model_step(
+        station_series,
+        model_step_hours,
+    )
 
     expected_index = build_expected_forcing_index(config, context="calibration")
     missing_expected_steps: list[pd.Timestamp] = []
@@ -954,6 +1035,13 @@ def main() -> None:
     print(f"基础目录: {base_dir}")
     print(f"目标目录: {target_dir}")
     print(f"站点格式: {fmt}")
+    if station_time_aggregation.get("enabled"):
+        print(
+            "站点降水聚合: 小时资料已按水文日 "
+            f"{int(station_time_aggregation.get('day_start_hour', HYDROLOGICAL_DAY_START_HOUR)):02d}:00-次日"
+            f"{int(station_time_aggregation.get('day_start_hour', HYDROLOGICAL_DAY_START_HOUR)):02d}:00 "
+            f"累计为日降水；有效日数 {int(station_time_aggregation.get('valid_days', 0))}"
+        )
     print(f"匹配站点数: {len(stations)}")
     print(f"时间步文件数: {len(records)}")
     if skipped_out_of_scope:
@@ -978,6 +1066,7 @@ def main() -> None:
         stations=stations,
         station_series=station_series,
         station_format=fmt,
+        station_time_aggregation=station_time_aggregation,
         base_dir=base_dir,
         target_dir=target_dir,
         written=written,

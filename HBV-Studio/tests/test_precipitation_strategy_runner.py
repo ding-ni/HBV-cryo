@@ -19,6 +19,23 @@ import precipitation_strategy_runner as runner  # noqa: E402
 
 
 class PrecipitationStrategyRunnerTests(unittest.TestCase):
+    def test_aggregate_hourly_station_precip_for_daily_runner(self) -> None:
+        hourly_index = pd.date_range("2026-05-01 08:00", periods=48, freq="1h")
+        station_series = pd.DataFrame(
+            {
+                "S1": np.ones(48, dtype="float64"),
+                "S2": np.full(48, 2.0, dtype="float64"),
+            },
+            index=hourly_index,
+        )
+
+        daily, meta = runner.aggregate_station_precip_for_model_step(station_series, 24)
+
+        self.assertTrue(meta["enabled"])
+        self.assertEqual(list(daily.index), [pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-02")])
+        self.assertEqual(float(daily.loc[pd.Timestamp("2026-05-01"), "S1"]), 24.0)
+        self.assertEqual(float(daily.loc[pd.Timestamp("2026-05-02"), "S2"]), 48.0)
+
     def test_no_available_station_steps_detects_nan_and_negative_only_steps(self) -> None:
         timestamps = pd.date_range("2026-01-01", periods=3, freq="1D")
         records = [(pd.Timestamp(ts), Path(f"{idx}.tif")) for idx, ts in enumerate(timestamps)]

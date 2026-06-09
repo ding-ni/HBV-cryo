@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -16,6 +17,7 @@ if str(STUDIO_DIR) not in sys.path:
 from services.station_precip import (  # noqa: E402
     StationPrecipAnalysisContext,
     StationPrecipStrategyStatusContext,
+    aggregate_station_precip_for_model_step,
     analyze_station_precip_inputs,
     check_station_precip_strategy_status,
     format_time_for_check,
@@ -172,6 +174,40 @@ class StationPrecipServiceTests(unittest.TestCase):
         self.assertEqual(list(table.columns), ["S1", "S2"])
         self.assertEqual(float(table.loc[pd.Timestamp("2026-01-01"), "S2"]), 4.0)
         self.assertTrue(pd.isna(table.loc[pd.Timestamp("2026-01-02"), "S2"]))
+
+    def test_aggregate_hourly_station_precip_to_hydrological_daily_sum(self) -> None:
+        hourly_index = pd.date_range("2026-05-01 08:00", periods=48, freq="1h")
+        station_series = pd.DataFrame(
+            {
+                "S1": np.ones(48, dtype="float64"),
+                "S2": np.full(48, 2.0, dtype="float64"),
+            },
+            index=hourly_index,
+        )
+
+        daily, meta = aggregate_station_precip_for_model_step(station_series, 24)
+
+        self.assertTrue(meta["enabled"])
+        self.assertEqual(meta["method"], "hourly_sum_to_hydrological_day")
+        self.assertEqual(list(daily.index), [pd.Timestamp("2026-05-01"), pd.Timestamp("2026-05-02")])
+        self.assertEqual(float(daily.loc[pd.Timestamp("2026-05-01"), "S1"]), 24.0)
+        self.assertEqual(float(daily.loc[pd.Timestamp("2026-05-02"), "S2"]), 48.0)
+
+    def test_aggregate_hourly_station_precip_requires_complete_station_day(self) -> None:
+        hourly_index = pd.date_range("2026-05-01 08:00", periods=24, freq="1h")
+        station_series = pd.DataFrame(
+            {
+                "S1": np.ones(24, dtype="float64"),
+                "S2": [2.0] * 23 + [np.nan],
+            },
+            index=hourly_index,
+        )
+
+        daily, meta = aggregate_station_precip_for_model_step(station_series, 24)
+
+        self.assertEqual(meta["valid_days"], 1)
+        self.assertEqual(float(daily.loc[pd.Timestamp("2026-05-01"), "S1"]), 24.0)
+        self.assertTrue(pd.isna(daily.loc[pd.Timestamp("2026-05-01"), "S2"]))
 
     def test_load_station_metadata_table_normalizes_station_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

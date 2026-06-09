@@ -127,6 +127,29 @@ class StationPrecipTimeBasisTests(unittest.TestCase):
             self.assertEqual(result["event_coverage"][0]["status"], "ok")
             self.assertIn("事件之间允许资料间断", result["task_context"]["headline"])
 
+    def test_daily_check_aggregates_hourly_station_precip_by_hydrological_day(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hourly_index = pd.date_range("2025-05-01 08:00", periods=48, freq="1h")
+            precip_path, meta_path = _write_station_files(root, hourly_index)
+            config = _base_config(root, precip_path, meta_path, mode="grid_plus_station_bias")
+            config["\u65f6\u95f4"] = {
+                "\u9884\u70ed\u5f00\u59cb": "2025-05-01",
+                "\u7387\u5b9a\u5f00\u59cb": "2025-05-01",
+                "\u7387\u5b9a\u7ed3\u675f": "2025-05-02",
+                "\u9a8c\u8bc1\u5f00\u59cb": "2025-05-01",
+                "\u9a8c\u8bc1\u7ed3\u675f": "2025-05-02",
+            }
+
+            result = svc.analyze_station_precip_inputs(config, step_hours=24)
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["expected_time_steps"], 2)
+            self.assertEqual(result["covered_time_steps"], 2)
+            self.assertEqual(result["zero_available_steps"], 0)
+            self.assertTrue(result["station_time_aggregation"]["enabled"])
+            self.assertEqual(result["station_time_aggregation"]["day_start_hour"], 8)
+
     def test_event_window_station_gap_fails_for_station_only_precipitation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -9,6 +9,11 @@ import pandas as pd
 
 from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, TIME_BASIS_LABELS, event_date_range
 from services.meteo_config import METEO_KEY, METEO_PRECIP_MODE_KEY, METEO_STATION_META_KEY, METEO_STATION_PREC_KEY
+from services.time_utils import detect_series_step_hours
+
+
+HYDROLOGICAL_DAY_START_HOUR = 8
+MIN_DAILY_PRECIP_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -114,6 +119,62 @@ def load_station_precip_table(path: Path) -> tuple[pd.DataFrame, str, str | None
     if wide.index.has_duplicates:
         wide = wide.groupby(level=0).mean(numeric_only=True).sort_index()
     return wide, "\u5bbd\u8868", time_col
+
+
+def aggregate_station_precip_for_model_step(
+    station_series: pd.DataFrame,
+    target_step_hours: float,
+    *,
+    min_daily_hours: int = MIN_DAILY_PRECIP_HOURS,
+    day_start_hour: int = HYDROLOGICAL_DAY_START_HOUR,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    source_step_hours = detect_series_step_hours(pd.Series(pd.DatetimeIndex(station_series.index).tolist())) if not station_series.empty else None
+    meta: dict[str, Any] = {
+        "enabled": False,
+        "method": "none",
+        "source_time_step_hours": source_step_hours,
+        "effective_time_step_hours": float(target_step_hours),
+    }
+    if (
+        station_series.empty
+        or float(target_step_hours) < 24.0
+        or source_step_hours is None
+        or float(source_step_hours) > 1.5
+    ):
+        return station_series, meta
+
+    working = station_series.copy()
+    source_index = pd.DatetimeIndex(pd.to_datetime(working.index, errors="coerce"))
+    valid_index = source_index.notna()
+    working = working.loc[valid_index].copy()
+    source_index = pd.DatetimeIndex(source_index[valid_index])
+    hydrological_day = (source_index - pd.Timedelta(hours=int(day_start_hour))).normalize()
+    working.index = hydrological_day
+    grouped = working.groupby(level=0)
+    hourly_counts = grouped.count()
+    daily_sum = grouped.sum(min_count=1).where(hourly_counts >= int(min_daily_hours))
+    daily_sum.index.name = station_series.index.name
+    day_has_any_station = (hourly_counts >= int(min_daily_hours)).any(axis=1) if not hourly_counts.empty else pd.Series(dtype=bool)
+    meta.update(
+        {
+            "enabled": True,
+            "method": "hourly_sum_to_hydrological_day",
+            "source_time_step_hours": source_step_hours,
+            "effective_time_step_hours": 24.0,
+            "day_start_hour": int(day_start_hour),
+            "day_label": "start",
+            "min_hours_per_day": int(min_daily_hours),
+            "source_rows": int(len(station_series)),
+            "daily_rows": int(len(daily_sum)),
+            "valid_days": int(day_has_any_station.sum()) if len(day_has_any_station) else 0,
+            "insufficient_station_days": int((hourly_counts < int(min_daily_hours)).sum().sum()) if not hourly_counts.empty else 0,
+            "source_start": str(source_index.min()) if len(source_index) else "",
+            "source_end": str(source_index.max()) if len(source_index) else "",
+            "effective_start": str(daily_sum.index.min()) if len(daily_sum.index) else "",
+            "effective_end": str(daily_sum.index.max()) if len(daily_sum.index) else "",
+        }
+    )
+    return daily_sum.sort_index(), meta
 
 
 def load_station_metadata_table(path: Path) -> tuple[pd.DataFrame, dict[str, str | None]]:
@@ -596,6 +657,7 @@ def analyze_station_precip_inputs(
 
     station_series = station_series.loc[station_series.index.notna()].copy()
     station_series = station_series[~station_series.index.duplicated(keep="first")].sort_index()
+    station_series, station_time_aggregation = aggregate_station_precip_for_model_step(station_series, step)
     match_info = station_precip_id_match_summary(station_series, station_meta, meta_columns)
     matched_ids = list(match_info["matched_ids"])
     missing_in_precip = list(match_info["missing_in_precip"])
@@ -711,6 +773,7 @@ def analyze_station_precip_inputs(
         "station_missing_rates": station_missing_rates,
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
+        "station_time_aggregation": station_time_aggregation,
         "task_context": task_context,
         "event_coverage": event_coverage,
     }
