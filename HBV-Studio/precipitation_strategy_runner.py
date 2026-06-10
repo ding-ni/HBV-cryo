@@ -29,6 +29,9 @@ IDW_MIN_DISTANCE_M = 100.0
 IDW_CHUNK_SIZE = 200_000
 HYDROLOGICAL_DAY_START_HOUR = 8
 MIN_DAILY_PRECIP_HOURS = 24
+TRANSFER_RULES_JSON = "station_bias_transfer_rules.json"
+TRANSFER_RULES_NPZ = "station_bias_transfer_rules.npz"
+TRANSFER_RULES_SCHEMA = "station_bias_transfer_rules_v1"
 TIME_BASIS_CONTINUOUS = "continuous"
 TIME_BASIS_EVENT_WINDOWS = "event_windows"
 TIME_BASIS_FORECAST_WINDOW = "forecast_window"
@@ -781,6 +784,8 @@ def summarize_record_participation(
     target_dir: Path,
     written: int,
     use_timestamp_names: bool = False,
+    transfer_rule_summary: dict[str, Any] | None = None,
+    processing_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
     time_basis = task_time_basis(config, context="calibration")
@@ -904,6 +909,8 @@ def summarize_record_participation(
         "station_missing_rates": station_missing_rates,
         "event_coverage": event_coverage,
         "hydrological_diagnostics": hydro_diagnostics,
+        "transfer_rules": transfer_rule_summary or {"available": False, "status": "not_requested"},
+        "processing_stats": processing_stats or {},
         "base_dir": str(base_dir.resolve(strict=False)),
         "target_dir": str(target_dir.resolve(strict=False)),
     }
@@ -922,6 +929,342 @@ def sample_station_values(src: rasterio.io.DatasetReader, stations: pd.DataFrame
         samples[samples == src.nodata] = np.nan
     samples[samples < -9000] = np.nan
     return samples
+
+
+def valid_station_observation_mask(obs: np.ndarray, grid_station: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    return np.isfinite(obs) & np.isfinite(grid_station) & (obs >= 0.0) & (grid_station >= 0.0) & (weights > 0)
+
+
+def interpolated_station_correction_fields(
+    src: rasterio.io.DatasetReader,
+    raster_values: np.ndarray,
+    stations: pd.DataFrame,
+    obs: np.ndarray,
+    grid_station: np.ndarray,
+    valid: np.ndarray,
+) -> dict[str, Any]:
+    valid_mask = np.isfinite(raster_values)
+    rows, cols, grid_x, grid_y = grid_cell_coordinates(valid_mask, src.transform)
+    station_x = stations["x"].to_numpy(dtype="float64")
+    station_y = stations["y"].to_numpy(dtype="float64")
+    transformer = metric_transformer_for_points(
+        src.crs,
+        np.concatenate([grid_x, station_x]),
+        np.concatenate([grid_y, station_y]),
+    )
+    grid_x_m, grid_y_m = transform_metric_xy(grid_x, grid_y, transformer)
+    station_x_m, station_y_m = transform_metric_xy(station_x, station_y, transformer)
+
+    raw_ratios = obs[valid] / np.maximum(grid_station[valid], MIN_GRID_PRECIP_MM)
+    clipped_ratios = np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])
+    residuals = obs[valid] - grid_station[valid]
+
+    ratio_values = idw_interpolate_to_points(
+        station_x_m[valid],
+        station_y_m[valid],
+        clipped_ratios,
+        grid_x_m,
+        grid_y_m,
+    )
+    residual_values = idw_interpolate_to_points(
+        station_x_m[valid],
+        station_y_m[valid],
+        residuals,
+        grid_x_m,
+        grid_y_m,
+    )
+    station_prec_values = idw_interpolate_to_points(
+        station_x_m[valid],
+        station_y_m[valid],
+        obs[valid],
+        grid_x_m,
+        grid_y_m,
+    )
+    return {
+        "rows": rows,
+        "cols": cols,
+        "ratio_values": ratio_values,
+        "residual_values": residual_values,
+        "station_prec_values": station_prec_values,
+        "raw_ratios": raw_ratios,
+        "clipped_ratios": clipped_ratios,
+        "residuals": residuals,
+    }
+
+
+def apply_station_observation_correction(
+    base_values: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    *,
+    ratio_values: np.ndarray,
+    residual_values: np.ndarray,
+    station_prec_values: np.ndarray,
+    obs_mean: float,
+    grid_mean: float,
+) -> np.ndarray:
+    corrected_values = base_values * ratio_values
+    residual_corrected = np.clip(base_values + residual_values, 0.0, None)
+    if np.isfinite(grid_mean) and np.isfinite(obs_mean) and grid_mean < MIN_GRID_PRECIP_MM and obs_mean >= WET_STATION_MEAN_MM:
+        corrected_values = np.clip(station_prec_values, 0.0, None)
+    else:
+        residual_weight = 0.0
+        if np.isfinite(grid_mean) and np.isfinite(obs_mean) and obs_mean > grid_mean:
+            residual_weight = float(np.clip((WET_STATION_MEAN_MM - grid_mean) / WET_STATION_MEAN_MM, 0.0, 1.0))
+        corrected_values = (1.0 - residual_weight) * corrected_values + residual_weight * residual_corrected
+        occurrence_gap = (base_values < MIN_GRID_PRECIP_MM) & (station_prec_values >= WET_STATION_MEAN_MM)
+        if np.any(occurrence_gap):
+            corrected_values[occurrence_gap] = np.maximum(
+                corrected_values[occurrence_gap],
+                residual_corrected[occurrence_gap],
+            )
+    return np.clip(corrected_values, 0.0, None)
+
+
+def _empty_rule_accumulators(shape: tuple[int, int]) -> dict[str, np.ndarray]:
+    return {
+        "ratio_sum": np.zeros(shape, dtype="float64"),
+        "ratio_count": np.zeros(shape, dtype="int32"),
+        "residual_sum": np.zeros(shape, dtype="float64"),
+        "residual_count": np.zeros(shape, dtype="int32"),
+    }
+
+
+def _accumulate_rule_field(acc: dict[str, np.ndarray], rows: np.ndarray, cols: np.ndarray, ratios: np.ndarray, residuals: np.ndarray) -> None:
+    ratio_valid = np.isfinite(ratios)
+    if np.any(ratio_valid):
+        rr = rows[ratio_valid]
+        cc = cols[ratio_valid]
+        np.add.at(acc["ratio_sum"], (rr, cc), ratios[ratio_valid])
+        np.add.at(acc["ratio_count"], (rr, cc), 1)
+    residual_valid = np.isfinite(residuals)
+    if np.any(residual_valid):
+        rr = rows[residual_valid]
+        cc = cols[residual_valid]
+        np.add.at(acc["residual_sum"], (rr, cc), residuals[residual_valid])
+        np.add.at(acc["residual_count"], (rr, cc), 1)
+
+
+def _finalize_rule_array(total: np.ndarray, count: np.ndarray, fill_value: float) -> np.ndarray:
+    result = np.full(total.shape, fill_value, dtype="float32")
+    valid = count > 0
+    if np.any(valid):
+        result[valid] = (total[valid] / np.maximum(count[valid], 1)).astype("float32")
+    return result
+
+
+def _rule_paths(target_dir: Path) -> tuple[Path, Path]:
+    return target_dir / TRANSFER_RULES_JSON, target_dir / TRANSFER_RULES_NPZ
+
+
+def fit_grid_bias_transfer_rules(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    json_path, npz_path = _rule_paths(target_dir)
+    if json_path.exists() and npz_path.exists() and not overwrite:
+        try:
+            summary = json.loads(json_path.read_text(encoding="utf-8"))
+            summary["loaded_existing"] = True
+            return summary
+        except Exception:
+            pass
+
+    weights = stations["weight"].to_numpy(dtype="float64")
+    station_ids = stations["station_id"].tolist()
+    global_acc: dict[str, np.ndarray] | None = None
+    month_acc: dict[int, dict[str, np.ndarray]] = {}
+    shape: tuple[int, int] | None = None
+    crs_text = ""
+    transform_values: list[float] = []
+    training_days = 0
+    valid_station_samples = 0
+    monthly_training_days: dict[int, int] = {month: 0 for month in range(1, 13)}
+    clipped_days = 0
+    raw_ratio_values: list[float] = []
+
+    for ts, path in records:
+        if not path.exists():
+            continue
+        with rasterio.open(path) as src:
+            arr = src.read(1).astype("float64")
+            nodata = src.nodata
+            if nodata is not None:
+                arr[arr == nodata] = np.nan
+            grid_station = sample_station_values(src, stations)
+            obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
+            valid = valid_station_observation_mask(obs, grid_station, weights)
+            if not np.any(valid):
+                continue
+            if shape is None:
+                shape = arr.shape
+                global_acc = _empty_rule_accumulators(shape)
+                crs_text = str(src.crs) if src.crs is not None else ""
+                transform_values = [float(item) for item in src.transform.to_gdal()]
+            if arr.shape != shape:
+                continue
+            fields = interpolated_station_correction_fields(src, arr, stations, obs, grid_station, valid)
+            rows = fields["rows"]
+            cols = fields["cols"]
+            ratios = np.asarray(fields["ratio_values"], dtype="float64")
+            residuals = np.asarray(fields["residual_values"], dtype="float64")
+            assert global_acc is not None
+            _accumulate_rule_field(global_acc, rows, cols, ratios, residuals)
+            month = int(pd.Timestamp(ts).month)
+            month_acc.setdefault(month, _empty_rule_accumulators(shape))
+            _accumulate_rule_field(month_acc[month], rows, cols, ratios, residuals)
+            training_days += 1
+            monthly_training_days[month] += 1
+            valid_station_samples += int(np.sum(valid))
+            raw_ratios = np.asarray(fields["raw_ratios"], dtype="float64")
+            clipped_ratios = np.asarray(fields["clipped_ratios"], dtype="float64")
+            if np.any(np.abs(raw_ratios - clipped_ratios) > 1e-9):
+                clipped_days += 1
+            raw_ratio_values.extend(raw_ratios[np.isfinite(raw_ratios)].tolist())
+
+    if shape is None or global_acc is None or training_days <= 0:
+        summary = {
+            "schema": TRANSFER_RULES_SCHEMA,
+            "available": False,
+            "status": "no_training_samples",
+            "training_days": 0,
+            "valid_station_samples": 0,
+            "json_path": str(json_path.resolve(strict=False)),
+            "npz_path": str(npz_path.resolve(strict=False)),
+        }
+        target_dir.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        return summary
+
+    global_ratio = _finalize_rule_array(global_acc["ratio_sum"], global_acc["ratio_count"], 1.0)
+    global_residual = _finalize_rule_array(global_acc["residual_sum"], global_acc["residual_count"], 0.0)
+    arrays: dict[str, np.ndarray] = {
+        "global_ratio": global_ratio,
+        "global_residual": global_residual,
+    }
+    monthly_meta: dict[str, Any] = {}
+    for month in range(1, 13):
+        acc = month_acc.get(month)
+        if acc is None or monthly_training_days.get(month, 0) <= 0:
+            arrays[f"month_{month:02d}_ratio"] = global_ratio
+            arrays[f"month_{month:02d}_residual"] = global_residual
+            monthly_meta[f"{month:02d}"] = {"training_days": 0, "fallback": "global"}
+            continue
+        arrays[f"month_{month:02d}_ratio"] = _finalize_rule_array(acc["ratio_sum"], acc["ratio_count"], 1.0)
+        arrays[f"month_{month:02d}_residual"] = _finalize_rule_array(acc["residual_sum"], acc["residual_count"], 0.0)
+        monthly_meta[f"{month:02d}"] = {"training_days": int(monthly_training_days[month]), "fallback": ""}
+
+    ratio_finite = global_ratio[np.isfinite(global_ratio)]
+    residual_finite = global_residual[np.isfinite(global_residual)]
+    raw_ratio_arr = np.asarray(raw_ratio_values, dtype="float64")
+    summary = {
+        "schema": TRANSFER_RULES_SCHEMA,
+        "available": True,
+        "status": "ok",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "method": "station_observed_days_to_monthly_idw_ratio_residual_fields",
+        "training_days": int(training_days),
+        "valid_station_samples": int(valid_station_samples),
+        "clipped_training_days": int(clipped_days),
+        "ratio_clip": [float(RATIO_CLIP[0]), float(RATIO_CLIP[1])],
+        "shape": [int(shape[0]), int(shape[1])],
+        "crs": crs_text,
+        "transform": transform_values,
+        "monthly": monthly_meta,
+        "global_ratio_mean": safe_stat(ratio_finite, np.mean),
+        "global_ratio_min": safe_stat(ratio_finite, np.min),
+        "global_ratio_max": safe_stat(ratio_finite, np.max),
+        "global_residual_mean_mm": safe_stat(residual_finite, np.mean),
+        "raw_station_ratio_mean": safe_stat(raw_ratio_arr, np.mean),
+        "json_path": str(json_path.resolve(strict=False)),
+        "npz_path": str(npz_path.resolve(strict=False)),
+    }
+    target_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(npz_path, **arrays)
+    json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    return summary
+
+
+def load_grid_bias_transfer_rules(rule_dir: Path) -> dict[str, Any] | None:
+    json_path, npz_path = _rule_paths(rule_dir)
+    if not json_path.exists() or not npz_path.exists():
+        return None
+    try:
+        summary = json.loads(json_path.read_text(encoding="utf-8"))
+        if not bool(summary.get("available", False)):
+            return None
+        with np.load(npz_path) as loaded:
+            arrays = {key: np.asarray(loaded[key]).copy() for key in loaded.files}
+        return {"summary": summary, "arrays": arrays, "json_path": json_path, "npz_path": npz_path}
+    except Exception:
+        return None
+
+
+def apply_transfer_rule_to_array(arr: np.ndarray, rules: dict[str, Any], ts: pd.Timestamp) -> tuple[np.ndarray, bool, str]:
+    arrays = rules.get("arrays")
+    if arrays is None:
+        return arr.copy(), False, "none"
+    month = int(pd.Timestamp(ts).month)
+    monthly = dict(dict(rules.get("summary", {}) or {}).get("monthly", {}) or {})
+    month_meta = dict(monthly.get(f"{month:02d}", {}) or {})
+    ratio_key = f"month_{month:02d}_ratio"
+    residual_key = f"month_{month:02d}_residual"
+    if ratio_key not in arrays or residual_key not in arrays:
+        ratio_key = "global_ratio"
+        residual_key = "global_residual"
+        source = "global"
+    else:
+        source = "global" if str(month_meta.get("fallback", "")) == "global" else f"month_{month:02d}"
+    ratio = np.asarray(arrays[ratio_key], dtype="float64")
+    residual = np.asarray(arrays[residual_key], dtype="float64")
+    if ratio.shape != arr.shape or residual.shape != arr.shape:
+        return arr.copy(), False, "shape_mismatch"
+    out = arr.copy()
+    valid = np.isfinite(out)
+    if not np.any(valid):
+        return out, False, source
+    ratio_values = np.where(np.isfinite(ratio[valid]), ratio[valid], 1.0)
+    residual_values = np.where(np.isfinite(residual[valid]), residual[valid], 0.0)
+    base_values = out[valid]
+    ratio_corrected = base_values * ratio_values
+    residual_corrected = np.clip(base_values + residual_values, 0.0, None)
+    residual_weight = np.clip((WET_STATION_MEAN_MM - base_values) / WET_STATION_MEAN_MM, 0.0, 1.0)
+    residual_weight = np.where(residual_values > 0.0, residual_weight, 0.0)
+    corrected = (1.0 - residual_weight) * ratio_corrected + residual_weight * residual_corrected
+    occurrence_gap = (base_values < MIN_GRID_PRECIP_MM) & (residual_values >= WET_STATION_MEAN_MM)
+    if np.any(occurrence_gap):
+        corrected[occurrence_gap] = np.maximum(corrected[occurrence_gap], residual_corrected[occurrence_gap])
+    out[valid] = np.clip(corrected, 0.0, None)
+    return out, True, source
+
+
+def apply_transfer_rule_to_raster(
+    ts: pd.Timestamp,
+    source_path: Path,
+    target_path: Path,
+    rules: dict[str, Any],
+    *,
+    overwrite: bool = True,
+) -> tuple[bool, str]:
+    if target_path.exists() and not overwrite:
+        return True, "existing"
+    with rasterio.open(source_path) as src:
+        arr = src.read(1).astype("float64")
+        nodata = src.nodata
+        if nodata is not None:
+            arr[arr == nodata] = np.nan
+        out, applied, source = apply_transfer_rule_to_array(arr, rules, pd.Timestamp(ts))
+        profile = src.profile.copy()
+        profile.update(dtype="float32", compress="lzw")
+        if nodata is None:
+            profile["nodata"] = -9999.0
+        out_to_write = np.where(np.isfinite(out), out, profile["nodata"]).astype("float32")
+        write_raster(target_path, profile, out_to_write)
+    return applied, source
 
 
 def metric_transformer_for_points(raster_crs: Any, x_values: np.ndarray, y_values: np.ndarray) -> pyproj.Transformer | None:
@@ -1048,11 +1391,22 @@ def no_available_station_steps(
     return missing
 
 
-def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_dir: Path, stations: pd.DataFrame, station_series: pd.DataFrame, overwrite: bool) -> int:
+def apply_grid_bias_correction(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    overwrite: bool,
+    transfer_rules: dict[str, Any] | None = None,
+    *,
+    return_stats: bool = False,
+) -> int | dict[str, Any]:
     written = 0
     processed_count = 0
     skipped_existing_count = 0
     no_station_step_count = 0
+    transfer_rule_step_count = 0
+    pass_through_step_count = 0
     clipped_step_count = 0
     occurrence_repair_count = 0
     total_valid_station_steps = 0
@@ -1071,72 +1425,43 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
                 arr[arr == nodata] = np.nan
             grid_station = sample_station_values(src, stations)
             obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
-            valid = np.isfinite(obs) & np.isfinite(grid_station) & (obs >= 0.0) & (grid_station >= 0.0) & (weights > 0)
+            valid = valid_station_observation_mask(obs, grid_station, weights)
             out = arr.copy()
             if np.any(valid):
                 obs_mean = np.average(obs[valid], weights=weights[valid])
                 grid_mean = np.average(grid_station[valid], weights=weights[valid])
                 total_valid_station_steps += int(np.sum(valid))
-                valid_mask = np.isfinite(out)
-                rows, cols, grid_x, grid_y = grid_cell_coordinates(valid_mask, src.transform)
-                station_x = stations["x"].to_numpy(dtype="float64")
-                station_y = stations["y"].to_numpy(dtype="float64")
-                transformer = metric_transformer_for_points(
-                    src.crs,
-                    np.concatenate([grid_x, station_x]),
-                    np.concatenate([grid_y, station_y]),
-                )
-                grid_x_m, grid_y_m = transform_metric_xy(grid_x, grid_y, transformer)
-                station_x_m, station_y_m = transform_metric_xy(station_x, station_y, transformer)
-
-                raw_ratios = obs[valid] / np.maximum(grid_station[valid], MIN_GRID_PRECIP_MM)
-                clipped_ratios = np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])
+                fields = interpolated_station_correction_fields(src, out, stations, obs, grid_station, valid)
+                raw_ratios = np.asarray(fields["raw_ratios"], dtype="float64")
+                clipped_ratios = np.asarray(fields["clipped_ratios"], dtype="float64")
                 if np.any(np.abs(raw_ratios - clipped_ratios) > 1e-9):
                     clipped_step_count += 1
-                residuals = obs[valid] - grid_station[valid]
-
-                ratio_values = idw_interpolate_to_points(
-                    station_x_m[valid],
-                    station_y_m[valid],
-                    clipped_ratios,
-                    grid_x_m,
-                    grid_y_m,
-                )
-                residual_values = idw_interpolate_to_points(
-                    station_x_m[valid],
-                    station_y_m[valid],
-                    residuals,
-                    grid_x_m,
-                    grid_y_m,
-                )
-                station_prec_values = idw_interpolate_to_points(
-                    station_x_m[valid],
-                    station_y_m[valid],
-                    obs[valid],
-                    grid_x_m,
-                    grid_y_m,
-                )
-
-                base_values = out[rows, cols]
-                ratio_corrected = base_values * ratio_values
-                residual_corrected = np.clip(base_values + residual_values, 0.0, None)
                 if np.isfinite(grid_mean) and np.isfinite(obs_mean) and grid_mean < MIN_GRID_PRECIP_MM and obs_mean >= WET_STATION_MEAN_MM:
-                    corrected_values = np.clip(station_prec_values, 0.0, None)
                     occurrence_repair_count += 1
-                else:
-                    residual_weight = 0.0
-                    if np.isfinite(grid_mean) and np.isfinite(obs_mean) and obs_mean > grid_mean:
-                        residual_weight = float(np.clip((WET_STATION_MEAN_MM - grid_mean) / WET_STATION_MEAN_MM, 0.0, 1.0))
-                    corrected_values = (1.0 - residual_weight) * ratio_corrected + residual_weight * residual_corrected
-                    occurrence_gap = (base_values < MIN_GRID_PRECIP_MM) & (station_prec_values >= WET_STATION_MEAN_MM)
-                    if np.any(occurrence_gap):
-                        corrected_values[occurrence_gap] = np.maximum(
-                            corrected_values[occurrence_gap],
-                            residual_corrected[occurrence_gap],
-                        )
+                rows = fields["rows"]
+                cols = fields["cols"]
+                base_values = out[rows, cols]
+                corrected_values = apply_station_observation_correction(
+                    base_values,
+                    rows,
+                    cols,
+                    ratio_values=np.asarray(fields["ratio_values"], dtype="float64"),
+                    residual_values=np.asarray(fields["residual_values"], dtype="float64"),
+                    station_prec_values=np.asarray(fields["station_prec_values"], dtype="float64"),
+                    obs_mean=float(obs_mean),
+                    grid_mean=float(grid_mean),
+                )
                 out[rows, cols] = np.clip(corrected_values, 0.0, None)
             else:
                 no_station_step_count += 1
+                if transfer_rules is not None:
+                    out, applied, _source = apply_transfer_rule_to_array(out, transfer_rules, pd.Timestamp(ts))
+                    if applied:
+                        transfer_rule_step_count += 1
+                    else:
+                        pass_through_step_count += 1
+                else:
+                    pass_through_step_count += 1
             profile = src.profile.copy()
             profile.update(dtype="float32", compress="lzw")
             if nodata is None:
@@ -1151,12 +1476,28 @@ def apply_grid_bias_correction(records: list[tuple[pd.Timestamp, Path]], target_
         f"已有输出跳过 {skipped_existing_count}；"
         f"有效站点-时段样本 {total_valid_station_steps}；"
         f"无可用站点时段 {no_station_step_count}；"
+        f"规则外推时段 {transfer_rule_step_count}；"
+        f"原样保留时段 {pass_through_step_count}；"
         f"倍率裁剪时段 {clipped_step_count}；"
         f"格点漏报降水修复时段 {occurrence_repair_count}"
     )
     if skipped_existing_count and processed_count == 0:
         print("提示: 本次没有重新计算已有订正文件；如需刷新空间订正统计和结果，请启用覆盖。")
-    return written
+    stats = {
+        "method": "grid_plus_station_bias",
+        "written_files": int(written),
+        "processed_steps": int(processed_count),
+        "skipped_existing_steps": int(skipped_existing_count),
+        "direct_station_corrected_steps": int(processed_count - no_station_step_count),
+        "no_available_station_steps": int(no_station_step_count),
+        "transfer_rule_applied_steps": int(transfer_rule_step_count),
+        "pass_through_steps": int(pass_through_step_count),
+        "valid_station_step_samples": int(total_valid_station_steps),
+        "ratio_clip_steps": int(clipped_step_count),
+        "grid_missed_precip_repair_steps": int(occurrence_repair_count),
+        "transfer_rules_available": bool(transfer_rules is not None),
+    }
+    return stats if return_stats else written
 
 
 def apply_thiessen(
@@ -1261,6 +1602,7 @@ def main() -> None:
     missing_expected_steps: list[pd.Timestamp] = []
     skipped_out_of_scope = 0
     records = list_rasters(base_dir) if base_dir.exists() else []
+    all_base_records = list(records)
     use_timestamp_names = False
     if mode == "grid_plus_station_bias":
         if not base_dir.exists():
@@ -1320,10 +1662,47 @@ def main() -> None:
         print(f"站点-only 目标格网模板: {records[0][1]}")
 
     target_dir.mkdir(parents=True, exist_ok=True)
+    transfer_rule_summary: dict[str, Any] | None = None
+    transfer_rules: dict[str, Any] | None = None
+    processing_stats: dict[str, Any] = {}
     if mode == "grid_plus_station_bias":
-        written = apply_grid_bias_correction(records, target_dir, stations, station_series, args.覆盖)
+        transfer_rule_summary = fit_grid_bias_transfer_rules(
+            all_base_records,
+            target_dir,
+            stations,
+            station_series,
+            overwrite=args.覆盖,
+        )
+        if transfer_rule_summary.get("available"):
+            month_count = sum(
+                1
+                for item in dict(transfer_rule_summary.get("monthly", {}) or {}).values()
+                if int(dict(item).get("training_days", 0) or 0) > 0
+            )
+            print(
+                "订正规则: "
+                f"训练日 {int(transfer_rule_summary.get('training_days', 0) or 0)}；"
+                f"有效站点样本 {int(transfer_rule_summary.get('valid_station_samples', 0) or 0)}；"
+                f"有独立月规则 {month_count}/12；"
+                f"平均倍率 {transfer_rule_summary.get('global_ratio_mean', '未形成')}"
+            )
+            transfer_rules = load_grid_bias_transfer_rules(target_dir)
+        else:
+            print("订正规则: 未形成可外推规则；无站点时段将保留格点基线。")
+        correction_result = apply_grid_bias_correction(
+            records,
+            target_dir,
+            stations,
+            station_series,
+            args.覆盖,
+            transfer_rules,
+            return_stats=True,
+        )
+        processing_stats = dict(correction_result) if isinstance(correction_result, dict) else {}
+        written = int(processing_stats.get("written_files", correction_result if isinstance(correction_result, int) else 0))
     elif mode == "thiessen_station_only":
         written = apply_thiessen(records, target_dir, stations, station_series, args.覆盖, use_timestamp_names=use_timestamp_names)
+        processing_stats = {"method": "thiessen_station_only", "written_files": int(written)}
     summary = summarize_record_participation(
         config=config,
         mode=mode,
@@ -1341,6 +1720,8 @@ def main() -> None:
         target_dir=target_dir,
         written=written,
         use_timestamp_names=use_timestamp_names,
+        transfer_rule_summary=transfer_rule_summary,
+        processing_stats=processing_stats,
     )
     summary_path = write_strategy_summary(target_dir, summary)
     print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")

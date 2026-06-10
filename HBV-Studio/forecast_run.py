@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 import profile_runner
+import precipitation_strategy_runner
 from forward_run import build_legacy_argv, build_param_vector, build_runtime_cli_args, resolve_input_path
 from profile_runner import patch_profile_behavior, patch_runtime_environment, resolve_profile
 
@@ -303,6 +304,154 @@ def archive_forecast_inputs(
     }
 
 
+def source_precip_rule_dirs(
+    config: dict[str, Any],
+    profile: str,
+    source_metadata: dict[str, Any],
+    paths: dict[str, Any],
+) -> list[Path]:
+    candidates: list[Path] = []
+    data_sources = dict(source_metadata.get("data_sources", {}) or {})
+    for raw in (
+        data_sources.get("prec_dir"),
+        data_sources.get("forecast_prec_dir"),
+        data_sources.get("runtime_prec_dir"),
+    ):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        resolved = profile_runner.replace_placeholders(text)
+        candidates.append(Path(str(resolved)).resolve(strict=False))
+    for key in (
+        "aligned_prec_effective_dir",
+        "aligned_prec_custom_corrected_dir",
+        "aligned_prec_era5_corrected_dir",
+        "aligned_prec_cmfd_corrected_dir",
+        "aligned_prec_corrected_dir",
+    ):
+        if key in paths:
+            candidates.append(Path(paths[key]).resolve(strict=False))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def apply_forecast_precip_transfer_rules(
+    module: Any,
+    source_metadata: dict[str, Any],
+    config: dict[str, Any],
+    profile: str,
+    paths: dict[str, Any],
+    input_archive: dict[str, Any],
+    forecast_start: str,
+    forecast_end: str,
+) -> dict[str, Any]:
+    meteo = dict(config.get("气象策略", {}) or {})
+    data_sources = dict(source_metadata.get("data_sources", {}) or {})
+    source_mode = str(
+        data_sources.get("station_precip_mode")
+        or data_sources.get("precipitation_mode")
+        or meteo.get("降水方案")
+        or "grid_only"
+    ).strip()
+    if source_mode != "grid_plus_station_bias":
+        return {"enabled": False, "status": "station_bias_not_selected", "station_precip_mode": source_mode}
+    archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
+    raw_prec_dir = Path(str(archived_dirs.get("prec", "") or "")).resolve(strict=False)
+    if not raw_prec_dir.exists():
+        return {"enabled": False, "status": "missing_archived_precip"}
+    source_rule_dir: Path | None = None
+    rules: dict[str, Any] | None = None
+    for candidate in source_precip_rule_dirs(config, profile, source_metadata, paths):
+        loaded = precipitation_strategy_runner.load_grid_bias_transfer_rules(candidate)
+        if loaded is not None:
+            source_rule_dir = candidate
+            rules = loaded
+            break
+    if rules is None or source_rule_dir is None:
+        return {
+            "enabled": False,
+            "status": "missing_transfer_rules",
+            "raw_prec_dir": str(raw_prec_dir),
+        }
+    expected_index = forecast_time_index(module, forecast_start, forecast_end)
+    target_dir = raw_prec_dir.parent / "prec_station_bias_corrected"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    time_to_file: dict[pd.Timestamp, Path] = {}
+    for tif_path in raw_prec_dir.glob("*.tif"):
+        timestamp = module.parse_time_from_name(str(tif_path))
+        if timestamp is not None:
+            time_to_file[pd.Timestamp(timestamp)] = tif_path
+    applied_count = 0
+    fallback_global_count = 0
+    failed_count = 0
+    files: list[str] = []
+    for timestamp in expected_index:
+        src_file = time_to_file.get(pd.Timestamp(timestamp))
+        if src_file is None:
+            failed_count += 1
+            continue
+        target_file = target_dir / src_file.name
+        applied, source = precipitation_strategy_runner.apply_transfer_rule_to_raster(
+            pd.Timestamp(timestamp),
+            src_file,
+            target_file,
+            rules,
+            overwrite=True,
+        )
+        if applied:
+            applied_count += 1
+            if source == "global":
+                fallback_global_count += 1
+        else:
+            failed_count += 1
+        files.append(target_file.name)
+    if applied_count > 0 and failed_count == 0:
+        archived_dirs["prec_raw_before_station_bias"] = str(raw_prec_dir)
+        archived_dirs["prec"] = str(target_dir.resolve(strict=False))
+        input_archive["archived_dirs"] = archived_dirs
+        manifest = dict(input_archive.get("manifest", {}) or {})
+        variables = dict(manifest.get("variables", {}) or {})
+        prec_meta = dict(variables.get("prec", {}) or {})
+        prec_meta.update(
+            {
+                "station_bias_transfer_applied": True,
+                "raw_archive_dir": str(raw_prec_dir),
+                "archive_dir": archived_dirs["prec"],
+                "source_rule_dir": str(source_rule_dir.resolve(strict=False)),
+                "source_rule_json": str((source_rule_dir / precipitation_strategy_runner.TRANSFER_RULES_JSON).resolve(strict=False)),
+                "applied_files": int(applied_count),
+                "fallback_global_files": int(fallback_global_count),
+                "files": files,
+            }
+        )
+        variables["prec"] = prec_meta
+        manifest["variables"] = variables
+        input_archive["manifest"] = manifest
+        manifest_path_text = str(input_archive.get("manifest_path", "") or "").strip()
+        if manifest_path_text:
+            manifest_path = Path(manifest_path_text)
+            manifest_path.write_text(json.dumps(clean_for_json(manifest), ensure_ascii=False, indent=2, default=json_default), encoding="utf-8")
+    return {
+        "enabled": applied_count > 0 and failed_count == 0,
+        "status": "ok" if applied_count > 0 and failed_count == 0 else "partial_or_failed",
+        "source_rule_dir": str(source_rule_dir.resolve(strict=False)),
+        "raw_prec_dir": str(raw_prec_dir),
+        "corrected_prec_dir": str(target_dir.resolve(strict=False)),
+        "applied_files": int(applied_count),
+        "failed_files": int(failed_count),
+        "fallback_global_files": int(fallback_global_count),
+        "rule_summary": clean_for_json(dict(rules.get("summary", {}) or {})),
+    }
+
+
 def series_values(values: Any, count: int) -> list[float | None]:
     if values is None:
         return [None] * count
@@ -326,6 +475,7 @@ def write_forecast_outputs(
     source_state_summary: dict[str, Any] | None = None,
     source_parameter_summary: dict[str, Any] | None = None,
     forecast_input_check: dict[str, Any] | None = None,
+    forecast_precip_transfer: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -366,6 +516,7 @@ def write_forecast_outputs(
     source_state_summary = dict(source_state_summary or {})
     source_parameter_summary = dict(source_parameter_summary or {})
     forecast_input_check = dict(forecast_input_check or {})
+    forecast_precip_transfer = dict(forecast_precip_transfer or {})
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
@@ -390,6 +541,7 @@ def write_forecast_outputs(
             "routing_state_available": bool(restart.get("routing_state_available")),
             "forecast_input_archive": clean_for_json(input_archive or {}),
             "forecast_input_check": clean_for_json(forecast_input_check),
+            "precipitation_transfer": clean_for_json(forecast_precip_transfer),
         },
         "workspace_config": str(config_path.resolve(strict=False)),
         "calibration_profile": profile,
@@ -409,6 +561,7 @@ def write_forecast_outputs(
         "source_state_summary": clean_for_json(source_state_summary),
         "source_parameter_summary": clean_for_json(source_parameter_summary),
         "forecast_input_check": clean_for_json(forecast_input_check),
+        "forecast_precipitation_transfer": clean_for_json(forecast_precip_transfer),
         "initial_state": {
             "mode": "state_snapshot_restart",
             "hot_start_supported": True,
@@ -432,6 +585,7 @@ def write_forecast_outputs(
             "forecast_evap_dir": forecast_dirs.get("evap", ""),
             "forecast_input_archive": clean_for_json(input_archive or {}),
             "forecast_input_check": clean_for_json(forecast_input_check),
+            "forecast_precipitation_transfer": clean_for_json(forecast_precip_transfer),
             "glacier_mode": str(getattr(module.args, "glacier_mode", "") or ""),
         },
         "optional_modules": {
@@ -515,6 +669,17 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         forecast_end,
     )
     log_stage("归档预报气象输入", stage_callback)
+    log_stage("应用站点降水订正规则", stage_callback)
+    forecast_precip_transfer = apply_forecast_precip_transfer_rules(
+        module,
+        source_metadata,
+        config,
+        profile,
+        paths,
+        input_archive,
+        forecast_start,
+        forecast_end,
+    )
     archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
     module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
     module.TEMP_DIR = archived_dirs.get("temp", source_forecast_dirs["temp"])
@@ -550,6 +715,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         source_state_summary=source_state_summary,
         source_parameter_summary=source_parameter_summary,
         forecast_input_check=forecast_input_check,
+        forecast_precip_transfer=forecast_precip_transfer,
     )
     log_stage("生成预报元数据", stage_callback)
     result["params_adjusted"] = bool(params_adjusted)

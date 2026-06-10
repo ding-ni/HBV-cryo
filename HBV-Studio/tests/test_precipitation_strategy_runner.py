@@ -54,6 +54,24 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
 
         self.assertEqual(missing, [pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-03")])
 
+    def test_expected_forcing_index_starts_from_warmup_not_calibration(self) -> None:
+        config = {
+            "时间步长_小时": 24,
+            "时间": {
+                "预热开始": "2026-01-01",
+                "率定开始": "2026-05-01",
+                "率定结束": "2026-10-31",
+                "验证结束": "2026-11-01",
+            },
+        }
+
+        index = runner.build_expected_forcing_index(config)
+
+        self.assertIsNotNone(index)
+        self.assertEqual(index[0], pd.Timestamp("2026-01-01"))
+        self.assertIn(pd.Timestamp("2026-04-30"), set(index))
+        self.assertEqual(index[-1], pd.Timestamp("2026-11-01"))
+
     def test_grid_bias_reports_existing_outputs_skipped_without_recomputing_stats(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -160,6 +178,88 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
                 )
 
             self.assertFalse((output_dir / raster_path.name).exists())
+
+    def test_grid_bias_uses_transfer_rule_when_station_day_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            train_path = root / "2026.01.01.tif"
+            missing_path = root / "2026.01.02.tif"
+            output_dir = root / "out"
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(0.0, 2.0, 1.0, 1.0),
+                "nodata": -9999.0,
+            }
+            for path in (train_path, missing_path):
+                with rasterio.open(path, "w", **profile) as dst:
+                    dst.write(np.ones((2, 2), dtype="float32"), 1)
+            stations = pd.DataFrame({"station_id": ["S1"], "x": [0.5], "y": [1.5], "weight": [1.0]})
+            station_series = pd.DataFrame(
+                {"S1": [2.0, np.nan]},
+                index=[pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")],
+            )
+
+            summary = runner.fit_grid_bias_transfer_rules(
+                [(pd.Timestamp("2026-01-01"), train_path), (pd.Timestamp("2026-01-02"), missing_path)],
+                output_dir,
+                stations,
+                station_series,
+                overwrite=True,
+            )
+            rules = runner.load_grid_bias_transfer_rules(output_dir)
+            written = runner.apply_grid_bias_correction(
+                [(pd.Timestamp("2026-01-02"), missing_path)],
+                output_dir,
+                stations,
+                station_series,
+                overwrite=True,
+                transfer_rules=rules,
+            )
+
+            self.assertTrue(summary["available"])
+            self.assertEqual(written, 1)
+            with rasterio.open(output_dir / missing_path.name) as src:
+                data = src.read(1)
+            self.assertAlmostEqual(float(np.nanmean(data)), 2.0, places=4)
+
+    def test_fit_transfer_rules_writes_monthly_and_global_rule_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raster_path = root / "2026.06.01.tif"
+            output_dir = root / "out"
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(0.0, 2.0, 1.0, 1.0),
+                "nodata": -9999.0,
+            }
+            with rasterio.open(raster_path, "w", **profile) as dst:
+                dst.write(np.ones((2, 2), dtype="float32"), 1)
+            stations = pd.DataFrame({"station_id": ["S1"], "x": [0.5], "y": [1.5], "weight": [1.0]})
+            station_series = pd.DataFrame({"S1": [3.0]}, index=[pd.Timestamp("2026-06-01")])
+
+            summary = runner.fit_grid_bias_transfer_rules(
+                [(pd.Timestamp("2026-06-01"), raster_path)],
+                output_dir,
+                stations,
+                station_series,
+                overwrite=True,
+            )
+
+            self.assertTrue((output_dir / runner.TRANSFER_RULES_JSON).exists())
+            self.assertTrue((output_dir / runner.TRANSFER_RULES_NPZ).exists())
+            self.assertEqual(summary["training_days"], 1)
+            self.assertEqual(summary["monthly"]["06"]["training_days"], 1)
+            self.assertEqual(summary["monthly"]["01"]["fallback"], "global")
 
 
 if __name__ == "__main__":

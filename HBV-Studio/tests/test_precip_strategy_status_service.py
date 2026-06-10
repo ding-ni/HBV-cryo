@@ -164,6 +164,51 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertIn("流域面降水总量：100.0 mm→120.0 mm（20.0%）", message)
         self.assertIn("时间口径：小时站点降水已按水文日 08:00-次日08:00 累计为日降水。", message)
 
+    def test_station_bias_summary_includes_transfer_rule_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            corrected = root / "corrected"
+            (corrected / "prec_2021.01.01.tif").write_bytes(b"")
+            (corrected / "precipitation_strategy_summary.json").write_text(
+                json.dumps(
+                    {
+                        "time_basis_label": "连续时段",
+                        "selected_steps": 1,
+                        "written_files": 1,
+                        "processing_stats": {
+                            "direct_station_corrected_steps": 5,
+                            "transfer_rule_applied_steps": 3,
+                            "pass_through_steps": 1,
+                            "skipped_existing_steps": 2,
+                        },
+                        "transfer_rules": {
+                            "available": True,
+                            "training_days": 12,
+                            "valid_station_samples": 120,
+                            "global_ratio_mean": 1.15,
+                            "monthly": {
+                                "01": {"training_days": 0, "fallback": "global"},
+                                "05": {"training_days": 6, "fallback": ""},
+                                "06": {"training_days": 6, "fallback": ""},
+                            },
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ok, message, count = check_precip_strategy_outputs(
+                {"气象策略": {"降水方案": "grid_plus_station_bias"}},
+                context,
+            )
+
+        self.assertTrue(ok)
+        self.assertEqual(count, 1)
+        self.assertIn("订正执行：实测站点 5 时段；规则外推 3 时段；原样保留 1 时段；已有输出跳过 2 时段", message)
+        self.assertIn("站点订正规则：训练日 12；有效站点样本 120；独立月规则 2/12；平均倍率 1.15", message)
+
 
 if __name__ == "__main__":
     unittest.main()

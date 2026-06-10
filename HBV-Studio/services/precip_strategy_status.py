@@ -29,9 +29,40 @@ def _fmt_float(value: Any, digits: int = 1, suffix: str = "") -> str:
 
 def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
     hydro = dict(summary.get("hydrological_diagnostics", {}) or {})
-    if not hydro:
-        return []
     parts: list[str] = []
+    stats = dict(summary.get("processing_stats", {}) or {})
+    if stats:
+        station_steps = int(stats.get("direct_station_corrected_steps", 0) or 0)
+        rule_steps = int(stats.get("transfer_rule_applied_steps", 0) or 0)
+        pass_steps = int(stats.get("pass_through_steps", 0) or 0)
+        skipped_steps = int(stats.get("skipped_existing_steps", 0) or 0)
+        if station_steps or rule_steps or pass_steps or skipped_steps:
+            parts.append(
+                "订正执行："
+                f"实测站点 {station_steps} 时段；"
+                f"规则外推 {rule_steps} 时段；"
+                f"原样保留 {pass_steps} 时段；"
+                f"已有输出跳过 {skipped_steps} 时段"
+            )
+    rules = dict(summary.get("transfer_rules", {}) or {})
+    if rules:
+        if bool(rules.get("available", False)):
+            month_count = sum(
+                1
+                for item in dict(rules.get("monthly", {}) or {}).values()
+                if int(dict(item).get("training_days", 0) or 0) > 0
+            )
+            parts.append(
+                "站点订正规则："
+                f"训练日 {int(rules.get('training_days', 0) or 0)}；"
+                f"有效站点样本 {int(rules.get('valid_station_samples', 0) or 0)}；"
+                f"独立月规则 {month_count}/12；"
+                f"平均倍率 {_fmt_float(rules.get('global_ratio_mean'), 2)}"
+            )
+        elif str(rules.get("status", "") or "") not in {"", "not_requested"}:
+            parts.append(f"站点订正规则：未形成（{rules.get('status')}）")
+    if not hydro:
+        return parts
     available = hydro.get("station_day_samples_available")
     total = hydro.get("station_day_samples_total")
     missing_rate = hydro.get("station_day_missing_rate_percent")

@@ -1852,6 +1852,7 @@ def patch_profile_behavior(
         data_sources["prec_source"] = runtime_prec_source
         data_sources["runtime_prec_source"] = runtime_prec_source
         data_sources["configured_precip_source"] = configured_precip_source(config)
+        data_sources["station_precip_mode"] = str(dict(config.get("气象策略", {}) or {}).get("降水方案", "grid_only") or "grid_only").strip()
         data_sources["prec_dir"] = str(getattr(module, "PREC_DIR", "") or data_sources.get("prec_dir", ""))
         data_sources["glacier_mode"] = str(getattr(module.args, "glacier_mode", "") or data_sources.get("glacier_mode", "inline"))
         metadata["data_sources"] = data_sources
