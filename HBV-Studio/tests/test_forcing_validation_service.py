@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -107,6 +108,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
         return ForcingValidationContext(
             current_profile=lambda config: "daily",
             build_profile_paths=lambda config, profile: {
+                "aligned_dir": "aligned_dir",
                 "aligned_temp_dir": "temp_dir",
                 "aligned_evap_dir": "evap_dir",
                 "gis_dir": "gis_dir",
@@ -124,6 +126,48 @@ class ForcingValidationServiceTests(unittest.TestCase):
             validate_tif_grid_alignment=validate_tif_grid_alignment,
             event_windows_ui_summary=lambda event_info, step_hours: {"event_count": len(event_info["events"])},
             event_forcing_coverage_summary=lambda event_info, directories, step_hours: {"status": "ok", "event_count": len(event_info["events"])},
+        )
+
+    def _hourly_bundle_context(self, root: Path) -> ForcingValidationContext:
+        expected_index = pd.date_range("2025-01-01 08:00", periods=24, freq="1h")
+
+        def validate_tif_time_series(
+            label: str,
+            directory: Path,
+            step_hours: float,
+            expected: Any,
+            time_basis_label: str,
+        ) -> dict[str, Any]:
+            return {"label": label, "errors": [], "warnings": [], "valid_time_steps": 24}
+
+        def validate_tif_grid_alignment(label: str, directory: Path, dem_path: Path) -> dict[str, Any]:
+            return {"label": label, "ok": True, "checked_files": 1, "error": None}
+
+        return ForcingValidationContext(
+            current_profile=lambda config: "hourly",
+            build_profile_paths=lambda config, profile: {
+                "aligned_dir": root,
+                "aligned_temp_dir": root / "气温",
+                "aligned_evap_dir": root / "蒸散发",
+                "gis_dir": root / "gis",
+            },
+            normalize_time_step_hours=lambda value: 1.0,
+            task_time_basis=lambda config, **kwargs: "continuous",
+            time_basis_labels={"continuous": "率定时段"},
+            time_basis_event_windows="event_windows",
+            build_expected_forcing_index=lambda config, **kwargs: expected_index,
+            normalized_flood_events=lambda config, **kwargs: {"events": []},
+            effective_precip_paths=lambda config, profile, **kwargs: (
+                root / "降水_本地导入",
+                root / "降水_本地导入_站点订正",
+                "custom_tif",
+            ),
+            validate_tif_time_series=validate_tif_time_series,
+            workspace_dem_path=lambda gis_dir, **kwargs: root / "gis" / "dem.tif",
+            configured_dem_kind=lambda config: "1km",
+            validate_tif_grid_alignment=validate_tif_grid_alignment,
+            event_windows_ui_summary=lambda event_info, step_hours: None,
+            event_forcing_coverage_summary=lambda event_info, directories, step_hours: None,
         )
 
     def _inputs_ready_context(
@@ -231,12 +275,14 @@ class ForcingValidationServiceTests(unittest.TestCase):
             "aligned_prec_custom_base_dir": "aligned_custom",
         }
         hourly_profile_paths = {
+            "aligned_dir": "aligned_hourly",
             "aligned_temp_dir": "aligned_hourly_temp",
             "aligned_evap_dir": "aligned_hourly_evap",
             "aligned_prec_era5_base_dir": "aligned_hourly_era5",
             "aligned_prec_cmfd_base_dir": "aligned_hourly_cmfd",
             "aligned_prec_base_dir": "aligned_hourly_default",
             "aligned_prec_custom_base_dir": "aligned_hourly_custom",
+            "aligned_prec_custom_dir": "aligned_hourly_custom_corrected",
         }
         workspace_paths = {
             "raw_temp_hourly_dir": "raw_hourly_temp",
@@ -701,6 +747,82 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertEqual(result["time_basis_label"], "洪水事件窗口")
         self.assertEqual(result["event_windows"], {"event_count": 1})
         self.assertEqual(result["event_forcing_coverage"], {"status": "ok", "event_count": 1})
+
+    def test_validate_forcing_bundle_hourly_requires_explicit_hour_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            summary = {
+                "time_basis": "hydrological_day_08_to_08_local",
+                "first_output_time": "2025-01-01 08:00",
+                "last_output_time": "2025-01-02 07:00",
+                "expected_hours": 24,
+                "actual_hours": 24,
+                "outputs": {
+                    "precipitation_dir": str(root / "降水_本地导入_站点订正"),
+                    "temperature_dir": str(root / "气温"),
+                    "evaporation_dir": str(root / "蒸散发"),
+                },
+                "conservation_checks": {"ok": True, "items": {}},
+            }
+            (root / "hourly_forcing_summary.json").write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+            context = self._hourly_bundle_context(root)
+
+            result = validate_forcing_bundle(
+                {
+                    "时间步长_小时": 1,
+                    "时间": {
+                        "预热开始": "2025-01-01",
+                        "验证结束": "2025-01-02",
+                    },
+                },
+                context,
+                profile="hourly",
+                precip_source="custom_tif",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("必须写到小时" in item for item in result["errors"]))
+        self.assertTrue(result["hourly_forcing_summary"]["exists"])
+
+    def test_validate_forcing_bundle_hourly_uses_summary_as_hard_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            summary = {
+                "time_basis": "hydrological_day_08_to_08_local",
+                "first_output_time": "2025-01-01 09:00",
+                "last_output_time": "2025-01-01 20:00",
+                "expected_hours": 24,
+                "actual_hours": 12,
+                "outputs": {
+                    "precipitation_dir": str(root / "降水_本地导入_站点订正"),
+                    "temperature_dir": str(root / "气温"),
+                    "evaporation_dir": str(root / "蒸散发"),
+                },
+                "conservation_checks": {
+                    "ok": False,
+                    "items": {"precipitation_daily_sum": {"failed_days": 1, "invalid_cell_count": 0}},
+                },
+            }
+            (root / "hourly_forcing_summary.json").write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+            context = self._hourly_bundle_context(root)
+
+            result = validate_forcing_bundle(
+                {
+                    "时间步长_小时": 1,
+                    "时间": {
+                        "预热开始": "2025-01-01 08:00",
+                        "验证结束": "2025-01-02 07:00",
+                    },
+                },
+                context,
+                profile="hourly",
+                precip_source="custom_tif",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("输出不完整" in item for item in result["errors"]))
+        self.assertTrue(any("守恒检查未通过" in item for item in result["errors"]))
+        self.assertTrue(any("开始时间晚于配置期望" in item for item in result["errors"]))
 
 
 if __name__ == "__main__":

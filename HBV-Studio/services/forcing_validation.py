@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -121,6 +122,125 @@ def glob_count(path: Path, pattern: str) -> int:
     if not path.exists():
         return 0
     return len(list(path.glob(pattern)))
+
+
+def _is_date_only_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(text) and (" " not in text) and ("T" not in text) and len(text) <= 10
+
+
+def _format_hourly_time(value: Any) -> str:
+    try:
+        return pd.Timestamp(value).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(value)
+
+
+def _same_path(left: Any, right: Any) -> bool:
+    try:
+        return str(Path(left).resolve(strict=False)).lower() == str(Path(right).resolve(strict=False)).lower()
+    except Exception:
+        return str(left).strip().lower() == str(right).strip().lower()
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def hourly_explicit_time_errors(config: dict[str, Any], step_hours: float) -> list[str]:
+    if float(step_hours) >= 24.0:
+        return []
+    time_cfg = dict(config.get("时间", {}) or {})
+    errors: list[str] = []
+    for key in ("预热开始", "预热结束", "率定开始", "率定结束", "验证开始", "验证结束"):
+        value = time_cfg.get(key)
+        if _is_date_only_text(value):
+            errors.append(f"小时尺度时间字段“{key}”必须写到小时，例如 2025-06-01 08:00，不能只写 {value}。")
+    return errors
+
+
+def inspect_hourly_forcing_summary(
+    aligned_dir: Path,
+    *,
+    expected_index: pd.DatetimeIndex | None,
+    precip_dir: Path,
+    temp_dir: Path,
+    evap_dir: Path,
+) -> dict[str, Any]:
+    summary_path = Path(aligned_dir) / "hourly_forcing_summary.json"
+    result: dict[str, Any] = {
+        "path": str(summary_path.resolve(strict=False)),
+        "exists": summary_path.exists(),
+        "errors": [],
+        "warnings": [],
+        "summary": None,
+    }
+    if not summary_path.exists():
+        result["warnings"].append("未找到小时强迫摘要 hourly_forcing_summary.json，无法核对 08:00 水文日时间基准和守恒检查结果。")
+        return result
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        result["errors"].append(f"小时强迫摘要无法读取：{exc}")
+        return result
+    result["summary"] = summary
+
+    if summary.get("time_basis") != "hydrological_day_08_to_08_local":
+        result["warnings"].append("小时强迫摘要未声明 hydrological_day_08_to_08_local 时间基准，请确认小时 TIF 与 workspace 时间一致。")
+    expected_hours = _int_or_none(summary.get("expected_hours"))
+    actual_hours = _int_or_none(summary.get("actual_hours"))
+    if expected_hours is not None and actual_hours is not None and actual_hours < expected_hours:
+        result["errors"].append(f"小时强迫输出不完整：实际完整小时 {actual_hours}，期望 {expected_hours}。")
+
+    conservation = dict(summary.get("conservation_checks", {}) or {})
+    if conservation and not bool(conservation.get("ok", False)):
+        failed = []
+        for key, item in dict(conservation.get("items", {}) or {}).items():
+            item_dict = dict(item or {}) if isinstance(item, dict) else {}
+            failed_days = _int_or_none(item_dict.get("failed_days", 0)) or 0
+            invalid_cells = _int_or_none(item_dict.get("invalid_cell_count", 0)) or 0
+            if failed_days > 0 or invalid_cells > 0:
+                failed.append(str(key))
+        suffix = f"：{', '.join(failed[:3])}" if failed else ""
+        result["errors"].append(f"小时强迫守恒检查未通过{suffix}。")
+
+    outputs = dict(summary.get("outputs", {}) or {})
+    output_checks = [
+        ("降水", outputs.get("precipitation_dir"), precip_dir),
+        ("气温", outputs.get("temperature_dir"), temp_dir),
+        ("蒸散发", outputs.get("evaporation_dir"), evap_dir),
+    ]
+    for label, recorded, current in output_checks:
+        if recorded and not _same_path(recorded, current):
+            result["warnings"].append(f"小时强迫摘要中的{label}目录与当前配置读取目录不同：{recorded} -> {current}")
+
+    first_raw = summary.get("first_output_time")
+    last_raw = summary.get("last_output_time")
+    first = pd.to_datetime(first_raw, errors="coerce") if first_raw else pd.NaT
+    last = pd.to_datetime(last_raw, errors="coerce") if last_raw else pd.NaT
+    if expected_index is not None and len(expected_index) > 0:
+        expected_start = pd.Timestamp(expected_index[0])
+        expected_end = pd.Timestamp(expected_index[-1])
+        if pd.notna(first) and first > expected_start:
+            result["errors"].append(
+                f"小时强迫开始时间晚于配置期望：强迫 {_format_hourly_time(first)}，配置 {_format_hourly_time(expected_start)}。"
+            )
+        if pd.notna(last) and last < expected_end:
+            result["errors"].append(
+                f"小时强迫结束时间早于配置期望：强迫 {_format_hourly_time(last)}，配置 {_format_hourly_time(expected_end)}。"
+            )
+        if pd.notna(first) and pd.notna(last) and (first != expected_start or last != expected_end):
+            result["warnings"].append(
+                "小时强迫摘要时间范围与当前 workspace 不完全相同："
+                f"强迫 {_format_hourly_time(first)} 至 {_format_hourly_time(last)}；"
+                f"配置 {_format_hourly_time(expected_start)} 至 {_format_hourly_time(expected_end)}。"
+            )
+    return result
 
 
 def summarize_nc_download_status(entries: list[tuple[str, Path, str]]) -> tuple[bool, str, int]:
@@ -313,7 +433,7 @@ def check_hourly_prec_status(
     profile_paths = context.build_profile_paths(config, profile)
     source_key = context.resolve_precip_source(config, precip_source)
     if source_key == "custom_tif":
-        aligned = Path(profile_paths["aligned_prec_custom_base_dir"])
+        aligned = Path(profile_paths.get("aligned_prec_custom_dir", profile_paths["aligned_prec_custom_base_dir"]))
         count = context.count_matching(aligned)
         if count > 0:
             return True, "当前为本地栅格降水模式，小时降水已导入工程独立降水目录。", count
@@ -430,6 +550,20 @@ def validate_forcing_bundle(
     for item in grid_checks.values():
         if not item.get("ok") and item.get("error"):
             errors.append(str(item["error"]))
+    hourly_summary = None
+    if active_profile == "hourly" or step_hours < 24.0:
+        explicit_time_errors = hourly_explicit_time_errors(config, step_hours)
+        errors.extend(explicit_time_errors)
+        aligned_dir = Path(paths.get("aligned_dir", Path(paths["aligned_temp_dir"]).parent))
+        hourly_summary = inspect_hourly_forcing_summary(
+            aligned_dir,
+            expected_index=expected_index,
+            precip_dir=Path(precip_dir),
+            temp_dir=Path(paths["aligned_temp_dir"]),
+            evap_dir=Path(paths["aligned_evap_dir"]),
+        )
+        errors.extend(hourly_summary["errors"])
+        warnings.extend(hourly_summary["warnings"])
     return {
         "ok": len(errors) == 0,
         "errors": errors,
@@ -441,6 +575,7 @@ def validate_forcing_bundle(
         "profile": active_profile,
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
+        "hourly_forcing_summary": hourly_summary,
         "event_windows": context.event_windows_ui_summary(event_info, step_hours) if event_info is not None else None,
         "event_forcing_coverage": (
             context.event_forcing_coverage_summary(event_info, directories, step_hours)
