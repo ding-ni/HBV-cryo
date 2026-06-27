@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--forecast-prec-dir", dest="forecast_prec_dir", default="")
     parser.add_argument("--forecast-temp-dir", dest="forecast_temp_dir", default="")
     parser.add_argument("--forecast-evap-dir", dest="forecast_evap_dir", default="")
+    parser.add_argument("--forecast-boundary-inflow-file", dest="forecast_boundary_inflow_file", default="")
+    parser.add_argument("--forecast-boundary-date-field", dest="forecast_boundary_date_field", default="")
+    parser.add_argument("--forecast-boundary-flow-field", dest="forecast_boundary_flow_field", default="")
+    parser.add_argument("--forecast-boundary-gap-fill", dest="forecast_boundary_gap_fill", default="")
     parser.add_argument("--率定模式", "--profile", dest="profile", default="")
     parser.add_argument("--目标函数", "--objective-mode", dest="objective_mode", default="")
     parser.add_argument("--降水源", "--prec-source", dest="prec_source", choices=["era5", "mswep", "cmfd", "custom_tif"], default="custom_tif")
@@ -62,6 +66,46 @@ def input_check_from_args(args: argparse.Namespace) -> dict[str, Any]:
         raise FileNotFoundError(f"预报输入检查文件不存在：{path}")
     data = read_json(path)
     return dict(data) if isinstance(data, dict) else {}
+
+
+def forecast_boundary_required(config: dict[str, Any], source_metadata: dict[str, Any]) -> bool:
+    object_type = str(
+        config.get("项目对象")
+        or source_metadata.get("project_object_type")
+        or source_metadata.get("object_type")
+        or ""
+    ).strip().lower()
+    if object_type == profile_runner.OBJECT_INTERBASIN:
+        return True
+    boundary_condition = dict(source_metadata.get("boundary_condition", {}) or {})
+    optional_boundary = dict(source_metadata.get("optional_modules", {}).get("boundary_inflow", {}) or {})
+    if bool(boundary_condition.get("enabled") or boundary_condition.get("boundary_inflow_file")):
+        return True
+    if bool(optional_boundary.get("enabled")):
+        return True
+    return False
+
+
+def forecast_boundary_fields(args: argparse.Namespace, source_metadata: dict[str, Any]) -> dict[str, str]:
+    boundary_condition = dict(source_metadata.get("boundary_condition", {}) or {})
+    return {
+        "file": str(getattr(args, "forecast_boundary_inflow_file", "") or "").strip(),
+        "date_field": str(
+            getattr(args, "forecast_boundary_date_field", "")
+            or boundary_condition.get("date_field")
+            or "date"
+        ).strip(),
+        "flow_field": str(
+            getattr(args, "forecast_boundary_flow_field", "")
+            or boundary_condition.get("flow_field")
+            or "flow"
+        ).strip(),
+        "gap_fill": str(
+            getattr(args, "forecast_boundary_gap_fill", "")
+            or boundary_condition.get("gap_fill")
+            or "zero"
+        ).strip(),
+    }
 
 
 def json_default(value: Any) -> Any:
@@ -226,6 +270,7 @@ def archive_forecast_inputs(
     source_dirs: dict[str, str],
     forecast_start: str,
     forecast_end: str,
+    boundary_source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     expected_index = forecast_time_index(module, forecast_start, forecast_end)
     expected_set = set(expected_index)
@@ -240,6 +285,7 @@ def archive_forecast_inputs(
         "variables": {},
     }
     archived_dirs: dict[str, str] = {}
+    archived_files: dict[str, str] = {}
     label_map = {"prec": "降水", "temp": "气温", "evap": "潜在蒸散发"}
     for key, label in label_map.items():
         src_dir = Path(str(source_dirs.get(key, "") or "")).resolve(strict=False)
@@ -293,6 +339,30 @@ def archive_forecast_inputs(
             "last_time": module.format_time_value(expected_index[-1]) if len(expected_index) else "",
             "files": copied_files,
         }
+    boundary_source = dict(boundary_source or {})
+    boundary_file = str(boundary_source.get("file", "") or "").strip()
+    if boundary_file:
+        src_file = Path(boundary_file).resolve(strict=False)
+        if not src_file.exists():
+            raise FileNotFoundError(f"预报边界入流文件不存在：{src_file}")
+        target_dir = archive_root / "boundary"
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_file = target_dir / src_file.name
+        shutil.copy2(src_file, target_file)
+        archived_files["boundary_inflow"] = str(target_file.resolve(strict=False))
+        manifest["variables"]["boundary_inflow"] = {
+            "label": "上游边界入流",
+            "source_file": str(src_file),
+            "archive_file": archived_files["boundary_inflow"],
+            "expected_steps": int(len(expected_index)),
+            "date_field": str(boundary_source.get("date_field", "") or ""),
+            "flow_field": str(boundary_source.get("flow_field", "") or ""),
+            "gap_fill": str(boundary_source.get("gap_fill", "") or ""),
+            "first_time": module.format_time_value(expected_index[0]) if len(expected_index) else "",
+            "last_time": module.format_time_value(expected_index[-1]) if len(expected_index) else "",
+        }
     manifest_path = archive_root / "input_manifest.json"
     manifest_path.write_text(json.dumps(clean_for_json(manifest), ensure_ascii=False, indent=2, default=json_default), encoding="utf-8")
     return {
@@ -301,6 +371,7 @@ def archive_forecast_inputs(
         "manifest_path": str(manifest_path.resolve(strict=False)),
         "manifest": manifest,
         "archived_dirs": archived_dirs,
+        "archived_files": archived_files,
     }
 
 
@@ -476,6 +547,7 @@ def write_forecast_outputs(
     source_parameter_summary: dict[str, Any] | None = None,
     forecast_input_check: dict[str, Any] | None = None,
     forecast_precip_transfer: dict[str, Any] | None = None,
+    forecast_boundary_source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dates = sim.get("date")
@@ -517,6 +589,12 @@ def write_forecast_outputs(
     source_parameter_summary = dict(source_parameter_summary or {})
     forecast_input_check = dict(forecast_input_check or {})
     forecast_precip_transfer = dict(forecast_precip_transfer or {})
+    forecast_boundary_source = dict(forecast_boundary_source or {})
+    boundary_enabled = bool(
+        getattr(module, "BOUNDARY_INFLOW_ENABLED", False)
+        or forecast_boundary_source.get("file")
+        or np.any(np.asarray(sim.get("q_boundary_raw", []), dtype=np.float64))
+    )
     metadata = {
         "schema": "hbv_studio_forecast_result_v1",
         "run_id": output_dir.name,
@@ -583,14 +661,25 @@ def write_forecast_outputs(
             "forecast_prec_dir": forecast_dirs.get("prec", ""),
             "forecast_temp_dir": forecast_dirs.get("temp", ""),
             "forecast_evap_dir": forecast_dirs.get("evap", ""),
+            "forecast_boundary_inflow_file": forecast_boundary_source.get("file", ""),
+            "forecast_boundary_date_field": forecast_boundary_source.get("date_field", ""),
+            "forecast_boundary_flow_field": forecast_boundary_source.get("flow_field", ""),
+            "forecast_boundary_gap_fill": forecast_boundary_source.get("gap_fill", ""),
             "forecast_input_archive": clean_for_json(input_archive or {}),
             "forecast_input_check": clean_for_json(forecast_input_check),
             "forecast_precipitation_transfer": clean_for_json(forecast_precip_transfer),
             "glacier_mode": str(getattr(module.args, "glacier_mode", "") or ""),
         },
+        "boundary_condition": {
+            "enabled": boundary_enabled,
+            "boundary_inflow_file": forecast_boundary_source.get("file", ""),
+            "date_field": forecast_boundary_source.get("date_field", ""),
+            "flow_field": forecast_boundary_source.get("flow_field", ""),
+            "gap_fill": forecast_boundary_source.get("gap_fill", ""),
+        },
         "optional_modules": {
             "glacier": {"enabled": bool(sim.get("glacier_enabled", False))},
-            "boundary_inflow": {"enabled": bool(np.any(np.asarray(sim.get("q_boundary_raw", []), dtype=np.float64)))},
+            "boundary_inflow": {"enabled": boundary_enabled},
         },
     }
     metadata_path = output_dir / "metadata.json"
@@ -651,6 +740,10 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         objective_mode,
     )
     forecast_input_check = input_check_from_args(args)
+    boundary_required = forecast_boundary_required(config, source_metadata)
+    boundary_source = forecast_boundary_fields(args, source_metadata)
+    if boundary_required and not boundary_source.get("file"):
+        raise ValueError("区间流域连续状态预报必须提供未来上游边界入流 CSV。")
     apply_forecast_window(module, forecast_start, forecast_end)
     output_dir = Path(args.output_dir).resolve(strict=False) if args.output_dir else (
         Path(module.RUNS_DIR) / f"hbv_forecast_{source_run.name}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -667,6 +760,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         source_forecast_dirs,
         forecast_start,
         forecast_end,
+        boundary_source=boundary_source if (boundary_required or boundary_source.get("file")) else None,
     )
     log_stage("归档预报气象输入", stage_callback)
     log_stage("应用站点降水订正规则", stage_callback)
@@ -684,6 +778,18 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
     module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
     module.TEMP_DIR = archived_dirs.get("temp", source_forecast_dirs["temp"])
     module.EVAP_DIR = archived_dirs.get("evap", source_forecast_dirs["evap"])
+    archived_files = dict(input_archive.get("archived_files", {}) or {})
+    if boundary_required or boundary_source.get("file"):
+        boundary_file = str(archived_files.get("boundary_inflow") or boundary_source.get("file") or "").strip()
+        if not boundary_file:
+            raise ValueError("区间流域连续状态预报缺少未来上游边界入流 CSV。")
+        module.BOUNDARY_INFLOW_FILE = boundary_file
+        module.BOUNDARY_INFLOW_DATE_FIELD = boundary_source.get("date_field") or "date"
+        module.BOUNDARY_INFLOW_FLOW_FIELD = boundary_source.get("flow_field") or "flow"
+        module.BOUNDARY_INFLOW_GAP_FILL = boundary_source.get("gap_fill") or "zero"
+        boundary_source["file"] = boundary_file
+    else:
+        module.BOUNDARY_INFLOW_FILE = ""
 
     log_stage("加载未来气象与地理数据", stage_callback)
     module.load_all_data(end_date_override=module.SIM_END, skip_obs=True)
@@ -716,6 +822,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         source_parameter_summary=source_parameter_summary,
         forecast_input_check=forecast_input_check,
         forecast_precip_transfer=forecast_precip_transfer,
+        forecast_boundary_source=boundary_source if (boundary_required or boundary_source.get("file")) else None,
     )
     log_stage("生成预报元数据", stage_callback)
     result["params_adjusted"] = bool(params_adjusted)

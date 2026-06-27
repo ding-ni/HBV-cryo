@@ -62,6 +62,7 @@ OBJECT_FULL_UPSTREAM = "full_upstream_basin"
 OBJECTIVE_MODE_AUTO = "auto"
 OBJECTIVE_MODE_SINGLE = "single_objective_nse"
 OBJECTIVE_MODE_MULTI = "daily_unified_professional_v1"
+OBJECTIVE_MODE_HOURLY = "hourly_alpine_qtp_v1"
 OBJECTIVE_MODE_FLOOD_EVENT = "flood_event_calibration_v1"
 TIME_BASIS_EVENT_WINDOWS = "event_windows"
 CALIBRATION_WORKFLOW_SINGLE = "single_pass"
@@ -577,19 +578,22 @@ def normalize_legacy_project_paths(
 
 PARAM_BOUNDS_PROFILE_QTP = "qtp_alpine_default"
 PARAM_BOUNDS_PROFILE_GENERIC = "generic_wide"
-PARAM_BOUNDS_PROFILE_HOURLY = "hourly_step"
+PARAM_BOUNDS_PROFILE_HOURLY = "hourly_qtp_alpine_default"
+PARAM_BOUNDS_PROFILE_HOURLY_LEGACY = "hourly_step"
 DEFAULT_DAILY_PARAM_BOUNDS_PROFILE = PARAM_BOUNDS_PROFILE_QTP
 
 PARAM_BOUNDS_PROFILE_LABELS = {
     PARAM_BOUNDS_PROFILE_QTP: "青藏高原高寒区默认范围",
     PARAM_BOUNDS_PROFILE_GENERIC: "通用宽范围",
-    PARAM_BOUNDS_PROFILE_HOURLY: "小时尺度稳定范围",
+    PARAM_BOUNDS_PROFILE_HOURLY: "小时尺度青藏高寒区默认范围",
+    PARAM_BOUNDS_PROFILE_HOURLY_LEGACY: "小时尺度稳定范围",
 }
 
 PARAM_BOUNDS_PROFILE_NOTES = {
     PARAM_BOUNDS_PROFILE_QTP: "默认用于青藏高原高寒区率定，收窄土壤、雪冰和退水自由度，降低异参同效。",
     PARAM_BOUNDS_PROFILE_GENERIC: "保留原通用硬边界，适合资料较充分、先验不确定或需要放宽搜索的流域。",
-    PARAM_BOUNDS_PROFILE_HOURLY: "小时尺度边界按 1 小时步长的离散稳定性单独管理。",
+    PARAM_BOUNDS_PROFILE_HOURLY: "用于 1 小时步长的高寒区率定，重点限制汇流和退水参数的离散稳定性。",
+    PARAM_BOUNDS_PROFILE_HOURLY_LEGACY: "旧版小时尺度边界别名，自动映射到小时尺度青藏高寒区默认范围。",
 }
 
 DAILY_GENERIC_PARAM_BOUNDS = [
@@ -688,6 +692,14 @@ def normalize_objective_mode(value: Any) -> str:
         "daily_unified_professional_v1",
     }:
         return OBJECTIVE_MODE_MULTI
+    if raw in {
+        OBJECTIVE_MODE_HOURLY,
+        "hourly",
+        "hourly_qtp",
+        "hourly_alpine",
+        "hourly_unified",
+    }:
+        return OBJECTIVE_MODE_HOURLY
     raise ValueError(f"未知目标函数模式：{value}")
 
 
@@ -878,7 +890,7 @@ def parse_args() -> argparse.Namespace:
         "--param-bounds-profile",
         "--参数边界档案",
         dest="param_bounds_profile",
-        choices=[PARAM_BOUNDS_PROFILE_QTP, PARAM_BOUNDS_PROFILE_GENERIC],
+        choices=[PARAM_BOUNDS_PROFILE_QTP, PARAM_BOUNDS_PROFILE_GENERIC, PARAM_BOUNDS_PROFILE_HOURLY, PARAM_BOUNDS_PROFILE_HOURLY_LEGACY],
         default=None,
         help="日尺度参数边界档案，默认使用青藏高原高寒区推荐范围。",
     )
@@ -937,8 +949,10 @@ def resolve_objective_mode(config: dict[str, Any], explicit: Any, profile: str) 
     if profile == PROFILE_DAILY:
         return OBJECTIVE_MODE_MULTI
     if selected == OBJECTIVE_MODE_AUTO:
+        return OBJECTIVE_MODE_HOURLY
+    if selected == OBJECTIVE_MODE_SINGLE:
         return OBJECTIVE_MODE_SINGLE
-    return OBJECTIVE_MODE_SINGLE if selected == OBJECTIVE_MODE_SINGLE else OBJECTIVE_MODE_SINGLE
+    return OBJECTIVE_MODE_HOURLY
 
 
 def normalize_calibration_workflow(value: Any) -> str:
@@ -958,6 +972,8 @@ def normalize_param_bounds_profile(value: Any) -> str:
         return PARAM_BOUNDS_PROFILE_QTP
     if raw in {"generic", "wide", "universal", "legacy", PARAM_BOUNDS_PROFILE_GENERIC}:
         return PARAM_BOUNDS_PROFILE_GENERIC
+    if raw in {"hourly", "hourly_qtp", "hourly_alpine", PARAM_BOUNDS_PROFILE_HOURLY, PARAM_BOUNDS_PROFILE_HOURLY_LEGACY}:
+        return PARAM_BOUNDS_PROFILE_HOURLY
     raise ValueError(f"未知参数边界档案：{value}")
 
 
@@ -1683,6 +1699,33 @@ def build_single_objective_meta(profile: str) -> dict[str, Any]:
     }
 
 
+def build_hourly_alpine_objective_meta(profile: str) -> dict[str, Any]:
+    return {
+        "type": OBJECTIVE_MODE_HOURLY,
+        "profile": profile,
+        "label": "小时尺度高寒区率定目标",
+        "summary": "小时流量过程为主，叠加 08:00 水文日聚合约束和 6 小时洪峰时序容差。",
+        "formula": "weighted(hourly NSE/logNSE/PBIAS, hydro-day NSE/PBIAS, peak timing penalty)",
+        "weights": {
+            "hourly_nse_cal": 1.00,
+            "hourly_log_nse_cal": 0.25,
+            "hourly_pbias_cal": 0.12,
+            "hydroday_nse_cal": 0.35,
+            "hydroday_pbias_cal": 0.12,
+            "peak_timing_cal": 0.08,
+        },
+        "diagnostic_only_constraints": {
+            "validation_metrics": True,
+            "source_partition": True,
+        },
+        "notes": [
+            "率定目标只使用率定期有效观测；验证期指标保留为诊断输出。",
+            "日约束按 08:00-次日 08:00 水文日把小时流量聚合为日均流量。",
+            "该目标函数服务于小时尺度高寒区方案，不改变日尺度统一目标函数。",
+        ],
+    }
+
+
 def patch_profile_behavior(
     module: Any,
     config: dict[str, Any],
@@ -1718,7 +1761,10 @@ def patch_profile_behavior(
             module.objective_with_logging = module._studio_base_objective_with_logging
         if getattr(module, "_studio_base_de_callback", None) is not None:
             module.de_callback = module._studio_base_de_callback
-        module.OBJECTIVE_PROFILE = build_single_objective_meta(profile)
+        if selected_objective == OBJECTIVE_MODE_SINGLE:
+            module.OBJECTIVE_PROFILE = build_single_objective_meta(profile)
+        else:
+            module.OBJECTIVE_PROFILE = build_hourly_alpine_objective_meta(profile)
 
     if profile == PROFILE_DAILY:
         selected_bounds = parameter_bounds_for_profile(PROFILE_DAILY, selected_bounds_profile)
@@ -1737,9 +1783,9 @@ def patch_profile_behavior(
     else:
         module.PARAMETER_PROFILE["notes"] = [
             (
-                "小时尺度当前启用多指标综合目标，可切回单目标 NSE。"
-                if selected_objective == OBJECTIVE_MODE_MULTI
-                else "小时尺度默认使用单目标 NSE，也可切换为多指标综合目标。"
+                "小时尺度当前启用小时高寒区综合目标，可显式切回单目标 NSE。"
+                if selected_objective == OBJECTIVE_MODE_HOURLY
+                else "小时尺度当前显式使用单目标 NSE，默认推荐小时高寒区综合目标。"
             ),
             "Muskingum 路由参数范围已按 1 小时步长的离散稳定性收紧，避免大面积无效搜索。",
             "Results are stored separately from daily mode.",
@@ -1930,7 +1976,12 @@ def main() -> None:
         "--objective-mode", requested_objective_mode,
         "--calibration-workflow", calibration_workflow,
     ]
-    if profile == PROFILE_DAILY and param_bounds_profile in {PARAM_BOUNDS_PROFILE_QTP, PARAM_BOUNDS_PROFILE_GENERIC}:
+    if param_bounds_profile in {
+        PARAM_BOUNDS_PROFILE_QTP,
+        PARAM_BOUNDS_PROFILE_GENERIC,
+        PARAM_BOUNDS_PROFILE_HOURLY,
+        PARAM_BOUNDS_PROFILE_HOURLY_LEGACY,
+    }:
         argv.extend(["--param-bounds-profile", param_bounds_profile])
     if args.prec_dir:
         argv.extend(["--prec-dir", str(args.prec_dir)])

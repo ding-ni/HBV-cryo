@@ -115,6 +115,7 @@ SIGNATURE_PEAK_TOL_MONTHS = 1
 EPS = 1e-12
 
 FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1"
+OBJECTIVE_FAMILY_HOURLY = "hourly_alpine_qtp_v1"
 FLOOD_EVENT_SCHEMA = "flood_event_evaluation_v1"
 DEFAULT_FLOOD_EVENT_WEIGHTS = {
     "peak_flow_error": 0.30,
@@ -276,16 +277,22 @@ param_names = [
 
 PARAM_BOUNDS_PROFILE_QTP = "qtp_alpine_default"
 PARAM_BOUNDS_PROFILE_GENERIC = "generic_wide"
+PARAM_BOUNDS_PROFILE_HOURLY_QTP = "hourly_qtp_alpine_default"
+PARAM_BOUNDS_PROFILE_HOURLY_LEGACY = "hourly_step"
 DEFAULT_PARAM_BOUNDS_PROFILE = PARAM_BOUNDS_PROFILE_QTP
 
 PARAM_BOUNDS_PROFILE_LABELS = {
     PARAM_BOUNDS_PROFILE_QTP: "青藏高原高寒区默认范围",
     PARAM_BOUNDS_PROFILE_GENERIC: "通用宽范围",
+    PARAM_BOUNDS_PROFILE_HOURLY_QTP: "小时尺度青藏高寒区默认范围",
+    PARAM_BOUNDS_PROFILE_HOURLY_LEGACY: "小时尺度稳定范围",
 }
 
 PARAM_BOUNDS_PROFILE_NOTES = {
     PARAM_BOUNDS_PROFILE_QTP: "默认用于青藏高原高寒区率定，收窄土壤、雪冰和退水自由度，降低异参同效。",
     PARAM_BOUNDS_PROFILE_GENERIC: "保留原通用硬边界，适合资料较充分、先验不确定或需要放宽搜索的流域。",
+    PARAM_BOUNDS_PROFILE_HOURLY_QTP: "用于 1 小时步长的高寒区率定，重点限制汇流和退水参数的离散稳定性。",
+    PARAM_BOUNDS_PROFILE_HOURLY_LEGACY: "旧版小时尺度边界别名，自动映射到小时尺度青藏高寒区默认范围。",
 }
 
 GENERIC_PARAM_BOUNDS = [
@@ -330,9 +337,32 @@ QTP_ALPINE_PARAM_BOUNDS = [
     (0.05, 0.35),
 ]
 
+HOURLY_QTP_ALPINE_PARAM_BOUNDS = [
+    (-2.0, 2.0),
+    (100.0, 1500.0),
+    (0.5, 4.0),
+    (0.2, 1.0),
+    (0.8, 1.2),
+    (0.5, 1.5),
+    (0.0, 0.1),
+    (0.01, 0.1),
+    (2.0, 5.0),
+    (3.0, 8.0),
+    (0.02, 0.5),
+    (0.01, 0.2),
+    (0.0005, 0.02),
+    (1.0, 120.0),
+    (0.01, 5.0),
+    (1.0, 4.0),
+    (0.03, 1.2),
+    (0.0, 0.05),
+]
+
 PARAM_BOUNDS_BY_PROFILE = {
     PARAM_BOUNDS_PROFILE_QTP: QTP_ALPINE_PARAM_BOUNDS,
     PARAM_BOUNDS_PROFILE_GENERIC: GENERIC_PARAM_BOUNDS,
+    PARAM_BOUNDS_PROFILE_HOURLY_QTP: HOURLY_QTP_ALPINE_PARAM_BOUNDS,
+    PARAM_BOUNDS_PROFILE_HOURLY_LEGACY: HOURLY_QTP_ALPINE_PARAM_BOUNDS,
 }
 PARAM_BOUNDS_PROFILE_SELECTED = DEFAULT_PARAM_BOUNDS_PROFILE
 PARAM_BOUNDS = [tuple(bound) for bound in PARAM_BOUNDS_BY_PROFILE[PARAM_BOUNDS_PROFILE_SELECTED]]
@@ -356,6 +386,8 @@ def normalize_param_bounds_profile(value):
         return PARAM_BOUNDS_PROFILE_QTP
     if raw in {"generic", "wide", "universal", "legacy", PARAM_BOUNDS_PROFILE_GENERIC}:
         return PARAM_BOUNDS_PROFILE_GENERIC
+    if raw in {"hourly", "hourly_qtp", "hourly_alpine", PARAM_BOUNDS_PROFILE_HOURLY_QTP, PARAM_BOUNDS_PROFILE_HOURLY_LEGACY}:
+        return PARAM_BOUNDS_PROFILE_HOURLY_QTP
     raise ValueError(f"未知参数边界档案：{value}")
 
 
@@ -2604,7 +2636,7 @@ def parse_args():
         "--param-bounds-profile",
         "--参数边界档案",
         dest="param_bounds_profile",
-        choices=[PARAM_BOUNDS_PROFILE_QTP, PARAM_BOUNDS_PROFILE_GENERIC],
+        choices=[PARAM_BOUNDS_PROFILE_QTP, PARAM_BOUNDS_PROFILE_GENERIC, PARAM_BOUNDS_PROFILE_HOURLY_QTP, PARAM_BOUNDS_PROFILE_HOURLY_LEGACY],
         default=DEFAULT_PARAM_BOUNDS_PROFILE,
         help="参数搜索边界档案：默认使用青藏高原高寒区推荐范围，可切换为通用宽范围。",
     )
@@ -2615,7 +2647,7 @@ def parse_args():
         "--目标函数",
         "--objective-mode",
         dest="objective_mode",
-        choices=["auto", "single_objective_nse", "weighted_multi_criteria", OBJECTIVE_FAMILY_DAILY, FLOOD_EVENT_OBJECTIVE_FAMILY],
+        choices=["auto", "single_objective_nse", "weighted_multi_criteria", OBJECTIVE_FAMILY_DAILY, OBJECTIVE_FAMILY_HOURLY, FLOOD_EVENT_OBJECTIVE_FAMILY],
         default="auto",
     )
     parser.add_argument("--fill-nan", dest="fill_nan", action="store_true", default=True)
@@ -6960,6 +6992,183 @@ def current_calibration_profile():
     return "hourly" if float(TIME_STEP_HOURS) <= 1.5 else "daily"
 
 
+def _metric_bundle(obs, sim):
+    obs_arr = np.asarray(obs, dtype=np.float64)
+    sim_arr = np.asarray(sim, dtype=np.float64)
+    count = min(len(obs_arr), len(sim_arr))
+    obs_arr = obs_arr[:count]
+    sim_arr = sim_arr[:count]
+    mask = np.isfinite(obs_arr) & np.isfinite(sim_arr)
+    valid_count = int(np.sum(mask))
+    if valid_count < 2:
+        return {
+            "count": valid_count,
+            "nse": float("nan"),
+            "log_nse": float("nan"),
+            "pbias": float("nan"),
+            "rmse": float("nan"),
+        }
+    return {
+        "count": valid_count,
+        "nse": nse_safe(obs_arr, sim_arr),
+        "log_nse": log_nse(obs_arr, sim_arr),
+        "pbias": pbias(obs_arr, sim_arr),
+        "rmse": rmse(obs_arr, sim_arr),
+    }
+
+
+def _hydrological_daily_mean(obs, sim, mask=None, *, day_start_hour=8):
+    if SIM_DATES is None:
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), []
+    dates = pd.DatetimeIndex(SIM_DATES)
+    count = min(len(dates), len(obs), len(sim))
+    if count <= 0:
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), []
+    dates = dates[:count]
+    obs_arr = np.asarray(obs, dtype=np.float64)[:count]
+    sim_arr = np.asarray(sim, dtype=np.float64)[:count]
+    active = np.ones(count, dtype=bool)
+    if mask is not None:
+        active &= np.asarray(mask, dtype=bool)[:count]
+    active &= np.isfinite(obs_arr) & np.isfinite(sim_arr)
+    if not np.any(active):
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), []
+
+    step_hours = max(float(TIME_STEP_HOURS), 1e-6)
+    expected_steps = max(1, int(round(24.0 / step_hours)))
+    min_steps = max(2, int(np.ceil(expected_steps * 0.75)))
+    labels = (dates - pd.Timedelta(hours=int(day_start_hour))).floor("D")
+    obs_days = []
+    sim_days = []
+    day_labels = []
+    for label in pd.Index(labels[active]).unique():
+        group_mask = active & (labels == label)
+        if int(np.sum(group_mask)) < min_steps:
+            continue
+        obs_days.append(float(np.mean(obs_arr[group_mask])))
+        sim_days.append(float(np.mean(sim_arr[group_mask])))
+        day_labels.append(pd.Timestamp(label) + pd.Timedelta(hours=int(day_start_hour)))
+    return (
+        np.asarray(obs_days, dtype=np.float64),
+        np.asarray(sim_days, dtype=np.float64),
+        day_labels,
+    )
+
+
+def _finite_penalty(value, *, mode="skill", scale=15.0, cap=5.0):
+    try:
+        value = float(value)
+    except Exception:
+        return float("nan")
+    if not np.isfinite(value):
+        return float("nan")
+    if mode == "pbias":
+        return float(min(cap, abs(value) / max(float(scale), EPS)))
+    return float(min(cap, max(0.0, 1.0 - value)))
+
+
+def _peak_timing_error_hours(obs, sim, mask=None):
+    if SIM_DATES is None:
+        return float("nan")
+    dates = pd.DatetimeIndex(SIM_DATES)
+    count = min(len(dates), len(obs), len(sim))
+    if count <= 0:
+        return float("nan")
+    dates = dates[:count]
+    obs_arr = np.asarray(obs, dtype=np.float64)[:count]
+    sim_arr = np.asarray(sim, dtype=np.float64)[:count]
+    active = np.isfinite(obs_arr) & np.isfinite(sim_arr)
+    if mask is not None:
+        active &= np.asarray(mask, dtype=bool)[:count]
+    if int(np.sum(active)) < 3:
+        return float("nan")
+    active_indices = np.where(active)[0]
+    obs_peak_index = active_indices[int(np.argmax(obs_arr[active]))]
+    sim_peak_index = active_indices[int(np.argmax(sim_arr[active]))]
+    delta = abs((dates[sim_peak_index] - dates[obs_peak_index]).total_seconds()) / 3600.0
+    return float(delta)
+
+
+def compute_hourly_alpine_objective_terms(metrics, sim):
+    q_score_series, q_score_basis = scoring_series(sim)
+    if q_score_series is None or Q_OBS_FULL is None or CALIB_MASK is None:
+        return BAD_OBJ, None
+    obs_source = Q_OBS_OBJ if Q_OBS_OBJ is not None else Q_OBS_FULL
+    obs_full = np.asarray(obs_source, dtype=np.float64)
+    sim_full = np.asarray(q_score_series, dtype=np.float64)
+    count = min(len(obs_full), len(sim_full))
+    if count <= 0:
+        return BAD_OBJ, None
+    obs_full = obs_full[:count]
+    sim_full = sim_full[:count]
+    calib_mask = np.asarray(CALIB_MASK, dtype=bool)[:count]
+    valid_mask = np.asarray(VALID_MASK, dtype=bool)[:count] if VALID_MASK is not None else np.zeros(count, dtype=bool)
+
+    hourly_cal = _metric_bundle(obs_full[calib_mask], sim_full[calib_mask])
+    hourly_val = _metric_bundle(obs_full[valid_mask], sim_full[valid_mask])
+    daily_obs_cal, daily_sim_cal, daily_labels_cal = _hydrological_daily_mean(obs_full, sim_full, calib_mask)
+    daily_obs_val, daily_sim_val, daily_labels_val = _hydrological_daily_mean(obs_full, sim_full, valid_mask)
+    daily_cal = _metric_bundle(daily_obs_cal, daily_sim_cal)
+    daily_val = _metric_bundle(daily_obs_val, daily_sim_val)
+    peak_error_hours = _peak_timing_error_hours(obs_full, sim_full, calib_mask)
+    peak_tolerance_hours = 6.0
+
+    if not np.isfinite(hourly_cal["nse"]):
+        return BAD_OBJ, None
+
+    weighted_terms = []
+
+    def add_term(name, penalty, weight):
+        if np.isfinite(float(penalty)):
+            weighted_terms.append((name, float(penalty), float(weight)))
+
+    add_term("hourly_nse_cal", _finite_penalty(hourly_cal["nse"]), 1.00)
+    add_term("hourly_log_nse_cal", _finite_penalty(hourly_cal["log_nse"]), 0.25)
+    add_term("hourly_pbias_cal", _finite_penalty(hourly_cal["pbias"], mode="pbias", scale=15.0), 0.12)
+    add_term("hydroday_nse_cal", _finite_penalty(daily_cal["nse"]), 0.35)
+    add_term("hydroday_pbias_cal", _finite_penalty(daily_cal["pbias"], mode="pbias", scale=12.0), 0.12)
+    if np.isfinite(peak_error_hours):
+        add_term("peak_timing_cal", min(3.0, peak_error_hours / peak_tolerance_hours), 0.08)
+
+    if not weighted_terms:
+        return BAD_OBJ, None
+    total_weight = float(sum(item[2] for item in weighted_terms))
+    objective_value = float(sum(item[1] * item[2] for item in weighted_terms) / max(total_weight, EPS))
+    return objective_value, {
+        "objective_family": OBJECTIVE_FAMILY_HOURLY,
+        "objective_value": objective_value,
+        "evaluation_basis": q_score_basis,
+        "nse_cal": float(hourly_cal["nse"]),
+        "nse_val": float(hourly_val["nse"]),
+        "log_nse_cal": float(hourly_cal["log_nse"]) if np.isfinite(hourly_cal["log_nse"]) else float(hourly_cal["nse"]),
+        "log_nse_val": float(hourly_val["log_nse"]),
+        "pbias_cal": float(hourly_cal["pbias"]),
+        "pbias_val": float(hourly_val["pbias"]),
+        "daily_nse_cal": float(daily_cal["nse"]),
+        "daily_nse_val": float(daily_val["nse"]),
+        "daily_pbias_cal": float(daily_cal["pbias"]),
+        "daily_pbias_val": float(daily_val["pbias"]),
+        "peak_time_error_hours": float(peak_error_hours) if np.isfinite(peak_error_hours) else None,
+        "peak_time_tolerance_hours": peak_tolerance_hours,
+        "objective_terms": {
+            name: {"penalty": penalty, "weight": weight}
+            for name, penalty, weight in weighted_terms
+        },
+        "diagnostics": {
+            "hourly": {"calibration": hourly_cal, "validation": hourly_val},
+            "hydrological_day": {
+                "day_start_hour": 8,
+                "calibration": dict(daily_cal, days=int(len(daily_labels_cal))),
+                "validation": dict(daily_val, days=int(len(daily_labels_val))),
+            },
+            "peak_timing": {
+                "calibration_error_hours": float(peak_error_hours) if np.isfinite(peak_error_hours) else None,
+                "tolerance_hours": peak_tolerance_hours,
+            },
+        },
+    }
+
+
 def current_objective_mode():
     raw_selected = str(OBJECTIVE_MODE_SELECTED or "").strip().lower()
     raw_profile_type = (
@@ -6974,8 +7183,6 @@ def current_objective_mode():
     ):
         return FLOOD_EVENT_OBJECTIVE_FAMILY
     profile_name = current_calibration_profile()
-    if profile_name == "daily":
-        return OBJECTIVE_FAMILY_DAILY
     raw = ""
     if isinstance(OBJECTIVE_PROFILE, dict):
         raw = str(OBJECTIVE_PROFILE.get("type", "") or "").strip().lower()
@@ -6983,9 +7190,13 @@ def current_objective_mode():
         raw = str(OBJECTIVE_MODE_SELECTED or "").strip().lower()
     if raw in {"single_objective_nse", "single", "single_nse", "nse"}:
         return "single_objective_nse"
+    if raw in {OBJECTIVE_FAMILY_HOURLY, "hourly_alpine", "hourly_qtp", "hourly_unified"}:
+        return OBJECTIVE_FAMILY_HOURLY
+    if profile_name == "daily":
+        return OBJECTIVE_FAMILY_DAILY
     if raw in {FLOOD_EVENT_OBJECTIVE_FAMILY, "flood_event", "event_objective"}:
         return FLOOD_EVENT_OBJECTIVE_FAMILY
-    return "single_objective_nse"
+    return OBJECTIVE_FAMILY_HOURLY
 
 
 def objective_simulation_mode():
@@ -7000,6 +7211,8 @@ def compute_objective_terms(metrics, sim=None):
     nse_cal = float(metrics.get("nse_cal", float("nan")))
     if current_objective_mode() == FLOOD_EVENT_OBJECTIVE_FAMILY:
         return compute_flood_event_objective_terms(metrics, sim or {})
+    if current_objective_mode() == OBJECTIVE_FAMILY_HOURLY:
+        return compute_hourly_alpine_objective_terms(metrics, sim or {})
     if current_objective_mode() == OBJECTIVE_FAMILY_DAILY:
         translated = dict(sim or {})
         translated["glacier_fraction_window"] = (
@@ -7135,6 +7348,36 @@ def build_daily_unified_objective_meta(profile_name=None):
     }
 
 
+def build_hourly_alpine_objective_meta(profile_name=None):
+    profile_name = str(profile_name or current_calibration_profile()).strip().lower()
+    if profile_name not in {"daily", "hourly"}:
+        profile_name = current_calibration_profile()
+    return {
+        "type": OBJECTIVE_FAMILY_HOURLY,
+        "profile": profile_name,
+        "label": "小时尺度高寒区率定目标",
+        "summary": "小时流量过程为主，叠加 08:00 水文日聚合约束和 6 小时洪峰时序容差。",
+        "formula": "weighted(hourly NSE/logNSE/PBIAS, hydro-day NSE/PBIAS, peak timing penalty)",
+        "weights": {
+            "hourly_nse_cal": 1.00,
+            "hourly_log_nse_cal": 0.25,
+            "hourly_pbias_cal": 0.12,
+            "hydroday_nse_cal": 0.35,
+            "hydroday_pbias_cal": 0.12,
+            "peak_timing_cal": 0.08,
+        },
+        "diagnostic_only_constraints": {
+            "validation_metrics": True,
+            "source_partition": True,
+        },
+        "notes": [
+            "率定目标只使用率定期有效观测；验证期指标保留为诊断输出。",
+            "日约束按 08:00-次日 08:00 水文日把小时流量聚合为日均流量。",
+            "该目标函数服务于小时尺度高寒区方案，不改变日尺度统一目标函数。",
+        ],
+    }
+
+
 def build_flood_event_objective_meta(profile_name=None):
     profile_name = str(profile_name or current_calibration_profile()).strip().lower()
     if profile_name not in {"daily", "hourly"}:
@@ -7198,6 +7441,9 @@ def current_objective_profile():
     base_profile = (
         build_flood_event_objective_meta(profile_name)
         if objective_mode == FLOOD_EVENT_OBJECTIVE_FAMILY
+        else
+        build_hourly_alpine_objective_meta(profile_name)
+        if objective_mode == OBJECTIVE_FAMILY_HOURLY
         else
         build_daily_unified_objective_meta(profile_name)
         if objective_mode == OBJECTIVE_FAMILY_DAILY

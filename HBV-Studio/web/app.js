@@ -4896,6 +4896,7 @@ function forecastInputPayload(run = selectedForecastRun()) {
     forecast_prec_dir: $("#forecast-prec-dir")?.value,
     forecast_temp_dir: $("#forecast-temp-dir")?.value,
     forecast_evap_dir: $("#forecast-evap-dir")?.value,
+    forecast_boundary_inflow_file: $("#forecast-boundary-inflow-file")?.value,
   }, { fallbackConfigPath: state.wizardWorkspacePath });
 }
 
@@ -5129,13 +5130,15 @@ async function startForecastRestart() {
   const precDir = $("#forecast-prec-dir")?.value.trim() || "";
   const tempDir = $("#forecast-temp-dir")?.value.trim() || "";
   const evapDir = $("#forecast-evap-dir")?.value.trim() || "";
+  const boundaryFile = $("#forecast-boundary-inflow-file")?.value.trim() || "";
   const preflight = window.HBVStudioForecastView.forecastRestartPreflight(run, {
     forecast_start: forecastStart,
     forecast_end: forecastEnd,
     forecast_prec_dir: precDir,
     forecast_temp_dir: tempDir,
     forecast_evap_dir: evapDir,
-  }, { forecastRunReady, forecastSuggestedStart, forecastTimeComparable });
+    forecast_boundary_inflow_file: boundaryFile,
+  }, { forecastRunReady, forecastSuggestedStart, forecastTimeComparable, boundaryEnabledFromMeta });
   if (!preflight.ok) {
     showToast(preflight.message, true);
     return;
@@ -5158,6 +5161,7 @@ async function startForecastRestart() {
     forecast_prec_dir: precDir,
     forecast_temp_dir: tempDir,
     forecast_evap_dir: evapDir,
+    forecast_boundary_inflow_file: boundaryFile,
     glacier_mode: $("#forecast-glacier-mode")?.value,
   }, {
     fallbackConfigPath: state.wizardWorkspacePath,
@@ -6110,7 +6114,7 @@ function bindEvents() {
     renderForecastSourceSummary();
     scheduleForecastInputCheck(0);
   });
-  ["#forecast-start", "#forecast-end", "#forecast-prec-dir", "#forecast-temp-dir", "#forecast-evap-dir"].forEach(sel => {
+  ["#forecast-start", "#forecast-end", "#forecast-prec-dir", "#forecast-temp-dir", "#forecast-evap-dir", "#forecast-boundary-inflow-file"].forEach(sel => {
     const el = $(sel);
     if (!el) return;
     el.addEventListener("input", () => scheduleForecastInputCheck());

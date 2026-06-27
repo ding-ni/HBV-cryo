@@ -10,6 +10,10 @@ from typing import Any, Callable
 import pandas as pd
 
 
+def _default_inspect_boundary_inflow_csv(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    raise ValueError("边界入流检查函数未配置。")
+
+
 @dataclass(frozen=True)
 class ForecastInputCheckContext:
     resolve_path: Callable[..., Path]
@@ -31,6 +35,7 @@ class ForecastInputCheckContext:
     meteo_precip_mode_key: str
     time_basis_forecast_window: str
     time_basis_labels: dict[str, str]
+    inspect_boundary_inflow_csv: Callable[..., dict[str, Any]] = _default_inspect_boundary_inflow_csv
 
 
 def forecast_source_state_time(source_run: Path, metadata: dict[str, Any]) -> str:
@@ -341,6 +346,123 @@ def forecast_station_precip_check(
         }
 
 
+def forecast_boundary_required(metadata: dict[str, Any]) -> bool:
+    object_type = str(metadata.get("project_object_type") or metadata.get("object_type") or "").strip().lower()
+    if object_type == "interbasin_with_boundary":
+        return True
+    boundary = dict(metadata.get("boundary_condition", {}) or {})
+    optional = dict(metadata.get("optional_modules", {}).get("boundary_inflow", {}) or {})
+    return bool(boundary.get("enabled") or boundary.get("boundary_inflow_file") or optional.get("enabled"))
+
+
+def forecast_boundary_input_summary(
+    payload: dict[str, Any],
+    metadata: dict[str, Any],
+    expected_index: pd.DatetimeIndex | None,
+    step_hours: float,
+    *,
+    resolve_path: Callable[..., Path],
+    inspect_boundary_inflow_csv: Callable[..., dict[str, Any]],
+    format_time_for_check: Callable[[Any, float], str],
+) -> dict[str, Any] | None:
+    boundary = dict(metadata.get("boundary_condition", {}) or {})
+    raw_path = str(
+        payload.get("forecast_boundary_inflow_file")
+        or payload.get("boundary_inflow_file")
+        or payload.get("boundary_csv")
+        or ""
+    ).strip()
+    required = forecast_boundary_required(metadata)
+    if not required and not raw_path:
+        return None
+    expected_steps = int(len(expected_index)) if expected_index is not None else 0
+    if not raw_path:
+        message = "区间流域连续状态预报需要选择未来上游边界入流 CSV。"
+        return {
+            "key": "boundary_inflow",
+            "label": "上游边界入流",
+            "path": "",
+            "status": "fail",
+            "summary": message,
+            "errors": [message],
+            "warnings": [],
+            "expected_steps": expected_steps,
+            "covered_steps": 0,
+            "missing_steps": expected_steps,
+            "out_of_window_steps": 0,
+        }
+    date_field = str(
+        payload.get("forecast_boundary_date_field")
+        or payload.get("boundary_date_field")
+        or boundary.get("date_field")
+        or "date"
+    ).strip()
+    flow_field = str(
+        payload.get("forecast_boundary_flow_field")
+        or payload.get("boundary_flow_field")
+        or boundary.get("flow_field")
+        or "flow"
+    ).strip()
+    try:
+        resolved = resolve_path(raw_path, must_exist=True)
+        info = inspect_boundary_inflow_csv(
+            str(resolved),
+            date_field=date_field,
+            flow_field=flow_field,
+            expected_index=expected_index,
+            expected_step_hours=step_hours,
+        )
+    except Exception as exc:
+        message = f"预报边界入流检查失败：{exc}"
+        return {
+            "key": "boundary_inflow",
+            "label": "上游边界入流",
+            "path": raw_path,
+            "status": "fail",
+            "summary": message,
+            "errors": [message],
+            "warnings": [],
+            "expected_steps": expected_steps,
+            "covered_steps": 0,
+            "missing_steps": expected_steps,
+            "out_of_window_steps": 0,
+        }
+    missing = list(info.get("missing_steps", []) or [])
+    out_of_window = list(info.get("out_of_range_steps", []) or [])
+    errors: list[str] = []
+    warnings: list[str] = []
+    if missing:
+        sample = "、".join(format_time_for_check(item, step_hours) for item in missing[:3])
+        errors.append(f"预报边界入流缺少 {len(missing)} 个时间步，例如：{sample}")
+    if out_of_window:
+        warnings.append(f"边界入流文件中有 {len(out_of_window)} 个预报窗口外时间步，将不参与本次预报。")
+    negative_count = int(info.get("negative_count", 0) or 0)
+    if negative_count:
+        warnings.append(f"边界入流存在 {negative_count} 条负值记录，建议核对。")
+    covered = max(0, expected_steps - len(missing)) if expected_steps else int(info.get("valid_rows", 0) or 0)
+    status = "fail" if errors else "warn" if warnings or expected_steps <= 0 else "ok"
+    return {
+        "key": "boundary_inflow",
+        "label": "上游边界入流",
+        "path": str(resolved.resolve(strict=False)),
+        "status": status,
+        "summary": f"{covered}/{expected_steps} 个预报边界入流时步可用" if expected_steps else f"识别到 {covered} 条有效边界入流记录",
+        "errors": errors,
+        "warnings": warnings,
+        "total_files": 1,
+        "valid_time_steps": int(info.get("valid_rows", covered) or covered),
+        "expected_steps": expected_steps,
+        "covered_steps": covered,
+        "missing_steps": int(len(missing)),
+        "out_of_window_steps": int(len(out_of_window)),
+        "first_time": format_time_for_check(info.get("date_range", {}).get("start", ""), step_hours),
+        "last_time": format_time_for_check(info.get("date_range", {}).get("end", ""), step_hours),
+        "date_field": str(info.get("date_field", date_field) or date_field),
+        "flow_field": str(info.get("flow_field", flow_field) or flow_field),
+        "time_step_hours": info.get("effective_time_step_hours", info.get("time_step_hours")),
+    }
+
+
 def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckContext) -> dict[str, Any]:
     source_run_raw = str(payload.get("source_run", payload.get("run_path", "")) or "").strip()
     if not source_run_raw:
@@ -433,6 +555,17 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
             format_time_for_check=context.format_time_for_check,
         ),
     ]
+    boundary_summary = forecast_boundary_input_summary(
+        payload,
+        metadata,
+        expected_index,
+        step_hours,
+        resolve_path=context.resolve_path,
+        inspect_boundary_inflow_csv=context.inspect_boundary_inflow_csv,
+        format_time_for_check=context.format_time_for_check,
+    )
+    if boundary_summary is not None:
+        variables.append(boundary_summary)
     for item in variables:
         errors.extend(str(msg) for msg in list(item.get("errors", []) or []))
         warnings.extend(str(msg) for msg in list(item.get("warnings", []) or []))
@@ -507,6 +640,15 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
             {"label": "预报时段", "value": f"{forecast_start} 至 {forecast_end}" if forecast_start and forecast_end else "未完整填写", "status": "ok" if expected_steps > 0 else "warn"},
             {"label": "参数来源", "value": f"源结果参数（{len(params)} 项）" if params else "缺少参数", "detail": parameter_detail, "status": "ok" if params else "fail"},
             {"label": "归档方式", "value": "运行时仅归档预报窗口内 P/T/PET 栅格", "status": "ok" if expected_steps > 0 else "warn"},
+            {
+                "label": "边界入流",
+                "value": (
+                    boundary_summary.get("summary")
+                    if boundary_summary is not None
+                    else "非区间入流方案，无需未来边界入流"
+                ),
+                "status": boundary_summary.get("status", "ok") if boundary_summary is not None else "ok",
+            },
             {"label": "结果输出", "value": output_preview["result_label"], "detail": output_preview["result_detail"], "status": output_status},
             {"label": "输入清单", "value": output_preview["archive_label"], "detail": output_preview["archive_detail"], "status": output_status},
         ],

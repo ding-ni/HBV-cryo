@@ -314,6 +314,7 @@
       forecast_prec_dir: text(fields.forecast_prec_dir),
       forecast_temp_dir: text(fields.forecast_temp_dir),
       forecast_evap_dir: text(fields.forecast_evap_dir),
+      forecast_boundary_inflow_file: text(fields.forecast_boundary_inflow_file),
       time_step_hours: forecastStepHours(run),
     };
   }
@@ -339,6 +340,7 @@
       forecast_prec_dir: input.forecast_prec_dir,
       forecast_temp_dir: input.forecast_temp_dir,
       forecast_evap_dir: input.forecast_evap_dir,
+      forecast_boundary_inflow_file: input.forecast_boundary_inflow_file,
       profile: text(options.profile),
       objective_mode: text(run?.effective_objective_mode || run?.objective_family || run?.recorded_objective_family || options.defaultObjectiveMode || ""),
       prec_source: "custom_tif",
@@ -372,6 +374,7 @@
     const precDir = text(fields.forecast_prec_dir);
     const tempDir = text(fields.forecast_temp_dir);
     const evapDir = text(fields.forecast_evap_dir);
+    const boundaryFile = text(fields.forecast_boundary_inflow_file);
     if (!forecastEnd) {
       return { ok: false, message: "请填写预报结束时间。" };
     }
@@ -385,6 +388,10 @@
     }
     if (!precDir || !tempDir || !evapDir) {
       return { ok: false, message: "请完整选择预报降水、气温和潜在蒸散发栅格目录。" };
+    }
+    const boundaryEnabledFromMeta = helpers.boundaryEnabledFromMeta || (() => false);
+    if (boundaryEnabledFromMeta(run?.metadata || run) && !boundaryFile) {
+      return { ok: false, message: "区间流域连续状态预报需要选择未来上游边界入流文件。" };
     }
     return { ok: true, message: "", expectedStart };
   }
@@ -834,12 +841,12 @@
   }
 
   function variableLabel(key, fallback) {
-    return fallback || ({ prec: "降水", temp: "气温", evap: "潜在蒸散发" }[key] || key || "气象变量");
+    return fallback || ({ prec: "降水", temp: "气温", evap: "潜在蒸散发", boundary_inflow: "上游边界入流" }[key] || key || "气象变量");
   }
 
   function variableDetailText(item = {}) {
     if (item.first_time || item.last_time) return rangeText(item.first_time, item.last_time);
-    if (item.path) return "目录已选择，等待按预报窗口核对";
+    if (item.path) return item.key === "boundary_inflow" ? "文件已选择，等待按预报窗口核对" : "目录已选择，等待按预报窗口核对";
     return "未选择目录";
   }
 
@@ -889,7 +896,7 @@
     if (output.result_detail || output.result_dir) rows.push(["结果目录预览", output.result_detail || output.result_dir]);
     if (output.archive_detail || output.manifest_path) rows.push(["输入归档清单", output.archive_detail || output.manifest_path]);
     variables.forEach(item => {
-      if (item?.path) rows.push([`${variableLabel(item.key, item.label)}目录`, item.path]);
+      if (item?.path) rows.push([`${variableLabel(item.key, item.label)}${item.key === "boundary_inflow" ? "文件" : "目录"}`, item.path]);
     });
     return rows;
   }

@@ -4066,6 +4066,7 @@ def _forecast_input_check_context() -> ForecastInputCheckContext:
         normalize_time_step_hours=normalize_time_step_hours,
         is_date_only_string=is_date_only_string,
         validate_tif_time_series=validate_tif_time_series,
+        inspect_boundary_inflow_csv=inspect_boundary_inflow_csv,
         format_time_for_check=_format_time_for_check,
         analyze_station_precip_inputs=analyze_station_precip_inputs,
         meteo_key=METEO_KEY,
