@@ -15,6 +15,21 @@ import build_windows_installer as installer  # noqa: E402
 
 
 class PackagingSurfaceTests(unittest.TestCase):
+    def test_runtime_entrypoint_scripts_are_collected_by_packaging_surfaces(self) -> None:
+        expected_scripts = (
+            "studio_service.py",
+            "create_hourly_workspace.py",
+            "forecast_run.py",
+            "profile_runner.py",
+            "forward_run.py",
+            "precipitation_strategy_runner.py",
+        )
+
+        for script in expected_scripts:
+            self.assertTrue((STUDIO_DIR / script).is_file(), script)
+            self.assertIn(script, portable.STUDIO_FILES)
+            self.assertIn(script, installer.portable.STUDIO_FILES)
+
     def test_services_directory_is_collected_by_packaging_surfaces(self) -> None:
         self.assertIn("services", portable.STUDIO_DIRS)
         self.assertIn("services", installer.portable.STUDIO_DIRS)
@@ -143,7 +158,16 @@ class PackagingSurfaceTests(unittest.TestCase):
             ):
                 path.mkdir(parents=True, exist_ok=True)
 
-            (gui_root / "studio_service.py").write_text("# service\n", encoding="utf-8")
+            entrypoint_scripts = [
+                "studio_service.py",
+                "create_hourly_workspace.py",
+                "forecast_run.py",
+                "profile_runner.py",
+                "forward_run.py",
+                "precipitation_strategy_runner.py",
+            ]
+            for script in entrypoint_scripts:
+                (gui_root / script).write_text(f"# {script}\n", encoding="utf-8")
             (gui_root / "services" / "geo_overview.py").write_text("# geo\n", encoding="utf-8")
             (gui_root / "web" / "index.html").write_text(
                 "\n".join(f'<script src="{source}"></script>' for source in script_sources),
@@ -168,12 +192,14 @@ class PackagingSurfaceTests(unittest.TestCase):
                 mock.patch.object(installer, "CONFIG_SOURCE", config_source),
                 mock.patch.object(installer, "DEM_SOURCE_DIR", dem_source_dir),
                 mock.patch.object(installer, "GLACIER_SOURCE_DIR", glacier_source_dir),
-                mock.patch.object(installer.portable, "STUDIO_FILES", ["studio_service.py"]),
+                mock.patch.object(installer.portable, "STUDIO_FILES", entrypoint_scripts),
                 mock.patch.object(installer.portable, "STUDIO_DIRS", ["services"]),
             ):
                 installer.copy_installer_files(bundle_root)
 
             expected_files = [
+                bundle_root / "HBV-Studio" / "create_hourly_workspace.py",
+                bundle_root / "HBV-Studio" / "forecast_run.py",
                 bundle_root / "HBV-Studio" / "services" / "geo_overview.py",
                 bundle_root / installer.CN_BASE_DATA / installer.CN_DEM_DIR / installer.DEFAULT_DEM_NAME,
                 bundle_root / installer.CN_BASE_DATA / "冰川源" / glacier_source_dir.name / "glacier.shp",

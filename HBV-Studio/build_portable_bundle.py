@@ -85,6 +85,8 @@ STUDIO_FILES = [
     "launch.py",
     "server.py",
     "studio_service.py",
+    "create_hourly_workspace.py",
+    "forecast_run.py",
     "profile_runner.py",
     "forward_run.py",
     "precipitation_strategy_runner.py",
