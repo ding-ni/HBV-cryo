@@ -13,7 +13,7 @@ from 公共函数 import (
     old_script_path,
     patch_module,
     read_config,
-    bbox_list,
+    era5_download_bbox_list,
     year_range,
 )
 
@@ -60,6 +60,8 @@ def main():
         print(f"太阳辐射目录: {paths['raw_solar_dir']}")
         print(f"风速目录: {paths['raw_wind_dir']}")
         print(f"露点温度目录: {paths['raw_dewpoint_dir']}")
+    download_bbox = era5_download_bbox_list(config)
+    print(f"ERA5 下载范围[N,W,S,E]已外扩0.2°: {download_bbox}")
 
     if (need_temp_download or need_prec_download) and args.内容 in {"pet", "era5", "mswep说明"}:
         module = load_legacy_module(old_script_path(config, "scripts", "02_download_meteorological_data.py"))
@@ -71,7 +73,7 @@ def main():
                 "RAW_EVAP_DIR": str(paths["raw_evap_dir"]),
                 "RAW_PREC_DIR": str(paths["raw_prec_root"]),
                 "RAW_PREC_ERA5_DIR": str(paths["raw_prec_era5_dir"]),
-                "TUOTUOHE_BBOX": bbox_list(config),
+                "TUOTUOHE_BBOX": download_bbox,
                 "START_YEAR": years[0],
                 "END_YEAR": years[-1],
             },
@@ -90,7 +92,7 @@ def main():
             module,
             {
                 "PROJECT_ROOT": str(paths["workspace_root"]),
-                "TUOTUOHE_BBOX": bbox_list(config),
+                "TUOTUOHE_BBOX": download_bbox,
                 "START_YEAR": years[0],
                 "END_YEAR": years[-1],
                 "RAW_DIR": str(paths["raw_root"]),

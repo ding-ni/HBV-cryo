@@ -3206,6 +3206,42 @@ def ensure_loaded_stack_alignment(label, actual_shape, actual_transform, actual_
         raise ValueError(f"{label} 栅格坐标系与主降水网格不一致：actual={actual_crs} expected={expected_crs}")
 
 
+def ensure_forcing_masks_complete(valid_mask, runtime_dates):
+    labels = (("降水", PREC_3D), ("气温", TEMP_3D), ("蒸散发/PET", ET_3D))
+    basin_cells = int(np.count_nonzero(valid_mask))
+    if basin_cells <= 0:
+        raise ValueError("flow_accumulation_masked.tif 没有有效流域像元，无法校验气象驱动掩膜。")
+
+    errors = []
+    finite_masks = {label: np.isfinite(stack) for label, stack in labels}
+    for label, mask3d in finite_masks.items():
+        missing_by_step = np.count_nonzero(~mask3d[valid_mask, :], axis=0)
+        bad_indices = np.where(missing_by_step > 0)[0]
+        if len(bad_indices):
+            samples = []
+            for idx in bad_indices[:5]:
+                samples.append(f"{format_time_value(runtime_dates[int(idx)])}: 缺 {int(missing_by_step[int(idx)])} 格")
+            errors.append(f"{label} 在流域内存在缺失像元（{len(bad_indices)} 个时步），例如 {'；'.join(samples)}")
+
+    reference = finite_masks["降水"] & valid_mask[:, :, None]
+    for label in ("气温", "蒸散发/PET"):
+        mismatch = reference != (finite_masks[label] & valid_mask[:, :, None])
+        mismatch_count_by_step = np.count_nonzero(mismatch[valid_mask, :], axis=0)
+        bad_indices = np.where(mismatch_count_by_step > 0)[0]
+        if len(bad_indices):
+            samples = []
+            for idx in bad_indices[:5]:
+                samples.append(f"{format_time_value(runtime_dates[int(idx)])}: 差 {int(mismatch_count_by_step[int(idx)])} 格")
+            errors.append(f"{label} 与降水有效像元掩膜不一致，例如 {'；'.join(samples)}")
+
+    if errors:
+        raise ValueError(
+            "气象驱动有效像元不一致，已停止运行，避免把缺失 PET/降水静默当 0 参与水文计算。"
+            "请重跑数据准备的对齐裁剪步骤（必要时覆盖重跑），并确认 ERA5/PET 原始下载范围已外扩。\n- "
+            + "\n- ".join(errors[:6])
+        )
+
+
 def cache_meta_matches_source(meta, label, directory, source_token):
     if str(meta.get("label", "") or "").strip() != str(label or "").strip():
         return False
@@ -4702,11 +4738,6 @@ def load_all_data(end_date_override=None, skip_obs=False):
     np.divide(temp_sum, temp_valid_count, out=temp_fill_base, where=temp_valid_count > 0)
     LL_TEMP_3D = np.broadcast_to(temp_fill_base.astype(np.float32), TEMP_3D.shape)
 
-    if args.fill_nan:
-        PREC_3D = np.nan_to_num(PREC_3D, nan=0.0)
-        ET_3D = np.nan_to_num(ET_3D, nan=0.0)
-        TEMP_3D = np.where(np.isnan(TEMP_3D), LL_TEMP_3D, TEMP_3D)
-
     with rasterio.open(FLOW_ACC_PATH) as src:
         ensure_raster_alignment("flow_acc", src, (rows, cols), transform, forcing_crs, FLOW_ACC_PATH)
         FLOW_ACC = src.read(1).astype(np.float32)
@@ -4716,6 +4747,12 @@ def load_all_data(end_date_override=None, skip_obs=False):
 
     valid_mask = ~np.isnan(FLOW_ACC)
     VALID_CELLS = np.argwhere(valid_mask).astype(np.int64)
+    ensure_forcing_masks_complete(valid_mask, runtime_dates)
+
+    if args.fill_nan:
+        PREC_3D = np.nan_to_num(PREC_3D, nan=0.0)
+        ET_3D = np.nan_to_num(ET_3D, nan=0.0)
+        TEMP_3D = np.where(np.isnan(TEMP_3D), LL_TEMP_3D, TEMP_3D)
 
     _basin_shp_path = os.path.join(GIS_ROOT, "basin.shp")
     if os.path.exists(_basin_shp_path):

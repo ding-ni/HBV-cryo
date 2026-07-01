@@ -630,6 +630,21 @@ def bbox_list(config):
     return [bbox["北"], bbox["西"], bbox["南"], bbox["东"]]
 
 
+def expand_era5_bbox(bbox, padding_degrees=0.2):
+    north, west, south, east = [float(value) for value in bbox]
+    pad = max(float(padding_degrees), 0.0)
+    return [
+        min(90.0, north + pad),
+        max(-180.0, west - pad),
+        max(-90.0, south - pad),
+        min(180.0, east + pad),
+    ]
+
+
+def era5_download_bbox_list(config, padding_degrees=0.2):
+    return expand_era5_bbox(bbox_list(config), padding_degrees=padding_degrees)
+
+
 def bbox_dict(config):
     bbox = config["范围_bbox"]
     return {

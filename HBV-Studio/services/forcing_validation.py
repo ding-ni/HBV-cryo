@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
+from services.time_utils import parse_time_from_name
 
 
 @dataclass(frozen=True)
@@ -240,6 +242,94 @@ def inspect_hourly_forcing_summary(
                 f"强迫 {_format_hourly_time(first)} 至 {_format_hourly_time(last)}；"
                 f"配置 {_format_hourly_time(expected_start)} 至 {_format_hourly_time(expected_end)}。"
             )
+    return result
+
+
+def _valid_raster_mask(path: Path) -> np.ndarray:
+    import rasterio
+
+    with rasterio.open(path) as src:
+        arr = src.read(1).astype("float64")
+        mask = np.isfinite(arr) & (arr > -9000.0) & (arr < 1.0e10)
+        if src.nodata is not None:
+            mask &= arr != src.nodata
+        return mask
+
+
+def _time_file_map(directory: Path) -> dict[pd.Timestamp, Path]:
+    mapping: dict[pd.Timestamp, Path] = {}
+    if not directory.exists():
+        return mapping
+    for path in sorted(directory.glob("*.tif")):
+        stamp = parse_time_from_name(path.name)
+        if stamp is not None and stamp not in mapping:
+            mapping[pd.Timestamp(stamp)] = path
+    return mapping
+
+
+def validate_forcing_mask_consistency(
+    directories: dict[str, dict[str, Any]],
+    *,
+    max_checked_steps: int = 12,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": True,
+        "checked_steps": 0,
+        "errors": [],
+        "warnings": [],
+        "examples": [],
+    }
+    path_texts = {key: str(item.get("path", "") or "").strip() for key, item in directories.items()}
+    if any(not text for text in path_texts.values()):
+        return result
+    path_map = {key: Path(text) for key, text in path_texts.items()}
+    if any(not path.exists() for path in path_map.values()):
+        result["warnings"].append("气象驱动目录尚未齐全，暂不做 P/T/PET 有效像元一致性检查。")
+        return result
+    maps = {key: _time_file_map(path) for key, path in path_map.items()}
+    common = sorted(set(maps["prec"]) & set(maps["temp"]) & set(maps["evap"]))
+    if not common:
+        result["warnings"].append("没有共同时间步，暂不做 P/T/PET 有效像元一致性检查。")
+        return result
+    if len(common) <= max_checked_steps:
+        samples = common
+    else:
+        last = len(common) - 1
+        indices = sorted({round(pos * last / (max_checked_steps - 1)) for pos in range(max_checked_steps)})
+        samples = [common[idx] for idx in indices]
+
+    for stamp in samples:
+        try:
+            masks = {key: _valid_raster_mask(maps[key][stamp]) for key in ("prec", "temp", "evap")}
+        except Exception as exc:
+            result["errors"].append(f"有效像元一致性检查读取失败：{stamp}（{exc}）")
+            continue
+        if masks["prec"].shape != masks["temp"].shape or masks["prec"].shape != masks["evap"].shape:
+            result["errors"].append(f"有效像元一致性检查失败：{stamp} 三类栅格尺寸不一致。")
+            continue
+        for key, label in (("temp", "气温"), ("evap", "蒸散发/PET")):
+            missing = int(np.count_nonzero(masks["prec"] & ~masks[key]))
+            extra = int(np.count_nonzero(masks[key] & ~masks["prec"]))
+            if missing or extra:
+                result["examples"].append(
+                    {
+                        "time": str(stamp),
+                        "variable": label,
+                        "missing_vs_precip": missing,
+                        "extra_vs_precip": extra,
+                    }
+                )
+    result["checked_steps"] = int(len(samples))
+    if result["examples"]:
+        preview = "；".join(
+            f"{item['time']} {item['variable']} 缺 {item['missing_vs_precip']} 格/多 {item['extra_vs_precip']} 格"
+            for item in result["examples"][:5]
+        )
+        result["errors"].append(
+            "降水、气温、潜在蒸散发的有效像元掩膜不一致，不能用于率定；"
+            f"例如：{preview}。请覆盖重跑气象对齐裁剪步骤。"
+        )
+    result["ok"] = len(result["errors"]) == 0
     return result
 
 
@@ -550,6 +640,9 @@ def validate_forcing_bundle(
     for item in grid_checks.values():
         if not item.get("ok") and item.get("error"):
             errors.append(str(item["error"]))
+    mask_consistency = validate_forcing_mask_consistency(directories)
+    errors.extend(mask_consistency["errors"])
+    warnings.extend(mask_consistency["warnings"])
     hourly_summary = None
     if active_profile == "hourly" or step_hours < 24.0:
         explicit_time_errors = hourly_explicit_time_errors(config, step_hours)
@@ -571,6 +664,7 @@ def validate_forcing_bundle(
         "expected_steps": len(expected_index) if expected_index is not None else None,
         "directories": directories,
         "grid_checks": grid_checks,
+        "mask_consistency": mask_consistency,
         "total_valid_steps": sum(int(item["valid_time_steps"]) for item in directories.values()),
         "profile": active_profile,
         "time_basis": time_basis,

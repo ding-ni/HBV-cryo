@@ -29,6 +29,9 @@ from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip
 
 
 DATE_RE = re.compile(r"(\d{4}\.\d{2}\.\d{2})")
+NODATA = -9999.0
+MAX_REPAIR_CELLS = 5
+MAX_REPAIR_FRACTION = 0.02
 
 
 def resolve_config_entry_path(config, raw_value):
@@ -59,9 +62,41 @@ def collect_files(input_dir, start_date, end_date):
     return records
 
 
+def _finite_mask(data):
+    return np.isfinite(data) & (data > -9000.0) & (data < 1.0e10)
+
+
+def _nearest_fill_small_gaps(data, fill_mask, valid_mask, label, stamp):
+    missing_mask = fill_mask & ~valid_mask
+    missing = int(np.count_nonzero(missing_mask))
+    if missing <= 0:
+        return data, 0
+    allowed = max(MAX_REPAIR_CELLS, int(np.ceil(int(np.count_nonzero(fill_mask)) * MAX_REPAIR_FRACTION)))
+    if missing > allowed:
+        raise RuntimeError(
+            f"{label} {stamp} 在流域内缺少 {missing} 个有效像元，超过允许修补阈值 {allowed}。"
+            "这通常是 ERA5/PET 原始 NetCDF 下载范围卡边导致的，请用外扩后的 bbox 重新下载/生成。"
+        )
+    try:
+        from scipy import ndimage
+    except Exception as exc:
+        raise RuntimeError(
+            f"{label} {stamp} 在流域内缺少 {missing} 个有效像元，但当前环境缺少 scipy，无法做小范围最近邻修补。"
+            "请重新生成覆盖完整的原始栅格。"
+        ) from exc
+    if not np.any(valid_mask):
+        raise RuntimeError(f"{label} {stamp} 没有任何有效像元，无法修补。")
+    _, indices = ndimage.distance_transform_edt(~valid_mask, return_indices=True)
+    repaired = data.copy()
+    repaired[missing_mask] = data[indices[0][missing_mask], indices[1][missing_mask]]
+    print(f"[修补] {label} {stamp}: 最近邻补齐流域边缘缺口 {missing} 个像元")
+    return repaired, missing
+
+
 def align_single(input_file, dem_profile, dem_shape, basin_mask):
     with rasterio.open(input_file) as src:
         out = np.full(dem_shape, np.nan, dtype="float32")
+        nodata = src.nodata
         reproject(
             source=rasterio.band(src, 1),
             destination=out,
@@ -69,30 +104,72 @@ def align_single(input_file, dem_profile, dem_shape, basin_mask):
             src_crs=src.crs,
             dst_transform=dem_profile["transform"],
             dst_crs=dem_profile["crs"],
+            src_nodata=nodata,
+            dst_nodata=np.nan,
             resampling=Resampling.bilinear,
         )
-        nodata = src.nodata
         if nodata is not None:
             out[out == nodata] = np.nan
     out[~basin_mask] = np.nan
+    out[~_finite_mask(out)] = np.nan
     return out
 
 
-def write_series(records, output_dir, prefix, dem_profile, dem_shape, basin_mask, overwrite=False):
+def write_series(records, output_dir, prefix, dem_profile, dem_shape, basin_mask, overwrite=False, reference_masks=None):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     profile = dem_profile.copy()
-    profile.update(dtype="float32", count=1, nodata=-9999.0, compress="lzw")
+    profile.update(dtype="float32", count=1, nodata=NODATA, compress="lzw")
     count = 0
+    masks = {}
+    repaired_total = 0
     for index, (date, input_file) in enumerate(records):
+        stamp = date.strftime("%Y.%m.%d")
         output_file = Path(output_dir) / f"{index}_{prefix}_{date.strftime('%Y.%m.%d')}.tif"
         if (not overwrite) and output_file.exists():
+            existing = align_existing_mask(output_file, basin_mask)
+            if reference_masks is not None:
+                expected = reference_masks.get(stamp)
+                if expected is not None and not np.array_equal(existing, expected):
+                    raise RuntimeError(f"{prefix} {stamp} 已有输出与参考有效掩膜不一致，请使用 --覆盖 重新生成。")
+            elif not np.array_equal(existing, basin_mask):
+                missing = int(np.count_nonzero(basin_mask & ~existing))
+                raise RuntimeError(f"{prefix} {stamp} 已有输出在流域内缺少 {missing} 个有效像元，请使用 --覆盖 重新生成。")
+            masks[stamp] = existing
             count += 1
             continue
         data = align_single(input_file, dem_profile, dem_shape, basin_mask)
+        valid_mask = _finite_mask(data) & basin_mask
+        if reference_masks is not None:
+            expected = reference_masks.get(stamp)
+            if expected is None:
+                raise RuntimeError(f"{prefix} {stamp} 找不到对应参考掩膜，不能保证 P/T/PET 一致。")
+            data, repaired = _nearest_fill_small_gaps(data, expected, valid_mask, prefix, stamp)
+            repaired_total += repaired
+            valid_mask = _finite_mask(data) & basin_mask
+            if not np.array_equal(valid_mask, expected):
+                missing = int(np.count_nonzero(expected & ~valid_mask))
+                extra = int(np.count_nonzero(valid_mask & ~expected))
+                raise RuntimeError(f"{prefix} {stamp} 有效掩膜仍不一致：缺少 {missing} 个，多出 {extra} 个。")
+        elif not np.array_equal(valid_mask, basin_mask):
+            data, repaired = _nearest_fill_small_gaps(data, basin_mask, valid_mask, prefix, stamp)
+            repaired_total += repaired
+            valid_mask = _finite_mask(data) & basin_mask
+            if not np.array_equal(valid_mask, basin_mask):
+                missing = int(np.count_nonzero(basin_mask & ~valid_mask))
+                raise RuntimeError(f"{prefix} {stamp} 在流域内仍缺少 {missing} 个有效像元。")
         with rasterio.open(output_file, "w", **profile) as dst:
             dst.write(np.where(np.isfinite(data), data, profile["nodata"]).astype("float32"), 1)
+        masks[stamp] = valid_mask
         count += 1
-    return count
+    return count, masks, repaired_total
+
+
+def align_existing_mask(output_file, basin_mask):
+    with rasterio.open(output_file) as src:
+        arr = src.read(1).astype("float32")
+        if src.nodata is not None:
+            arr[arr == src.nodata] = np.nan
+    return _finite_mask(arr) & basin_mask
 
 
 def main():
@@ -164,38 +241,52 @@ def main():
         evap_input = paths["raw_evap_daily_dir"]
         print(f"[蒸散发] 使用 ERA5 处理结果: {evap_input}")
 
+    prec_count, prec_masks, prec_repaired = write_series(
+        collect_files(prec_input, start_date, end_date),
+        prec_output,
+        "PREC",
+        dem_profile,
+        dem_shape,
+        basin_mask,
+        overwrite=bool(args.覆盖),
+    )
+    temp_count, temp_masks, temp_repaired = write_series(
+        collect_files(temp_input, start_date, end_date),
+        paths["aligned_temp_dir"],
+        "TEMP",
+        dem_profile,
+        dem_shape,
+        basin_mask,
+        overwrite=bool(args.覆盖),
+        reference_masks=prec_masks,
+    )
+    evap_count, evap_masks, evap_repaired = write_series(
+        collect_files(evap_input, start_date, end_date),
+        paths["aligned_evap_dir"],
+        "EVAP",
+        dem_profile,
+        dem_shape,
+        basin_mask,
+        overwrite=bool(args.覆盖),
+        reference_masks=prec_masks,
+    )
+    for stamp in sorted(prec_masks):
+        if stamp not in temp_masks or stamp not in evap_masks:
+            raise RuntimeError(f"{stamp} 缺少气温或蒸散发输出，不能保证三类驱动一致。")
+        if not np.array_equal(prec_masks[stamp], temp_masks[stamp]) or not np.array_equal(prec_masks[stamp], evap_masks[stamp]):
+            raise RuntimeError(f"{stamp} 降水/气温/蒸散发有效像元掩膜不一致。")
     summary = {
-        "降水": write_series(
-            collect_files(prec_input, start_date, end_date),
-            prec_output,
-            "PREC",
-            dem_profile,
-            dem_shape,
-            basin_mask,
-            overwrite=bool(args.覆盖),
-        ),
-        "温度": write_series(
-            collect_files(temp_input, start_date, end_date),
-            paths["aligned_temp_dir"],
-            "TEMP",
-            dem_profile,
-            dem_shape,
-            basin_mask,
-            overwrite=bool(args.覆盖),
-        ),
-        "蒸散发": write_series(
-            collect_files(evap_input, start_date, end_date),
-            paths["aligned_evap_dir"],
-            "EVAP",
-            dem_profile,
-            dem_shape,
-            basin_mask,
-            overwrite=bool(args.覆盖),
-        ),
+        "降水": prec_count,
+        "温度": temp_count,
+        "蒸散发": evap_count,
     }
 
     for name, count in summary.items():
         print(f"{name}: {count} 个文件")
+    repaired_total = int(prec_repaired + temp_repaired + evap_repaired)
+    if repaired_total:
+        print(f"[修补统计] 共最近邻补齐 {repaired_total} 个流域边缘缺口像元。")
+    print("[校验] 降水/气温/蒸散发逐日有效像元掩膜一致。")
 
 
 if __name__ == "__main__":

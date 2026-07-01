@@ -32,6 +32,7 @@ import rasterio
 from rasterio.warp import reproject, Resampling
 from rasterio.enums import Resampling as ResamplingEnum
 from rasterio.mask import mask
+from rasterio.features import geometry_mask
 import geopandas as gpd
 
 # ============================================================
@@ -82,6 +83,7 @@ FILE_PREFIX = {
     "temp": "TEMP",
     "evap": "EVAP",
 }
+NODATA = -9999.0
 
 
 # ============================================================
@@ -101,7 +103,8 @@ def align_raster_to_dem(input_file, dem_profile, dem_shape):
     """
     with rasterio.open(input_file) as src:
         # 准备输出数组
-        out_data = np.empty(dem_shape, dtype=np.float32)
+        out_data = np.full(dem_shape, np.nan, dtype=np.float32)
+        nodata = src.nodata
 
         # 重投影
         reproject(
@@ -111,8 +114,13 @@ def align_raster_to_dem(input_file, dem_profile, dem_shape):
             src_crs=src.crs,
             dst_transform=dem_profile['transform'],
             dst_crs=dem_profile['crs'],
+            src_nodata=nodata,
+            dst_nodata=np.nan,
             resampling=Resampling.bilinear
         )
+        if nodata is not None:
+            out_data[out_data == nodata] = np.nan
+        out_data[(out_data < -9000) | (out_data > 1e10)] = np.nan
 
     return out_data
 
@@ -129,27 +137,14 @@ def apply_basin_mask(data, basin_shape, dem_profile):
     返回:
         掩膜后的数据
     """
-    # 创建临时栅格用于掩膜
-    temp_tif = "temp_mask.tif"
-
-    # 保存临时文件
-    temp_profile = dem_profile.copy()
-    temp_profile.update(dtype=np.float32, nodata=-9999)
-
-    with rasterio.open(temp_tif, 'w', **temp_profile) as dst:
-        dst.write(data.astype(np.float32), 1)
-
-    # 应用掩膜
-    with rasterio.open(temp_tif) as src:
-        out_image, out_transform = mask(src, basin_shape, crop=False)
-        out_data = out_image[0]
-
-    # 删除临时文件
-    os.remove(temp_tif)
-
-    # 将掩膜外的值设为nodata
-    out_data[out_data == dem_profile['nodata']] = -9999
-
+    basin_mask = ~geometry_mask(
+        basin_shape,
+        out_shape=data.shape,
+        transform=dem_profile["transform"],
+        invert=False,
+    )
+    out_data = data.astype(np.float32, copy=True)
+    out_data[~basin_mask] = np.nan
     return out_data
 
 
@@ -233,10 +228,10 @@ def process_data_type(data_type, dem_profile, dem_shape, basin_shape=None):
 
             # 保存
             out_profile = dem_profile.copy()
-            out_profile.update(dtype=np.float32, count=1, nodata=-9999)
+            out_profile.update(dtype=np.float32, count=1, nodata=NODATA)
 
             with rasterio.open(output_file, 'w', **out_profile) as dst:
-                dst.write(data.astype(np.float32), 1)
+                dst.write(np.where(np.isfinite(data), data, NODATA).astype(np.float32), 1)
 
             count += 1
 

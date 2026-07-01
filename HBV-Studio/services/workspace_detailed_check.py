@@ -578,6 +578,26 @@ def workspace_detailed_check(
                 "ok": str(event_coverage.get("status", "")).lower() == "ok",
             }
         )
+    mask_consistency = dict(forcing.get("mask_consistency") or {})
+    if mask_consistency:
+        checked_steps = int(mask_consistency.get("checked_steps", 0) or 0)
+        examples = list(mask_consistency.get("examples", []) or [])
+        if examples:
+            first = dict(examples[0] or {})
+            detail = (
+                f"{first.get('time', '示例时步')} {first.get('variable', '变量')}"
+                f"缺 {int(first.get('missing_vs_precip', 0) or 0)} 格"
+            )
+        else:
+            detail = f"已抽查 {checked_steps} 个时间步"
+        summary.append(
+            {
+                "group": "气象数据",
+                "label": "P/T/PET有效像元一致性",
+                "value": "一致" if mask_consistency.get("ok", True) else detail,
+                "ok": bool(mask_consistency.get("ok", True)),
+            }
+        )
     for key, label in (("prec", "降水"), ("temp", "气温"), ("evap", "蒸散发")):
         item = forcing["directories"][key]
         summary.append(

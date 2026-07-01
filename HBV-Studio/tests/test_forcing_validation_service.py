@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 
 STUDIO_DIR = Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ from services.forcing_validation import (  # noqa: E402
     hourly_forcing_ready_status,
     prefer_raw_or_aligned_group_status,
     summarize_nc_download_status,
+    validate_forcing_mask_consistency,
     validate_forcing_bundle,
 )
 
@@ -823,6 +825,46 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertTrue(any("输出不完整" in item for item in result["errors"]))
         self.assertTrue(any("守恒检查未通过" in item for item in result["errors"]))
         self.assertTrue(any("开始时间晚于配置期望" in item for item in result["errors"]))
+
+    def test_forcing_mask_consistency_detects_pet_holes(self) -> None:
+        try:
+            import rasterio
+        except ImportError:
+            self.skipTest("rasterio is not installed")
+        from rasterio.transform import from_origin
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(0, 2, 1, 1),
+                "nodata": -9999.0,
+            }
+            for name in ("prec", "temp", "evap"):
+                (root / name).mkdir()
+            arr = np.ones((2, 2), dtype="float32")
+            pet = arr.copy()
+            pet[0, 0] = -9999.0
+            for directory, data in ((root / "prec", arr), (root / "temp", arr), (root / "evap", pet)):
+                with rasterio.open(directory / "X_2025.01.01.tif", "w", **profile) as dst:
+                    dst.write(data, 1)
+
+            result = validate_forcing_mask_consistency(
+                {
+                    "prec": {"path": str(root / "prec")},
+                    "temp": {"path": str(root / "temp")},
+                    "evap": {"path": str(root / "evap")},
+                }
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("有效像元掩膜不一致" in item for item in result["errors"]))
+        self.assertEqual(result["examples"][0]["missing_vs_precip"], 1)
 
 
 if __name__ == "__main__":

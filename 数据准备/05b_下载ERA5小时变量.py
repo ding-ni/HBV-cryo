@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 
-from 公共函数 import bbox_dict, build_workspace_paths, ensure_workspace_dirs, example_config_path, read_config, year_range  # type: ignore
+from 公共函数 import build_workspace_paths, ensure_workspace_dirs, era5_download_bbox_list, example_config_path, read_config, year_range  # type: ignore
 
 
 HOURLY_TIMES = [f"{hour:02d}:00" for hour in range(24)]
@@ -59,8 +59,8 @@ def main() -> None:
     ensure_workspace_dirs(paths)
     meteo = dict(config.get("气象策略", {}))
     prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
-    bbox = bbox_dict(config)
-    area = [bbox["lat_max"], bbox["lon_min"], bbox["lat_min"], bbox["lon_max"]]
+    area = era5_download_bbox_list(config)
+    print(f"[范围] ERA5 小时下载范围[N,W,S,E]已外扩0.2°: {area}")
     years = list(year_range(config))
     client = cdsapi.Client()
 
