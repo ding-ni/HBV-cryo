@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ CSV_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "gbk")
 EXCEL_SUFFIXES = {".xlsx", ".xls", ".xlsm"}
 DEFAULT_MIN_DAILY_HOURS = 18
 HYDROLOGICAL_DAY_START_HOUR = 8
+MIN_ZERO_FILL_COVERAGE_RATIO = 0.5
 
 DATE_COLUMN_HINTS = ("date", "datetime", "time", "日期", "时间")
 FLOW_COLUMN_HINTS = (
@@ -264,6 +266,23 @@ def read_boundary_inflow_series(
     target_index = pd.DatetimeIndex(dates)
     series = effective_series.reindex(target_index)
     gap_mode = str(gap_fill).strip().lower()
+    original_missing = series.isna()
+    original_covered_count = int((~original_missing).sum())
+    expected_count = int(len(target_index))
+    coverage_ratio = float(original_covered_count / expected_count) if expected_count > 0 else 1.0
+    if expected_step_hours is not None and expected_count > 0:
+        if original_covered_count == 0:
+            raise ValueError(
+                "上游边界入流文件没有与当前模拟时段重叠的时间步，"
+                "不能在 zero 填补模式下静默按全 0 入流运行。"
+            )
+        if gap_mode in {"", "zero", "0"} and coverage_ratio < MIN_ZERO_FILL_COVERAGE_RATIO:
+            warnings.warn(
+                f"上游边界入流与当前模拟时段仅重叠 {coverage_ratio * 100:.1f}% 时间步，"
+                "缺失部分将按 0 m3/s 填补；请确认这不是时间范围或时区配置错误。",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     if gap_mode == "interpolate":
         series = series.interpolate(method="linear", limit_direction="both")
     elif gap_mode in {"", "zero", "0"}:

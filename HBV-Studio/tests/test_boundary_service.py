@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -139,6 +140,43 @@ class BoundaryServiceTests(unittest.TestCase):
 
         self.assertTrue(enabled)
         self.assertEqual(series.tolist(), [1.0, 3.0])
+
+    def test_boundary_zero_fill_rejects_no_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path = root / "boundary.csv"
+            pd.DataFrame({"date": ["2026-01-01"], "flow": [10.0]}).to_csv(path, index=False, encoding="utf-8-sig")
+
+            with self.assertRaisesRegex(ValueError, "没有与当前模拟时段重叠"):
+                read_boundary_inflow_series(
+                    str(path),
+                    pd.date_range("2026-02-01", periods=3, freq="1D"),
+                    date_field="date",
+                    flow_field="flow",
+                    gap_fill="zero",
+                    expected_step_hours=24,
+                )
+
+    def test_boundary_zero_fill_warns_on_low_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path = root / "boundary.csv"
+            pd.DataFrame({"date": ["2026-01-01"], "flow": [10.0]}).to_csv(path, index=False, encoding="utf-8-sig")
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                series, enabled = read_boundary_inflow_series(
+                    str(path),
+                    pd.date_range("2026-01-01", periods=4, freq="1D"),
+                    date_field="date",
+                    flow_field="flow",
+                    gap_fill="zero",
+                    expected_step_hours=24,
+                )
+
+        self.assertTrue(enabled)
+        self.assertEqual(series.tolist(), [10.0, 0.0, 0.0, 0.0])
+        self.assertTrue(any("仅重叠" in str(item.message) for item in caught))
 
     def test_boundary_xlsx_is_supported_by_preview_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

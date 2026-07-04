@@ -1933,6 +1933,20 @@ def load_run_series_map(run_path: Path, field: str) -> dict[str, float | None]:
     return values
 
 
+def load_run_date_sequence(run_path: Path) -> list[str]:
+    simulation_path = run_path / "simulation.csv"
+    if not simulation_path.exists():
+        return []
+    dates: list[str] = []
+    with simulation_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            date_text = str(row.get("date", "")).strip()
+            if date_text:
+                dates.append(date_text)
+    return dates
+
+
 def run_csv_preview(run_path: Path, *, limit: int = 3) -> dict[str, Any]:
     csv_path = run_path / "simulation.csv"
     if not csv_path.exists():
@@ -2167,12 +2181,13 @@ def restore_forward_boundary_series(
     matched = 0
     for item in sim_dates:
         key = module.format_time_value(item) if hasattr(module, "format_time_value") else str(item)
-        if key not in source_boundary_series:
-            return False
-        value = source_boundary_series.get(key, 0.0)
-        restored_values.append(0.0 if value is None else float(value))
-        matched += 1
-    if matched != series_len:
+        if key in source_boundary_series:
+            value = source_boundary_series.get(key, 0.0)
+            restored_values.append(0.0 if value is None else float(value))
+            matched += 1
+        else:
+            restored_values.append(0.0)
+    if matched <= 0 or matched != len(source_boundary_series):
         return False
 
     np_mod = module.np

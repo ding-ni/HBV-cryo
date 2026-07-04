@@ -246,6 +246,7 @@ from services.runs import iter_run_dirs as build_iter_run_dirs
 from services.runs import iter_run_parent_dirs as build_iter_run_parent_dirs
 from services.runs import list_runs as build_list_runs
 from services.runs import load_run_detail as build_load_run_detail
+from services.runs import load_run_date_sequence as build_load_run_date_sequence
 from services.runs import load_run_series_map as build_load_run_series_map
 from services.runs import metadata_boundary_enabled as _metadata_boundary_enabled
 from services.runs import normalize_result_title as _normalized_result_title
@@ -3189,7 +3190,14 @@ def _build_forward_legacy_argv(prec_source: str, glacier_mode: str, prec_dir: st
     return argv
 
 
-def _build_forward_result(module: Any, sim: dict[str, Any], metrics: dict[str, Any], *, cache_hit: bool) -> dict[str, Any]:
+def _build_forward_result(
+    module: Any,
+    sim: dict[str, Any],
+    metrics: dict[str, Any],
+    *,
+    cache_hit: bool,
+    output_dates: list[str] | None = None,
+) -> dict[str, Any]:
     series_len = min(len(sim["q_total"]), len(module.Q_OBS_FULL))
     glacier_checks: dict[str, Any] = {}
     if hasattr(module, "compute_glacier_physical_checks"):
@@ -3259,16 +3267,26 @@ def _build_forward_result(module: Any, sim: dict[str, Any], metrics: dict[str, A
         except Exception:
             pass
 
+    if hasattr(module, "format_time_value"):
+        full_dates = [module.format_time_value(item) for item in module.SIM_DATES[:series_len]]
+    else:
+        full_dates = [str(item) for item in module.SIM_DATES[:series_len]]
+    output_indices = list(range(series_len))
+    if output_dates:
+        index_by_date = {date: idx for idx, date in enumerate(full_dates)}
+        requested_indices = [index_by_date[date] for date in output_dates if date in index_by_date]
+        if len(requested_indices) == len(output_dates):
+            output_indices = requested_indices
+
     def to_series(values: Any) -> list[float | None]:
         if values is None:
-            return [None] * series_len
-        arr = values[:series_len]
-        return [float(item) if module.np.isfinite(item) else None for item in arr]
+            return [None] * len(output_indices)
+        return [
+            float(values[idx]) if idx < len(values) and module.np.isfinite(values[idx]) else None
+            for idx in output_indices
+        ]
 
-    if hasattr(module, "format_time_value"):
-        dates = [module.format_time_value(item) for item in module.SIM_DATES[:series_len]]
-    else:
-        dates = [str(item) for item in module.SIM_DATES[:series_len]]
+    dates = [full_dates[idx] for idx in output_indices]
 
     return {
         "dates": dates,
@@ -3319,6 +3337,7 @@ def _build_forward_payload_context(payload: dict[str, Any]) -> dict[str, Any]:
     if not metadata_path.exists():
         raise FileNotFoundError("结果目录缺少 metadata.json。")
     metadata, resolved_config = normalize_run_metadata(read_json_file(metadata_path), run_path=run_path)
+    source_output_dates = build_load_run_date_sequence(run_path)
     source_obs_series = build_load_run_series_map(run_path, "q_obs")
     source_boundary_series = build_load_run_series_map(run_path, "q_boundary_inflow")
     source_boundary_enabled = bool(
@@ -3395,6 +3414,7 @@ def _build_forward_payload_context(payload: dict[str, Any]) -> dict[str, Any]:
         "glacier_mode": glacier_mode,
         "params": params,
         "source_metadata": metadata,
+        "source_output_dates": source_output_dates,
         "source_obs_series": source_obs_series,
         "source_boundary_series": source_boundary_series if source_boundary_enabled else {},
         "source_boundary_enabled": source_boundary_enabled,
@@ -3552,7 +3572,13 @@ def _run_forward_simulation(
         if stage_callback is not None:
             stage_callback("计算指标", "[阶段] 计算指标")
         metrics = call_with_output_capture(output_callback, module.compute_metrics, sim["q_total"])
-        result = _build_forward_result(module, sim, metrics, cache_hit=cache_hit)
+        result = _build_forward_result(
+            module,
+            sim,
+            metrics,
+            cache_hit=cache_hit,
+            output_dates=list(context.get("source_output_dates", []) or []),
+        )
         runtime_config = dict(context["config"])
         profile = str(context["profile"]).strip().lower()
         prec_source = profile_runner.resolve_runtime_precip_source(runtime_config, context.get("prec_source", None))

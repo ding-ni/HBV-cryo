@@ -50,6 +50,7 @@ from services.runs import (  # noqa: E402
     infer_effective_objective_mode,
     is_studio_editable_metadata,
     iter_run_parent_dirs,
+    load_run_date_sequence,
     load_run_series_map,
     metadata_boundary_enabled,
     metadata_initial_state_override,
@@ -1900,6 +1901,40 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertFalse(
             restore_forward_boundary_series(module, {"q_total": np.asarray([1.0])}, {"2026-06-02": 1.0})
         )
+
+    def test_restore_forward_boundary_series_accepts_source_output_subset(self) -> None:
+        module = SimpleNamespace(
+            np=np,
+            SIM_DATES=["2026-06-01", "2026-06-02", "2026-06-03"],
+            format_time_value=lambda value: value,
+        )
+        sim = {
+            "q_total": np.asarray([10.0, 19.0, 28.0]),
+            "q_local": np.asarray([10.0, 19.0, 28.0]),
+        }
+
+        restored = restore_forward_boundary_series(
+            module,
+            sim,
+            {"2026-06-02": 1.5, "2026-06-03": 2.0},
+        )
+
+        self.assertTrue(restored)
+        np.testing.assert_allclose(sim["q_boundary"], np.asarray([0.0, 1.5, 2.0]))
+        np.testing.assert_allclose(sim["q_total"], np.asarray([10.0, 20.5, 30.0]))
+        self.assertTrue(sim["boundary_enabled"])
+
+    def test_load_run_date_sequence_preserves_simulation_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            (run_dir / "simulation.csv").write_text(
+                "date,q_sim\n2026-06-02,1.0\n,2.0\n2026-06-01,3.0\n",
+                encoding="utf-8-sig",
+            )
+
+            dates = load_run_date_sequence(run_dir)
+
+        self.assertEqual(dates, ["2026-06-02", "2026-06-01"])
 
     def test_pick_latest_run_path_uses_mtime_then_path_for_tie_break(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
