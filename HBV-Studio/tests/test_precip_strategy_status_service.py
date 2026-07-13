@@ -245,6 +245,43 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertIn("站点订正算法：occurrence_amount_v2", message)
         self.assertIn("高倍率像元 3；移除比例超限像元 1；未分配像元 2", message)
 
+    def test_station_series_duplicate_qc_block_names_station_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            corrected = root / "corrected"
+            (corrected / "prec_2021.01.01.tif").write_bytes(b"")
+            (corrected / "precipitation_strategy_summary.json").write_text(
+                json.dumps(
+                    {
+                        "selected_steps": 1,
+                        "written_files": 1,
+                        "processing_stats": {
+                            "algorithm": "occurrence_amount_v2",
+                            "qc_blocked": True,
+                            "station_series_integrity": {
+                                "qc_blocked": True,
+                                "duplicate_pair_count": 1,
+                                "duplicate_pairs": [
+                                    {"station_a": "Station-A", "station_b": "Station-B"}
+                                ],
+                            },
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ok, message, count = check_precip_strategy_outputs(
+                {"气象策略": {"降水方案": "grid_plus_station_bias"}},
+                context,
+            )
+
+        self.assertFalse(ok)
+        self.assertEqual(count, 1)
+        self.assertIn("异站同序列 1 对（Station-A/Station-B）", message)
+
 
 if __name__ == "__main__":
     unittest.main()

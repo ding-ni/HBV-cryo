@@ -86,6 +86,18 @@ INSTALLER_PRUNE_SUFFIXES = {".md", ".pdf", ".docx", ".pptx"}
 
 INNO_APP_ID = "{{9B8D0C43-8A7F-4B7D-9E54-79A67A8A1BB1}}"
 
+BUILD_CONTRACTS = {
+    "daily_forcing_manifest": "hbv_cryo_daily_forcing_manifest_v1",
+    "precipitation_correction": "occurrence_amount_v2",
+    "state_snapshot": "per_cell_branch_states_v2",
+    "model_water_balance": "hbv_cryo_model_water_balance_v1",
+    "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
+    "historical_spinup_forcing": "hbv_cryo_historical_spinup_forcing_manifest_v1",
+    "historical_spinup_sensitivity": "hbv_cryo_continuous_historical_spinup_sensitivity_v1",
+    "era5_accumulation_boundary": "hbv_cryo_era5_accumulation_following_midnight_v1",
+    "path_memory": "hbvstudio.pathBrowser.lastDirectory.v1",
+}
+
 
 def prepare_clean_dir(path: Path) -> Path:
     if path.exists():
@@ -139,7 +151,8 @@ def build_source_records() -> list[dict[str, object]]:
     candidates.extend((GUI_ROOT / "web").rglob("*.html"))
     candidates.extend((GUI_ROOT / "web").rglob("*.css"))
     candidates.extend((PROJECT_ROOT / "HBV-Cryo").glob("*.py"))
-    candidates.extend((PROJECT_ROOT / CN_PUBLIC).glob("*.py"))
+    candidates.extend((PROJECT_ROOT / CN_PUBLIC).rglob("*.py"))
+    candidates.extend((PROJECT_ROOT / CN_DATA_PREP).rglob("*.py"))
     records = []
     for path in sorted({item.resolve() for item in candidates if item.is_file()}):
         records.append(
@@ -172,14 +185,7 @@ def write_build_manifest(version: str, package_paths: list[Path]) -> Path:
             "worktree_change_count": len(status_lines),
             "note": "A dirty worktree is identified explicitly; HEAD alone is not a source/package alignment claim.",
         },
-        "contracts": {
-            "daily_forcing_manifest": "hbv_cryo_daily_forcing_manifest_v1",
-            "precipitation_correction": "occurrence_amount_v2",
-            "state_snapshot": "per_cell_branch_states_v2",
-            "model_water_balance": "hbv_cryo_model_water_balance_v1",
-            "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
-            "path_memory": "hbvstudio.pathBrowser.lastDirectory.v1",
-        },
+        "contracts": dict(BUILD_CONTRACTS),
         "source_files": build_source_records(),
         "packages": [
             {

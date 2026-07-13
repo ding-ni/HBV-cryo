@@ -90,6 +90,7 @@ STUDIO_FILES = [
     "forecast_run.py",
     "profile_runner.py",
     "initial_state_sensitivity_runner.py",
+    "historical_spinup_runner.py",
     "forward_run.py",
     "precipitation_strategy_runner.py",
     "sync_tuotuohe_data.py",

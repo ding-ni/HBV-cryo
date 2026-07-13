@@ -28,6 +28,11 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from 公共函数 import open_netcdf_dataset_safe
+from era5_accumulation import (
+    append_following_midnight,
+    daily_totals_from_following_midnight,
+    find_boundary_file,
+)
 
 # ============================================================
 # 路径配置
@@ -114,36 +119,16 @@ def output_transform(lons, lats):
     )
 
 
-def daily_totals_from_cumulative(arr):
-    accum = rename_time_dim(arr)
-    times = pd.DatetimeIndex(pd.to_datetime(accum["time"].values))
-    if times.empty:
-        return accum.isel(time=slice(0, 0))
-
-    available_days = sorted({ts.normalize() for ts in times})
-    available_day_set = set(available_days)
-    selected_indices = {}
-    fallback_indices = {}
-
-    for idx, ts in enumerate(times):
-        day = ts.normalize()
-        fallback_indices[day] = idx
-        prev_day = day - pd.Timedelta(days=1)
-        if ts.hour == 0 and prev_day in available_day_set:
-            selected_indices[prev_day] = idx
-
-    slices = []
-    output_days = []
-    for day in available_days:
-        idx = selected_indices.get(day, fallback_indices.get(day))
-        if idx is None:
-            continue
-        slices.append(accum.isel(time=idx))
-        output_days.append(day)
-
-    if not slices:
-        return accum.isel(time=slice(0, 0))
-    return xr.concat(slices, dim=pd.Index(pd.DatetimeIndex(output_days), name="time")).sortby("time")
+def daily_totals_from_cumulative(arr, *, start_date=None, end_date=None):
+    if start_date is None or end_date is None:
+        raise ValueError(
+            "累计型 ERA5 日总量必须声明开始/结束日期，并提供结束日次日 00:00 样本。"
+        )
+    return daily_totals_from_following_midnight(
+        arr,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 # ============================================================
@@ -261,6 +246,7 @@ def process_year(year):
     u10_file = os.path.join(WIND_DIR, f"era5_u10_{year}.nc")
     v10_file = os.path.join(WIND_DIR, f"era5_v10_{year}.nc")
     dewpoint_file = os.path.join(DEWPOINT_DIR, f"era5_d2m_{year}.nc")
+    solar_boundary_file = find_boundary_file(SOLAR_DIR, "era5_ssrd", year)
 
     missing = []
     for name, f in [("温度", temp_file), ("辐射", solar_file),
@@ -278,19 +264,29 @@ def process_year(year):
         ds_u10 = stack.enter_context(open_netcdf_dataset_safe(u10_file))
         ds_v10 = stack.enter_context(open_netcdf_dataset_safe(v10_file))
         ds_dew = stack.enter_context(open_netcdf_dataset_safe(dewpoint_file))
+        ds_solar_boundary = stack.enter_context(open_netcdf_dataset_safe(solar_boundary_file))
 
         # 获取变量
         t2m = rename_time_dim(ds_temp['t2m'] - 273.15)  # K -> °C
-        ssrd = rename_time_dim(ds_solar['ssrd'] / 1e6)  # J/m² -> MJ/m²
+        boundary_name = 'ssrd' if 'ssrd' in ds_solar_boundary.data_vars else list(ds_solar_boundary.data_vars)[0]
+        ssrd = append_following_midnight(
+            rename_time_dim(ds_solar['ssrd']).load(),
+            rename_time_dim(ds_solar_boundary[boundary_name]).load(),
+            boundary_time=pd.Timestamp(year=int(year) + 1, month=1, day=1),
+        ) / 1e6  # J/m² -> MJ/m²
         u10 = rename_time_dim(ds_u10['u10'])
         v10 = rename_time_dim(ds_v10['v10'])
         d2m = rename_time_dim(ds_dew['d2m'] - 273.15)  # K -> °C
 
-        # ERA5-Land 累积辐射在下一天 00:00 给出上一日总量；跨年缺口回退到当日最后时次。
+        # ERA5-Land 累积辐射在下一天 00:00 给出上一日总量；缺边界样本时拒绝生成。
         t_mean = t2m.resample(time='1D').mean()
         t_min = t2m.resample(time='1D').min()
         t_max = t2m.resample(time='1D').max()
-        rs_daily = daily_totals_from_cumulative(ssrd).reindex(time=t_mean["time"].values)
+        rs_daily = daily_totals_from_cumulative(
+            ssrd,
+            start_date=f"{year}-01-01",
+            end_date=f"{year}-12-31",
+        ).reindex(time=t_mean["time"].values)
         u10_mean = u10.resample(time='1D').mean().reindex(time=t_mean["time"].values)
         v10_mean = v10.resample(time='1D').mean().reindex(time=t_mean["time"].values)
         d2m_mean = d2m.resample(time='1D').mean().reindex(time=t_mean["time"].values)

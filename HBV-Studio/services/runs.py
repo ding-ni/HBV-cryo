@@ -604,6 +604,14 @@ def infer_project_roots_from_run_path(run_path: Path | None) -> tuple[Path | Non
     except Exception:
         return None, None
     for candidate in [current] + list(current.parents):
+        installed_user_root = candidate / "\u7528\u6237\u6570\u636e"
+        installed_gui_root = candidate / "HBV-Studio"
+        if (
+            (installed_gui_root / "workspaces").exists()
+            and (installed_user_root / "workspaces").exists()
+            and (installed_user_root / "\u8fd0\u884c\u76ee\u5f55").exists()
+        ):
+            return candidate.resolve(strict=False), installed_gui_root.resolve(strict=False)
         if (candidate / "HBV-Studio" / "workspaces").exists() and (candidate / "\u8fd0\u884c\u76ee\u5f55").exists():
             return candidate.resolve(strict=False), (candidate / "HBV-Studio").resolve(strict=False)
     return None, None

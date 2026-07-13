@@ -16,6 +16,20 @@ import build_windows_installer as installer  # noqa: E402
 
 
 class PackagingSurfaceTests(unittest.TestCase):
+    def test_installer_manifest_declares_historical_and_accumulation_contracts(self) -> None:
+        self.assertEqual(
+            installer.BUILD_CONTRACTS["historical_spinup_forcing"],
+            "hbv_cryo_historical_spinup_forcing_manifest_v1",
+        )
+        self.assertEqual(
+            installer.BUILD_CONTRACTS["historical_spinup_sensitivity"],
+            "hbv_cryo_continuous_historical_spinup_sensitivity_v1",
+        )
+        self.assertEqual(
+            installer.BUILD_CONTRACTS["era5_accumulation_boundary"],
+            "hbv_cryo_era5_accumulation_following_midnight_v1",
+        )
+
     def test_installer_manifest_parses_git_left_right_counts_in_correct_direction(self) -> None:
         self.assertEqual(installer.parse_ahead_behind_counts("3\t2"), (3, 2))
         self.assertEqual(installer.parse_ahead_behind_counts("invalid"), (None, None))
@@ -40,6 +54,7 @@ class PackagingSurfaceTests(unittest.TestCase):
             "forecast_run.py",
             "profile_runner.py",
             "initial_state_sensitivity_runner.py",
+            "historical_spinup_runner.py",
             "forward_run.py",
             "precipitation_strategy_runner.py",
         )
@@ -183,6 +198,7 @@ class PackagingSurfaceTests(unittest.TestCase):
                 "forecast_run.py",
                 "profile_runner.py",
                 "initial_state_sensitivity_runner.py",
+                "historical_spinup_runner.py",
                 "forward_run.py",
                 "precipitation_strategy_runner.py",
             ]
@@ -220,6 +236,7 @@ class PackagingSurfaceTests(unittest.TestCase):
             expected_files = [
                 bundle_root / "HBV-Studio" / "create_hourly_workspace.py",
                 bundle_root / "HBV-Studio" / "forecast_run.py",
+                bundle_root / "HBV-Studio" / "historical_spinup_runner.py",
                 bundle_root / "HBV-Studio" / "services" / "geo_overview.py",
                 bundle_root / installer.CN_BASE_DATA / installer.CN_DEM_DIR / installer.DEFAULT_DEM_NAME,
                 bundle_root / installer.CN_BASE_DATA / "冰川源" / glacier_source_dir.name / "glacier.shp",

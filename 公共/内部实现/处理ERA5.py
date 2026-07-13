@@ -26,6 +26,11 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from 公共函数 import open_netcdf_dataset_safe
+from era5_accumulation import (
+    append_following_midnight,
+    daily_totals_from_following_midnight,
+    find_boundary_file,
+)
 
 # ============================================================
 # 路径配置
@@ -106,36 +111,24 @@ def output_transform(lons, lats):
     )
 
 
-def daily_totals_from_cumulative(arr):
-    accum = rename_time_dim(arr)
-    times = pd.DatetimeIndex(pd.to_datetime(accum["time"].values))
-    if times.empty:
-        return accum.isel(time=slice(0, 0))
+def daily_totals_from_cumulative(arr, *, start_date=None, end_date=None):
+    if start_date is None or end_date is None:
+        raise ValueError(
+            "累计型 ERA5 日总量必须声明开始/结束日期，并提供结束日次日 00:00 样本。"
+        )
+    return daily_totals_from_following_midnight(
+        arr,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
-    available_days = sorted({ts.normalize() for ts in times})
-    selected_indices = {}
-    fallback_indices = {}
-    available_day_set = set(available_days)
 
-    for idx, ts in enumerate(times):
-        day = ts.normalize()
-        fallback_indices[day] = idx
-        prev_day = day - pd.Timedelta(days=1)
-        if ts.hour == 0 and prev_day in available_day_set:
-            selected_indices[prev_day] = idx
-
-    slices = []
-    output_days = []
-    for day in available_days:
-        idx = selected_indices.get(day, fallback_indices.get(day))
-        if idx is None:
-            continue
-        slices.append(accum.isel(time=idx))
-        output_days.append(day)
-
-    if not slices:
-        return accum.isel(time=slice(0, 0))
-    return xr.concat(slices, dim=pd.Index(pd.DatetimeIndex(output_days), name="time")).sortby("time")
+def append_year_boundary(arr, boundary_arr, year):
+    return append_following_midnight(
+        arr,
+        boundary_arr,
+        boundary_time=pd.Timestamp(year=int(year) + 1, month=1, day=1),
+    )
 
 
 # ============================================================
@@ -152,11 +145,20 @@ def process_precipitation(year):
 
     print(f"   处理 {year} 年 ERA5 降水数据...")
 
-    with open_netcdf_dataset_safe(nc_file) as ds:
+    boundary_file = find_boundary_file(RAW_PREC_ERA5_DIR, "era5_tp", year)
+    with open_netcdf_dataset_safe(nc_file) as ds, open_netcdf_dataset_safe(boundary_file) as boundary_ds:
         var_name = 'tp' if 'tp' in ds.data_vars else list(ds.data_vars)[0]
-        precip = ds[var_name]
-        precip_mm = precip * 1000.0
-        precip_daily = daily_totals_from_cumulative(precip_mm)
+        boundary_name = 'tp' if 'tp' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
+        precip = append_year_boundary(
+            rename_time_dim(ds[var_name]).load(),
+            rename_time_dim(boundary_ds[boundary_name]).load(),
+            year,
+        )
+        precip_daily = daily_totals_from_cumulative(
+            precip * 1000.0,
+            start_date=f"{year}-01-01",
+            end_date=f"{year}-12-31",
+        )
 
         os.makedirs(PREC_ERA5_DAILY_DIR, exist_ok=True)
 
@@ -287,17 +289,26 @@ def process_evaporation(year):
 
     print(f"   处理 {year} 年蒸散发数据...")
 
-    with open_netcdf_dataset_safe(nc_file) as ds:
+    boundary_file = find_boundary_file(RAW_EVAP_DIR, "era5_evap", year)
+    with open_netcdf_dataset_safe(nc_file) as ds, open_netcdf_dataset_safe(boundary_file) as boundary_ds:
         # ERA5 蒸散发变量名
         var_name = 'e' if 'e' in ds.data_vars else list(ds.data_vars)[0]
-        evap = ds[var_name]
+        boundary_name = 'e' if 'e' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
+        evap = append_year_boundary(
+            rename_time_dim(ds[var_name]).load(),
+            rename_time_dim(boundary_ds[boundary_name]).load(),
+            year,
+        )
 
         # ERA5 蒸散发单位是 m，转换为 mm
         # 且 ERA5 蒸散发是负值（向下为正），取绝对值
         evap_mm = np.abs(evap) * 1000
 
-        # ERA5-Land 累积量在下一天 00:00 才给出上一日总量；若跨年缺少该时次，则退回当日最后一个时次。
-        evap_daily = daily_totals_from_cumulative(evap_mm)
+        evap_daily = daily_totals_from_cumulative(
+            evap_mm,
+            start_date=f"{year}-01-01",
+            end_date=f"{year}-12-31",
+        )
 
         # 确保输出目录存在
         os.makedirs(EVAP_DAILY_DIR, exist_ok=True)

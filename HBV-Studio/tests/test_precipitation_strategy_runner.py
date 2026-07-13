@@ -21,6 +21,71 @@ import precipitation_strategy_runner as runner  # noqa: E402
 
 
 class PrecipitationStrategyRunnerTests(unittest.TestCase):
+    def test_station_series_integrity_blocks_distinct_ids_with_identical_nonzero_series(self) -> None:
+        index = pd.date_range("2026-01-01", periods=30, freq="1D")
+        series = pd.DataFrame(
+            {
+                "A": np.arange(30, dtype="float64"),
+                "B": np.arange(30, dtype="float64"),
+                "C": np.arange(30, dtype="float64") + 1.0,
+            },
+            index=index,
+        )
+
+        result = runner.station_series_integrity_diagnostics(series)
+
+        self.assertTrue(result["qc_blocked"])
+        self.assertEqual(result["duplicate_pair_count"], 1)
+        self.assertEqual(result["duplicate_pairs"][0]["station_a"], "A")
+        self.assertEqual(result["duplicate_pairs"][0]["station_b"], "B")
+
+    def test_raster_series_fingerprint_changes_with_file_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "2026.01.01.tif"
+            path.write_bytes(b"first")
+            records = [(pd.Timestamp("2026-01-01"), path)]
+            first = runner.raster_series_fingerprint(records)
+            path.write_bytes(b"second")
+            second = runner.raster_series_fingerprint(records)
+
+        self.assertNotEqual(first["series_sha256"], second["series_sha256"])
+
+    def test_station_elevation_support_reports_no_station_above_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            dem = root / "station_dem.tif"
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(90.0, 30.0, 0.1, 0.1),
+                "nodata": -9999.0,
+            }
+            with rasterio.open(dem, "w", **profile) as dst:
+                dst.write(np.asarray([[3500.0, 3600.0], [3700.0, 3800.0]], dtype="float32"), 1)
+            stations = pd.DataFrame(
+                {
+                    "station_id": ["A", "B"],
+                    "x_raw": [90.05, 90.15],
+                    "y_raw": [29.95, 29.85],
+                }
+            )
+
+            result = runner.station_elevation_support_diagnostics(
+                {
+                    "气象策略": {"站点高程DEM_tif": str(dem)},
+                    "CFMAX分区阈值_m": 4500.0,
+                },
+                stations,
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "high_zone_unsupported")
+        self.assertEqual(result["high_zone_station_count"], 0)
+
     def test_missing_algorithm_version_replays_legacy_but_explicit_v2_is_preserved(self) -> None:
         self.assertEqual(
             runner.configured_station_correction_algorithm({}),

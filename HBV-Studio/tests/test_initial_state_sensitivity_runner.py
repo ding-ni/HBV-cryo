@@ -11,7 +11,12 @@ STUDIO_DIR = Path(__file__).resolve().parents[1]
 if str(STUDIO_DIR) not in sys.path:
     sys.path.insert(0, str(STUDIO_DIR))
 
-from initial_state_sensitivity_runner import build_scientific_acceptance, summarize_snapshot  # noqa: E402
+from initial_state_sensitivity_runner import (  # noqa: E402
+    _select_local_flow,
+    build_proxy_forcing_layout,
+    build_scientific_acceptance,
+    summarize_snapshot,
+)
 
 
 class InitialStateSensitivityRunnerTests(unittest.TestCase):
@@ -58,6 +63,41 @@ class InitialStateSensitivityRunnerTests(unittest.TestCase):
         accepted = build_scientific_acceptance(metadata, {"converged": True})
         self.assertTrue(accepted["formal_result_accepted"])
         self.assertEqual(accepted["status"], "accepted")
+
+    def test_scientific_acceptance_rejects_repeated_forcing_proxy(self) -> None:
+        metadata = {
+            "model_water_balance": {
+                "available": True,
+                "hydrological_screening": {
+                    "formal_interval_acceptance": True,
+                    "reasons": [],
+                },
+            }
+        }
+        result = build_scientific_acceptance(
+            metadata,
+            {"converged": True, "formal_acceptance_eligible": False},
+        )
+        self.assertFalse(result["formal_result_accepted"])
+        self.assertIn("initial_state_proxy_not_formal_evidence", result["blockers"])
+
+    def test_local_flow_selection_does_not_use_boundary_dominated_total(self) -> None:
+        values, basis = _select_local_flow(
+            {
+                "q_total": np.asarray([100.0, 100.0]),
+                "q_local": np.asarray([10.0, 11.0]),
+                "q_local_raw": np.asarray([9.0, 10.0]),
+            }
+        )
+        np.testing.assert_allclose(values, [9.0, 10.0])
+        self.assertEqual(basis, "q_local_raw")
+
+    def test_proxy_layout_places_target_after_complete_proxy_cycles(self) -> None:
+        layout = build_proxy_forcing_layout(total_steps=303, warmup_steps=151, proxy_cycles=3)
+        self.assertEqual(layout["combined_steps"], 1212)
+        self.assertEqual(layout["target_start_step"], 909)
+        self.assertEqual(layout["target_warmup_end_step"], 1060)
+        self.assertEqual(layout["target_evaluation_end_step"], 1212)
 
 
 if __name__ == "__main__":

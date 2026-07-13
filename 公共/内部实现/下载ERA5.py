@@ -15,7 +15,10 @@
 """
 
 import os
+import shutil
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 # ============================================================
 # 路径配置
@@ -110,6 +113,94 @@ def extract_if_zip(file_path):
                     break
 
         print(f"      解压完成")
+
+
+BOUNDARY_VARIABLE_NAMES = {
+    "total_precipitation": "tp",
+    "total_evaporation": "e",
+}
+
+
+def validate_accumulation_boundary(file_path, variable, boundary_year):
+    """校验累计变量最后一年所需的次年 01-01 00:00 收尾样本。"""
+    import numpy as np
+    import xarray as xr
+
+    source = Path(file_path)
+    if not source.is_file() or source.stat().st_size <= 1000:
+        return False, "边界文件不存在或过小"
+
+    expected_variable = BOUNDARY_VARIABLE_NAMES[variable]
+    expected_time = np.datetime64(f"{int(boundary_year):04d}-01-01T00", "h")
+    with tempfile.TemporaryDirectory(prefix="hbv_era5_boundary_qc_") as temp_dir:
+        ascii_copy = Path(temp_dir) / f"{expected_variable}_boundary.nc"
+        shutil.copy2(source, ascii_copy)
+        try:
+            with xr.open_dataset(ascii_copy, engine="netcdf4") as dataset:
+                if expected_variable not in dataset.data_vars:
+                    return False, f"缺少变量 {expected_variable}"
+                time_name = next(
+                    (name for name in ("valid_time", "time") if name in dataset.coords),
+                    None,
+                )
+                if time_name is None or len(dataset[time_name]) != 1:
+                    return False, "边界文件必须且只能包含一个时次"
+                actual_time = np.datetime64(dataset[time_name].values[0], "h")
+                if actual_time != expected_time:
+                    return False, f"边界时次 {actual_time}，预期 {expected_time}"
+                values = np.asarray(dataset[expected_variable].values)
+                if values.size == 0 or not np.isfinite(values).any():
+                    return False, "边界变量为空或全部无效"
+        except Exception as exc:
+            return False, f"边界 NetCDF 无法完整读取: {exc}"
+    return True, "变量、时次和数据可读性通过"
+
+
+def download_accumulation_boundary(variable, output_dir, prefix, boundary_year):
+    """下载最后一年累计量所需的次年 01-01 00:00 单时次文件。"""
+    import cdsapi
+
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"{prefix}_boundary_{boundary_year}.nc")
+    partial_file = output_file + ".part"
+
+    if os.path.exists(output_file):
+        valid, reason = validate_accumulation_boundary(output_file, variable, boundary_year)
+        if valid:
+            print(f"   {boundary_year}-01-01 00:00: 边界文件已存在且校验通过")
+            return output_file
+        print(f"   边界文件未通过校验，将重新下载（{reason}）")
+
+    if os.path.exists(partial_file):
+        os.remove(partial_file)
+
+    print(f"   {boundary_year}-01-01 00:00: 下载累计量收尾样本...")
+    try:
+        cdsapi.Client().retrieve(
+            "reanalysis-era5-land",
+            {
+                "variable": variable,
+                "year": str(boundary_year),
+                "month": "01",
+                "day": "01",
+                "time": "00:00",
+                "area": TUOTUOHE_BBOX,
+                "format": "netcdf",
+            },
+            partial_file,
+        )
+        extract_if_zip(partial_file)
+        valid, reason = validate_accumulation_boundary(partial_file, variable, boundary_year)
+        if not valid:
+            raise RuntimeError(f"边界下载结果校验失败：{reason}")
+        os.replace(partial_file, output_file)
+    except Exception:
+        if os.path.exists(partial_file):
+            os.remove(partial_file)
+        raise
+
+    print(f"   {boundary_year}-01-01 00:00: [OK]")
+    return output_file
 
 
 def download_era5_temperature(year):
@@ -266,6 +357,15 @@ def download_era5_all(download_actual_evaporation=False, download_precipitation=
                 download_era5_precipitation(year)
             except Exception as e:
                 print(f"   [ERROR] {year}: {e}")
+        try:
+            download_accumulation_boundary(
+                "total_precipitation",
+                RAW_PREC_ERA5_DIR,
+                "era5_tp",
+                END_YEAR + 1,
+            )
+        except Exception as e:
+            raise RuntimeError(f"ERA5 降水跨年收尾样本下载失败: {e}") from e
 
     # 下载温度
     if download_temperature:
@@ -283,6 +383,15 @@ def download_era5_all(download_actual_evaporation=False, download_precipitation=
                 download_era5_evaporation(year)
             except Exception as e:
                 print(f"   [ERROR] {year}: {e}")
+        try:
+            download_accumulation_boundary(
+                "total_evaporation",
+                RAW_EVAP_DIR,
+                "era5_evap",
+                END_YEAR + 1,
+            )
+        except Exception as e:
+            raise RuntimeError(f"ERA5 实际蒸散发跨年收尾样本下载失败: {e}") from e
     else:
         print("\n[说明] 当前默认不下载 ERA5 actual evaporation（total_evaporation）。")
         print("      潜在蒸散发将在后续阶段使用 ERA5 温度/辐射/风速/露点按 FAO56 计算。")

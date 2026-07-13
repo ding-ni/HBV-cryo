@@ -8443,6 +8443,37 @@ def save_results(result):
             except Exception:
                 glacier_mask_summary = None
 
+    precipitation_correction = {
+        "available": False,
+        "summary_file": None,
+        "summary_sha256": None,
+    }
+    precipitation_summary_path = os.path.join(PREC_DIR, "precipitation_strategy_summary.json")
+    if os.path.exists(precipitation_summary_path):
+        try:
+            with open(precipitation_summary_path, "rb") as fh:
+                summary_bytes = fh.read()
+            precipitation_summary = json.loads(summary_bytes.decode("utf-8"))
+            processing_stats = dict(precipitation_summary.get("processing_stats", {}) or {})
+            precipitation_correction = {
+                "available": True,
+                "summary_file": precipitation_summary_path,
+                "summary_sha256": hashlib.sha256(summary_bytes).hexdigest(),
+                "summary_schema": precipitation_summary.get("schema"),
+                "algorithm": processing_stats.get("algorithm"),
+                "qc_blocked": bool(processing_stats.get("qc_blocked", False)),
+                "station_series_integrity": processing_stats.get("station_series_integrity"),
+                "station_elevation_support": precipitation_summary.get("station_elevation_support"),
+                "provenance": precipitation_summary.get("provenance"),
+            }
+        except Exception as exc:
+            precipitation_correction = {
+                "available": False,
+                "summary_file": precipitation_summary_path,
+                "summary_sha256": None,
+                "error": str(exc),
+            }
+
     metadata = {
         "run_id": RUN_ID,
         "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -8468,6 +8499,7 @@ def save_results(result):
             "glacier_fraction": GLACIER_FRACTION_PATH,
             "glacier_elev": GLACIER_ELEV_PATH,
             "obs_file": OBS_FILE,
+            "precipitation_correction": precipitation_correction,
         },
         "data_cache": DATA_LOAD_SUMMARY,
         "optional_modules": {

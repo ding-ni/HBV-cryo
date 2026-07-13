@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -49,6 +50,9 @@ TIME_BASIS_LABELS = {
     TIME_BASIS_EVENT_WINDOWS: "洪水事件窗口",
     TIME_BASIS_FORECAST_WINDOW: "预报窗口",
 }
+
+STATION_DUPLICATE_MATCH_FRACTION = 0.999
+STATION_DUPLICATE_MIN_OVERLAP = 24
 
 
 DATE_PATTERNS = [
@@ -454,6 +458,222 @@ def load_station_precip(path: Path) -> tuple[pd.DataFrame, str]:
     if wide.index.has_duplicates:
         wide = wide.groupby(level=0).mean(numeric_only=True).sort_index()
     return wide, "wide"
+
+
+def station_series_integrity_diagnostics(
+    station_series: pd.DataFrame,
+    station_ids: list[str] | None = None,
+    *,
+    match_fraction_threshold: float = STATION_DUPLICATE_MATCH_FRACTION,
+    min_overlap: int = STATION_DUPLICATE_MIN_OVERLAP,
+) -> dict[str, Any]:
+    ids = [str(item) for item in (station_ids or list(station_series.columns)) if str(item) in station_series.columns]
+    required_overlap = min(max(3, int(min_overlap)), max(3, len(station_series)))
+    duplicate_pairs: list[dict[str, Any]] = []
+    for left_index, left_id in enumerate(ids):
+        left = pd.to_numeric(station_series[left_id], errors="coerce")
+        for right_id in ids[left_index + 1 :]:
+            right = pd.to_numeric(station_series[right_id], errors="coerce")
+            common = left.notna() & right.notna()
+            overlap = int(common.sum())
+            if overlap < required_overlap:
+                continue
+            left_values = left[common].to_numpy(dtype="float64")
+            right_values = right[common].to_numpy(dtype="float64")
+            matches = np.isclose(left_values, right_values, rtol=0.0, atol=1e-9)
+            match_fraction = float(np.mean(matches)) if matches.size else 0.0
+            nonzero_overlap = int(np.count_nonzero((np.abs(left_values) > 1e-12) | (np.abs(right_values) > 1e-12)))
+            if match_fraction < float(match_fraction_threshold) or nonzero_overlap <= 0:
+                continue
+            duplicate_pairs.append(
+                {
+                    "station_a": left_id,
+                    "station_b": right_id,
+                    "overlap_count": overlap,
+                    "matching_count": int(np.count_nonzero(matches)),
+                    "matching_fraction": match_fraction,
+                    "nonzero_overlap_count": nonzero_overlap,
+                    "total_a_mm": float(np.nansum(left_values)),
+                    "total_b_mm": float(np.nansum(right_values)),
+                }
+            )
+    return {
+        "schema": "station_series_integrity_v1",
+        "station_count": int(len(ids)),
+        "minimum_overlap": int(required_overlap),
+        "matching_fraction_threshold": float(match_fraction_threshold),
+        "duplicate_pair_count": int(len(duplicate_pairs)),
+        "duplicate_pairs": duplicate_pairs,
+        "qc_blocked": bool(duplicate_pairs),
+        "interpretation": (
+            "Different station identifiers with effectively identical non-zero time series are not independent evidence. "
+            "The source identity or coordinates must be resolved before formal spatial correction."
+        ),
+    }
+
+
+def sha256_file_identity(path: Path) -> dict[str, Any]:
+    resolved = Path(path).resolve(strict=False)
+    if not resolved.exists() or not resolved.is_file():
+        return {"path": str(resolved), "available": False}
+    digest = hashlib.sha256()
+    with resolved.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "path": str(resolved),
+        "available": True,
+        "size_bytes": int(resolved.stat().st_size),
+        "sha256": digest.hexdigest(),
+    }
+
+
+def raster_series_fingerprint(
+    records: list[tuple[pd.Timestamp, Path]],
+    *,
+    directory: Path | None = None,
+    use_timestamp_names: bool = False,
+) -> dict[str, Any]:
+    aggregate = hashlib.sha256()
+    file_count = 0
+    total_bytes = 0
+    missing_files: list[str] = []
+    for timestamp, source_path in records:
+        path = (
+            Path(directory) / (raster_name_from_timestamp(timestamp) if use_timestamp_names else source_path.name)
+            if directory is not None
+            else source_path
+        )
+        if not path.exists():
+            missing_files.append(str(path.resolve(strict=False)))
+            continue
+        identity = sha256_file_identity(path)
+        file_count += 1
+        total_bytes += int(identity.get("size_bytes", 0) or 0)
+        aggregate.update(
+            (
+                f"{pd.Timestamp(timestamp).isoformat()}\0{path.name}\0"
+                f"{identity.get('size_bytes', 0)}\0{identity.get('sha256', '')}\n"
+            ).encode("utf-8")
+        )
+    return {
+        "algorithm": "sha256(file_content)+sha256(ordered_series)",
+        "file_count": int(file_count),
+        "total_bytes": int(total_bytes),
+        "series_sha256": aggregate.hexdigest(),
+        "missing_file_count": int(len(missing_files)),
+        "missing_file_samples": missing_files[:5],
+    }
+
+
+def station_elevation_support_diagnostics(
+    config: dict[str, Any],
+    stations: pd.DataFrame,
+) -> dict[str, Any]:
+    meteo = dict(config.get("气象策略", {}) or {})
+    dem_raw = str(
+        meteo.get("站点高程DEM_tif", meteo.get("station_elevation_dem_tif", "")) or ""
+    ).strip()
+    threshold_raw = meteo.get(
+        "站点高程支持阈值_m",
+        meteo.get("station_elevation_support_threshold_m", config.get("CFMAX分区阈值_m")),
+    )
+    try:
+        threshold_m = float(threshold_raw)
+    except (TypeError, ValueError):
+        threshold_m = float("nan")
+    if not dem_raw:
+        return {
+            "schema": "station_elevation_support_v1",
+            "available": False,
+            "status": "not_configured",
+            "threshold_m": threshold_m if np.isfinite(threshold_m) else None,
+        }
+    dem_candidate = Path(dem_raw).expanduser()
+    dem_path = (
+        dem_candidate.resolve(strict=False)
+        if dem_candidate.is_absolute()
+        else resolve_config_entry_path(config, dem_raw)
+    )
+    if not dem_path.exists():
+        return {
+            "schema": "station_elevation_support_v1",
+            "available": False,
+            "status": "dem_missing",
+            "dem": str(dem_path),
+            "threshold_m": threshold_m if np.isfinite(threshold_m) else None,
+        }
+    if stations.empty:
+        return {
+            "schema": "station_elevation_support_v1",
+            "available": False,
+            "status": "no_matched_stations",
+            "dem": str(dem_path),
+            "threshold_m": threshold_m if np.isfinite(threshold_m) else None,
+        }
+    x_raw = pd.to_numeric(stations.get("x_raw"), errors="coerce").to_numpy(dtype="float64")
+    y_raw = pd.to_numeric(stations.get("y_raw"), errors="coerce").to_numpy(dtype="float64")
+    valid_coordinates = np.isfinite(x_raw) & np.isfinite(y_raw)
+    elevations = np.full(len(stations), np.nan, dtype="float64")
+    with rasterio.open(dem_path) as src:
+        x_values = x_raw.copy()
+        y_values = y_raw.copy()
+        looks_lonlat = bool(
+            np.any(valid_coordinates)
+            and np.nanmax(np.abs(x_values[valid_coordinates])) <= 180.0
+            and np.nanmax(np.abs(y_values[valid_coordinates])) <= 90.0
+        )
+        if src.crs is not None and looks_lonlat and str(src.crs).upper() not in {"EPSG:4326", "OGC:CRS84"}:
+            transformer = pyproj.Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+            transformed_x, transformed_y = transformer.transform(x_values[valid_coordinates], y_values[valid_coordinates])
+            x_values[valid_coordinates] = transformed_x
+            y_values[valid_coordinates] = transformed_y
+        samples = list(src.sample(zip(x_values[valid_coordinates], y_values[valid_coordinates])))
+        sampled = np.asarray([item[0] for item in samples], dtype="float64") if samples else np.asarray([], dtype="float64")
+        if src.nodata is not None:
+            sampled[np.isclose(sampled, float(src.nodata))] = np.nan
+        sampled[sampled < -500.0] = np.nan
+        elevations[valid_coordinates] = sampled
+    finite = np.isfinite(elevations)
+    high = finite & (elevations >= threshold_m) if np.isfinite(threshold_m) else np.zeros_like(finite)
+    valid_count = int(np.count_nonzero(finite))
+    high_count = int(np.count_nonzero(high))
+    if not np.isfinite(threshold_m):
+        status = "threshold_missing"
+    elif high_count == 0:
+        status = "high_zone_unsupported"
+    elif high_count < 2 or high_count / max(valid_count, 1) < 0.1:
+        status = "high_zone_sparsely_supported"
+    else:
+        status = "supported"
+    station_items = []
+    for station_id, elevation in zip(stations["station_id"].astype(str), elevations):
+        station_items.append(
+            {
+                "station_id": station_id,
+                "elevation_m": float(elevation) if np.isfinite(elevation) else None,
+                "supports_high_zone": bool(np.isfinite(elevation) and np.isfinite(threshold_m) and elevation >= threshold_m),
+            }
+        )
+    return {
+        "schema": "station_elevation_support_v1",
+        "available": bool(valid_count > 0),
+        "status": status,
+        "dem": sha256_file_identity(dem_path),
+        "threshold_m": float(threshold_m) if np.isfinite(threshold_m) else None,
+        "station_count": int(len(stations)),
+        "valid_elevation_count": valid_count,
+        "elevation_min_m": float(np.nanmin(elevations)) if valid_count else None,
+        "elevation_mean_m": float(np.nanmean(elevations)) if valid_count else None,
+        "elevation_max_m": float(np.nanmax(elevations)) if valid_count else None,
+        "high_zone_station_count": high_count,
+        "high_zone_station_fraction": float(high_count / valid_count) if valid_count else 0.0,
+        "stations": station_items,
+        "interpretation": (
+            "This is a representativeness diagnostic. Sparse or absent high-elevation gauges do not prove the background field is wrong, "
+            "but station residual correction cannot independently validate the high zone."
+        ),
+    }
 
 
 def base_and_target_dirs(config: dict[str, Any], prec_source: str) -> tuple[Path, Path]:
@@ -1281,6 +1501,12 @@ def summarize_record_participation(
                 "status": status,
             }
         )
+    station_integrity = station_series_integrity_diagnostics(station_series, station_ids)
+    combined_processing_stats = dict(processing_stats or {})
+    combined_processing_stats["station_series_integrity"] = station_integrity
+    combined_processing_stats["qc_blocked"] = bool(
+        combined_processing_stats.get("qc_blocked", False) or station_integrity.get("qc_blocked", False)
+    )
     hydro_diagnostics = summarize_precipitation_hydro_diagnostics(
         records,
         target_dir,
@@ -1289,7 +1515,7 @@ def summarize_record_participation(
         mode,
         use_timestamp_names=use_timestamp_names,
         algorithm=str(
-            dict(processing_stats or {}).get("algorithm", STATION_CORRECTION_ALGORITHM_LEGACY)
+            combined_processing_stats.get("algorithm", STATION_CORRECTION_ALGORITHM_LEGACY)
             or STATION_CORRECTION_ALGORITHM_LEGACY
         ),
     )
@@ -1323,6 +1549,7 @@ def summarize_record_participation(
         "min_available_station_count": min_available,
         "mean_available_station_count": mean_available,
         "station_missing_rates": station_missing_rates,
+        "station_series_integrity": station_integrity,
         "event_coverage": event_coverage,
         "hydrological_diagnostics": hydro_diagnostics,
         "day_basis_diagnostics": day_basis_diagnostics or {
@@ -1330,7 +1557,7 @@ def summarize_record_participation(
             "status": "not_run",
         },
         "transfer_rules": transfer_rule_summary or {"available": False, "status": "not_requested"},
-        "processing_stats": processing_stats or {},
+        "processing_stats": combined_processing_stats,
         "base_dir": str(base_dir.resolve(strict=False)),
         "target_dir": str(target_dir.resolve(strict=False)),
     }
@@ -2493,6 +2720,19 @@ def main() -> None:
         processing_stats=processing_stats,
         day_basis_diagnostics=day_basis_diagnostics,
     )
+    summary["station_elevation_support"] = station_elevation_support_diagnostics(config, stations)
+    summary["provenance"] = {
+        "schema": "precipitation_correction_provenance_v1",
+        "base_precipitation_series": raster_series_fingerprint(records),
+        "corrected_precipitation_series": raster_series_fingerprint(
+            records,
+            directory=target_dir,
+            use_timestamp_names=use_timestamp_names,
+        ),
+        "station_precipitation_input": sha256_file_identity(station_prec_path),
+        "station_metadata_input": sha256_file_identity(station_meta_path),
+        "source_daily_forcing_manifest": sha256_file_identity(base_dir.parent / "daily_forcing_manifest.json"),
+    }
     summary_path = write_strategy_summary(target_dir, summary)
     print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")
     print(f"降水方案摘要: {summary_path}")

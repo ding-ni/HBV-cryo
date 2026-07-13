@@ -127,7 +127,13 @@ class FilesystemServiceTests(unittest.TestCase):
             gui_root = project_root / "HBV-Studio"
             context = self._placeholder_context(project_root, gui_root)
             legacy_gui_path = project_root.parent / "legacy" / "HBV-Studio" / "workspaces" / "demo.json"
-            legacy_runtime_path = project_root.parent / "legacy" / "runtime" / "demo"
+            legacy_runtime_path = (
+                project_root.parent
+                / "legacy"
+                / project_root.name
+                / "运行目录"
+                / "demo"
+            )
 
             remapped_gui = remap_legacy_project_path(str(legacy_gui_path), context)
             remapped_runtime = remap_legacy_project_path(str(legacy_runtime_path), context)
@@ -135,24 +141,36 @@ class FilesystemServiceTests(unittest.TestCase):
         self.assertEqual(remapped_gui, str((gui_root / "workspaces" / "demo.json").resolve(strict=False)))
         self.assertEqual(remapped_runtime, str((project_root / "运行目录" / "demo").resolve(strict=False)))
 
+    def test_remap_legacy_project_path_preserves_new_external_runtime_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project_root = root / "CurrentProject"
+            gui_root = project_root / "HBV-Studio"
+            context = self._placeholder_context(project_root, gui_root)
+            new_runtime_path = root / "HBVStudio" / "用户数据" / "运行目录" / "New"
+
+            remapped = remap_legacy_project_path(str(new_runtime_path), context)
+
+        self.assertEqual(remapped, str(new_runtime_path))
+
     def test_normalize_legacy_project_paths_only_rewrites_path_like_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir) / "CurrentProject"
             gui_root = project_root / "HBV-Studio"
             context = self._placeholder_context(project_root, gui_root)
-            legacy_root = project_root.parent / "legacy"
+            legacy_root = project_root.parent / "legacy" / project_root.name
 
             normalized = normalize_legacy_project_paths(
                 {
-                    "运行目录": str(legacy_root / "runtime" / "demo"),
-                    "title": str(legacy_root / "runtime" / "not_a_path_label"),
+                    "运行目录": str(legacy_root / "运行目录" / "demo"),
+                    "title": str(legacy_root / "运行目录" / "not_a_path_label"),
                     "nested": [{"dem_tif": str(legacy_root / "HBV-Cryo" / "dem.tif")}],
                 },
                 context,
             )
 
         self.assertEqual(normalized["运行目录"], str((project_root / "运行目录" / "demo").resolve(strict=False)))
-        self.assertEqual(normalized["title"], str(legacy_root / "runtime" / "not_a_path_label"))
+        self.assertEqual(normalized["title"], str(legacy_root / "运行目录" / "not_a_path_label"))
         self.assertEqual(
             normalized["nested"][0]["dem_tif"],
             str((project_root / "HBV-Cryo" / "dem.tif").resolve(strict=False)),

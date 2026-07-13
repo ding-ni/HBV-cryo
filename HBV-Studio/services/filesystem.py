@@ -205,29 +205,6 @@ def remap_legacy_project_path(
             return str(remapped.resolve(strict=False))
         except Exception:
             return str(remapped)
-    legacy_markers = (
-        ("\\hbv-studio\\", context.gui_root),
-        ("\\workspaces\\", context.gui_root / "workspaces"),
-        ("\\运行目录\\", context.project_root / "运行目录"),
-        ("\\runtime\\", context.project_root / "运行目录"),
-        ("\\hbv-cryo\\", context.project_root / "HBV-Cryo"),
-        ("\\数据准备\\", context.project_root / "数据准备"),
-        ("\\基础数据\\", context.project_root / "基础数据"),
-    )
-    for marker, root in legacy_markers:
-        idx = lowered.find(marker)
-        if idx < 0:
-            suffix_marker = marker.rstrip("\\")
-            if not lowered.endswith(suffix_marker):
-                continue
-            suffix = ""
-        else:
-            suffix = normalized[idx + len(marker):].lstrip("\\/")
-        remapped = (root / suffix) if suffix else root
-        try:
-            return str(remapped.resolve(strict=False))
-        except Exception:
-            return str(remapped)
     return raw_value
 
 

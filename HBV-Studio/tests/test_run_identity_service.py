@@ -436,6 +436,21 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(inferred_project, project_root.resolve(strict=False))
         self.assertEqual(inferred_gui, gui_root.resolve(strict=False))
 
+    def test_infer_project_roots_from_installed_user_data_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            gui_root = project_root / "HBV-Studio"
+            (gui_root / "workspaces").mkdir(parents=True)
+            user_root = project_root / "\u7528\u6237\u6570\u636e"
+            (user_root / "workspaces").mkdir(parents=True)
+            run_path = user_root / "\u8fd0\u884c\u76ee\u5f55" / "workspace_a" / "results" / "runs" / "run_a"
+            run_path.mkdir(parents=True)
+
+            inferred_project, inferred_gui = infer_project_roots_from_run_path(run_path)
+
+        self.assertEqual(inferred_project, project_root.resolve(strict=False))
+        self.assertEqual(inferred_gui, gui_root.resolve(strict=False))
+
     def test_workspace_config_candidates_rebases_external_workspace_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)

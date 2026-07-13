@@ -47,6 +47,16 @@ def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
                 f"原样保留 {pass_steps} 时段；"
                 f"已有输出跳过 {skipped_steps} 时段"
             )
+    elevation_support = dict(summary.get("station_elevation_support", {}) or {})
+    elevation_status = str(elevation_support.get("status", "") or "")
+    if elevation_status in {"high_zone_unsupported", "high_zone_sparsely_supported", "supported"}:
+        parts.append(
+            "站点高程覆盖："
+            f"阈值 {_fmt_float(elevation_support.get('threshold_m'), 0, ' m')}；"
+            f"高区站 {int(elevation_support.get('high_zone_station_count', 0) or 0)}/"
+            f"{int(elevation_support.get('valid_elevation_count', 0) or 0)}；"
+            f"状态 {elevation_status}"
+        )
     rules = dict(summary.get("transfer_rules", {}) or {})
     if rules:
         if bool(rules.get("available", False)):
@@ -149,12 +159,31 @@ def check_precip_strategy_outputs(
             parts.extend(_hydro_diagnostic_message(summary))
             if qc_blocked:
                 monthly = dict(processing_stats.get("monthly_conservation", {}) or {})
-                parts.append(
-                    "月量守恒质量检查未通过："
-                    f"高倍率像元 {int(monthly.get('high_factor_cell_count', 0) or 0)}；"
-                    f"移除比例超限像元 {int(monthly.get('high_removed_fraction_cell_count', 0) or 0)}；"
-                    f"未分配像元 {int(monthly.get('unresolved_cell_count', 0) or 0)}"
+                integrity = dict(processing_stats.get("station_series_integrity", {}) or {})
+                monthly_failure_count = sum(
+                    int(monthly.get(key, 0) or 0)
+                    for key in (
+                        "high_factor_cell_count",
+                        "high_removed_fraction_cell_count",
+                        "unresolved_cell_count",
+                    )
                 )
+                if bool(monthly.get("qc_blocked", False)) or monthly_failure_count > 0:
+                    parts.append(
+                        "月量守恒质量检查未通过："
+                        f"高倍率像元 {int(monthly.get('high_factor_cell_count', 0) or 0)}；"
+                        f"移除比例超限像元 {int(monthly.get('high_removed_fraction_cell_count', 0) or 0)}；"
+                        f"未分配像元 {int(monthly.get('unresolved_cell_count', 0) or 0)}"
+                    )
+                if bool(integrity.get("qc_blocked", False)):
+                    samples = [
+                        f"{item.get('station_a')}/{item.get('station_b')}"
+                        for item in list(integrity.get("duplicate_pairs", []) or [])[:3]
+                    ]
+                    parts.append(
+                        f"站点序列独立性检查未通过：异站同序列 {int(integrity.get('duplicate_pair_count', 0) or 0)} 对"
+                        + (f"（{'、'.join(samples)}）" if samples else "")
+                    )
             return count > 0 and not qc_blocked, "；".join(parts), count
         except Exception:
             pass
