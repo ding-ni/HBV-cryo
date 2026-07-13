@@ -12,6 +12,7 @@ from datetime import datetime
 from glob import glob
 from math import log, radians, sin
 from multiprocessing.pool import ThreadPool
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -215,6 +216,8 @@ RELIABILITY_FLAG = "ok"
 OBS_MONTHLY_CALIB = None
 BASIN_GLACIER_AREA_FRACTION = float("nan")
 PROJECT_OBJECT_TYPE = "full_upstream_basin"
+INTERVAL_OBJECTIVE_GUARD_ENABLED = False
+INTERVAL_OBJECTIVE_GUARD_WEIGHT = 0.15
 FLOOD_EVENT_CONFIG = {}
 EVENT_RUNTIME_ENABLED = False
 EVENT_RUNTIME_MODE = "continuous"
@@ -403,6 +406,46 @@ INIT_ST = np.array([0.0, 5.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
 
 @njit(cache=False, fastmath=True, nogil=True)
+def limit_upper_zone_outflows(q0, q1, available_uz):
+    total = q0 + q1
+    if total > available_uz and total > EPS:
+        factor = max(available_uz, 0.0) / total
+        return q0 * factor, q1 * factor
+    return q0, q1
+
+
+@njit(cache=False, fastmath=True, nogil=True)
+def route_soil_storage_excess(sm, infiltration, recharge, actual_et, field_capacity):
+    """Route water above FC to recharge instead of silently clipping it."""
+    next_sm = sm + infiltration - recharge - actual_et
+    excess = max(next_sm - field_capacity, 0.0)
+    if excess > 0.0:
+        recharge += excess
+        next_sm = field_capacity
+    return max(next_sm, 0.0), recharge, excess
+
+
+@njit(cache=False, fastmath=True, nogil=True)
+def withdraw_mixed_water_sources(wc_r, wc_s, wc_i, requested):
+    total = max(wc_r + wc_s + wc_i, 0.0)
+    amount = min(max(requested, 0.0), total)
+    if total <= EPS or amount <= 0.0:
+        return wc_r, wc_s, wc_i, 0.0, 0.0, 0.0
+    fraction = amount / total
+    out_r = wc_r * fraction
+    out_s = wc_s * fraction
+    out_i = wc_i * fraction
+    return (
+        max(wc_r - out_r, 0.0),
+        max(wc_s - out_s, 0.0),
+        max(wc_i - out_i, 0.0),
+        out_r,
+        out_s,
+        out_i,
+    )
+
+
+@njit(cache=False, fastmath=True, nogil=True)
 def hbv_cell(prec, temp, et, ll_temp, par, init_st, is_glacier, ice_factor, glacier_delta_t):
     n = len(prec)
     q_uz = np.zeros(n, dtype=np.float32)
@@ -420,6 +463,15 @@ def hbv_cell(prec, temp, et, ll_temp, par, init_st, is_glacier, ice_factor, glac
     lp = max(min(lp, 0.99), 0.01)
 
     sp, sm, init_uz, init_lz, wc = init_st[0], init_st[1], init_st[2], init_st[3], init_st[4]
+    if len(init_st) >= 7:
+        wc_r = max(float(init_st[4]), 0.0)
+        wc_s = max(float(init_st[5]), 0.0)
+        wc_i = max(float(init_st[6]), 0.0)
+        wc = wc_r + wc_s + wc_i
+    else:
+        wc_r = 0.0
+        wc_s = max(float(wc), 0.0)
+        wc_i = 0.0
     init_uz = max(float(init_uz), 0.0)
     init_lz = max(float(init_lz), 0.0)
     uz_r, uz_s, uz_i = init_uz, 0.0, 0.0
@@ -460,25 +512,33 @@ def hbv_cell(prec, temp, et, ll_temp, par, init_st, is_glacier, ice_factor, glac
                     f_snow = 1.0
                 melt_pot_ice = (cfmax * ice_factor) * ddt
                 ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-            wc_int = wc + melt + rf + ice_melt
+            wc_r += rf
+            wc_s += melt
+            wc_i += ice_melt
         else:
-            refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+            wc_r += rf
+            refr = min(cfr * cfmax * (tt - t_eff), wc_r + wc_s + wc_i)
+            wc_r, wc_s, wc_i, _refr_r, _refr_s, _refr_i = withdraw_mixed_water_sources(
+                wc_r, wc_s, wc_i, refr,
+            )
             sp = sp + sf + refr
-            wc_int = max(wc - refr + rf, 0.0)
 
-        sp = min(sp, 10000.0)
+        sp = max(sp, 0.0)
+        wc_int = wc_r + wc_s + wc_i
         if wc_int > cwh * sp:
             inf = wc_int - cwh * sp
-            wc = cwh * sp
+            wc_r, wc_s, wc_i, inf_r, inf_s, inf_i = withdraw_mixed_water_sources(
+                wc_r, wc_s, wc_i, inf,
+            )
         else:
             inf = 0.0
-            wc = wc_int
+            inf_r, inf_s, inf_i = 0.0, 0.0, 0.0
+        wc = wc_r + wc_s + wc_i
 
-        input_total = rf + melt + ice_melt
-        den_in = input_total + EPS
-        frac_r = rf / den_in
-        frac_s = melt / den_in
-        frac_i = ice_melt / den_in
+        den_in = inf + EPS
+        frac_r = inf_r / den_in
+        frac_s = inf_s / den_in
+        frac_i = inf_i / den_in
 
         sm_ratio = min(max(sm / fc, 0.0), 1.0)
         r = (sm_ratio ** beta) * inf
@@ -494,11 +554,14 @@ def hbv_cell(prec, temp, et, ll_temp, par, init_st, is_glacier, ice_factor, glac
             ea = ep_adj
         ea = min(ea, sm)
 
+        sm, r, soil_excess = route_soil_storage_excess(sm, inf, r, ea, fc)
+        r_r += soil_excess * frac_r
+        r_s += soil_excess * frac_s
+        r_i += soil_excess * frac_i
         uz_r += r_r
         uz_s += r_s
         uz_i += r_i
         uz_int = uz_r + uz_s + uz_i
-        sm = max(min(sm + inf - r - ea, fc), 0.0)
 
         perc_actual = min(perc, uz_int)
         den_uz = uz_int + EPS
@@ -515,9 +578,7 @@ def hbv_cell(prec, temp, et, ll_temp, par, init_st, is_glacier, ice_factor, glac
         uz_int2 = uz_r + uz_s + uz_i
         q0 = k * max(uz_int2 - uzl, 0.0)
         q1 = k1 * uz_int2
-        if q0 + q1 > uz_int2:
-            q0 = uz_int2 * 0.67
-            q1 = uz_int2 * 0.33
+        q0, q1 = limit_upper_zone_outflows(q0, q1, uz_int2)
 
         den_uz2 = uz_int2 + EPS
         frac_ur2 = uz_r / den_uz2
@@ -600,6 +661,15 @@ def run_all_cells(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax_grid, ini
         init_uz = max(float(init_st[2]), 0.0)
         init_lz = max(float(init_st[3]), 0.0)
         wc = init_st[4]
+        if len(init_st) >= 7:
+            wc_r = max(float(init_st[4]), 0.0)
+            wc_s = max(float(init_st[5]), 0.0)
+            wc_i = max(float(init_st[6]), 0.0)
+            wc = wc_r + wc_s + wc_i
+        else:
+            wc_r = 0.0
+            wc_s = max(float(wc), 0.0)
+            wc_i = 0.0
         uz_r = init_uz
         uz_s = 0.0
         uz_i = 0.0
@@ -642,25 +712,33 @@ def run_all_cells(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax_grid, ini
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc_r += rf
+                wc_s += melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t), wc + rf)
+                wc_r += rf
+                refr = min(cfr * cfmax * (tt - t), wc_r + wc_s + wc_i)
+                wc_r, wc_s, wc_i, _refr_r, _refr_s, _refr_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, refr,
+                )
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc_r + wc_s + wc_i
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
-                wc = cwh * sp
+                wc_r, wc_s, wc_i, inf_r, inf_s, inf_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, inf,
+                )
             else:
                 inf = 0.0
-                wc = wc_int
+                inf_r, inf_s, inf_i = 0.0, 0.0, 0.0
+            wc = wc_r + wc_s + wc_i
 
-            input_total = rf + melt + ice_melt
-            den_in = input_total + EPS
-            frac_r = rf / den_in
-            frac_s = melt / den_in
-            frac_i = ice_melt / den_in
+            den_in = inf + EPS
+            frac_r = inf_r / den_in
+            frac_s = inf_s / den_in
+            frac_i = inf_i / den_in
 
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             r = (sm_ratio ** beta_base) * inf
@@ -676,11 +754,14 @@ def run_all_cells(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax_grid, ini
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, r, soil_excess = route_soil_storage_excess(sm, inf, r, ea, fc_base)
+            r_r += soil_excess * frac_r
+            r_s += soil_excess * frac_s
+            r_i += soil_excess * frac_i
             uz_r += r_r
             uz_s += r_s
             uz_i += r_i
             uz_int = uz_r + uz_s + uz_i
-            sm = max(min(sm + inf - r - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz_int)
             den_uz = uz_int + EPS
@@ -697,9 +778,7 @@ def run_all_cells(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax_grid, ini
             uz_int2 = uz_r + uz_s + uz_i
             q0 = k * max(uz_int2 - uzl, 0.0)
             q1 = k1 * uz_int2
-            if q0 + q1 > uz_int2:
-                q0 = uz_int2 * 0.67
-                q1 = uz_int2 * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz_int2)
 
             den_uz2 = uz_int2 + EPS
             frac_ur2 = uz_r / den_uz2
@@ -773,6 +852,9 @@ def run_all_cells_total_only(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfma
         sp = init_st[0]
         sm = init_st[1]
         wc = init_st[4]
+        wc_i = max(float(init_st[6]), 0.0) if len(init_st) >= 7 else 0.0
+        if len(init_st) >= 7:
+            wc = max(float(init_st[4]), 0.0) + max(float(init_st[5]), 0.0) + wc_i
         uz = max(float(init_st[2]), 0.0)
         lz = max(float(init_st[3]), 0.0)
 
@@ -817,7 +899,7 @@ def run_all_cells_total_only(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfma
                 sp = sp + sf + refr
                 wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
                 wc = cwh * sp
@@ -836,8 +918,10 @@ def run_all_cells_total_only(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfma
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, _soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
             uz += recharge
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz)
             uz -= perc_actual
@@ -845,9 +929,7 @@ def run_all_cells_total_only(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfma
 
             q0 = k * max(uz - uzl, 0.0)
             q1 = k1 * uz
-            if q0 + q1 > uz:
-                q0 = uz * 0.67
-                q1 = uz * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz)
             uz = max(uz - (q0 + q1), 0.0)
 
             q2 = k2 * lz
@@ -897,6 +979,9 @@ def run_all_cells_total_ice(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax
         lz = max(float(init_st[3]), 0.0)
         uz_i = 0.0
         lz_i = 0.0
+        wc_i = max(float(init_st[6]), 0.0) if len(init_st) >= 7 else 0.0
+        if len(init_st) >= 7:
+            wc = max(float(init_st[4]), 0.0) + max(float(init_st[5]), 0.0) + wc_i
 
         for t_idx in range(ts):
             p = prec_3d[x, y, t_idx]
@@ -933,22 +1018,29 @@ def run_all_cells_total_ice(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc = wc + melt + rf + ice_melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t), wc + rf)
+                wc = wc + rf
+                refr = min(cfr * cfmax * (tt - t), wc)
+                refr_i = refr * (wc_i / (wc + EPS))
+                wc_i = max(wc_i - refr_i, 0.0)
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
+                wc = max(wc - refr, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
+                inf_i = inf * (wc_i / (wc_int + EPS))
                 wc = cwh * sp
+                wc_i = max(wc_i - inf_i, 0.0)
             else:
                 inf = 0.0
                 wc = wc_int
+                inf_i = 0.0
 
-            input_total = rf + melt + ice_melt
-            frac_i = ice_melt / (input_total + EPS)
+            frac_i = inf_i / (inf + EPS)
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             recharge = (sm_ratio ** beta_base) * inf
             recharge_i = recharge * frac_i
@@ -961,9 +1053,12 @@ def run_all_cells_total_ice(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
+            recharge_i += soil_excess * frac_i
             uz += recharge
             uz_i += recharge_i
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz)
             frac_uz_i = uz_i / (uz + EPS)
@@ -975,9 +1070,7 @@ def run_all_cells_total_ice(prec_3d, temp_3d, et_3d, ll_temp_3d, par_base, cfmax
 
             q0 = k * max(uz - uzl, 0.0)
             q1 = k1 * uz
-            if q0 + q1 > uz:
-                q0 = uz * 0.67
-                q1 = uz * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz)
 
             frac_uz_i2 = uz_i / (uz + EPS)
             q0_i = q0 * frac_uz_i2
@@ -1010,6 +1103,13 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
     q_rain = np.zeros(ts, dtype=np.float64)
     q_snow = np.zeros(ts, dtype=np.float64)
     q_ice = np.zeros(ts, dtype=np.float64)
+    q_precip_input = np.zeros(ts, dtype=np.float64)
+    q_ice_input = np.zeros(ts, dtype=np.float64)
+    q_actual_et = np.zeros(ts, dtype=np.float64)
+    q_balance_error = np.zeros(ts, dtype=np.float64)
+    q_balance_error_low = np.zeros(ts, dtype=np.float64)
+    q_balance_error_high = np.zeros(ts, dtype=np.float64)
+    max_abs_cell_balance_error_mm = 0.0
 
     tt = par_base[0]
     rfcf = par_base[1]
@@ -1037,6 +1137,15 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
         init_uz = max(float(init_st[2]), 0.0)
         init_lz = max(float(init_st[3]), 0.0)
         wc = init_st[4]
+        if len(init_st) >= 7:
+            wc_r = max(float(init_st[4]), 0.0)
+            wc_s = max(float(init_st[5]), 0.0)
+            wc_i = max(float(init_st[6]), 0.0)
+            wc = wc_r + wc_s + wc_i
+        else:
+            wc_r = 0.0
+            wc_s = max(float(wc), 0.0)
+            wc_i = 0.0
         uz_r = init_uz
         uz_s = 0.0
         uz_i = 0.0
@@ -1056,6 +1165,7 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
             p = max(p, 0.0)
             e = max(e, 0.0)
 
+            storage_before = sp + sm + wc_r + wc_s + wc_i + uz_r + uz_s + uz_i + lz_r + lz_s + lz_i
             t_eff = t + delta_t_here
 
             if t_eff <= tt:
@@ -1081,25 +1191,33 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc_r += rf
+                wc_s += melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+                wc_r += rf
+                refr = min(cfr * cfmax * (tt - t_eff), wc_r + wc_s + wc_i)
+                wc_r, wc_s, wc_i, _refr_r, _refr_s, _refr_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, refr,
+                )
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc_r + wc_s + wc_i
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
-                wc = cwh * sp
+                wc_r, wc_s, wc_i, inf_r, inf_s, inf_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, inf,
+                )
             else:
                 inf = 0.0
-                wc = wc_int
+                inf_r, inf_s, inf_i = 0.0, 0.0, 0.0
+            wc = wc_r + wc_s + wc_i
 
-            input_total = rf + melt + ice_melt
-            den_in = input_total + EPS
-            frac_r = rf / den_in
-            frac_s = melt / den_in
-            frac_i = ice_melt / den_in
+            den_in = inf + EPS
+            frac_r = inf_r / den_in
+            frac_s = inf_s / den_in
+            frac_i = inf_i / den_in
 
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             recharge = (sm_ratio ** beta_base) * inf
@@ -1115,11 +1233,16 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
+            r_r += soil_excess * frac_r
+            r_s += soil_excess * frac_s
+            r_i += soil_excess * frac_i
             uz_r += r_r
             uz_s += r_s
             uz_i += r_i
             uz_int = uz_r + uz_s + uz_i
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz_int)
             den_uz = uz_int + EPS
@@ -1136,9 +1259,7 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
             uz_int2 = uz_r + uz_s + uz_i
             q0 = k * max(uz_int2 - uzl, 0.0)
             q1 = k1 * uz_int2
-            if q0 + q1 > uz_int2:
-                q0 = uz_int2 * 0.67
-                q1 = uz_int2 * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz_int2)
 
             den_uz2 = uz_int2 + EPS
             frac_ur2 = uz_r / den_uz2
@@ -1172,17 +1293,44 @@ def run_all_cells_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base
             lz_s = max(lz_s - q2_s, 0.0)
             lz_i = max(lz_i - q2_i, 0.0)
 
-            q_total[t_idx] += (q0 + q1 + q2) * scale
+            q_out = q0 + q1 + q2
+            storage_after = sp + sm + wc_r + wc_s + wc_i + uz_r + uz_s + uz_i + lz_r + lz_s + lz_i
+            balance_error = storage_before + rf + sf + ice_melt - ea - q_out - storage_after
+            abs_balance_error = abs(balance_error)
+            if abs_balance_error > max_abs_cell_balance_error_mm:
+                max_abs_cell_balance_error_mm = abs_balance_error
+
+            q_total[t_idx] += q_out * scale
             q_rain[t_idx] += (q0_r + q1_r + q2_r) * scale
             q_snow[t_idx] += (q0_s + q1_s + q2_s) * scale
             q_ice[t_idx] += (q0_i + q1_i + q2_i) * scale
+            q_precip_input[t_idx] += (rf + sf) * scale
+            q_ice_input[t_idx] += ice_melt * scale
+            q_actual_et[t_idx] += ea * scale
+            q_balance_error[t_idx] += balance_error * scale
+            if zone_high_cells[idx]:
+                q_balance_error_high[t_idx] += balance_error * scale
+            else:
+                q_balance_error_low[t_idx] += balance_error * scale
 
-    return q_total, q_rain, q_snow, q_ice
+    return (
+        q_total,
+        q_rain,
+        q_snow,
+        q_ice,
+        q_precip_input,
+        q_ice_input,
+        q_actual_et,
+        q_balance_error,
+        q_balance_error_low,
+        q_balance_error_high,
+        max_abs_cell_balance_error_mm,
+    )
 
 
 @njit(cache=False, fastmath=True, nogil=True)
 def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, par_base, zone_high_cells,
-                              state_sp, state_sm, state_wc,
+                              state_sp, state_sm, state_wc, state_wc_r, state_wc_s, state_wc_i,
                               state_uz_r, state_uz_s, state_uz_i,
                               state_lz_r, state_lz_s, state_lz_i,
                               active_cells, cell_scale, glacier_cells, glacier_on, ice_factor,
@@ -1197,6 +1345,9 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
     sp_end = np.full(n_cells, np.nan, dtype=np.float32)
     sm_end = np.full(n_cells, np.nan, dtype=np.float32)
     wc_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_r_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_s_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_i_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_r_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_s_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_i_end = np.full(n_cells, np.nan, dtype=np.float32)
@@ -1231,6 +1382,9 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
         sp = state_sp[idx]
         sm = state_sm[idx]
         wc = state_wc[idx]
+        wc_r = state_wc_r[idx]
+        wc_s = state_wc_s[idx]
+        wc_i = state_wc_i[idx]
         uz_r = state_uz_r[idx]
         uz_s = state_uz_s[idx]
         uz_i = state_uz_i[idx]
@@ -1243,6 +1397,9 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
             sm = 0.0
         if np.isnan(wc):
             wc = 0.0
+        if np.isnan(wc_r) or np.isnan(wc_s) or np.isnan(wc_i):
+            wc_r, wc_s, wc_i = 0.0, max(wc, 0.0), 0.0
+        wc = max(wc_r, 0.0) + max(wc_s, 0.0) + max(wc_i, 0.0)
         if np.isnan(uz_r):
             uz_r = 0.0
         if np.isnan(uz_s):
@@ -1293,25 +1450,33 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc_r += rf
+                wc_s += melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+                wc_r += rf
+                refr = min(cfr * cfmax * (tt - t_eff), wc_r + wc_s + wc_i)
+                wc_r, wc_s, wc_i, _refr_r, _refr_s, _refr_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, refr,
+                )
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc_r + wc_s + wc_i
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
-                wc = cwh * sp
+                wc_r, wc_s, wc_i, inf_r, inf_s, inf_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, inf,
+                )
             else:
                 inf = 0.0
-                wc = wc_int
+                inf_r, inf_s, inf_i = 0.0, 0.0, 0.0
+            wc = wc_r + wc_s + wc_i
 
-            input_total = rf + melt + ice_melt
-            den_in = input_total + EPS
-            frac_r = rf / den_in
-            frac_s = melt / den_in
-            frac_i = ice_melt / den_in
+            den_in = inf + EPS
+            frac_r = inf_r / den_in
+            frac_s = inf_s / den_in
+            frac_i = inf_i / den_in
 
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             recharge = (sm_ratio ** beta_base) * inf
@@ -1327,11 +1492,16 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
+            r_r += soil_excess * frac_r
+            r_s += soil_excess * frac_s
+            r_i += soil_excess * frac_i
             uz_r += r_r
             uz_s += r_s
             uz_i += r_i
             uz_int = uz_r + uz_s + uz_i
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz_int)
             den_uz = uz_int + EPS
@@ -1348,9 +1518,7 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
             uz_int2 = uz_r + uz_s + uz_i
             q0 = k * max(uz_int2 - uzl, 0.0)
             q1 = k1 * uz_int2
-            if q0 + q1 > uz_int2:
-                q0 = uz_int2 * 0.67
-                q1 = uz_int2 * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz_int2)
 
             den_uz2 = uz_int2 + EPS
             frac_ur2 = uz_r / den_uz2
@@ -1392,6 +1560,9 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
         sp_end[idx] = sp
         sm_end[idx] = sm
         wc_end[idx] = wc
+        wc_r_end[idx] = wc_r
+        wc_s_end[idx] = wc_s
+        wc_i_end[idx] = wc_i
         uz_r_end[idx] = uz_r
         uz_s_end[idx] = uz_s
         uz_i_end[idx] = uz_i
@@ -1401,7 +1572,7 @@ def run_cells_from_state_flat(prec_cells, temp_cells, et_cells, ll_temp_cells, p
 
     return (
         q_total, q_rain, q_snow, q_ice,
-        sp_end, sm_end, wc_end,
+        sp_end, sm_end, wc_end, wc_r_end, wc_s_end, wc_i_end,
         uz_r_end, uz_s_end, uz_i_end,
         lz_r_end, lz_s_end, lz_i_end,
     )
@@ -1439,6 +1610,9 @@ def run_all_cells_total_only_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
         sp = init_st[0]
         sm = init_st[1]
         wc = init_st[4]
+        wc_i = max(float(init_st[6]), 0.0) if len(init_st) >= 7 else 0.0
+        if len(init_st) >= 7:
+            wc = max(float(init_st[4]), 0.0) + max(float(init_st[5]), 0.0) + wc_i
         uz = max(float(init_st[2]), 0.0)
         lz = max(float(init_st[3]), 0.0)
 
@@ -1485,7 +1659,7 @@ def run_all_cells_total_only_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
                 sp = sp + sf + refr
                 wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
                 wc = cwh * sp
@@ -1504,8 +1678,10 @@ def run_all_cells_total_only_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, _soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
             uz += recharge
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz)
             uz -= perc_actual
@@ -1513,9 +1689,7 @@ def run_all_cells_total_only_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
 
             q0 = k * max(uz - uzl, 0.0)
             q1 = k1 * uz
-            if q0 + q1 > uz:
-                q0 = uz * 0.67
-                q1 = uz * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz)
             uz = max(uz - (q0 + q1), 0.0)
 
             q2 = k2 * lz
@@ -1565,6 +1739,9 @@ def run_all_cells_total_ice_flat(prec_cells, temp_cells, et_cells, ll_temp_cells
         lz = max(float(init_st[3]), 0.0)
         uz_i = 0.0
         lz_i = 0.0
+        wc_i = max(float(init_st[6]), 0.0) if len(init_st) >= 7 else 0.0
+        if len(init_st) >= 7:
+            wc = max(float(init_st[4]), 0.0) + max(float(init_st[5]), 0.0) + wc_i
 
         for t_idx in range(ts):
             p = prec_cells[idx, t_idx]
@@ -1603,22 +1780,29 @@ def run_all_cells_total_ice_flat(prec_cells, temp_cells, et_cells, ll_temp_cells
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc = wc + melt + rf + ice_melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+                wc = wc + rf
+                refr = min(cfr * cfmax * (tt - t_eff), wc)
+                refr_i = refr * (wc_i / (wc + EPS))
+                wc_i = max(wc_i - refr_i, 0.0)
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
+                wc = max(wc - refr, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
+                inf_i = inf * (wc_i / (wc_int + EPS))
                 wc = cwh * sp
+                wc_i = max(wc_i - inf_i, 0.0)
             else:
                 inf = 0.0
                 wc = wc_int
+                inf_i = 0.0
 
-            input_total = rf + melt + ice_melt
-            frac_i = ice_melt / (input_total + EPS)
+            frac_i = inf_i / (inf + EPS)
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             recharge = (sm_ratio ** beta_base) * inf
             recharge_i = recharge * frac_i
@@ -1631,9 +1815,12 @@ def run_all_cells_total_ice_flat(prec_cells, temp_cells, et_cells, ll_temp_cells
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
+            recharge_i += soil_excess * frac_i
             uz += recharge
             uz_i += recharge_i
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz)
             frac_uz_i = uz_i / (uz + EPS)
@@ -1645,9 +1832,7 @@ def run_all_cells_total_ice_flat(prec_cells, temp_cells, et_cells, ll_temp_cells
 
             q0 = k * max(uz - uzl, 0.0)
             q1 = k1 * uz
-            if q0 + q1 > uz:
-                q0 = uz * 0.67
-                q1 = uz * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz)
 
             frac_uz_i2 = uz_i / (uz + EPS)
             q0_i = q0 * frac_uz_i2
@@ -1680,6 +1865,9 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
     sp_end = np.full(n_cells, np.nan, dtype=np.float32)
     sm_end = np.full(n_cells, np.nan, dtype=np.float32)
     wc_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_r_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_s_end = np.full(n_cells, np.nan, dtype=np.float32)
+    wc_i_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_r_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_s_end = np.full(n_cells, np.nan, dtype=np.float32)
     uz_i_end = np.full(n_cells, np.nan, dtype=np.float32)
@@ -1715,6 +1903,15 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
         init_uz = max(float(init_st[2]), 0.0)
         init_lz = max(float(init_st[3]), 0.0)
         wc = init_st[4]
+        if len(init_st) >= 7:
+            wc_r = max(float(init_st[4]), 0.0)
+            wc_s = max(float(init_st[5]), 0.0)
+            wc_i = max(float(init_st[6]), 0.0)
+            wc = wc_r + wc_s + wc_i
+        else:
+            wc_r = 0.0
+            wc_s = max(float(wc), 0.0)
+            wc_i = 0.0
         uz_r = init_uz
         uz_s = 0.0
         uz_i = 0.0
@@ -1759,25 +1956,33 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
                         f_snow = 1.0
                     melt_pot_ice = (cfmax * ice_factor) * ddt
                     ice_melt = max(melt_pot_ice * (1.0 - f_snow), 0.0)
-                wc_int = wc + melt + rf + ice_melt
+                wc_r += rf
+                wc_s += melt
+                wc_i += ice_melt
             else:
-                refr = min(cfr * cfmax * (tt - t_eff), wc + rf)
+                wc_r += rf
+                refr = min(cfr * cfmax * (tt - t_eff), wc_r + wc_s + wc_i)
+                wc_r, wc_s, wc_i, _refr_r, _refr_s, _refr_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, refr,
+                )
                 sp = sp + sf + refr
-                wc_int = max(wc - refr + rf, 0.0)
 
-            sp = min(sp, 10000.0)
+            sp = max(sp, 0.0)
+            wc_int = wc_r + wc_s + wc_i
             if wc_int > cwh * sp:
                 inf = wc_int - cwh * sp
-                wc = cwh * sp
+                wc_r, wc_s, wc_i, inf_r, inf_s, inf_i = withdraw_mixed_water_sources(
+                    wc_r, wc_s, wc_i, inf,
+                )
             else:
                 inf = 0.0
-                wc = wc_int
+                inf_r, inf_s, inf_i = 0.0, 0.0, 0.0
+            wc = wc_r + wc_s + wc_i
 
-            input_total = rf + melt + ice_melt
-            den_in = input_total + EPS
-            frac_r = rf / den_in
-            frac_s = melt / den_in
-            frac_i = ice_melt / den_in
+            den_in = inf + EPS
+            frac_r = inf_r / den_in
+            frac_s = inf_s / den_in
+            frac_i = inf_i / den_in
 
             sm_ratio = min(max(sm / fc_base, 0.0), 1.0)
             recharge = (sm_ratio ** beta_base) * inf
@@ -1793,11 +1998,16 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
                 ea = ep_adj
             ea = min(ea, sm)
 
+            sm, recharge, soil_excess = route_soil_storage_excess(
+                sm, inf, recharge, ea, fc_base,
+            )
+            r_r += soil_excess * frac_r
+            r_s += soil_excess * frac_s
+            r_i += soil_excess * frac_i
             uz_r += r_r
             uz_s += r_s
             uz_i += r_i
             uz_int = uz_r + uz_s + uz_i
-            sm = max(min(sm + inf - recharge - ea, fc_base), 0.0)
 
             perc_actual = min(perc, uz_int)
             den_uz = uz_int + EPS
@@ -1814,9 +2024,7 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
             uz_int2 = uz_r + uz_s + uz_i
             q0 = k * max(uz_int2 - uzl, 0.0)
             q1 = k1 * uz_int2
-            if q0 + q1 > uz_int2:
-                q0 = uz_int2 * 0.67
-                q1 = uz_int2 * 0.33
+            q0, q1 = limit_upper_zone_outflows(q0, q1, uz_int2)
 
             den_uz2 = uz_int2 + EPS
             frac_ur2 = uz_r / den_uz2
@@ -1853,6 +2061,9 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
         sp_end[idx] = sp
         sm_end[idx] = sm
         wc_end[idx] = wc
+        wc_r_end[idx] = wc_r
+        wc_s_end[idx] = wc_s
+        wc_i_end[idx] = wc_i
         uz_r_end[idx] = uz_r
         uz_s_end[idx] = uz_s
         uz_i_end[idx] = uz_i
@@ -1860,7 +2071,10 @@ def run_cells_state_snapshot_flat(prec_cells, temp_cells, et_cells, ll_temp_cell
         lz_s_end[idx] = lz_s
         lz_i_end[idx] = lz_i
 
-    return sp_end, sm_end, wc_end, uz_r_end, uz_s_end, uz_i_end, lz_r_end, lz_s_end, lz_i_end
+    return (
+        sp_end, sm_end, wc_end, wc_r_end, wc_s_end, wc_i_end,
+        uz_r_end, uz_s_end, uz_i_end, lz_r_end, lz_s_end, lz_i_end,
+    )
 
 
 @njit(cache=False, fastmath=True, nogil=True)
@@ -2066,13 +2280,18 @@ def compare_series(reference, simulated):
     total_ref = float(np.sum(ref_valid))
     total_sim = float(np.sum(sim_valid))
     nse_value = nse_safe(ref_valid, sim_valid)
+    log_nse_value = (
+        round(log_nse(ref_valid, sim_valid), 4)
+        if np.all(ref_valid >= 0.0) and np.all(sim_valid >= 0.0)
+        else None
+    )
 
     kge_val, kge_r, kge_a, kge_b = kge_numba(ref_valid, sim_valid)
     metrics = {
         "count": count,
         "nse": nse_value,
         "kge": round(float(kge_val), 4) if kge_val > -900 else None,
-        "log_nse": round(log_nse(ref_valid, sim_valid), 4),
+        "log_nse": log_nse_value,
         "pbias": round(pbias(ref_valid, sim_valid), 2),
         "rmse_m3s": rmse(ref_valid, sim_valid),
         "mae_m3s": float(np.mean(np.abs(sim_valid - ref_valid))),
@@ -2083,6 +2302,327 @@ def compare_series(reference, simulated):
         "volume_ratio": float(total_sim / total_ref) if abs(total_ref) > EPS else float("nan"),
     }
     return metrics
+
+
+def compute_interbasin_residual_diagnostics(
+    dates,
+    q_obs,
+    q_boundary,
+    q_local,
+    *,
+    evaluation_mask=None,
+    step_hours=24.0,
+):
+    if q_obs is None or q_boundary is None or q_local is None:
+        return {"available": False, "status": "missing_series"}
+    obs = np.asarray(q_obs, dtype=np.float64)
+    boundary = np.asarray(q_boundary, dtype=np.float64)
+    local = np.asarray(q_local, dtype=np.float64)
+    count = min(len(obs), len(boundary), len(local))
+    if count <= 0:
+        return {"available": False, "status": "empty_series"}
+    obs = obs[:count]
+    boundary = boundary[:count]
+    local = local[:count]
+    mask = np.isfinite(obs) & np.isfinite(boundary) & np.isfinite(local)
+    if evaluation_mask is not None:
+        eval_mask = np.asarray(evaluation_mask, dtype=bool)[:count]
+        mask &= eval_mask
+    valid_count = int(np.count_nonzero(mask))
+    if valid_count < 3:
+        return {"available": False, "status": "insufficient_valid_steps", "valid_steps": valid_count}
+
+    observed_residual = obs - boundary
+    error = local - observed_residual
+    residual_valid = observed_residual[mask]
+    local_valid = local[mask]
+    negative = residual_valid < 0.0
+    negative_volume = float(np.sum(np.abs(residual_valid[negative]))) if np.any(negative) else 0.0
+    absolute_volume = float(np.sum(np.abs(residual_valid)))
+    comparison = compare_series(residual_valid, local_valid) or {}
+
+    max_lag = 24 if float(step_hours) < 23.0 else 7
+    best_lag = 0
+    best_corr = float("nan")
+    for lag in range(-max_lag, max_lag + 1):
+        if lag < 0:
+            ref_lag = residual_valid[:lag]
+            sim_lag = local_valid[-lag:]
+        elif lag > 0:
+            ref_lag = residual_valid[lag:]
+            sim_lag = local_valid[:-lag]
+        else:
+            ref_lag = residual_valid
+            sim_lag = local_valid
+        corr = pearson_r(ref_lag, sim_lag) if len(ref_lag) >= 3 else float("nan")
+        if np.isfinite(corr) and (not np.isfinite(best_corr) or corr > best_corr):
+            best_corr = float(corr)
+            best_lag = int(lag)
+
+    seconds = float(step_hours) * 3600.0
+    diagnostics = {
+        "available": True,
+        "status": "diagnostic_only",
+        "definition": "q_interval_observed = q_downstream_observed - q_upstream_boundary_routed",
+        "valid_steps": valid_count,
+        "total_steps": count,
+        "coverage_ratio": float(valid_count / count),
+        "negative_residual_steps": int(np.count_nonzero(negative)),
+        "negative_residual_frequency": float(np.mean(negative)),
+        "negative_residual_volume_m3": negative_volume * seconds,
+        "negative_residual_volume_ratio": float(negative_volume / absolute_volume) if absolute_volume > EPS else None,
+        "observed_interval_volume_m3": float(np.sum(residual_valid) * seconds),
+        "simulated_local_volume_m3": float(np.sum(local_valid) * seconds),
+        "best_lag_steps": best_lag,
+        "best_lag_hours": float(best_lag * step_hours),
+        "best_lag_correlation": best_corr if np.isfinite(best_corr) else None,
+        "comparison": comparison,
+        "objective_guard_enabled": bool(INTERVAL_OBJECTIVE_GUARD_ENABLED),
+        "objective_guard_weight": float(INTERVAL_OBJECTIVE_GUARD_WEIGHT),
+    }
+    return diagnostics
+
+
+def _q_equivalent_depth_mm(values, mask=None, area_km2=None):
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    active = np.isfinite(arr)
+    if mask is not None:
+        supplied = np.asarray(mask, dtype=bool).reshape(-1)
+        count = min(len(arr), len(supplied))
+        arr = arr[:count]
+        active = active[:count] & supplied[:count]
+    area = float(CATCHMENT_AREA if area_km2 is None else area_km2)
+    if area <= EPS or not np.any(active):
+        return float("nan")
+    seconds = max(float(TIME_STEP_HOURS), EPS) * 3600.0
+    return float(np.sum(arr[active]) * seconds / (area * 1e6) * 1000.0)
+
+
+def _parameter_bound_saturation(opt_params, tolerance=0.02):
+    vector = np.asarray(opt_params, dtype=np.float64).reshape(-1)
+    saturated = []
+    for index, name in enumerate(param_names):
+        if index >= len(vector) or index >= len(PARAM_BOUNDS):
+            continue
+        lower, upper = PARAM_BOUNDS[index]
+        span = float(upper) - float(lower)
+        if span <= EPS:
+            continue
+        position = (float(vector[index]) - float(lower)) / span
+        if position <= tolerance or position >= 1.0 - tolerance:
+            saturated.append(
+                {
+                    "parameter": name,
+                    "value": float(vector[index]),
+                    "lower": float(lower),
+                    "upper": float(upper),
+                    "normalized_position": float(position),
+                    "side": "lower" if position <= tolerance else "upper",
+                }
+            )
+    return saturated
+
+
+def compute_model_water_balance_diagnostics(sim, opt_params, evaluation_mask=None):
+    raw = dict(sim.get("water_balance_raw", {}) or {}) if isinstance(sim, dict) else {}
+    required = {
+        "q_precip_input",
+        "q_ice_input",
+        "q_actual_et",
+        "q_balance_error",
+        "q_balance_error_low",
+        "q_balance_error_high",
+    }
+    if not required.issubset(raw):
+        return {"available": False, "status": "full_kernel_diagnostics_unavailable"}
+
+    count = min(len(np.asarray(raw[name]).reshape(-1)) for name in required)
+    if count <= 0:
+        return {"available": False, "status": "empty_series"}
+
+    full_mask = np.ones(count, dtype=bool)
+    warmup_mask = np.zeros(count, dtype=bool)
+    warmup_mask[:min(max(int(WARMUP_STEPS or 0), 0), count)] = True
+    if evaluation_mask is None:
+        eval_mask = ~warmup_mask
+    else:
+        supplied = np.asarray(evaluation_mask, dtype=bool).reshape(-1)
+        eval_mask = np.zeros(count, dtype=bool)
+        overlap = min(count, len(supplied))
+        eval_mask[:overlap] = supplied[:overlap]
+
+    cell_scale = np.asarray(CELL_SCALE, dtype=np.float64).reshape(-1)
+    raw_precip_q = np.nansum(
+        np.asarray(PREC_CELLS[:, :count], dtype=np.float64) * cell_scale[:, None], axis=0,
+    )
+    raw_pet_q = np.nansum(
+        np.asarray(ET_CELLS[:, :count], dtype=np.float64) * cell_scale[:, None], axis=0,
+    )
+    local_raw = np.asarray(sim.get("q_local_raw"), dtype=np.float64).reshape(-1)[:count]
+
+    def window_summary(mask):
+        corrected_precip = _q_equivalent_depth_mm(raw["q_precip_input"][:count], mask)
+        ice_input = _q_equivalent_depth_mm(raw["q_ice_input"][:count], mask)
+        actual_et = _q_equivalent_depth_mm(raw["q_actual_et"][:count], mask)
+        runoff = _q_equivalent_depth_mm(local_raw, mask)
+        closure = _q_equivalent_depth_mm(raw["q_balance_error"][:count], mask)
+        return {
+            "steps": int(np.count_nonzero(mask)),
+            "raw_precipitation_mm": _q_equivalent_depth_mm(raw_precip_q, mask),
+            "potential_et_mm": _q_equivalent_depth_mm(raw_pet_q, mask),
+            "model_corrected_precipitation_mm": corrected_precip,
+            "ice_melt_input_mm": ice_input,
+            "actual_et_mm": actual_et,
+            "local_runoff_raw_mm": runoff,
+            "storage_change_mm": corrected_precip + ice_input - actual_et - runoff - closure,
+            "cumulative_closure_error_mm": closure,
+        }
+
+    source_error = (
+        np.asarray(sim.get("q_local_raw"), dtype=np.float64).reshape(-1)[:count]
+        - np.asarray(sim.get("q_rain_raw"), dtype=np.float64).reshape(-1)[:count]
+        - np.asarray(sim.get("q_snow_raw"), dtype=np.float64).reshape(-1)[:count]
+        - np.asarray(sim.get("q_ice_raw"), dtype=np.float64).reshape(-1)[:count]
+    )
+    basin_step_error_mm = (
+        np.asarray(raw["q_balance_error"], dtype=np.float64).reshape(-1)[:count]
+        * (3.6 * max(float(TIME_STEP_HOURS), EPS))
+        / max(float(CATCHMENT_AREA), EPS)
+    )
+    max_basin_step_error = float(np.nanmax(np.abs(basin_step_error_mm))) if basin_step_error_mm.size else None
+    max_cell_error = float(raw.get("max_abs_cell_balance_error_mm", float("nan")))
+    source_step_error = float(np.nanmax(np.abs(source_error))) if source_error.size else None
+    full_budget = window_summary(full_mask)
+    warmup_budget = window_summary(warmup_mask)
+    evaluation_budget = window_summary(eval_mask)
+    closure_passed = bool(
+        np.isfinite(max_cell_error)
+        and max_cell_error <= 1e-6
+        and max_basin_step_error is not None
+        and max_basin_step_error <= 1e-6
+        and abs(float(full_budget["cumulative_closure_error_mm"])) <= 1e-4
+    )
+    source_closure_passed = bool(source_step_error is not None and source_step_error <= 1e-5)
+
+    high_cells = np.asarray(ZONE_HIGH_CELLS, dtype=bool)
+    low_area = float(np.sum(cell_scale[~high_cells])) * 3.6 * float(TIME_STEP_HOURS)
+    high_area = float(np.sum(cell_scale[high_cells])) * 3.6 * float(TIME_STEP_HOURS)
+    zone_closure = {
+        "low": {
+            "area_km2": low_area,
+            "evaluation_cumulative_error_mm": _q_equivalent_depth_mm(
+                raw["q_balance_error_low"][:count], eval_mask, low_area,
+            ),
+        },
+        "high": {
+            "area_km2": high_area,
+            "evaluation_cumulative_error_mm": _q_equivalent_depth_mm(
+                raw["q_balance_error_high"][:count], eval_mask, high_area,
+            ),
+        },
+    }
+
+    interval = {"available": False}
+    if Q_OBS_FULL is not None and sim.get("q_boundary") is not None and sim.get("q_local") is not None:
+        obs = np.asarray(Q_OBS_FULL, dtype=np.float64).reshape(-1)[:count]
+        boundary = np.asarray(sim["q_boundary"], dtype=np.float64).reshape(-1)[:count]
+        local = np.asarray(sim["q_local"], dtype=np.float64).reshape(-1)[:count]
+        valid = eval_mask & np.isfinite(obs) & np.isfinite(boundary) & np.isfinite(local)
+        if np.any(valid):
+            observed_depth = _q_equivalent_depth_mm(obs - boundary, valid)
+            local_depth = _q_equivalent_depth_mm(local, valid)
+            raw_precip_depth = _q_equivalent_depth_mm(raw_precip_q, valid)
+            rain_depth = _q_equivalent_depth_mm(sim.get("q_rain"), valid)
+            snow_depth = _q_equivalent_depth_mm(sim.get("q_snow"), valid)
+            ice_depth = _q_equivalent_depth_mm(sim.get("q_ice"), valid)
+            deficit = observed_depth - local_depth
+            glacier_fraction = (
+                float(BASIN_GLACIER_AREA_FRACTION)
+                if np.isfinite(BASIN_GLACIER_AREA_FRACTION) and BASIN_GLACIER_AREA_FRACTION > EPS
+                else float("nan")
+            )
+            interval = {
+                "available": True,
+                "steps": int(np.count_nonzero(valid)),
+                "observed_residual_runoff_mm": observed_depth,
+                "simulated_local_runoff_mm": local_depth,
+                "simulated_rain_runoff_mm": rain_depth,
+                "simulated_snow_runoff_mm": snow_depth,
+                "simulated_ice_runoff_mm": ice_depth,
+                "raw_precipitation_mm": raw_precip_depth,
+                "observed_runoff_to_raw_precipitation_ratio": (
+                    observed_depth / raw_precip_depth if raw_precip_depth > EPS else None
+                ),
+                "local_runoff_deficit_mm": deficit,
+                "represented_glacier_area_fraction": glacier_fraction if np.isfinite(glacier_fraction) else None,
+                "simulated_ice_runoff_glacier_specific_mm": (
+                    ice_depth / glacier_fraction if np.isfinite(glacier_fraction) else None
+                ),
+                "additional_glacier_ablation_if_deficit_were_all_ice_mm": (
+                    max(deficit, 0.0) / glacier_fraction if np.isfinite(glacier_fraction) else None
+                ),
+            }
+
+    saturated = _parameter_bound_saturation(opt_params)
+    upper_saturated_names = {item["parameter"] for item in saturated if item["side"] == "upper"}
+    screening_reasons = []
+    if interval.get("available"):
+        runoff_ratio = interval.get("observed_runoff_to_raw_precipitation_ratio")
+        if runoff_ratio is not None and runoff_ratio > 1.05:
+            screening_reasons.append("observed_interval_runoff_exceeds_same_period_raw_precipitation")
+        if float(interval.get("local_runoff_deficit_mm", 0.0) or 0.0) > 50.0:
+            screening_reasons.append("simulated_local_runoff_volume_deficit_exceeds_50_mm")
+        glacier_specific = interval.get("simulated_ice_runoff_glacier_specific_mm")
+        if glacier_specific is not None and glacier_specific > 5000.0:
+            screening_reasons.append("simulated_glacier_specific_ice_runoff_exceeds_5000_mm")
+        required_ablation = interval.get("additional_glacier_ablation_if_deficit_were_all_ice_mm")
+        if required_ablation is not None and required_ablation > 5000.0:
+            screening_reasons.append("remaining_deficit_cannot_plausibly_be_assigned_to_ice_alone")
+    if "RFCF" in upper_saturated_names:
+        screening_reasons.append("rainfall_correction_factor_at_upper_bound")
+    if {"ICE_FACTOR", "CFMAX_high"}.issubset(upper_saturated_names):
+        screening_reasons.append("glacier_melt_parameters_jointly_at_upper_bounds")
+
+    return {
+        "available": True,
+        "schema": "hbv_cryo_model_water_balance_v1",
+        "model_closure_passed": closure_passed,
+        "source_closure_passed": source_closure_passed,
+        "max_abs_cell_step_closure_error_mm": max_cell_error,
+        "max_abs_basin_step_closure_error_mm": max_basin_step_error,
+        "max_abs_source_step_closure_error_m3s": source_step_error,
+        "windows": {"full": full_budget, "warmup": warmup_budget, "evaluation": evaluation_budget},
+        "elevation_zone_closure": zone_closure,
+        "interval_water_availability": interval,
+        "parameter_bound_saturation": saturated,
+        "hydrological_screening": {
+            "status": "unresolved_water_source" if screening_reasons else "no_screening_flag",
+            "formal_interval_acceptance": bool(closure_passed and source_closure_passed and not screening_reasons),
+            "reasons": screening_reasons,
+            "glacier_specific_threshold_mm": 5000.0,
+            "threshold_role": "screening_only_requires_external_glaciological_evidence",
+        },
+    }
+
+
+def interval_objective_guard_penalty(diagnostics):
+    if not isinstance(diagnostics, dict) or not diagnostics.get("available"):
+        return None
+    negative_ratio = diagnostics.get("negative_residual_volume_ratio")
+    if negative_ratio is None or float(negative_ratio) > 0.10:
+        return None
+    comparison = dict(diagnostics.get("comparison", {}) or {})
+    pbias_value = comparison.get("pbias")
+    corr_value = comparison.get("corr")
+    if pbias_value is None or not np.isfinite(float(pbias_value)):
+        return None
+    volume_penalty = min(abs(float(pbias_value)) / 20.0, 3.0)
+    correlation_penalty = 0.0
+    if corr_value is None or not np.isfinite(float(corr_value)):
+        correlation_penalty = 1.0
+    else:
+        correlation_penalty = max(0.0, 0.70 - float(corr_value)) / 0.70
+    return float(0.7 * volume_penalty + 0.3 * correlation_penalty)
 
 
 def _glacier_analysis_window(reference, simulated):
@@ -3607,6 +4147,43 @@ def glacier_reference_active_cells():
     return GLACIER_MASK & np.isfinite(FLOW_ACC)
 
 
+FULL_KERNEL_ARRAY_FIELDS = (
+    "q_total",
+    "q_rain",
+    "q_snow",
+    "q_ice",
+    "q_precip_input",
+    "q_ice_input",
+    "q_actual_et",
+    "q_balance_error",
+    "q_balance_error_low",
+    "q_balance_error_high",
+)
+
+
+def unpack_full_kernel_result(result):
+    if len(result) != len(FULL_KERNEL_ARRAY_FIELDS) + 1:
+        raise ValueError(f"完整 HBV 内核返回字段数量异常：{len(result)}")
+    unpacked = {
+        name: np.asarray(result[index], dtype=np.float64)
+        for index, name in enumerate(FULL_KERNEL_ARRAY_FIELDS)
+    }
+    unpacked["max_abs_cell_balance_error_mm"] = float(result[-1])
+    return unpacked
+
+
+def combine_full_kernel_results(first, second):
+    combined = {
+        name: np.asarray(first[name], dtype=np.float64) + np.asarray(second[name], dtype=np.float64)
+        for name in FULL_KERNEL_ARRAY_FIELDS
+    }
+    combined["max_abs_cell_balance_error_mm"] = max(
+        float(first.get("max_abs_cell_balance_error_mm", 0.0)),
+        float(second.get("max_abs_cell_balance_error_mm", 0.0)),
+    )
+    return combined
+
+
 def run_fractional_subgrid_simulation_arrays(
     mode_name,
     par_base,
@@ -3656,26 +4233,26 @@ def run_fractional_subgrid_simulation_arrays(
             "q_ice": q_ice_glacier + q_ice_nonglacier,
         }
 
-    q_total_glacier, q_rain_glacier, q_snow_glacier, q_ice_glacier = run_all_cells_flat(
-        prec_cells, temp_cells, et_cells, ll_temp_cells,
-        par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_scale,
-        glacier_cells, True, ice_factor, cfmax_low_step, cfmax_high_step,
-        GLACIER_DELTA_T_CELLS,
+    glacier_parts = unpack_full_kernel_result(
+        run_all_cells_flat(
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
+            par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_scale,
+            glacier_cells, True, ice_factor, cfmax_low_step, cfmax_high_step,
+            GLACIER_DELTA_T_CELLS,
+        )
     )
-    q_total_nonglacier, q_rain_nonglacier, q_snow_nonglacier, q_ice_nonglacier = run_all_cells_flat(
-        prec_cells, temp_cells, et_cells, ll_temp_cells,
-        par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_scale,
-        nonglacier_cells, False, ice_factor, cfmax_low_step, cfmax_high_step,
-        GLACIER_DELTA_T_CELLS,
+    nonglacier_parts = unpack_full_kernel_result(
+        run_all_cells_flat(
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
+            par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_scale,
+            nonglacier_cells, False, ice_factor, cfmax_low_step, cfmax_high_step,
+            GLACIER_DELTA_T_CELLS,
+        )
     )
-    return {
-        "q_total": q_total_glacier + q_total_nonglacier,
-        "q_rain": q_rain_glacier + q_rain_nonglacier,
-        "q_snow": q_snow_glacier + q_snow_nonglacier,
-        "q_ice": q_ice_glacier + q_ice_nonglacier,
-        "q_snow_glacier": q_snow_glacier,
-        "q_glacier_total": q_snow_glacier + q_ice_glacier,
-    }
+    combined = combine_full_kernel_results(glacier_parts, nonglacier_parts)
+    combined["q_snow_glacier"] = glacier_parts["q_snow"]
+    combined["q_glacier_total"] = glacier_parts["q_snow"] + glacier_parts["q_ice"]
+    return combined
 
 
 def run_fractional_subgrid_simulation(mode_name, par_base, ice_factor, cfmax_low_step, cfmax_high_step):
@@ -3814,26 +4391,28 @@ def run_event_window_source_parts(
             )
             parts = {"q_total": q_total, "q_ice": q_ice}
         else:
-            q_total, q_rain, q_snow, q_ice = run_all_cells_flat(
-                prec_seg, temp_seg, et_seg, ll_temp_seg,
-                par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
-                GLACIER_CELLS, glacier_on, ice_factor, cfmax_low_step, cfmax_high_step,
-                GLACIER_DELTA_T_CELLS,
+            parts = unpack_full_kernel_result(
+                run_all_cells_flat(
+                    prec_seg, temp_seg, et_seg, ll_temp_seg,
+                    par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
+                    GLACIER_CELLS, glacier_on, ice_factor, cfmax_low_step, cfmax_high_step,
+                    GLACIER_DELTA_T_CELLS,
+                )
             )
-            q_snow_glacier = np.asarray(q_snow, dtype=np.float64).copy() if glacier_on else np.zeros_like(q_total, dtype=np.float64)
-            parts = {
-                "q_total": q_total,
-                "q_rain": q_rain,
-                "q_snow": q_snow,
-                "q_ice": q_ice,
-                "q_snow_glacier": q_snow_glacier,
-                "q_glacier_total": q_snow_glacier + np.asarray(q_ice, dtype=np.float64),
-            }
+            q_snow_glacier = (
+                np.asarray(parts["q_snow"], dtype=np.float64).copy()
+                if glacier_on else np.zeros_like(parts["q_total"], dtype=np.float64)
+            )
+            parts["q_snow_glacier"] = q_snow_glacier
+            parts["q_glacier_total"] = q_snow_glacier + np.asarray(parts["q_ice"], dtype=np.float64)
         chunks.append(parts)
 
     keys = sorted({key for chunk in chunks for key in chunk.keys()})
     combined = {}
     for key in keys:
+        if key == "max_abs_cell_balance_error_mm":
+            combined[key] = max(float(chunk.get(key, 0.0)) for chunk in chunks)
+            continue
         values = [np.asarray(chunk[key], dtype=np.float64) for chunk in chunks if key in chunk]
         if values:
             combined[key] = np.concatenate(values)
@@ -3965,7 +4544,17 @@ def _snapshot_branch_tuple(snapshot, prefix):
         if key not in snapshot:
             raise ValueError(f"状态快照缺少 {key}。")
         arrays.append(np.ascontiguousarray(snapshot[key], dtype=np.float32))
-    return tuple(arrays)
+    sp, sm, wc, uz_r, uz_s, uz_i, lz_r, lz_s, lz_i = arrays
+    source_keys = [f"{prefix}wc_r", f"{prefix}wc_s", f"{prefix}wc_i"]
+    if all(key in snapshot for key in source_keys):
+        wc_r = np.ascontiguousarray(snapshot[source_keys[0]], dtype=np.float32)
+        wc_s = np.ascontiguousarray(snapshot[source_keys[1]], dtype=np.float32)
+        wc_i = np.ascontiguousarray(snapshot[source_keys[2]], dtype=np.float32)
+    else:
+        wc_r = np.zeros_like(wc, dtype=np.float32)
+        wc_s = np.ascontiguousarray(wc, dtype=np.float32)
+        wc_i = np.zeros_like(wc, dtype=np.float32)
+    return sp, sm, wc, wc_r, wc_s, wc_i, uz_r, uz_s, uz_i, lz_r, lz_s, lz_i
 
 
 def _validate_snapshot_grid(snapshot):
@@ -4022,6 +4611,9 @@ def _run_forecast_branch(snapshot, prefix, active_cells, cell_scale, glacier_cel
         states[6],
         states[7],
         states[8],
+        states[9],
+        states[10],
+        states[11],
         np.ascontiguousarray(active_cells, dtype=np.bool_),
         np.ascontiguousarray(cell_scale, dtype=np.float64),
         np.ascontiguousarray(glacier_cells, dtype=np.bool_),
@@ -4041,6 +4633,7 @@ def run_forecast_from_state(opt_params, snapshot_path=None, snapshot=None, bound
             raise ValueError("必须提供状态快照文件。")
         snapshot = load_state_snapshot(snapshot_path)
     snapshot = dict(snapshot)
+    legacy_wc_source_attribution = not any(str(key).endswith("wc_r") for key in snapshot)
     _validate_snapshot_grid(snapshot)
     if PREC_CELLS is None or TEMP_CELLS is None or ET_CELLS is None:
         raise ValueError("尚未加载未来气象输入。")
@@ -4137,7 +4730,7 @@ def run_forecast_from_state(opt_params, snapshot_path=None, snapshot=None, bound
     sim["date"] = pd.DatetimeIndex(SIM_DATES) if SIM_DATES is not None else None
     sim["q_obs"] = Q_OBS_FULL
     sim["forecast_restart"] = {
-        "schema": "continuous_state_forecast_v1",
+        "schema": "continuous_state_forecast_v2",
         "status": "ok",
         "source_snapshot": os.fspath(snapshot_path) if snapshot_path else "",
         "snapshot_mode": str(snapshot.get("snapshot_mode", "")),
@@ -4145,16 +4738,20 @@ def run_forecast_from_state(opt_params, snapshot_path=None, snapshot=None, bound
         "cell_count": int(n_cells),
         "time_steps": int(len(q_total)),
         "routing_state_available": bool(np.isfinite(routing_state.get("routing_q_total_out_last", float("nan")))),
+        "wc_source_attribution": "legacy_total_assigned_to_snow" if legacy_wc_source_attribution else "explicit_rain_snow_ice",
+        "wc_source_attribution_formal": not legacy_wc_source_attribution,
     }
     forecast_state_meta = {
-        "schema": "per_cell_branch_states_v1",
+        "schema": "per_cell_branch_states_v2",
         "snapshot_mode": "forecast_restart",
         "source_snapshot_mode": str(snapshot.get("snapshot_mode", "")),
         "branch_count": int(len(branches)),
         "branches": list(branches),
         "cell_count": int(n_cells),
         "time_steps": int(len(q_total)),
-        "forecast_restart_schema": "continuous_state_forecast_v1",
+        "forecast_restart_schema": "continuous_state_forecast_v2",
+        "wc_source_attribution": "legacy_total_assigned_to_snow" if legacy_wc_source_attribution else "explicit_rain_snow_ice",
+        "wc_source_attribution_formal": not legacy_wc_source_attribution,
     }
     append_routing_state_to_snapshot(forecast_state_arrays, sim)
     sim["forecast_state_snapshot_arrays"] = forecast_state_arrays
@@ -4959,6 +5556,7 @@ def load_all_data(end_date_override=None, skip_obs=False):
         flow_field=BOUNDARY_INFLOW_FLOW_FIELD,
         gap_fill=BOUNDARY_INFLOW_GAP_FILL,
         expected_step_hours=TIME_STEP_HOURS,
+        allow_no_overlap=bool(skip_obs and end_date_override is not None),
     )
     BOUNDARY_INFLOW_ENABLED = bool(BOUNDARY_INFLOW_FILE)
     if EVENT_RUNTIME_ENABLED:
@@ -5032,6 +5630,7 @@ def run_simulation(opt_params, mode="full"):
         and glacier_processing_mode() == "fractional_subgrid"
         and GLACIER_FRACTION_CELLS is not None
     )
+    kernel_diagnostics = {}
     if event_runtime_independent_active():
         sim_parts = run_event_window_source_parts(
             mode_name,
@@ -5048,6 +5647,11 @@ def run_simulation(opt_params, mode="full"):
         q_ice = sim_parts.get("q_ice")
         q_snow_glacier = sim_parts.get("q_snow_glacier")
         q_glacier_total = sim_parts.get("q_glacier_total")
+        kernel_diagnostics = {
+            key: sim_parts[key]
+            for key in (*FULL_KERNEL_ARRAY_FIELDS[4:], "max_abs_cell_balance_error_mm")
+            if key in sim_parts
+        }
     elif use_fractional_subgrid:
         sim_parts = run_fractional_subgrid_simulation(
             mode_name,
@@ -5062,6 +5666,11 @@ def run_simulation(opt_params, mode="full"):
         q_ice = sim_parts.get("q_ice")
         q_snow_glacier = sim_parts.get("q_snow_glacier")
         q_glacier_total = sim_parts.get("q_glacier_total")
+        kernel_diagnostics = {
+            key: sim_parts[key]
+            for key in (*FULL_KERNEL_ARRAY_FIELDS[4:], "max_abs_cell_balance_error_mm")
+            if key in sim_parts
+        }
     elif mode_name == "objective_total":
         q_total = run_all_cells_total_only_flat(
             PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
@@ -5081,12 +5690,22 @@ def run_simulation(opt_params, mode="full"):
         q_rain = q_snow = None
         q_snow_glacier = q_glacier_total = None
     else:
-        q_total, q_rain, q_snow, q_ice = run_all_cells_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
-            par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
-            GLACIER_CELLS, glacier_on, ICE_FACTOR, cfmax_low_step, cfmax_high_step,
-            GLACIER_DELTA_T_CELLS,
+        sim_parts = unpack_full_kernel_result(
+            run_all_cells_flat(
+                PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+                par_base, ZONE_HIGH_CELLS, INIT_ST, CELL_SCALE,
+                GLACIER_CELLS, glacier_on, ICE_FACTOR, cfmax_low_step, cfmax_high_step,
+                GLACIER_DELTA_T_CELLS,
+            )
         )
+        q_total = sim_parts["q_total"]
+        q_rain = sim_parts["q_rain"]
+        q_snow = sim_parts["q_snow"]
+        q_ice = sim_parts["q_ice"]
+        kernel_diagnostics = {
+            key: sim_parts[key]
+            for key in (*FULL_KERNEL_ARRAY_FIELDS[4:], "max_abs_cell_balance_error_mm")
+        }
         if glacier_on:
             q_snow_glacier = np.asarray(q_snow, dtype=np.float64).copy()
         else:
@@ -5133,6 +5752,7 @@ def run_simulation(opt_params, mode="full"):
     sim["glacier_fraction_exists"] = bool(os.path.exists(GLACIER_FRACTION_PATH))
     sim["glacier_elev_exists"] = bool(os.path.exists(GLACIER_ELEV_PATH))
     sim["glacier_reference_available"] = glacier_reference_available
+    sim["water_balance_raw"] = kernel_diagnostics
     glacier_reference_used_in_objective = False
     sim["glacier_reference_enabled"] = glacier_reference_used_in_objective
     sim["glacier_reference_used_in_objective"] = glacier_reference_used_in_objective
@@ -5181,13 +5801,16 @@ def run_simulation(opt_params, mode="full"):
 
 
 def _state_branch_arrays(prefix, branch_tuple):
-    sp, sm, wc, uz_r, uz_s, uz_i, lz_r, lz_s, lz_i = branch_tuple
+    sp, sm, wc, wc_r, wc_s, wc_i, uz_r, uz_s, uz_i, lz_r, lz_s, lz_i = branch_tuple
     uz = uz_r + uz_s + uz_i
     lz = lz_r + lz_s + lz_i
     return {
         f"{prefix}sp": np.asarray(sp, dtype=np.float32),
         f"{prefix}sm": np.asarray(sm, dtype=np.float32),
         f"{prefix}wc": np.asarray(wc, dtype=np.float32),
+        f"{prefix}wc_r": np.asarray(wc_r, dtype=np.float32),
+        f"{prefix}wc_s": np.asarray(wc_s, dtype=np.float32),
+        f"{prefix}wc_i": np.asarray(wc_i, dtype=np.float32),
         f"{prefix}uz": np.asarray(uz, dtype=np.float32),
         f"{prefix}lz": np.asarray(lz, dtype=np.float32),
         f"{prefix}uz_r": np.asarray(uz_r, dtype=np.float32),
@@ -5199,7 +5822,7 @@ def _state_branch_arrays(prefix, branch_tuple):
     }
 
 
-def compute_state_snapshot(opt_params):
+def compute_state_snapshot(opt_params, end_step=None):
     opt_params = validate_parameter_vector(opt_params)
     TT, FC, BETA, LP, RFCF, SFCF, CFR, CWH, CFMAX_low, CFMAX_high, K, K1, K2, UZL, PERC, ICE_FACTOR, _, _ = opt_params
     cfmax_low_step = scale_linear_to_step(CFMAX_low)
@@ -5216,6 +5839,16 @@ def compute_state_snapshot(opt_params):
 
     if VALID_CELLS is None or ZONE_HIGH_CELLS is None:
         raise ValueError("未加载有效像元，无法生成状态快照。")
+    total_steps = int(PREC_CELLS.shape[1]) if PREC_CELLS is not None else 0
+    if total_steps <= 0:
+        raise ValueError("未加载气象时间步，无法生成状态快照。")
+    snapshot_steps = total_steps if end_step is None else int(end_step)
+    if snapshot_steps <= 0 or snapshot_steps > total_steps:
+        raise ValueError(f"状态快照时间步必须位于 1..{total_steps}，当前为 {snapshot_steps}。")
+    prec_cells = np.ascontiguousarray(PREC_CELLS[:, :snapshot_steps])
+    temp_cells = np.ascontiguousarray(TEMP_CELLS[:, :snapshot_steps])
+    et_cells = np.ascontiguousarray(ET_CELLS[:, :snapshot_steps])
+    ll_temp_cells = np.ascontiguousarray(LL_TEMP_CELLS[:, :snapshot_steps])
 
     snapshot_arrays = {
         "valid_cell_rows": np.asarray(VALID_CELLS[:, 0], dtype=np.int32),
@@ -5223,15 +5856,21 @@ def compute_state_snapshot(opt_params):
         "zone_high_cells": np.asarray(ZONE_HIGH_CELLS, dtype=np.uint8),
     }
     snapshot_meta = {
-        "schema": "per_cell_branch_states_v1",
+        "schema": "per_cell_branch_states_v2",
         "snapshot_mode": glacier_processing_mode(),
         "branch_count": 0,
         "branches": [],
         "cell_count": int(len(VALID_CELLS)),
-        "time_steps": int(PREC_CELLS.shape[1]) if PREC_CELLS is not None else 0,
+        "time_steps": int(snapshot_steps),
+        "total_available_time_steps": int(total_steps),
         "time_step_hours": float(TIME_STEP_HOURS),
-        "snapshot_time": format_time_value(SIM_DATES[-1]) if SIM_DATES is not None and len(SIM_DATES) else "",
+        "snapshot_time": (
+            format_time_value(SIM_DATES[snapshot_steps - 1])
+            if SIM_DATES is not None and len(SIM_DATES) >= snapshot_steps else ""
+        ),
         "hot_start_supported": True,
+        "wc_source_attribution": "explicit_rain_snow_ice",
+        "wc_source_attribution_formal": True,
     }
 
     glacier_on = glacier_feature_enabled()
@@ -5247,13 +5886,13 @@ def compute_state_snapshot(opt_params):
         nonglacier_glacier_cells = np.zeros_like(glacier_active_cells, dtype=np.bool_)
 
         glacier_branch = run_cells_state_snapshot_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, glacier_active_cells,
             glacier_active_cells, True, ICE_FACTOR, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
         )
         nonglacier_branch = run_cells_state_snapshot_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, nonglacier_active_cells,
             nonglacier_glacier_cells, False, ICE_FACTOR, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
@@ -5273,7 +5912,7 @@ def compute_state_snapshot(opt_params):
             else np.zeros_like(active_cells, dtype=np.bool_)
         )
         main_branch = run_cells_state_snapshot_flat(
-            PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS,
+            prec_cells, temp_cells, et_cells, ll_temp_cells,
             par_base, ZONE_HIGH_CELLS, INIT_ST, active_cells,
             glacier_cells, glacier_on, ICE_FACTOR, cfmax_low_step, cfmax_high_step,
             GLACIER_DELTA_T_CELLS,
@@ -6267,10 +6906,31 @@ def normalize_seed_vectors(bounds, seed_vectors=None):
 def load_initial_param_vector(path):
     if not path:
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    path_obj = Path(path)
+    raw_text = path_obj.read_text(encoding="utf-8-sig")
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        parsed = {}
+        for raw_line in raw_text.splitlines():
+            line = str(raw_line or "").strip()
+            if (not line) or ("=" not in line):
+                continue
+            name, raw_value = line.split("=", 1)
+            name = str(name or "").strip()
+            if name not in param_names:
+                continue
+            try:
+                parsed[name] = float(str(raw_value or "").strip())
+            except ValueError:
+                continue
+        if not parsed:
+            raise ValueError(f"初始参数文件既不是有效 JSON，也未识别出参数行：{path_obj}")
+        data = parsed
     if isinstance(data, dict) and isinstance(data.get("params"), dict):
         data = data["params"]
+    elif isinstance(data, dict) and isinstance(data.get("optimized_params"), dict):
+        data = data["optimized_params"]
     if isinstance(data, dict):
         missing = [name for name in param_names if name not in data]
         if missing:
@@ -7262,6 +7922,33 @@ def compute_objective_terms(metrics, sim=None):
             metrics,
             bad_obj=BAD_OBJ,
         )
+        if BOUNDARY_INFLOW_ENABLED and PROJECT_OBJECT_TYPE == "interbasin_with_boundary":
+            interval_diagnostics = compute_interbasin_residual_diagnostics(
+                SIM_DATES,
+                Q_OBS_FULL,
+                translated.get("q_boundary"),
+                translated.get("q_local"),
+                evaluation_mask=CALIB_MASK,
+                step_hours=TIME_STEP_HOURS,
+            )
+            diagnostics = dict(evaluation.get("diagnostics", {}) or {})
+            diagnostics["interbasin_residual"] = interval_diagnostics
+            evaluation["diagnostics"] = diagnostics
+            diagnostic_only = dict(evaluation.get("diagnostic_only_constraints", {}) or {})
+            diagnostic_only["interbasin_residual"] = not bool(INTERVAL_OBJECTIVE_GUARD_ENABLED)
+            evaluation["diagnostic_only_constraints"] = diagnostic_only
+            if INTERVAL_OBJECTIVE_GUARD_ENABLED:
+                penalty = interval_objective_guard_penalty(interval_diagnostics)
+                if penalty is not None:
+                    weighted = float(INTERVAL_OBJECTIVE_GUARD_WEIGHT) * float(penalty)
+                    evaluation["objective_value"] = float(evaluation.get("objective_value", BAD_OBJ)) + weighted
+                    terms = dict(evaluation.get("objective_terms", {}) or {})
+                    terms["interbasin_residual_guard"] = {
+                        "penalty": float(penalty),
+                        "weight": float(INTERVAL_OBJECTIVE_GUARD_WEIGHT),
+                        "weighted_penalty": weighted,
+                    }
+                    evaluation["objective_terms"] = terms
         return float(evaluation.get("objective_value", BAD_OBJ)), evaluation
     if not np.isfinite(nse_cal):
         return BAD_OBJ, None
@@ -7373,6 +8060,7 @@ def build_daily_unified_objective_meta(profile_name=None):
         },
         "diagnostic_only_constraints": {
             "glacier_fraction_window": True,
+            "interbasin_residual": not bool(INTERVAL_OBJECTIVE_GUARD_ENABLED),
         },
         "notes": [
             "flow 主体项沿用现有成熟 NSE / logNSE / PBIAS 骨架，并记录 KGE 供 flow_guard 使用。",
@@ -7601,6 +8289,37 @@ def save_results(result):
     if flood_event_file:
         flood_event_evaluation["output_file"] = flood_event_file
 
+    interbasin_diagnostics = None
+    interbasin_diagnostic_file = None
+    if BOUNDARY_INFLOW_ENABLED and PROJECT_OBJECT_TYPE == "interbasin_with_boundary":
+        interbasin_diagnostics = compute_interbasin_residual_diagnostics(
+            SIM_DATES,
+            Q_OBS_FULL,
+            q_boundary,
+            q_local,
+            evaluation_mask=(CALIB_MASK | VALID_MASK) if CALIB_MASK is not None and VALID_MASK is not None else None,
+            step_hours=TIME_STEP_HOURS,
+        )
+
+    evaluation_mask = (
+        (CALIB_MASK | VALID_MASK)
+        if CALIB_MASK is not None and VALID_MASK is not None
+        else None
+    )
+    water_balance_diagnostics = compute_model_water_balance_diagnostics(
+        sim,
+        result.x,
+        evaluation_mask=evaluation_mask,
+    )
+    water_screening = dict(water_balance_diagnostics.get("hydrological_screening", {}) or {})
+    scientific_blockers = list(water_screening.get("reasons", []) or [])
+    scientific_blockers.append("initial_state_sensitivity_pending")
+    water_balance_file = None
+    if water_balance_diagnostics.get("available"):
+        water_balance_file = "model_water_balance_summary.json"
+        with open(os.path.join(run_dir, water_balance_file), "w", encoding="utf-8") as fh:
+            json_dump_safe(water_balance_diagnostics, fh, indent=2)
+
     export_start = max(int(WARMUP_STEPS or 0), 0)
     q_sim_export = q_sim[export_start:]
     q_local_export = q_local[export_start:]
@@ -7631,13 +8350,28 @@ def save_results(result):
         "q_ice_reference_raw": q_ice_ref_raw_csv,
     })
     df.to_csv(os.path.join(run_dir, "simulation.csv"), index=False)
+    if interbasin_diagnostics and interbasin_diagnostics.get("available"):
+        interval_frame = pd.DataFrame(
+            {
+                "date": date_export[:min_len],
+                "q_downstream_observed": q_obs_export[:min_len],
+                "q_upstream_boundary_routed": q_boundary_export[:min_len],
+                "q_interval_observed_residual": q_obs_export[:min_len] - q_boundary_export[:min_len],
+                "q_local_simulated": q_local_export[:min_len],
+                "q_local_error": q_local_export[:min_len] - (q_obs_export[:min_len] - q_boundary_export[:min_len]),
+            }
+        )
+        interbasin_diagnostic_file = "interbasin_residual_diagnostics.csv"
+        interval_frame.to_csv(os.path.join(run_dir, interbasin_diagnostic_file), index=False)
+        with open(os.path.join(run_dir, "interbasin_residual_summary.json"), "w", encoding="utf-8") as fh:
+            json_dump_safe(interbasin_diagnostics, fh, indent=2)
 
     snapshot_file_name = "state_snapshot.npz"
     state_snapshot_path = os.path.join(run_dir, snapshot_file_name)
     state_snapshot_saved = False
     state_snapshot_error = None
     state_snapshot_meta = {
-        "schema": "per_cell_branch_states_v1",
+        "schema": "per_cell_branch_states_v2",
         "snapshot_mode": glacier_processing_mode(),
         "branch_count": 0,
         "branches": [],
@@ -7860,6 +8594,23 @@ def save_results(result):
         "objective_profile": objective_profile,
         "objective_family": objective_evaluation.get("objective_family", objective_mode) if objective_evaluation else objective_mode,
         "objective": objective_meta,
+        "interbasin_residual_diagnostics": interbasin_diagnostics,
+        "interbasin_residual_diagnostic_file": interbasin_diagnostic_file,
+        "model_water_balance": water_balance_diagnostics,
+        "model_water_balance_file": water_balance_file,
+        "scientific_acceptance": {
+            "status": "pending_initial_state_sensitivity",
+            "formal_result_accepted": False,
+            "model_water_balance_accepted": bool(
+                water_screening.get("formal_interval_acceptance", False)
+            ),
+            "initial_state_sensitivity_accepted": None,
+            "blockers": scientific_blockers,
+            "notes": [
+                "出口总流量指标不能替代区间水量可用性和初始状态收敛审查。",
+                "运行 initial_state_sensitivity_runner.py 后更新最终科学准入状态。",
+            ],
+        },
         "hard_checks": dict(objective_evaluation.get("hard_checks", {}) or {}) if objective_evaluation else {},
         "objective_terms": dict(objective_evaluation.get("objective_terms", {}) or {}) if objective_evaluation else {},
         "diagnostics": dict(objective_evaluation.get("diagnostics", {}) or {}) if objective_evaluation else {},

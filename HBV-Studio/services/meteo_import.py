@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import hashlib
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -11,6 +12,15 @@ from typing import Any, Callable
 import pandas as pd
 
 from services.time_utils import parse_time_from_name
+
+
+DAILY_FORCING_MANIFEST_SCHEMA = "hbv_cryo_daily_forcing_manifest_v1"
+DAILY_PRECIP_UNITS = ("mm/day", "m/day")
+DAILY_PRECIP_DAY_BASES = (
+    "product_calendar_day",
+    "beijing_calendar_day",
+    "hydrological_day_08",
+)
 
 
 @dataclass(frozen=True)
@@ -95,3 +105,56 @@ def should_report_file_progress(index: int, total: int) -> bool:
         return True
     step = max(1, total // 10)
     return index == 1 or index == total or index % step == 0
+
+
+def meteo_import_resampling_name(role: str) -> str:
+    """Use area averaging for precipitation depth and bilinear interpolation for state-like fields."""
+    return "average" if str(role or "").strip() == "prec_dir" else "bilinear"
+
+
+def validate_precipitation_import_metadata(
+    payload: dict[str, Any],
+    *,
+    time_step_hours: float,
+) -> dict[str, Any]:
+    if abs(float(time_step_hours) - 24.0) > 1e-9:
+        return {
+            "required": False,
+            "input_unit": str(payload.get("precip_unit", "") or "").strip().lower(),
+            "day_basis": str(payload.get("precip_day_basis", "") or "").strip(),
+            "scale_to_mm": 1.0,
+        }
+    unit = str(payload.get("precip_unit", "") or "").strip().lower()
+    day_basis = str(payload.get("precip_day_basis", "") or "").strip()
+    if unit not in DAILY_PRECIP_UNITS:
+        raise ValueError(f"日尺度降水单位必须显式确认，可选值：{', '.join(DAILY_PRECIP_UNITS)}。")
+    if day_basis not in DAILY_PRECIP_DAY_BASES:
+        raise ValueError(f"日尺度降水日界必须显式确认，可选值：{', '.join(DAILY_PRECIP_DAY_BASES)}。")
+    return {
+        "required": True,
+        "input_unit": unit,
+        "day_basis": day_basis,
+        "scale_to_mm": 1000.0 if unit == "m/day" else 1.0,
+    }
+
+
+def tif_series_digest(records: list[tuple[pd.Timestamp, Path]]) -> dict[str, Any]:
+    aggregate = hashlib.sha256()
+    total_bytes = 0
+    for timestamp, path in records:
+        file_hash = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                file_hash.update(chunk)
+        size = int(path.stat().st_size)
+        total_bytes += size
+        token = (
+            f"{pd.Timestamp(timestamp).isoformat()}\0{path.name}\0{size}\0{file_hash.hexdigest()}\n"
+        ).encode("utf-8")
+        aggregate.update(token)
+    return {
+        "algorithm": "sha256(file_content)+sha256(ordered_series)",
+        "series_sha256": aggregate.hexdigest(),
+        "file_count": int(len(records)),
+        "total_bytes": int(total_bytes),
+    }

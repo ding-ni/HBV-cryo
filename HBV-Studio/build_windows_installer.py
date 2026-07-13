@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 import sys
@@ -89,6 +92,111 @@ def prepare_clean_dir(path: Path) -> Path:
         shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def git_text(*arguments: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(PROJECT_ROOT), *arguments],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def source_version() -> str:
+    text = (GUI_ROOT / "studio_service.py").read_text(encoding="utf-8")
+    match = re.search(r'^APP_VERSION\s*=\s*["\']([^"\']+)["\']', text, flags=re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def parse_ahead_behind_counts(value: str) -> tuple[int | None, int | None]:
+    """Parse ``git rev-list --left-right --count HEAD...upstream`` output."""
+    parts = str(value or "").split()
+    if len(parts) != 2:
+        return None, None
+    try:
+        # Left is reachable only from HEAD (ahead); right only from upstream (behind).
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None, None
+
+
+def build_source_records() -> list[dict[str, object]]:
+    candidates = [GUI_ROOT / name for name in portable.STUDIO_FILES]
+    candidates.extend((GUI_ROOT / "services").glob("*.py"))
+    candidates.extend((GUI_ROOT / "web").rglob("*.js"))
+    candidates.extend((GUI_ROOT / "web").rglob("*.html"))
+    candidates.extend((GUI_ROOT / "web").rglob("*.css"))
+    candidates.extend((PROJECT_ROOT / "HBV-Cryo").glob("*.py"))
+    candidates.extend((PROJECT_ROOT / CN_PUBLIC).glob("*.py"))
+    records = []
+    for path in sorted({item.resolve() for item in candidates if item.is_file()}):
+        records.append(
+            {
+                "path": str(path.relative_to(PROJECT_ROOT.resolve())).replace("\\", "/"),
+                "length": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
+    return records
+
+
+def write_build_manifest(version: str, package_paths: list[Path]) -> Path:
+    upstream = git_text("rev-parse", "--abbrev-ref", "@{upstream}")
+    counts = git_text("rev-list", "--left-right", "--count", f"HEAD...{upstream}") if upstream else ""
+    ahead, behind = parse_ahead_behind_counts(counts)
+    status_lines = [line for line in git_text("status", "--porcelain").splitlines() if line.strip()]
+    manifest = {
+        "schema": "hbv_studio_build_manifest_v2",
+        "version": version,
+        "app_version": source_version(),
+        "created_at": datetime.now().astimezone().isoformat(),
+        "source_control": {
+            "branch": git_text("branch", "--show-current"),
+            "head": git_text("rev-parse", "HEAD"),
+            "upstream": upstream,
+            "behind": behind,
+            "ahead": ahead,
+            "worktree_dirty": bool(status_lines),
+            "worktree_change_count": len(status_lines),
+            "note": "A dirty worktree is identified explicitly; HEAD alone is not a source/package alignment claim.",
+        },
+        "contracts": {
+            "daily_forcing_manifest": "hbv_cryo_daily_forcing_manifest_v1",
+            "precipitation_correction": "occurrence_amount_v2",
+            "state_snapshot": "per_cell_branch_states_v2",
+            "model_water_balance": "hbv_cryo_model_water_balance_v1",
+            "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
+            "path_memory": "hbvstudio.pathBrowser.lastDirectory.v1",
+        },
+        "source_files": build_source_records(),
+        "packages": [
+            {
+                "path": str(path.resolve()),
+                "length": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+            for path in package_paths
+            if path.exists()
+        ],
+    }
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output = OUTPUT_DIR / f"BUILD_MANIFEST_{version}.json"
+    # UTF-8 BOM keeps Chinese paths readable in Windows PowerShell 5.1,
+    # whose Get-Content default otherwise treats BOM-less UTF-8 as ANSI.
+    output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8-sig")
+    return output
 
 
 def run_windowed_pyinstaller(stage_parent: Path, build_root: Path) -> Path:
@@ -494,6 +602,10 @@ def main() -> None:
         help="Also produce the historical one-click self-extracting installer.",
     )
     args = parser.parse_args()
+    if source_version() != args.version:
+        raise ValueError(
+            f"Installer version {args.version} does not match Studio APP_VERSION {source_version()}."
+        )
 
     stage_parent = prepare_clean_dir(STAGE_PARENT)
     build_root = prepare_clean_dir(WINDOWED_BUILD_ROOT)
@@ -503,7 +615,9 @@ def main() -> None:
 
     script_path = write_inno_setup_script(bundle_dir, args.version)
     output_exe = build_inno_setup_installer(script_path)
+    package_outputs: list[Path] = []
     if output_exe is not None:
+        package_outputs.append(output_exe)
         print(f"Professional installer created: {output_exe}")
     else:
         print("Professional installer script is ready. Install Inno Setup and rerun to compile it.")
@@ -511,7 +625,11 @@ def main() -> None:
     if args.legacy_self_extractor:
         payload_zip = create_payload_zip(bundle_dir, stage_parent)
         legacy_exe = build_legacy_onefile_installer(stage_parent, payload_zip, args.version)
+        package_outputs.append(legacy_exe)
         print(f"Legacy self-extracting installer created: {legacy_exe}")
+
+    manifest_path = write_build_manifest(args.version, package_outputs)
+    print(f"Build manifest created: {manifest_path}")
 
 
 if __name__ == "__main__":

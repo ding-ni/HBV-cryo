@@ -209,6 +209,42 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertIn("订正执行：实测站点 5 时段；规则外推 3 时段；原样保留 1 时段；已有输出跳过 2 时段", message)
         self.assertIn("站点订正规则：训练日 12；有效站点样本 120；独立月规则 2/12；平均倍率 1.15", message)
 
+    def test_station_bias_monthly_qc_block_prevents_formal_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            corrected = root / "corrected"
+            (corrected / "prec_2021.01.01.tif").write_bytes(b"")
+            (corrected / "precipitation_strategy_summary.json").write_text(
+                json.dumps(
+                    {
+                        "selected_steps": 1,
+                        "written_files": 1,
+                        "processing_stats": {
+                            "algorithm": "occurrence_amount_v2",
+                            "qc_blocked": True,
+                            "monthly_conservation": {
+                                "high_factor_cell_count": 3,
+                                "high_removed_fraction_cell_count": 1,
+                                "unresolved_cell_count": 2,
+                            },
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            ok, message, count = check_precip_strategy_outputs(
+                {"气象策略": {"降水方案": "grid_plus_station_bias"}},
+                context,
+            )
+
+        self.assertFalse(ok)
+        self.assertEqual(count, 1)
+        self.assertIn("站点订正算法：occurrence_amount_v2", message)
+        self.assertIn("高倍率像元 3；移除比例超限像元 1；未分配像元 2", message)
+
 
 if __name__ == "__main__":
     unittest.main()

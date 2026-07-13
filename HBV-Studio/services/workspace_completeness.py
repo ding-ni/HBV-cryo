@@ -73,18 +73,10 @@ def quick_workspace_completeness(
     validation_warnings: list[str] = []
     next_step: int | None = remaining[0] if remaining else None
     if pending_validation:
-        calib_validation = context.validate_workspace_fields(str(cfg_path), stage="calibration", precip_source=runtime_prec_source)
-        ready = bool(calib_validation["valid"])
-        validation_missing = list(calib_validation.get("missing", []))
-        validation_warnings = list(calib_validation.get("warnings", []))
-        if ready:
-            completed.append(7)
-            completed = sorted(set(completed))
-            remaining = [s for s in all_steps if s not in completed]
-            pending_validation = False
-            next_step = None
-        else:
-            next_step = 7
+        # Dashboard/list summaries must stay cheap. Full forcing, boundary, and
+        # scientific validation remains mandatory when step 7 is opened or a
+        # calibration is started; a quick summary never claims that gate passed.
+        next_step = 7
 
     return {
         "steps_completed": completed,

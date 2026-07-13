@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import copy
 import hashlib
 import re
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +63,13 @@ WIZARD_STALE_KEYS = frozenset({
     "time_basis",
     "event_file",
 })
+
+_WORKSPACE_LIST_CACHE_TTL_SECONDS = 10.0
+_WORKSPACE_LIST_CACHE_LOCK = threading.Lock()
+_WORKSPACE_LIST_CACHE: dict[
+    str,
+    tuple[tuple[tuple[str, int, int], ...], float, list[dict[str, Any]]],
+] = {}
 
 
 @dataclass(frozen=True)
@@ -195,6 +205,7 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
         },
         "气象策略": {
             "降水方案": "grid_only",
+            "station_correction_algorithm": "occurrence_amount_v2",
             "降水来源": "era5",
             "降水源": "era5",
             "站点降水_csv": "",
@@ -205,6 +216,10 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
             "自带温度tif目录": "",
             "潜在蒸散发来源": "era5_fao56",
             "自带蒸散发tif目录": "",
+        },
+        "区间评价": {
+            "目标约束启用": False,
+            "目标约束权重": 0.15,
         },
         "冰川边界_shp": glacier_default,
         "范围_bbox": {"北": None, "西": None, "南": None, "东": None},
@@ -553,10 +568,36 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
     }
 
 
+def _workspace_file_signature(paths: list[Path]) -> tuple[tuple[str, int, int], ...]:
+    signature: list[tuple[str, int, int]] = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        signature.append(
+            (
+                str(path.resolve()).lower(),
+                int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1e9))),
+                int(stat.st_size),
+            )
+        )
+    return tuple(signature)
+
+
 def list_workspaces(context: WorkspaceCatalogContext) -> list[dict[str, Any]]:
     context.workspace_dir.mkdir(parents=True, exist_ok=True)
+    paths = sorted(context.workspace_dir.glob("*.json"))
+    signature = _workspace_file_signature(paths)
+    cache_key = str(context.workspace_dir.resolve()).lower()
+    now = time.monotonic()
+    with _WORKSPACE_LIST_CACHE_LOCK:
+        cached = _WORKSPACE_LIST_CACHE.get(cache_key)
+        if cached and cached[0] == signature and now - cached[1] <= _WORKSPACE_LIST_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached[2])
+
     results: list[dict[str, Any]] = []
-    for path in sorted(context.workspace_dir.glob("*.json")):
+    for path in paths:
         try:
             data = context.read_runtime_config(path)
             workflow = context.workspace_workflow_summary(str(path.resolve()), quick=True)
@@ -585,7 +626,10 @@ def list_workspaces(context: WorkspaceCatalogContext) -> list[dict[str, Any]]:
                 "updated_at": path.stat().st_mtime,
             }
         )
-    return sorted(results, key=lambda item: item["updated_at"], reverse=True)
+    sorted_results = sorted(results, key=lambda item: item["updated_at"], reverse=True)
+    with _WORKSPACE_LIST_CACHE_LOCK:
+        _WORKSPACE_LIST_CACHE[cache_key] = (signature, time.monotonic(), copy.deepcopy(sorted_results))
+    return sorted_results
 
 
 def load_workspace_config(path_value: str, context: WorkspaceCatalogContext) -> tuple[Path, dict[str, Any]]:

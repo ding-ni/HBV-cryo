@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from services.workspace_catalog import (  # noqa: E402
     build_empty_workspace,
     detect_object_type,
     detect_profile_from_payload,
+    list_workspaces,
     normalize_config_before_save,
     runtime_root_for_workspace,
     slugify_workspace_name,
@@ -82,6 +84,39 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
             runtime_root = runtime_root_for_workspace("通天河 / 上游", root / "runtime")
 
         self.assertEqual(runtime_root, root / "runtime" / "通天河_上游")
+
+    def test_list_workspaces_caches_unchanged_files_and_invalidates_on_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace_dir = root / "workspaces"
+            workspace_dir.mkdir(parents=True)
+            workspace_path = workspace_dir / "demo.json"
+            workspace_path.write_text("{}", encoding="utf-8")
+            calls = {"read": 0, "workflow": 0}
+
+            def read_config(_path: Path) -> dict[str, Any]:
+                calls["read"] += 1
+                return {"流域名称": "demo", "运行目录": str(root / "runtime")}
+
+            def workflow(*_args, **_kwargs) -> dict[str, Any]:
+                calls["workflow"] += 1
+                return {"ready_for_calibration": False}
+
+            context = replace(
+                self._context(root),
+                read_runtime_config=read_config,
+                workspace_workflow_summary=workflow,
+            )
+
+            first = list_workspaces(context)
+            second = list_workspaces(context)
+            self.assertEqual(first, second)
+            self.assertEqual(calls, {"read": 1, "workflow": 1})
+
+            workspace_path.write_text('{"changed": true}', encoding="utf-8")
+            third = list_workspaces(context)
+            self.assertEqual(len(third), 1)
+            self.assertEqual(calls, {"read": 2, "workflow": 2})
 
     def test_build_empty_workspace_uses_catalog_context_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

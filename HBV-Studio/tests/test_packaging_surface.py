@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,12 +16,30 @@ import build_windows_installer as installer  # noqa: E402
 
 
 class PackagingSurfaceTests(unittest.TestCase):
+    def test_installer_manifest_parses_git_left_right_counts_in_correct_direction(self) -> None:
+        self.assertEqual(installer.parse_ahead_behind_counts("3\t2"), (3, 2))
+        self.assertEqual(installer.parse_ahead_behind_counts("invalid"), (None, None))
+
+    def test_portable_builder_help_does_not_start_a_build(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(STUDIO_DIR / "build_portable_bundle.py"), "--help"],
+            cwd=str(STUDIO_DIR.parent),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Build the portable HBVStudio demo bundle", result.stdout)
+
     def test_runtime_entrypoint_scripts_are_collected_by_packaging_surfaces(self) -> None:
         expected_scripts = (
             "studio_service.py",
             "create_hourly_workspace.py",
             "forecast_run.py",
             "profile_runner.py",
+            "initial_state_sensitivity_runner.py",
             "forward_run.py",
             "precipitation_strategy_runner.py",
         )
@@ -163,6 +182,7 @@ class PackagingSurfaceTests(unittest.TestCase):
                 "create_hourly_workspace.py",
                 "forecast_run.py",
                 "profile_runner.py",
+                "initial_state_sensitivity_runner.py",
                 "forward_run.py",
                 "precipitation_strategy_runner.py",
             ]

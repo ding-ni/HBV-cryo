@@ -29,6 +29,7 @@
   },
   "气象策略": {
     "降水方案": "grid_plus_station_bias",
+    "station_correction_algorithm": "occurrence_amount_v2",
     "降水源": "era5",
     "降水来源": "era5",
     "站点降水_csv": "",
@@ -39,6 +40,10 @@
     "自带温度tif目录": "",
     "潜在蒸散发来源": "era5_fao56",
     "自带蒸散发tif目录": ""
+  },
+  "区间评价": {
+    "目标约束启用": false,
+    "目标约束权重": 0.15
   },
   "冰川边界_shp": "",
   "范围_bbox": {

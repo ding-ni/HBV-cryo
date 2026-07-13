@@ -774,17 +774,31 @@
     const configPath = String(model.configPath || model.config_path || "").trim();
     const directoryState = customMeteoImportDirectoryState(model);
     const dirs = directoryState.dirs || {};
-    const ready = Boolean(directoryState.ready);
+    const isDaily = Boolean(model.isDaily);
+    const precipUnit = String(model.precipUnit || model.precip_unit || "").trim();
+    const precipDayBasis = String(model.precipDayBasis || model.precip_day_basis || "").trim();
+    const metadataMissing = isDaily
+      ? [
+          ...(precipUnit ? [] : ["precip_unit"]),
+          ...(precipDayBasis ? [] : ["precip_day_basis"]),
+        ]
+      : [];
+    const ready = Boolean(directoryState.ready) && metadataMissing.length === 0;
     const request = {
       prec_source: String(model.runtimePrecipSource || "").trim(),
       prec_dir: String(dirs.prec || "").trim(),
       temp_dir: String(dirs.temp || "").trim(),
       evap_dir: String(dirs.pet || "").trim(),
+      ...(isDaily ? { precip_unit: precipUnit, precip_day_basis: precipDayBasis } : {}),
     };
     return {
       ready,
-      message: ready ? "" : "请选择降水、气温和蒸散发三个目录。",
-      missing: directoryState.missing,
+      message: ready
+        ? ""
+        : directoryState.missing.length
+          ? "请选择降水、气温和蒸散发三个目录。"
+          : "请显式确认日降水单位和日界。",
+      missing: [...directoryState.missing, ...metadataMissing],
       writeBackUpdates: directoryState.writeBackUpdates,
       requestPath: "/api/meteo/import/start",
       request,

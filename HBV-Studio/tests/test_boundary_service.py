@@ -157,6 +157,28 @@ class BoundaryServiceTests(unittest.TestCase):
                     expected_step_hours=24,
                 )
 
+    def test_boundary_zero_fill_allows_explicit_early_diagnostic_subwindow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path = root / "boundary.csv"
+            pd.DataFrame({"date": ["2026-05-01"], "flow": [10.0]}).to_csv(path, index=False, encoding="utf-8-sig")
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                series, enabled = read_boundary_inflow_series(
+                    str(path),
+                    pd.date_range("2026-01-01", periods=3, freq="1D"),
+                    date_field="date",
+                    flow_field="flow",
+                    gap_fill="zero",
+                    expected_step_hours=24,
+                    allow_no_overlap=True,
+                )
+
+        self.assertTrue(enabled)
+        self.assertEqual(series.tolist(), [0.0, 0.0, 0.0])
+        self.assertTrue(any("诊断子窗口" in str(item.message) for item in caught))
+
     def test_boundary_zero_fill_warns_on_low_overlap(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

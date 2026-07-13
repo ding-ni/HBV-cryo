@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -88,6 +89,7 @@ STUDIO_FILES = [
     "create_hourly_workspace.py",
     "forecast_run.py",
     "profile_runner.py",
+    "initial_state_sensitivity_runner.py",
     "forward_run.py",
     "precipitation_strategy_runner.py",
     "sync_tuotuohe_data.py",
@@ -538,4 +540,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    argparse.ArgumentParser(description="Build the portable HBVStudio demo bundle.").parse_args()
     main()

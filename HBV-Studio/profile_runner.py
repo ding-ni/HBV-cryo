@@ -45,6 +45,7 @@ from 公共函数 import (  # type: ignore
     workspace_path_candidates,
     边界条件配置,
 )
+from services.boundary import BoundaryInflowInspectContext, inspect_boundary_inflow_csv
 
 
 GUI_ROOT = APP_ROOT / "HBV-Studio"
@@ -922,6 +923,138 @@ def detect_object_type(config: dict[str, Any]) -> str:
     return OBJECT_FULL_UPSTREAM
 
 
+def precipitation_product_metadata_error(config: dict[str, Any]) -> str:
+    metadata = dict(config.get("降水产品元数据", config.get("precipitation_product_metadata", {})) or {})
+    if not metadata:
+        return ""
+    allowed = _runtime_truthy(metadata.get("formal_run_allowed"), default=True)
+    if allowed:
+        return ""
+    run_purpose = str(config.get("运行用途", config.get("run_purpose", "")) or "").strip().lower()
+    empirical_diagnostic_allowed = _runtime_truthy(
+        metadata.get("empirical_diagnostic_allowed"),
+        default=False,
+    )
+    if empirical_diagnostic_allowed and run_purpose in {"qc_only", "diagnostic_only", "internal_diagnostic"}:
+        return ""
+    status = str(metadata.get("metadata_status", "pending_confirmation") or "pending_confirmation")
+    return f"降水产品元数据尚未确认（{status}），当前工作区仅允许质检，禁止正式率定。"
+
+
+def precipitation_strategy_qc_error(summary: dict[str, Any]) -> str:
+    processing = dict(summary.get("processing_stats", {}) or {})
+    if not bool(processing.get("qc_blocked", False)):
+        return ""
+    monthly = dict(processing.get("monthly_conservation", {}) or {})
+    return (
+        "站点订正降水月量守恒 QC 未通过："
+        f"高倍率像元-月份 {int(monthly.get('high_factor_cell_count', 0) or 0)}，"
+        f"移除比例超过 30% 的像元-月份 {int(monthly.get('high_removed_fraction_cell_count', 0) or 0)}，"
+        f"未分配像元-月份 {int(monthly.get('unresolved_cell_count', 0) or 0)}；禁止正式率定。"
+    )
+
+
+def daily_forcing_manifest_error(config: dict[str, Any], profile: str) -> str:
+    if profile != PROFILE_DAILY:
+        return ""
+    meteo = dict(config.get("气象策略", {}) or {})
+    algorithm = str(meteo.get("station_correction_algorithm", "") or "").strip().lower()
+    if algorithm != "occurrence_amount_v2":
+        return ""
+    paths = build_profile_paths(config, profile)
+    manifest_path = Path(paths["aligned_dir"]) / "daily_forcing_manifest.json"
+    if not manifest_path.exists():
+        return f"缺少日强迫契约清单：{manifest_path}。请重新执行本地日 TIF 导入并确认单位与日界。"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"日强迫契约清单无法读取：{exc}"
+    precipitation = dict(manifest.get("precipitation", {}) or {})
+    if str(manifest.get("schema", "")) != "hbv_cryo_daily_forcing_manifest_v1":
+        return "日强迫契约清单版本不受支持，请重新导入。"
+    if not bool(precipitation.get("unit_confirmed")) or precipitation.get("output_unit") != "mm/day":
+        return "日降水单位尚未确认为 mm/day，请重新导入。"
+    if not bool(precipitation.get("day_basis_confirmed")) or not str(precipitation.get("day_basis", "")).strip():
+        return "日降水日界尚未确认，请重新导入。"
+    return ""
+
+
+def required_boundary_index(config: dict[str, Any]) -> tuple[pd.DatetimeIndex, float]:
+    time_cfg, step_hours = resolve_runtime_time_config(config)
+    warmup_end = pd.to_datetime(time_cfg["预热结束"])
+    evaluation_end_raw = time_cfg.get("验证结束") or time_cfg.get("率定结束")
+    if not evaluation_end_raw:
+        raise ValueError("时间.验证结束或时间.率定结束未设置。")
+    evaluation_end = pd.to_datetime(evaluation_end_raw)
+    required_steps = max(1, int(round(14.0 * 24.0 / step_hours)))
+    required_start = warmup_end - pd.Timedelta(hours=step_hours * (required_steps - 1))
+    frequency = pd.Timedelta(hours=step_hours)
+    return pd.date_range(required_start, evaluation_end, freq=frequency), step_hours
+
+
+def required_boundary_coverage_error(config: dict[str, Any], profile: str) -> str:
+    if detect_object_type(config) != OBJECT_INTERBASIN:
+        return ""
+    boundary = 边界条件配置(config)
+    boundary_path = Path(boundary.get("上游边界入流_csv", ""))
+    if not boundary_path.exists():
+        return f"上游边界入流文件不存在：{boundary_path}"
+    expected_index, step_hours = required_boundary_index(config)
+
+    def resolve_boundary_path(raw: str, *, must_exist: bool = False) -> Path:
+        path = Path(raw).expanduser().resolve(strict=False)
+        if must_exist and not path.exists():
+            raise FileNotFoundError(path)
+        return path
+
+    info = inspect_boundary_inflow_csv(
+        str(boundary_path),
+        BoundaryInflowInspectContext(
+            resolve_path=resolve_boundary_path,
+            profile_daily=PROFILE_DAILY,
+            profile_hourly=PROFILE_HOURLY,
+        ),
+        date_field=str(boundary.get("时间字段", "date")),
+        flow_field=str(boundary.get("流量字段", "flow")),
+        expected_index=expected_index,
+        expected_step_hours=step_hours,
+    )
+    missing = list(info.get("missing_steps", []))
+    if not missing:
+        return ""
+    samples = "、".join(format_runtime_time_value(pd.Timestamp(ts), step_hours) for ts in missing[:3])
+    return (
+        "上游边界入流在预热末 14 日及正式评价期缺少 "
+        f"{len(missing)} 个时间步，例如：{samples}；该时段禁止零填补或插值后正式率定。"
+    )
+
+
+def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> None:
+    errors: list[str] = []
+    metadata_error = precipitation_product_metadata_error(config)
+    if metadata_error:
+        errors.append(metadata_error)
+    manifest_error = daily_forcing_manifest_error(config, profile)
+    if manifest_error:
+        errors.append(manifest_error)
+    meteo = dict(config.get("气象策略", {}) or {})
+    if str(meteo.get("降水方案", "grid_only") or "grid_only").strip() != "grid_only":
+        paths = build_profile_paths(config, profile)
+        summary_path = Path(paths["aligned_prec_effective_dir"]) / "precipitation_strategy_summary.json"
+        if summary_path.exists():
+            try:
+                summary_error = precipitation_strategy_qc_error(json.loads(summary_path.read_text(encoding="utf-8")))
+            except Exception as exc:
+                summary_error = f"站点订正降水 QC 摘要无法读取：{exc}"
+            if summary_error:
+                errors.append(summary_error)
+    boundary_error = required_boundary_coverage_error(config, profile)
+    if boundary_error:
+        errors.append(boundary_error)
+    if errors:
+        raise ValueError("正式运行输入契约未通过：\n- " + "\n- ".join(errors))
+
+
 def resolve_objective_mode(config: dict[str, Any], explicit: Any, profile: str) -> str:
     selected = normalize_objective_mode(explicit)
     flood_cfg = config.get("洪水事件率定", {})
@@ -1337,6 +1470,18 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
     zone_threshold = cfmax_zone_threshold(config)
     obs_mode = config.get("观测口径模式", config.get("观测径流口径模式", "full_year"))
     init_state_vector = resolve_runtime_init_state(config)
+    interval_evaluation = dict(config.get("区间评价", config.get("interval_evaluation", {})) or {})
+    interval_guard_enabled = _runtime_truthy(
+        interval_evaluation.get("目标约束启用", interval_evaluation.get("objective_guard_enabled")),
+        default=False,
+    )
+    try:
+        interval_guard_weight = float(
+            interval_evaluation.get("目标约束权重", interval_evaluation.get("objective_guard_weight", 0.15))
+        )
+    except (TypeError, ValueError):
+        interval_guard_weight = 0.15
+    interval_guard_weight = min(max(interval_guard_weight, 0.0), 1.0)
     patch_module(
         module,
         {
@@ -1388,6 +1533,8 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
             "BOUNDARY_INFLOW_FLOW_FIELD": str(boundary["流量字段"]) if use_boundary_inflow else "inflow_m3s",
             "BOUNDARY_INFLOW_GAP_FILL": str(boundary.get("缺失填补", "zero")) if use_boundary_inflow else "zero",
             "PROJECT_OBJECT_TYPE": object_type,
+            "INTERVAL_OBJECTIVE_GUARD_ENABLED": interval_guard_enabled,
+            "INTERVAL_OBJECTIVE_GUARD_WEIGHT": interval_guard_weight,
             "FLOOD_EVENT_CONFIG": flood_event_config,
         },
     )
@@ -1458,6 +1605,7 @@ def build_weighted_multi_objective_meta(profile: str) -> dict[str, Any]:
         },
         "diagnostic_only_constraints": {
             "glacier_fraction_window": True,
+            "interbasin_residual": True,
         },
         "notes": [
             "flow 主体项沿用现有成熟 NSE / logNSE / PBIAS 骨架，并记录 KGE 供 flow_guard 使用。",
@@ -1943,6 +2091,7 @@ def main() -> None:
         preserve_gui_root=gui_root,
     )
     profile = resolve_profile(config, args.率定模式)
+    validate_profile_input_contracts(config, profile)
     requested_objective_mode = normalize_objective_mode(getattr(args, "目标函数", None))
     objective_mode = resolve_objective_mode(config, getattr(args, "目标函数", None), profile)
     calibration_workflow = resolve_calibration_workflow(config, getattr(args, "calibration_workflow", ""), profile)

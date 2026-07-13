@@ -1,4 +1,6 @@
 (function () {
+  const PATH_MEMORY_STORAGE_KEY = "hbvstudio.pathBrowser.lastDirectory.v1";
+
   function defaultEscapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, ch => ({
       "&": "&amp;",
@@ -24,28 +26,69 @@
     return raw.slice(0, raw.lastIndexOf("/"));
   }
 
-  function preferredPathForTarget(model = {}) {
+  function uniquePaths(values = []) {
+    const seen = new Set();
+    const paths = [];
+    for (const value of values) {
+      const path = String(value || "").trim();
+      const key = path.replace(/\\/g, "/").toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      paths.push(path);
+    }
+    return paths;
+  }
+
+  function readLastDirectory(storage, key = PATH_MEMORY_STORAGE_KEY) {
+    try {
+      return String(storage?.getItem?.(key) || "").trim();
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function writeLastDirectory(storage, pathValue, key = PATH_MEMORY_STORAGE_KEY) {
+    const path = String(pathValue || "").trim();
+    if (!path) return false;
+    try {
+      storage?.setItem?.(key, path);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function pathCandidatesForTarget(model = {}) {
     const target = String(model.target || "").trim();
     const kind = String(model.kind || "file").trim() || "file";
     const currentValue = String(model.currentValue || "").trim();
-    if (currentValue) return currentValue;
-    const lastVisited = model.lastVisited || {};
-    const remembered = target ? String(lastVisited[target] || "").trim() : "";
-    if (remembered) return remembered;
+    const lastDirectory = String(model.lastDirectory || "").trim();
     const runtimeRoot = String(model.runtimeRoot || "").trim();
-    if (kind === "dir" && runtimeRoot) return runtimeRoot;
-    if (/^wz-import-(prec|temp|evap)-dir$/.test(target) && runtimeRoot) return runtimeRoot;
-    if (/^wz-custom-/.test(target) && runtimeRoot) return runtimeRoot;
-    if (target === "wz-hourly-prec-dir" && runtimeRoot) return runtimeRoot;
-    return configDirectory(model.configPath) || runtimeRoot || "";
+    const configRoot = configDirectory(model.configPath);
+    const runtimeFirst = kind === "dir"
+      || /^wz-import-(prec|temp|evap)-dir$/.test(target)
+      || /^wz-custom-/.test(target)
+      || target === "wz-hourly-prec-dir";
+    const contextual = runtimeFirst
+      ? [runtimeRoot, configRoot]
+      : [configRoot, runtimeRoot];
+    const paths = uniquePaths([currentValue, lastDirectory, ...contextual].filter(Boolean));
+    paths.push("");
+    return paths;
+  }
+
+  function preferredPathForTarget(model = {}) {
+    return pathCandidatesForTarget(model)[0] || "";
   }
 
   function pathModalOpenState(model = {}) {
     const target = String(model.target || "").trim();
     const kind = String(model.kind || "file").trim() || "file";
     const extensions = normalizeExtensions(model.extensions);
+    const startPaths = pathCandidatesForTarget({ ...model, target, kind });
     return {
-      startPath: preferredPathForTarget({ ...model, target, kind }),
+      startPath: startPaths[0] || "",
+      startPaths,
       statePatch: {
         open: true,
         target,
@@ -154,21 +197,14 @@
 
   function selectedPathState(pathValue = "", model = {}) {
     const selectedPath = String(pathValue || "");
-    const target = String(model.target || "").trim();
     const kind = String(model.kind || "file").trim() || "file";
-    const lastVisited = model.lastVisited && typeof model.lastVisited === "object"
-      ? model.lastVisited
-      : {};
     const rememberedPath = kind === "dir"
       ? selectedPath
       : selectedPath.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
-    const nextLastVisited = target
-      ? { ...lastVisited, [target]: rememberedPath }
-      : { ...lastVisited };
     return {
       selectedPath,
       rememberedPath,
-      statePatch: { lastVisited: nextLastVisited },
+      statePatch: { lastDirectory: rememberedPath },
     };
   }
 
@@ -187,15 +223,19 @@
   }
 
   window.HBVStudioPathBrowserView = {
+    PATH_MEMORY_STORAGE_KEY,
     configDirectory,
     normalizeExtensions,
     openPathRequestState,
+    pathCandidatesForTarget,
     pathModalCloseState,
     pathModalOpenState,
     preferredPathForTarget,
+    readLastDirectory,
     pathListingQueryState,
     pathListingDomState,
     pathListingState,
     selectedPathState,
+    writeLastDirectory,
   };
 })();

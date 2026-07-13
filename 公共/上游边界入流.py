@@ -237,6 +237,7 @@ def read_boundary_inflow_series(
     flow_field="inflow_m3s",
     gap_fill="zero",
     expected_step_hours=None,
+    allow_no_overlap=False,
 ):
     if not csv_path:
         return np.zeros(len(dates), dtype=np.float64), False
@@ -272,11 +273,18 @@ def read_boundary_inflow_series(
     coverage_ratio = float(original_covered_count / expected_count) if expected_count > 0 else 1.0
     if expected_step_hours is not None and expected_count > 0:
         if original_covered_count == 0:
-            raise ValueError(
-                "上游边界入流文件没有与当前模拟时段重叠的时间步，"
-                "不能在 zero 填补模式下静默按全 0 入流运行。"
+            if not bool(allow_no_overlap):
+                raise ValueError(
+                    "上游边界入流文件没有与当前模拟时段重叠的时间步，"
+                    "不能在 zero 填补模式下静默按全 0 入流运行。"
+                )
+            warnings.warn(
+                "当前诊断子窗口早于上游边界资料起点，子窗口边界入流显式按 0 m3/s 处理；"
+                "这只适用于已由完整任务输入契约确认后期边界覆盖的预热诊断。",
+                RuntimeWarning,
+                stacklevel=2,
             )
-        if gap_mode in {"", "zero", "0"} and coverage_ratio < MIN_ZERO_FILL_COVERAGE_RATIO:
+        elif gap_mode in {"", "zero", "0"} and coverage_ratio < MIN_ZERO_FILL_COVERAGE_RATIO:
             warnings.warn(
                 f"上游边界入流与当前模拟时段仅重叠 {coverage_ratio * 100:.1f}% 时间步，"
                 "缺失部分将按 0 m3/s 填补；请确认这不是时间范围或时区配置错误。",

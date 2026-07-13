@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "selectedPathState"],
+    exports: ["PATH_MEMORY_STORAGE_KEY", "configDirectory", "normalizeExtensions", "openPathRequestState", "pathCandidatesForTarget", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "readLastDirectory", "selectedPathState", "writeLastDirectory"],
   },
   {
     script: "./js/dataPrepView.js",
@@ -506,7 +506,7 @@ const state = {
     fileCount: 0,
     shownFileCount: 0,
     filesTruncated: false,
-    lastVisited: {},
+    lastDirectory: "",
   },
 };
 
@@ -2989,6 +2989,7 @@ function collectStepData(step) {
     case 4: return {
       气象策略: {
         降水方案: getSelectedRadio("wz-precip-mode"),
+        station_correction_algorithm: "occurrence_amount_v2",
         降水来源: $("#wz-prec-source").value,
         降水源: $("#wz-prec-source").value,
         站点降水_csv: $("#wz-station-prec").value.trim(),
@@ -3151,6 +3152,8 @@ function populateWizardFromConfig(cfg, path) {
   if ($("#wz-import-prec-dir")) $("#wz-import-prec-dir").value = "";
   if ($("#wz-import-temp-dir")) $("#wz-import-temp-dir").value = "";
   if ($("#wz-import-evap-dir")) $("#wz-import-evap-dir").value = "";
+  if ($("#wz-import-prec-unit")) $("#wz-import-prec-unit").value = "";
+  if ($("#wz-import-prec-day-basis")) $("#wz-import-prec-day-basis").value = "";
   if ($("#wz-import-dem")) $("#wz-import-dem").value = "";
   if ($("#wz-import-flowacc")) $("#wz-import-flowacc").value = "";
   if ($("#wz-import-flowdir")) $("#wz-import-flowdir").value = "";
@@ -3225,7 +3228,8 @@ function resetWizard() {
     "#wz-event-file", "#wz-boundary-csv", "#wz-station-prec", "#wz-station-meta",
     "#wz-hourly-prec-dir", "#wz-custom-prec-dir", "#wz-custom-temp-dir",
     "#wz-custom-pet-dir", "#wz-import-prec-dir", "#wz-import-temp-dir",
-    "#wz-import-evap-dir", "#wz-import-dem", "#wz-import-flowacc",
+    "#wz-import-evap-dir", "#wz-import-prec-unit", "#wz-import-prec-day-basis",
+    "#wz-import-dem", "#wz-import-flowacc",
     "#wz-import-flowdir", "#wz-import-glacier",
   ].forEach(s => { if ($(s)) $(s).value = ""; });
   WIZARD_TIME_FIELDS.forEach(selector => {
@@ -3786,6 +3790,9 @@ async function importMeteoFiles() {
       pet: $("#wz-import-evap-dir")?.value || "",
     },
     runtimePrecipSource: getEffectiveRuntimePrecipSource(),
+    isDaily: Math.abs(Number(state.currentWorkspace?.时间步长_小时 || 24) - 24) < 1e-9,
+    precipUnit: $("#wz-import-prec-unit")?.value || "",
+    precipDayBasis: $("#wz-import-prec-day-basis")?.value || "",
   });
   if (!requestState.ready) { showToast(requestState.message, true); return; }
   const targets = {
@@ -5697,13 +5704,13 @@ function openPathModal(target, kind, extensions) {
     kind,
     extensions,
     currentValue,
-    lastVisited: state.pathModal.lastVisited,
+    lastDirectory: state.pathModal.lastDirectory,
     runtimeRoot: state.currentWorkspace?.运行目录 || "",
     configPath: state.wizardWorkspacePath,
   });
   Object.assign(state.pathModal, modalState.statePatch);
   $("#path-modal").classList.remove("hidden");
-  loadPathListing(modalState.startPath).catch(err => showToast(err.message, true));
+  loadFirstAvailablePathListing(modalState.startPaths).catch(err => showToast(err.message, true));
 }
 
 function closePathModal() {
@@ -5720,9 +5727,27 @@ async function loadPathListing(pathValue) {
   const p = await apiGet(query.listingPath);
   const listing = window.HBVStudioPathBrowserView.pathListingState(p.data);
   Object.assign(state.pathModal, listing.statePatch);
+  if (state.pathModal.currentPath) {
+    state.pathModal.lastDirectory = state.pathModal.currentPath;
+    window.HBVStudioPathBrowserView.writeLastDirectory(window.localStorage, state.pathModal.currentPath);
+  }
 
   const rendered = window.HBVStudioPathBrowserView.pathListingDomState(state.pathModal, { escapeHtml });
   applyDomUpdates(rendered.domUpdates);
+}
+
+async function loadFirstAvailablePathListing(pathValues) {
+  const candidates = Array.isArray(pathValues) && pathValues.length ? pathValues : [""];
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      await loadPathListing(candidate);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("无法打开文件浏览器。");
 }
 
 function applySelectedPath(pathValue) {
@@ -5731,10 +5756,10 @@ function applySelectedPath(pathValue) {
   const selectedState = window.HBVStudioPathBrowserView.selectedPathState(pathValue, {
     target: state.pathModal.target,
     kind: state.pathModal.kind,
-    lastVisited: state.pathModal.lastVisited,
   });
   input.value = selectedState.selectedPath;
   Object.assign(state.pathModal, selectedState.statePatch);
+  window.HBVStudioPathBrowserView.writeLastDirectory(window.localStorage, selectedState.rememberedPath);
   input.dispatchEvent(new Event("change", { bubbles: true }));
   closePathModal();
 }
@@ -6415,6 +6440,7 @@ function startPolling() {
 // ===============================================================
 
 async function init() {
+  state.pathModal.lastDirectory = window.HBVStudioPathBrowserView.readLastDirectory(window.localStorage);
   bindEvents();
   window.addEventListener("pagehide", notifyWindowUnload);
   validateFrontendModules();

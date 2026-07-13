@@ -17,9 +17,12 @@ from services.meteo_import import (  # noqa: E402
     MeteoImportWorkerContext,
     meteo_import_start_plan,
     meteo_import_worker_run,
+    meteo_import_resampling_name,
     ordered_tif_files_by_timestamp,
     replace_directory_from_stage,
     should_report_file_progress,
+    tif_series_digest,
+    validate_precipitation_import_metadata,
 )
 
 
@@ -138,6 +141,32 @@ class MeteoImportServiceTests(unittest.TestCase):
         self.assertTrue(should_report_file_progress(10, 100))
         self.assertTrue(should_report_file_progress(100, 100))
         self.assertFalse(should_report_file_progress(11, 100))
+
+    def test_meteo_import_resampling_preserves_precipitation_areal_depth(self) -> None:
+        self.assertEqual(meteo_import_resampling_name("prec_dir"), "average")
+        self.assertEqual(meteo_import_resampling_name("temp_dir"), "bilinear")
+        self.assertEqual(meteo_import_resampling_name("evap_dir"), "bilinear")
+
+    def test_daily_precipitation_metadata_is_required_and_m_per_day_is_scaled(self) -> None:
+        with self.assertRaisesRegex(ValueError, "单位必须显式确认"):
+            validate_precipitation_import_metadata({}, time_step_hours=24.0)
+        metadata = validate_precipitation_import_metadata(
+            {"precip_unit": "m/day", "precip_day_basis": "beijing_calendar_day"},
+            time_step_hours=24.0,
+        )
+        self.assertTrue(metadata["required"])
+        self.assertEqual(metadata["scale_to_mm"], 1000.0)
+        self.assertEqual(metadata["day_basis"], "beijing_calendar_day")
+
+    def test_tif_series_digest_changes_with_file_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "P_2025.01.01.tif"
+            path.write_bytes(b"one")
+            first = tif_series_digest([(pd.Timestamp("2025-01-01"), path)])
+            path.write_bytes(b"two")
+            second = tif_series_digest([(pd.Timestamp("2025-01-01"), path)])
+        self.assertEqual(first["file_count"], 1)
+        self.assertNotEqual(first["series_sha256"], second["series_sha256"])
 
 
 if __name__ == "__main__":

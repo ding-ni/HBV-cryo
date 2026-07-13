@@ -32,6 +32,9 @@ def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
     parts: list[str] = []
     stats = dict(summary.get("processing_stats", {}) or {})
     if stats:
+        algorithm = str(stats.get("algorithm", "") or "").strip()
+        if algorithm:
+            parts.append(f"站点订正算法：{algorithm}")
         station_steps = int(stats.get("direct_station_corrected_steps", 0) or 0)
         rule_steps = int(stats.get("transfer_rule_applied_steps", 0) or 0)
         pass_steps = int(stats.get("pass_through_steps", 0) or 0)
@@ -133,6 +136,8 @@ def check_precip_strategy_outputs(
             zero_steps = int(summary.get("zero_available_station_steps", 0) or 0)
             skipped_steps = int(summary.get("skipped_out_of_scope_steps", 0) or 0)
             parts = [f"{label}文件数：{count}"]
+            processing_stats = dict(summary.get("processing_stats", {}) or {})
+            qc_blocked = bool(processing_stats.get("qc_blocked", False))
             if time_basis_label:
                 parts.append(f"资料口径：{time_basis_label}")
             if selected_steps or written_files:
@@ -142,7 +147,15 @@ def check_precip_strategy_outputs(
             if skipped_steps:
                 parts.append(f"已忽略口径外时段：{skipped_steps}")
             parts.extend(_hydro_diagnostic_message(summary))
-            return count > 0, "；".join(parts), count
+            if qc_blocked:
+                monthly = dict(processing_stats.get("monthly_conservation", {}) or {})
+                parts.append(
+                    "月量守恒质量检查未通过："
+                    f"高倍率像元 {int(monthly.get('high_factor_cell_count', 0) or 0)}；"
+                    f"移除比例超限像元 {int(monthly.get('high_removed_fraction_cell_count', 0) or 0)}；"
+                    f"未分配像元 {int(monthly.get('unresolved_cell_count', 0) or 0)}"
+                )
+            return count > 0 and not qc_blocked, "；".join(parts), count
         except Exception:
             pass
     return count > 0, f"{label}文件数：{count}", count

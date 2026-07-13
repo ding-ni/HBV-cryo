@@ -682,12 +682,17 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               registeredDirs: { prec: " D:/meteo/prec ", temp: "D:/meteo/temp", pet: "D:/meteo/pet" },
               importDirs: { prec: "", temp: " D:/manual/temp ", pet: "" },
               runtimePrecipSource: " custom_tif ",
+              isDaily: true,
+              precipUnit: "mm/day",
+              precipDayBasis: "product_calendar_day",
             });
             const expectedMeteoRequest = {
               prec_source: "custom_tif",
               prec_dir: "D:/meteo/prec",
               temp_dir: "D:/manual/temp",
               evap_dir: "D:/meteo/pet",
+              precip_unit: "mm/day",
+              precip_day_basis: "product_calendar_day",
             };
             const expectedMeteoPayload = { config_path: "C:/ws/A.json", ...expectedMeteoRequest };
             if (!meteoRequest.ready || meteoRequest.message !== "" || meteoRequest.requestPath !== "/api/meteo/import/start" || meteoRequest.missing.length ||
@@ -706,6 +711,17 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             });
             if (incompleteMeteoRequest.ready || incompleteMeteoRequest.message !== "请选择降水、气温和蒸散发三个目录。" || incompleteMeteoRequest.missing.join(",") !== "prec,pet" || incompleteMeteoRequest.writeBackUpdates.length) {
               throw new Error(`incomplete meteo import request mismatch: ${JSON.stringify(incompleteMeteoRequest)}`);
+            }
+            const missingDailyMetadata = view.meteoImportRequestState({
+              configPath: "C:/ws/A.json",
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+              registeredDirs: { prec: "D:/p", temp: "D:/t", pet: "D:/e" },
+              importDirs: {},
+              runtimePrecipSource: "custom_tif",
+              isDaily: true,
+            });
+            if (missingDailyMetadata.ready || missingDailyMetadata.missing.join(",") !== "precip_unit,precip_day_basis" || missingDailyMetadata.message !== "请显式确认日降水单位和日界。") {
+              throw new Error(`daily import metadata gate mismatch: ${JSON.stringify(missingDailyMetadata)}`);
             }
             const allLocalHint = view.meteoModeHintState({
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },

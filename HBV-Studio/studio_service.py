@@ -180,11 +180,15 @@ from services.json_utils import read_json_file
 from services.json_utils import write_json_file
 from services.meteo_import import MeteoImportStartContext
 from services.meteo_import import MeteoImportWorkerContext
+from services.meteo_import import DAILY_FORCING_MANIFEST_SCHEMA
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
+from services.meteo_import import meteo_import_resampling_name
 from services.meteo_import import ordered_tif_files_by_timestamp
 from services.meteo_import import replace_directory_from_stage
 from services.meteo_import import should_report_file_progress
+from services.meteo_import import tif_series_digest
+from services.meteo_import import validate_precipitation_import_metadata
 from services.meteo_config import (
     EffectivePrecipPathContext,
     METEO_CUSTOM_PET_DIR_KEY,
@@ -495,7 +499,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026-05-24-meteo-shp-staging"
+APP_VERSION = "2026.07.13.2"
 SERVER_STARTED_AT = time.time()
 
 
@@ -2787,12 +2791,20 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
     """Copy user-provided meteorological tif directories into aligned_masked, in timestamp order."""
     import shutil
 
+    import numpy as np
     import rasterio
     from rasterio.warp import reproject, Resampling
 
     config_path = resolve_any_path(str(payload.get("config_path", "")), must_exist=True)
     config = read_runtime_config(config_path)
     profile = current_profile(config)
+    time_step_hours = float(
+        config.get("时间步长_小时", 1.0 if profile == PROFILE_HOURLY else 24.0) or 24.0
+    )
+    precip_import_metadata = validate_precipitation_import_metadata(
+        payload,
+        time_step_hours=time_step_hours,
+    )
     paths = build_profile_paths(config, profile)
     gis_dir = Path(paths["gis_dir"])
     dem_file = _workspace_dem_path(gis_dir, prefer=_configured_dem_kind(config))
@@ -2828,9 +2840,15 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
 
     # Read DEM grid info for validation
     dem_meta = None
+    dem_valid_mask = None
     if dem_file.exists():
         with rasterio.open(dem_file) as src:
             dem_meta = {"height": src.height, "width": src.width, "crs": src.crs, "transform": src.transform, "res": src.res}
+            dem_values = src.read(1).astype("float64")
+            dem_valid_mask = np.isfinite(dem_values)
+            if src.nodata is not None:
+                dem_valid_mask &= dem_values != src.nodata
+            dem_valid_mask &= dem_values > -9000.0
         log(f"[检查] 已读取 DEM 网格：{dem_meta['width']} x {dem_meta['height']}。")
     else:
         log(f"[检查] 当前工作区缺少 {dem_file.name}，将跳过网格对齐检查。")
@@ -2890,6 +2908,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                 "ordered_files": ordered_files,
                 "reuse_existing": reuse_existing,
                 "out_of_range_count": out_of_range_count,
+                "source_digest": tif_series_digest(ordered_files),
             }
         )
 
@@ -2933,27 +2952,108 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                 fname = Path(src_path).name
                 dst_path = stage_dir / fname
                 with rasterio.open(src_path) as src:
-                    if matches_dem_grid(src):
+                    source_values = src.read()
+                    scale_to_mm = (
+                        float(precip_import_metadata.get("scale_to_mm", 1.0) or 1.0)
+                        if key == "prec_dir" else 1.0
+                    )
+                    if key == "prec_dir":
+                        source_precip = source_values[0].astype("float64") * scale_to_mm
+                        source_precip_valid = np.isfinite(source_precip)
+                        if src.nodata is not None:
+                            source_precip_valid &= source_values[0] != src.nodata
+                        negative = source_precip_valid & (source_precip < -1e-6)
+                        if np.any(negative):
+                            raise ValueError(
+                                f"降水文件包含 {int(np.count_nonzero(negative))} 个负值：{src_path_obj}"
+                            )
+                    source_valid = np.isfinite(source_values[0].astype("float64"))
+                    if src.nodata is not None:
+                        source_valid &= source_values[0] != src.nodata
+                    source_valid &= source_values[0] > -9000.0
+                    mask_matches = dem_valid_mask is None or np.array_equal(source_valid, dem_valid_mask)
+                    if matches_dem_grid(src) and mask_matches and abs(scale_to_mm - 1.0) <= 1e-12:
                         shutil.copy2(src_path, str(dst_path))
                         action = "直接复制"
-                    else:
-                        needs_align = True
+                    elif matches_dem_grid(src) and mask_matches:
                         out_meta = src.meta.copy()
+                        dst_nodata = src.nodata if src.nodata is not None else -9999.0
+                        out_meta.update(nodata=dst_nodata, compress="lzw")
+                        with rasterio.open(dst_path, "w", **out_meta) as dst:
+                            for band in range(1, src.count + 1):
+                                destination = source_values[band - 1].astype("float64")
+                                if key == "prec_dir":
+                                    valid_band = np.isfinite(destination)
+                                    if src.nodata is not None:
+                                        valid_band &= destination != src.nodata
+                                    destination[valid_band] = np.clip(
+                                        destination[valid_band] * scale_to_mm, 0.0, None,
+                                    )
+                                dst.write(destination.astype(out_meta["dtype"], copy=False), band)
+                                band_tags = src.tags(band)
+                                if band_tags:
+                                    dst.update_tags(band, **band_tags)
+                            dataset_tags = src.tags()
+                            if dataset_tags:
+                                dst.update_tags(**dataset_tags)
+                        action = "单位换算后写入"
+                    else:
+                        needs_align = needs_align or not matches_dem_grid(src)
+                        out_meta = src.meta.copy()
+                        dst_nodata = src.nodata if src.nodata is not None else -9999.0
                         out_meta.update(
                             height=dem_meta["height"], width=dem_meta["width"],
                             transform=dem_meta["transform"], crs=dem_meta["crs"],
-                            compress="lzw",
+                            nodata=dst_nodata, compress="lzw",
                         )
                         with rasterio.open(dst_path, "w", **out_meta) as dst:
                             for band in range(1, src.count + 1):
-                                reproject(
-                                    source=rasterio.band(src, band),
-                                    destination=rasterio.band(dst, band),
-                                    src_transform=src.transform, src_crs=src.crs,
-                                    dst_transform=dem_meta["transform"], dst_crs=dem_meta["crs"],
-                                    resampling=Resampling.bilinear,
-                                )
-                        action = "裁剪对齐"
+                                if matches_dem_grid(src):
+                                    destination = source_values[band - 1].copy()
+                                else:
+                                    destination = np.full(
+                                        (dem_meta["height"], dem_meta["width"]),
+                                        dst_nodata,
+                                        dtype=source_values.dtype,
+                                    )
+                                    source_for_reproject: Any = rasterio.band(src, band)
+                                    if key == "prec_dir" and abs(scale_to_mm - 1.0) > 1e-12:
+                                        source_for_reproject = source_values[band - 1].astype("float64")
+                                        valid_band = np.isfinite(source_for_reproject)
+                                        if src.nodata is not None:
+                                            valid_band &= source_for_reproject != src.nodata
+                                        source_for_reproject[valid_band] = np.clip(
+                                            source_for_reproject[valid_band] * scale_to_mm, 0.0, None,
+                                        )
+                                    reproject(
+                                        source=source_for_reproject,
+                                        destination=destination,
+                                        src_transform=src.transform, src_crs=src.crs,
+                                        src_nodata=src.nodata,
+                                        dst_transform=dem_meta["transform"], dst_crs=dem_meta["crs"],
+                                        dst_nodata=dst_nodata,
+                                        resampling=getattr(Resampling, meteo_import_resampling_name(key)),
+                                        init_dest_nodata=True,
+                                    )
+                                if dem_valid_mask is not None:
+                                    destination[~dem_valid_mask] = dst_nodata
+                                dst.write(destination.astype(out_meta["dtype"], copy=False), band)
+                                band_tags = src.tags(band)
+                                if band_tags:
+                                    dst.update_tags(band, **band_tags)
+                            dataset_tags = src.tags()
+                            if dataset_tags:
+                                dst.update_tags(**dataset_tags)
+                        action = "裁剪对齐并套用流域掩膜" if not matches_dem_grid(src) else "套用流域掩膜"
+                if key == "prec_dir":
+                    with rasterio.open(dst_path, "r+") as dst:
+                        dst.update_tags(
+                            HBV_VARIABLE="precipitation",
+                            HBV_UNIT="mm/day" if abs(time_step_hours - 24.0) <= 1e-9 else "mm/time_step",
+                            HBV_INPUT_UNIT=str(precip_import_metadata.get("input_unit", "")),
+                            HBV_DAY_BASIS=str(precip_import_metadata.get("day_basis", "")),
+                            HBV_SOURCE_FORMAT="daily_tif" if abs(time_step_hours - 24.0) <= 1e-9 else "time_step_tif",
+                        )
                 count += 1
                 processed_all += 1
                 if should_report_file_progress(idx, total_item):
@@ -3007,6 +3107,57 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "source_dirs": {str(item["key"]).replace("_dir", ""): str(Path(item["src_dir"]).resolve()) for item in prepared_inputs},
         "target_dirs": {str(item["key"]).replace("_dir", ""): str(Path(item["target_dir"]).resolve()) for item in prepared_inputs},
     }
+    manifest_path: Path | None = None
+    if abs(time_step_hours - 24.0) <= 1e-9:
+        first_series = list(prepared_inputs[0]["ordered_files"]) if prepared_inputs else []
+        manifest = {
+            "schema": DAILY_FORCING_MANIFEST_SCHEMA,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "producer": "HBV-Studio",
+            "preparation_mode": "import_local_tif",
+            "profile": profile,
+            "time_step_hours": float(time_step_hours),
+            "start_date": first_series[0][0].strftime("%Y-%m-%d") if first_series else None,
+            "end_date": first_series[-1][0].strftime("%Y-%m-%d") if first_series else None,
+            "date_count": int(len(first_series)),
+            "precipitation": {
+                "input_unit": str(precip_import_metadata.get("input_unit", "")),
+                "output_unit": "mm/day",
+                "day_basis": str(precip_import_metadata.get("day_basis", "")),
+                "unit_confirmed": True,
+                "day_basis_confirmed": True,
+            },
+            "source_series": {
+                str(item["key"]).replace("_dir", ""): {
+                    "source_dir": str(Path(item["src_dir"]).resolve()),
+                    **dict(item.get("source_digest", {}) or {}),
+                }
+                for item in prepared_inputs
+            },
+            "target_dirs": dict(summary["target_dirs"]),
+            "grid": {
+                "dem": str(dem_file.resolve(strict=False)),
+                "crs": str(dem_meta["crs"]) if dem_meta is not None else None,
+                "width": int(dem_meta["width"]) if dem_meta is not None else None,
+                "height": int(dem_meta["height"]) if dem_meta is not None else None,
+                "transform": (
+                    [float(value) for value in dem_meta["transform"][:6]]
+                    if dem_meta is not None else None
+                ),
+                "active_mask_required": bool(dem_valid_mask is not None),
+            },
+            "qc": {
+                "validation_ok": bool(forcing["ok"]),
+                "validation_errors": list(forcing["errors"][:20]),
+                "validation_warnings": list(forcing["warnings"][:20]),
+                "expected_steps": forcing["expected_steps"],
+                "valid_steps": forcing["total_valid_steps"],
+            },
+        }
+        manifest_path = Path(paths["aligned_dir"]) / "daily_forcing_manifest.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        summary["daily_forcing_manifest"] = str(manifest_path)
     state_payload = {
         "version": 1,
         "profile": profile,
@@ -3032,6 +3183,8 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "time_basis_label": forcing.get("time_basis_label"),
         "import_order": "timestamp_asc",
         "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "precipitation_metadata": dict(precip_import_metadata),
+        "daily_forcing_manifest": str(manifest_path) if manifest_path is not None else "",
     }
     state_path = write_meteo_state(config, state_payload, profile)
     summary["state_file"] = str(state_path)

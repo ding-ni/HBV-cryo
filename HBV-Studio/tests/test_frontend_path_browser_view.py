@@ -21,7 +21,7 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             vm.runInContext(fs.readFileSync("web/js/pathBrowserView.js", "utf8"), context);
 
             const view = context.window.HBVStudioPathBrowserView;
-            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "selectedPathState"]) {
+            for (const name of ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathCandidatesForTarget", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "readLastDirectory", "selectedPathState", "writeLastDirectory"]) {
               if (typeof view?.[name] !== "function") throw new Error(`missing path browser export: ${name}`);
             }
             const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -57,12 +57,22 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             }
             const rememberedPreferred = view.preferredPathForTarget({
               target: "wz-import-dem",
-              lastVisited: { "wz-import-dem": " D:/remembered " },
+              lastDirectory: " D:/remembered ",
               runtimeRoot: "D:/runtime",
               configPath: "C:/ws/A/workspace.json",
             });
             if (rememberedPreferred !== "D:/remembered") {
               throw new Error(`remembered path should win preferred path: ${rememberedPreferred}`);
+            }
+            const candidates = view.pathCandidatesForTarget({
+              target: "wz-import-dem",
+              currentValue: "C:/current/file.tif",
+              lastDirectory: "D:/remembered",
+              runtimeRoot: "E:/runtime",
+              configPath: "F:/configs/workspace.json",
+            });
+            if (candidates.join("|") !== "C:/current/file.tif|D:/remembered|F:/configs|E:/runtime|") {
+              throw new Error(`path candidate order mismatch: ${JSON.stringify(candidates)}`);
             }
             const runtimeDirPreferred = view.preferredPathForTarget({
               target: "wz-import-prec-dir",
@@ -224,31 +234,37 @@ class FrontendPathBrowserViewTests(unittest.TestCase):
             const selectedDir = view.selectedPathState("D:/runtime/forcing", {
               target: "wz-import-prec-dir",
               kind: "dir",
-              lastVisited: { other: "C:/old" },
             });
             if (selectedDir.selectedPath !== "D:/runtime/forcing" ||
                 selectedDir.rememberedPath !== "D:/runtime/forcing" ||
-                selectedDir.statePatch.lastVisited["wz-import-prec-dir"] !== "D:/runtime/forcing" ||
-                selectedDir.statePatch.lastVisited.other !== "C:/old") {
+                selectedDir.statePatch.lastDirectory !== "D:/runtime/forcing") {
               throw new Error(`selected directory state mismatch: ${JSON.stringify(selectedDir)}`);
             }
             const selectedFile = view.selectedPathState("D:\\runtime\\forcing\\prec.tif", {
               target: "wz-import-prec",
               kind: "file",
-              lastVisited: {},
             });
             if (selectedFile.selectedPath !== "D:\\runtime\\forcing\\prec.tif" ||
                 selectedFile.rememberedPath !== "D:/runtime/forcing" ||
-                selectedFile.statePatch.lastVisited["wz-import-prec"] !== "D:/runtime/forcing") {
+                selectedFile.statePatch.lastDirectory !== "D:/runtime/forcing") {
               throw new Error(`selected file state mismatch: ${JSON.stringify(selectedFile)}`);
             }
-            const untargetedSelection = view.selectedPathState("D:/runtime/forcing/prec.tif", {
-              kind: "file",
-              lastVisited: { other: "C:/old" },
-            });
-            if (untargetedSelection.statePatch.lastVisited.other !== "C:/old" ||
-                Object.keys(untargetedSelection.statePatch.lastVisited).length !== 1) {
-              throw new Error(`untargeted selection should preserve existing last visited map: ${JSON.stringify(untargetedSelection)}`);
+            const storageData = {};
+            const storage = {
+              getItem(key) { return storageData[key] || null; },
+              setItem(key, value) { storageData[key] = value; },
+            };
+            if (!view.writeLastDirectory(storage, "D:/runtime/forcing") ||
+                view.readLastDirectory(storage) !== "D:/runtime/forcing") {
+              throw new Error(`path storage round trip mismatch: ${JSON.stringify(storageData)}`);
+            }
+            const throwingStorage = {
+              getItem() { throw new Error("blocked"); },
+              setItem() { throw new Error("blocked"); },
+            };
+            if (view.readLastDirectory(throwingStorage) !== "" ||
+                view.writeLastDirectory(throwingStorage, "D:/runtime") !== false) {
+              throw new Error("blocked storage should degrade without throwing");
             }
             """
         )

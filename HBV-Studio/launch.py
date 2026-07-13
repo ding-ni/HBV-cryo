@@ -202,7 +202,7 @@ def print_result_roots() -> None:
 
         runtime_roots = [str(path.resolve(strict=False)) for path in studio_service.discover_runtime_roots()]
         run_parents = []
-        for root in studio_service.discover_runtime_roots():
+        for root in map(Path, runtime_roots):
             run_parents.extend(str(path.resolve(strict=False)) for path in studio_service.iter_run_parent_dirs(root))
     except Exception as exc:
         print(f"[HBV-Studio] result root discovery failed: {exc}", flush=True)

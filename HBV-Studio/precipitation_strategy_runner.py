@@ -24,6 +24,15 @@ from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip
 MIN_GRID_PRECIP_MM = 0.05
 WET_STATION_MEAN_MM = 0.10
 RATIO_CLIP = (0.2, 5.0)
+STATION_CORRECTION_ALGORITHM_V2 = "occurrence_amount_v2"
+STATION_CORRECTION_ALGORITHM_LEGACY = "legacy_ratio_v1"
+DEFAULT_STATION_CORRECTION_ALGORITHM = STATION_CORRECTION_ALGORITHM_V2
+CONFIG_FALLBACK_STATION_CORRECTION_ALGORITHM = STATION_CORRECTION_ALGORITHM_LEGACY
+MIN_STATION_SUPPORT_RADIUS_M = 30_000.0
+OCCURRENCE_DECISION_THRESHOLD = 0.5
+EXACT_DRY_CONFIDENCE = 0.8
+MAX_MONTHLY_REDISTRIBUTION_FACTOR = 2.0
+MAX_MONTHLY_REMOVED_FRACTION = 0.30
 IDW_POWER = 2.0
 IDW_MIN_DISTANCE_M = 100.0
 IDW_CHUNK_SIZE = 200_000
@@ -57,6 +66,14 @@ STATION_ONLY_TEMPLATE_CANDIDATES = (
     "dem_0p1deg.tif",
     "dem.tif",
 )
+
+
+def configured_station_correction_algorithm(meteo: dict[str, Any]) -> str:
+    """Replay legacy workspaces unless an algorithm version was explicitly recorded."""
+    return str(
+        meteo.get("station_correction_algorithm", CONFIG_FALLBACK_STATION_CORRECTION_ALGORITHM)
+        or CONFIG_FALLBACK_STATION_CORRECTION_ALGORITHM
+    ).strip().lower()
 
 
 def parse_args() -> argparse.Namespace:
@@ -584,6 +601,7 @@ def paired_station_metrics(obs_values: list[float], sim_values: list[float]) -> 
             "mae_mm": None,
             "rmse_mm": None,
             "pbias_percent": None,
+            "correlation": None,
         }
     obs = obs[:count]
     sim = sim[:count]
@@ -596,10 +614,17 @@ def paired_station_metrics(obs_values: list[float], sim_values: list[float]) -> 
             "mae_mm": None,
             "rmse_mm": None,
             "pbias_percent": None,
+            "correlation": None,
         }
     diff = sim[mask] - obs[mask]
     obs_sum = float(np.sum(obs[mask]))
     pbias_value = float(np.sum(diff) / obs_sum * 100.0) if abs(obs_sum) > 1e-12 else None
+    correlation = None
+    if int(np.sum(mask)) >= 2:
+        obs_std = float(np.std(obs[mask]))
+        sim_std = float(np.std(sim[mask]))
+        if obs_std > 1e-12 and sim_std > 1e-12:
+            correlation = float(np.corrcoef(obs[mask], sim[mask])[0, 1])
     return {
         "sample_count": int(np.sum(mask)),
         "mean_observed_mm": float(np.mean(obs[mask])),
@@ -607,6 +632,325 @@ def paired_station_metrics(obs_values: list[float], sim_values: list[float]) -> 
         "mae_mm": float(np.mean(np.abs(diff))),
         "rmse_mm": float(np.sqrt(np.mean(diff * diff))),
         "pbias_percent": pbias_value,
+        "correlation": correlation,
+    }
+
+
+def precipitation_occurrence_metrics(
+    obs_values: list[float],
+    sim_values: list[float],
+    *,
+    wet_threshold_mm: float = WET_STATION_MEAN_MM,
+) -> dict[str, Any]:
+    obs = np.asarray(obs_values, dtype="float64")
+    sim = np.asarray(sim_values, dtype="float64")
+    count = min(obs.size, sim.size)
+    if count <= 0:
+        return {
+            "wet_threshold_mm": float(wet_threshold_mm),
+            "sample_count": 0,
+            "hits": 0,
+            "misses": 0,
+            "false_alarms": 0,
+            "correct_negatives": 0,
+            "pod": None,
+            "far": None,
+            "csi": None,
+        }
+    obs = obs[:count]
+    sim = sim[:count]
+    mask = np.isfinite(obs) & np.isfinite(sim) & (obs >= 0.0) & (sim >= 0.0)
+    obs_wet = obs[mask] >= float(wet_threshold_mm)
+    sim_wet = sim[mask] >= float(wet_threshold_mm)
+    hits = int(np.sum(obs_wet & sim_wet))
+    misses = int(np.sum(obs_wet & ~sim_wet))
+    false_alarms = int(np.sum(~obs_wet & sim_wet))
+    correct_negatives = int(np.sum(~obs_wet & ~sim_wet))
+
+    def ratio(numerator: int, denominator: int) -> float | None:
+        return float(numerator / denominator) if denominator > 0 else None
+
+    return {
+        "wet_threshold_mm": float(wet_threshold_mm),
+        "sample_count": int(np.sum(mask)),
+        "hits": hits,
+        "misses": misses,
+        "false_alarms": false_alarms,
+        "correct_negatives": correct_negatives,
+        "pod": ratio(hits, hits + misses),
+        "far": ratio(false_alarms, hits + false_alarms),
+        "csi": ratio(hits, hits + misses + false_alarms),
+    }
+
+
+def precipitation_sequence_metrics(values: list[float]) -> dict[str, Any]:
+    finite = [float(value) for value in values if np.isfinite(float(value))]
+    wet = [value >= WET_STATION_MEAN_MM for value in finite]
+    dry = [not flag for flag in wet]
+    trace_count = int(sum(0.0 < value < WET_STATION_MEAN_MM for value in finite))
+    return {
+        "sample_count": int(len(finite)),
+        "dry_day_count": int(sum(dry)),
+        "wet_day_count": int(sum(wet)),
+        "trace_day_count": trace_count,
+        "trace_day_frequency_percent": ratio_percent(trace_count, len(finite)),
+        "longest_dry_spell_steps": max_consecutive_true(dry),
+        "longest_wet_spell_steps": max_consecutive_true(wet),
+    }
+
+
+def monthly_precipitation_totals(records: list[tuple[pd.Timestamp, float]]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for timestamp, value in records:
+        if not np.isfinite(float(value)):
+            continue
+        key = pd.Timestamp(timestamp).strftime("%Y-%m")
+        totals[key] = totals.get(key, 0.0) + float(value)
+    return totals
+
+
+def station_product_day_basis_diagnostics(
+    records: list[tuple[pd.Timestamp, Path]],
+    stations: pd.DataFrame,
+    station_series_raw: pd.DataFrame,
+    *,
+    model_step_hours: float,
+) -> dict[str, Any]:
+    source_step = detect_station_series_step_hours(station_series_raw.index)
+    if abs(float(model_step_hours) - 24.0) > 1e-9 or source_step is None or source_step > 1.5:
+        return {
+            "schema": "precipitation_day_basis_diagnostics_v1",
+            "status": "not_applicable",
+            "source_time_step_hours": source_step,
+        }
+    station_ids = [str(item) for item in stations["station_id"].tolist()]
+    grid_by_time: dict[pd.Timestamp, np.ndarray] = {}
+    for ts, path in records:
+        if not path.exists():
+            continue
+        with rasterio.open(path) as src:
+            grid_by_time[pd.Timestamp(ts).normalize()] = sample_station_values(src, stations)
+
+    candidates: list[dict[str, Any]] = []
+    for day_start_hour, basis in (
+        (0, "calendar_day_00_local"),
+        (HYDROLOGICAL_DAY_START_HOUR, "hydrological_day_08_local"),
+    ):
+        aggregated, aggregation_meta = aggregate_station_precip_for_model_step(
+            station_series_raw,
+            model_step_hours,
+            day_start_hour=day_start_hour,
+        )
+        for label_shift_days in (-1, 0, 1):
+            shifted = aggregated.copy()
+            shifted.index = pd.DatetimeIndex(shifted.index) + pd.Timedelta(days=label_shift_days)
+            observed: list[float] = []
+            simulated: list[float] = []
+            for stamp, grid_values in grid_by_time.items():
+                if stamp not in shifted.index:
+                    continue
+                obs = shifted.loc[stamp, station_ids]
+                if isinstance(obs, pd.DataFrame):
+                    obs = obs.mean(axis=0, numeric_only=True)
+                obs_values = obs.to_numpy(dtype="float64")
+                valid = np.isfinite(obs_values) & np.isfinite(grid_values) & (obs_values >= 0.0) & (grid_values >= 0.0)
+                if np.any(valid):
+                    observed.extend(obs_values[valid].tolist())
+                    simulated.extend(grid_values[valid].tolist())
+            metrics = paired_station_metrics(observed, simulated)
+            candidates.append(
+                {
+                    "basis": basis,
+                    "day_start_hour": int(day_start_hour),
+                    "station_label_shift_days": int(label_shift_days),
+                    "aggregation": aggregation_meta,
+                    "amount_metrics": metrics,
+                    "occurrence_metrics": precipitation_occurrence_metrics(observed, simulated),
+                }
+            )
+
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -float(item["amount_metrics"].get("correlation"))
+            if item["amount_metrics"].get("correlation") is not None else float("inf"),
+            float(item["amount_metrics"].get("mae_mm"))
+            if item["amount_metrics"].get("mae_mm") is not None else float("inf"),
+        ),
+    )
+    best = ranked[0] if ranked else None
+    second = ranked[1] if len(ranked) > 1 else None
+    best_corr = dict(best.get("amount_metrics", {}) if best else {}).get("correlation")
+    second_corr = dict(second.get("amount_metrics", {}) if second else {}).get("correlation")
+    correlation_margin = (
+        float(best_corr) - float(second_corr)
+        if best_corr is not None and second_corr is not None else None
+    )
+    evidence_status = "inconclusive"
+    if best is not None and int(best["amount_metrics"].get("sample_count", 0) or 0) >= 100:
+        if correlation_margin is not None and correlation_margin >= 0.02:
+            evidence_status = "preferred_candidate"
+    return {
+        "schema": "precipitation_day_basis_diagnostics_v1",
+        "status": "ok",
+        "source_time_step_hours": float(source_step),
+        "formal_confirmation": False,
+        "evidence_status": evidence_status,
+        "correlation_margin_to_second": correlation_margin,
+        "preferred_candidate": best,
+        "candidates": candidates,
+        "interpretation": (
+            "This ranks temporal alignment against station observations; it does not replace product metadata."
+        ),
+    }
+
+
+def leave_one_station_out_diagnostics(
+    records: list[tuple[pd.Timestamp, Path]],
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+) -> dict[str, Any]:
+    """Evaluate v2 at held-out station points, including pointwise monthly redistribution."""
+    station_ids = [str(item) for item in stations["station_id"].tolist()]
+    weights = stations["weight"].to_numpy(dtype="float64")
+    station_x = stations["x"].to_numpy(dtype="float64")
+    station_y = stations["y"].to_numpy(dtype="float64")
+    samples: list[dict[str, Any]] = []
+    skipped_insufficient_network = 0
+
+    for ts, path in records:
+        if not path.exists():
+            continue
+        with rasterio.open(path) as src:
+            grid_station = sample_station_values(src, stations)
+            obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
+            valid = valid_station_observation_mask(obs, grid_station, weights)
+            if int(np.count_nonzero(valid)) < 2:
+                skipped_insufficient_network += int(np.count_nonzero(valid))
+                continue
+            transformer = metric_transformer_for_points(src.crs, station_x, station_y)
+            station_x_m, station_y_m = transform_metric_xy(station_x, station_y, transformer)
+
+        for held_out in np.where(valid)[0]:
+            training = valid.copy()
+            training[held_out] = False
+            if not np.any(training):
+                skipped_insufficient_network += 1
+                continue
+            amount_valid = training & (obs >= WET_STATION_MEAN_MM) & (grid_station >= WET_STATION_MEAN_MM)
+            target_x = np.asarray([station_x_m[held_out]], dtype="float64")
+            target_y = np.asarray([station_y_m[held_out]], dtype="float64")
+            if np.any(amount_valid):
+                raw_ratio = obs[amount_valid] / np.maximum(grid_station[amount_valid], MIN_GRID_PRECIP_MM)
+                log_ratio = idw_interpolate_to_points(
+                    station_x_m[amount_valid],
+                    station_y_m[amount_valid],
+                    np.log(np.clip(raw_ratio, RATIO_CLIP[0], RATIO_CLIP[1])),
+                    target_x,
+                    target_y,
+                )
+                ratio = np.exp(log_ratio)
+            else:
+                ratio = np.ones(1, dtype="float64")
+            station_amount = idw_interpolate_to_points(
+                station_x_m[training], station_y_m[training], obs[training], target_x, target_y,
+            )
+            station_occurrence = idw_interpolate_to_points(
+                station_x_m[training],
+                station_y_m[training],
+                (obs[training] >= WET_STATION_MEAN_MM).astype("float64"),
+                target_x,
+                target_y,
+            )
+            support_radius = station_support_radius_m(station_x_m[training], station_y_m[training])
+            nearest_distance = nearest_station_distance_to_points(
+                station_x_m[training], station_y_m[training], target_x, target_y,
+            )
+            possible_training = max(int(np.count_nonzero(weights_positive(stations))) - 1, 1)
+            temporal_confidence = float(np.count_nonzero(training) / possible_training)
+            spatial_confidence = np.exp(-np.square(nearest_distance / max(support_radius, 1.0)))
+            confidence = np.clip(temporal_confidence * spatial_confidence, 0.0, 1.0)
+            correction = apply_station_observation_correction(
+                np.asarray([grid_station[held_out]], dtype="float64"),
+                ratio_values=ratio,
+                station_prec_values=station_amount,
+                station_occurrence_values=station_occurrence,
+                confidence_values=confidence,
+                allow_exact_dry=bool(np.all(obs[training] < WET_STATION_MEAN_MM)),
+            )
+            samples.append(
+                {
+                    "timestamp": pd.Timestamp(ts),
+                    "station_id": station_ids[held_out],
+                    "observed": float(obs[held_out]),
+                    "background": float(grid_station[held_out]),
+                    "target_amount": float(correction["amount_corrected"][0]),
+                    "corrected": float(correction["corrected"][0]),
+                }
+            )
+
+    grouped: dict[tuple[str, int, int], list[int]] = {}
+    for index, sample in enumerate(samples):
+        stamp = pd.Timestamp(sample["timestamp"])
+        grouped.setdefault((str(sample["station_id"]), int(stamp.year), int(stamp.month)), []).append(index)
+    high_factor_groups = 0
+    high_removed_fraction_groups = 0
+    unresolved_groups = 0
+    for indices in grouped.values():
+        target_sum = float(sum(max(float(samples[index]["target_amount"]), 0.0) for index in indices))
+        corrected_sum = float(sum(max(float(samples[index]["corrected"]), 0.0) for index in indices))
+        removed_fraction = max(target_sum - corrected_sum, 0.0) / target_sum if target_sum > MIN_GRID_PRECIP_MM else 0.0
+        if corrected_sum > MIN_GRID_PRECIP_MM:
+            factor = target_sum / corrected_sum
+            for index in indices:
+                samples[index]["corrected"] = max(float(samples[index]["corrected"]), 0.0) * factor
+            if factor > MAX_MONTHLY_REDISTRIBUTION_FACTOR:
+                high_factor_groups += 1
+        elif target_sum > MIN_GRID_PRECIP_MM:
+            unresolved_groups += 1
+        if removed_fraction > MAX_MONTHLY_REMOVED_FRACTION:
+            high_removed_fraction_groups += 1
+
+    observed = [float(item["observed"]) for item in samples]
+    background = [float(item["background"]) for item in samples]
+    corrected = [float(item["corrected"]) for item in samples]
+    per_station: list[dict[str, Any]] = []
+    for station_id in station_ids:
+        selected = [item for item in samples if item["station_id"] == station_id]
+        per_station.append(
+            {
+                "station_id": station_id,
+                "before": paired_station_metrics(
+                    [float(item["observed"]) for item in selected],
+                    [float(item["background"]) for item in selected],
+                ),
+                "after": paired_station_metrics(
+                    [float(item["observed"]) for item in selected],
+                    [float(item["corrected"]) for item in selected],
+                ),
+                "occurrence_after": precipitation_occurrence_metrics(
+                    [float(item["observed"]) for item in selected],
+                    [float(item["corrected"]) for item in selected],
+                ),
+            }
+        )
+    return {
+        "schema": "precipitation_station_leave_one_out_v1",
+        "method": "hold_out_one_station_then_apply_occurrence_amount_v2_and_point_monthly_redistribution",
+        "independence_note": "The held-out station is excluded from this local correction, but may have been used upstream to create v2.",
+        "sample_count": int(len(samples)),
+        "skipped_insufficient_network_samples": int(skipped_insufficient_network),
+        "before": paired_station_metrics(observed, background),
+        "after": paired_station_metrics(observed, corrected),
+        "occurrence_before": precipitation_occurrence_metrics(observed, background),
+        "occurrence_after": precipitation_occurrence_metrics(observed, corrected),
+        "monthly_qc": {
+            "group_count": int(len(grouped)),
+            "high_factor_group_count": int(high_factor_groups),
+            "high_removed_fraction_group_count": int(high_removed_fraction_groups),
+            "unresolved_group_count": int(unresolved_groups),
+        },
+        "per_station": per_station,
     }
 
 
@@ -618,10 +962,13 @@ def summarize_precipitation_hydro_diagnostics(
     mode: str,
     *,
     use_timestamp_names: bool = False,
+    algorithm: str = STATION_CORRECTION_ALGORITHM_LEGACY,
 ) -> dict[str, Any]:
     station_ids = [str(item) for item in stations["station_id"].tolist()]
     base_basin_means: list[float] = []
     corrected_basin_means: list[float] = []
+    base_basin_records: list[tuple[pd.Timestamp, float]] = []
+    corrected_basin_records: list[tuple[pd.Timestamp, float]] = []
     base_daily_max: list[float] = []
     corrected_daily_max: list[float] = []
     base_wet_ratios: list[float] = []
@@ -636,6 +983,11 @@ def summarize_precipitation_hydro_diagnostics(
     clipped_station_sample_count = 0
     occurrence_repair_step_count = 0
     target_file_count = 0
+    spatial_abs_change_sum = 0.0
+    spatial_relative_change_sum = 0.0
+    spatial_change_cell_steps = 0
+    spatial_changed_gt_10pct_cell_steps = 0
+    spatial_max_abs_change = 0.0
 
     for ts, path in records:
         output = target_dir / (raster_name_from_timestamp(ts) if use_timestamp_names else path.name)
@@ -644,20 +996,26 @@ def summarize_precipitation_hydro_diagnostics(
         available_station_counts.append(int(np.sum(obs_valid)))
 
         base_station_values = np.full(len(station_ids), np.nan, dtype="float64")
+        base_grid_values: np.ndarray | None = None
         base_mean = None
         if path.exists():
             base_stats = raster_hydro_stats(path)
             base_mean = base_stats["mean_mm"]
             if base_mean is not None:
                 base_basin_means.append(float(base_mean))
+                base_basin_records.append((pd.Timestamp(ts), float(base_mean)))
             if base_stats["max_mm"] is not None:
                 base_daily_max.append(float(base_stats["max_mm"]))
             if base_stats["wet_pixel_ratio"] is not None:
                 base_wet_ratios.append(float(base_stats["wet_pixel_ratio"]))
             with rasterio.open(path) as src:
                 base_station_values = sample_station_values(src, stations)
+                base_grid_values = src.read(1).astype("float64")
+                if src.nodata is not None:
+                    base_grid_values[base_grid_values == src.nodata] = np.nan
 
         corrected_station_values = np.full(len(station_ids), np.nan, dtype="float64")
+        corrected_grid_values: np.ndarray | None = None
         corrected_mean = None
         if output.exists():
             target_file_count += 1
@@ -665,12 +1023,31 @@ def summarize_precipitation_hydro_diagnostics(
             corrected_mean = corrected_stats["mean_mm"]
             if corrected_mean is not None:
                 corrected_basin_means.append(float(corrected_mean))
+                corrected_basin_records.append((pd.Timestamp(ts), float(corrected_mean)))
             if corrected_stats["max_mm"] is not None:
                 corrected_daily_max.append(float(corrected_stats["max_mm"]))
             if corrected_stats["wet_pixel_ratio"] is not None:
                 corrected_wet_ratios.append(float(corrected_stats["wet_pixel_ratio"]))
             with rasterio.open(output) as src:
                 corrected_station_values = sample_station_values(src, stations)
+                corrected_grid_values = src.read(1).astype("float64")
+                if src.nodata is not None:
+                    corrected_grid_values[corrected_grid_values == src.nodata] = np.nan
+
+        if (
+            base_grid_values is not None
+            and corrected_grid_values is not None
+            and base_grid_values.shape == corrected_grid_values.shape
+        ):
+            common = np.isfinite(base_grid_values) & np.isfinite(corrected_grid_values)
+            if np.any(common):
+                absolute_change = np.abs(corrected_grid_values[common] - base_grid_values[common])
+                relative_change = absolute_change / np.maximum(base_grid_values[common], WET_STATION_MEAN_MM)
+                spatial_abs_change_sum += float(np.sum(absolute_change))
+                spatial_relative_change_sum += float(np.sum(relative_change))
+                spatial_change_cell_steps += int(absolute_change.size)
+                spatial_changed_gt_10pct_cell_steps += int(np.count_nonzero(relative_change > 0.10))
+                spatial_max_abs_change = max(spatial_max_abs_change, float(np.max(absolute_change)))
 
         station_base_mask = obs_valid & np.isfinite(base_station_values) & (base_station_values >= 0.0)
         if np.any(station_base_mask):
@@ -698,6 +1075,8 @@ def summarize_precipitation_hydro_diagnostics(
     corrected_total = safe_stat(corrected_basin_means, np.sum)
     before_metrics = paired_station_metrics(obs_for_base, base_at_station)
     after_metrics = paired_station_metrics(obs_for_corrected, corrected_at_station)
+    occurrence_before = precipitation_occurrence_metrics(obs_for_base, base_at_station)
+    occurrence_after = precipitation_occurrence_metrics(obs_for_corrected, corrected_at_station)
     possible_station_day_samples = int(len(records) * len(station_ids))
     valid_station_day_samples = int(sum(available_station_counts))
     missing_station_day_samples = max(0, possible_station_day_samples - valid_station_day_samples)
@@ -711,9 +1090,18 @@ def summarize_precipitation_hydro_diagnostics(
         if pbias_before is not None and pbias_after is not None and abs(float(pbias_before)) > 1e-12
         else None
     )
+    leave_one_out = (
+        leave_one_station_out_diagnostics(records, stations, station_series)
+        if mode == "grid_plus_station_bias" and algorithm == STATION_CORRECTION_ALGORITHM_V2
+        else {
+            "schema": "precipitation_station_leave_one_out_v1",
+            "status": "not_applicable",
+            "algorithm": algorithm,
+        }
+    )
 
     return {
-        "schema": "precipitation_hydro_diagnostics_v1",
+        "schema": "precipitation_hydro_diagnostics_v2",
         "mode": mode,
         "target_file_count": int(target_file_count),
         "time_step_count": int(len(records)),
@@ -734,19 +1122,42 @@ def summarize_precipitation_hydro_diagnostics(
         "basin_precip_total_change_percent": relative_change_percent(corrected_total, base_total),
         "basin_mean_daily_before_mm": safe_stat(base_basin_means, np.mean),
         "basin_mean_daily_after_mm": safe_stat(corrected_basin_means, np.mean),
+        "basin_monthly_total_before_mm": monthly_precipitation_totals(base_basin_records),
+        "basin_monthly_total_after_mm": monthly_precipitation_totals(corrected_basin_records),
         "basin_max_daily_before_mm": safe_stat(base_daily_max, np.max),
         "basin_max_daily_after_mm": safe_stat(corrected_daily_max, np.max),
         "wet_day_count_before": int(np.sum(np.asarray(base_basin_means) >= WET_STATION_MEAN_MM)) if base_basin_means else None,
         "wet_day_count_after": int(np.sum(np.asarray(corrected_basin_means) >= WET_STATION_MEAN_MM)) if corrected_basin_means else None,
+        "basin_occurrence_before": precipitation_sequence_metrics(base_basin_means),
+        "basin_occurrence_after": precipitation_sequence_metrics(corrected_basin_means),
         "mean_wet_pixel_ratio_before_percent": (safe_stat(base_wet_ratios, np.mean) or 0.0) * 100.0 if base_wet_ratios else None,
         "mean_wet_pixel_ratio_after_percent": (safe_stat(corrected_wet_ratios, np.mean) or 0.0) * 100.0 if corrected_wet_ratios else None,
         "station_point_before": before_metrics,
         "station_point_after": after_metrics,
+        "station_occurrence_before": occurrence_before,
+        "station_occurrence_after": occurrence_after,
+        "station_leave_one_out": leave_one_out,
         "station_point_mae_change_percent": mae_change,
         "station_point_abs_pbias_change_percent": pbias_abs_change,
         "correction_factor_mean": safe_stat(correction_factors, np.mean),
         "correction_factor_min": safe_stat(correction_factors, np.min),
         "correction_factor_max": safe_stat(correction_factors, np.max),
+        "spatial_correction_strength": {
+            "cell_step_count": int(spatial_change_cell_steps),
+            "mean_absolute_change_mm": (
+                float(spatial_abs_change_sum / spatial_change_cell_steps)
+                if spatial_change_cell_steps > 0 else None
+            ),
+            "mean_relative_change_percent": (
+                float(spatial_relative_change_sum / spatial_change_cell_steps * 100.0)
+                if spatial_change_cell_steps > 0 else None
+            ),
+            "changed_gt_10_percent_cell_step_count": int(spatial_changed_gt_10pct_cell_steps),
+            "changed_gt_10_percent_cell_step_percent": ratio_percent(
+                spatial_changed_gt_10pct_cell_steps, spatial_change_cell_steps,
+            ),
+            "max_absolute_change_mm": float(spatial_max_abs_change) if spatial_change_cell_steps > 0 else None,
+        },
         "ratio_clip_step_count": int(clipped_step_count),
         "ratio_clip_station_sample_count": int(clipped_station_sample_count),
         "grid_missed_precip_repair_step_count": int(occurrence_repair_step_count),
@@ -786,6 +1197,7 @@ def summarize_record_participation(
     use_timestamp_names: bool = False,
     transfer_rule_summary: dict[str, Any] | None = None,
     processing_stats: dict[str, Any] | None = None,
+    day_basis_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
     time_basis = task_time_basis(config, context="calibration")
@@ -876,6 +1288,10 @@ def summarize_record_participation(
         station_series,
         mode,
         use_timestamp_names=use_timestamp_names,
+        algorithm=str(
+            dict(processing_stats or {}).get("algorithm", STATION_CORRECTION_ALGORITHM_LEGACY)
+            or STATION_CORRECTION_ALGORITHM_LEGACY
+        ),
     )
 
     return {
@@ -909,6 +1325,10 @@ def summarize_record_participation(
         "station_missing_rates": station_missing_rates,
         "event_coverage": event_coverage,
         "hydrological_diagnostics": hydro_diagnostics,
+        "day_basis_diagnostics": day_basis_diagnostics or {
+            "schema": "precipitation_day_basis_diagnostics_v1",
+            "status": "not_run",
+        },
         "transfer_rules": transfer_rule_summary or {"available": False, "status": "not_requested"},
         "processing_stats": processing_stats or {},
         "base_dir": str(base_dir.resolve(strict=False)),
@@ -920,6 +1340,25 @@ def write_strategy_summary(target_dir: Path, summary: dict[str, Any]) -> Path:
     path = target_dir / "precipitation_strategy_summary.json"
     path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return path
+
+
+def remove_stale_strategy_rasters(
+    target_dir: Path,
+    records: list[tuple[pd.Timestamp, Path]],
+    *,
+    use_timestamp_names: bool = False,
+) -> int:
+    expected_names = {
+        raster_name_from_timestamp(ts) if use_timestamp_names else source_path.name
+        for ts, source_path in records
+    }
+    removed = 0
+    for path in target_dir.glob("*.tif"):
+        if path.name in expected_names:
+            continue
+        path.unlink()
+        removed += 1
+    return removed
 
 
 def sample_station_values(src: rasterio.io.DatasetReader, stations: pd.DataFrame) -> np.ndarray:
@@ -955,17 +1394,21 @@ def interpolated_station_correction_fields(
     grid_x_m, grid_y_m = transform_metric_xy(grid_x, grid_y, transformer)
     station_x_m, station_y_m = transform_metric_xy(station_x, station_y, transformer)
 
-    raw_ratios = obs[valid] / np.maximum(grid_station[valid], MIN_GRID_PRECIP_MM)
+    amount_valid = valid & (obs >= WET_STATION_MEAN_MM) & (grid_station >= WET_STATION_MEAN_MM)
+    raw_ratios = obs[amount_valid] / np.maximum(grid_station[amount_valid], MIN_GRID_PRECIP_MM)
     clipped_ratios = np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])
     residuals = obs[valid] - grid_station[valid]
-
-    ratio_values = idw_interpolate_to_points(
-        station_x_m[valid],
-        station_y_m[valid],
-        clipped_ratios,
-        grid_x_m,
-        grid_y_m,
-    )
+    if np.any(amount_valid):
+        log_ratio_values = idw_interpolate_to_points(
+            station_x_m[amount_valid],
+            station_y_m[amount_valid],
+            np.log(clipped_ratios),
+            grid_x_m,
+            grid_y_m,
+        )
+        ratio_values = np.exp(log_ratio_values)
+    else:
+        ratio_values = np.ones(grid_x_m.shape, dtype="float64")
     residual_values = idw_interpolate_to_points(
         station_x_m[valid],
         station_y_m[valid],
@@ -980,19 +1423,81 @@ def interpolated_station_correction_fields(
         grid_x_m,
         grid_y_m,
     )
+    station_occurrence_values = idw_interpolate_to_points(
+        station_x_m[valid],
+        station_y_m[valid],
+        (obs[valid] >= WET_STATION_MEAN_MM).astype("float64"),
+        grid_x_m,
+        grid_y_m,
+    )
+    support_radius_m = station_support_radius_m(station_x_m[valid], station_y_m[valid])
+    nearest_distance_m = nearest_station_distance_to_points(
+        station_x_m[valid], station_y_m[valid], grid_x_m, grid_y_m,
+    )
+    temporal_confidence = float(np.sum(valid) / max(np.sum(weights_positive(stations)), 1))
+    spatial_confidence = np.exp(-np.square(nearest_distance_m / max(support_radius_m, 1.0)))
+    confidence_values = np.clip(temporal_confidence * spatial_confidence, 0.0, 1.0)
     return {
         "rows": rows,
         "cols": cols,
         "ratio_values": ratio_values,
         "residual_values": residual_values,
         "station_prec_values": station_prec_values,
+        "station_occurrence_values": station_occurrence_values,
+        "confidence_values": confidence_values,
+        "support_radius_m": float(support_radius_m),
+        "temporal_confidence": temporal_confidence,
         "raw_ratios": raw_ratios,
         "clipped_ratios": clipped_ratios,
         "residuals": residuals,
     }
 
 
-def apply_station_observation_correction(
+def weights_positive(stations: pd.DataFrame) -> np.ndarray:
+    if "weight" not in stations.columns:
+        return np.ones(len(stations), dtype=bool)
+    return stations["weight"].to_numpy(dtype="float64") > 0.0
+
+
+def station_support_radius_m(station_x_m: np.ndarray, station_y_m: np.ndarray) -> float:
+    x = np.asarray(station_x_m, dtype="float64")
+    y = np.asarray(station_y_m, dtype="float64")
+    valid = np.isfinite(x) & np.isfinite(y)
+    x = x[valid]
+    y = y[valid]
+    if x.size < 2:
+        return MIN_STATION_SUPPORT_RADIUS_M
+    dx = x[:, None] - x[None, :]
+    dy = y[:, None] - y[None, :]
+    distances = np.sqrt(dx * dx + dy * dy)
+    distances[distances <= 0.0] = np.inf
+    nearest = np.min(distances, axis=1)
+    finite = nearest[np.isfinite(nearest)]
+    if finite.size == 0:
+        return MIN_STATION_SUPPORT_RADIUS_M
+    return float(max(MIN_STATION_SUPPORT_RADIUS_M, 2.0 * np.median(finite)))
+
+
+def nearest_station_distance_to_points(
+    station_x: np.ndarray,
+    station_y: np.ndarray,
+    target_x: np.ndarray,
+    target_y: np.ndarray,
+) -> np.ndarray:
+    sx = np.asarray(station_x, dtype="float64")
+    sy = np.asarray(station_y, dtype="float64")
+    tx = np.asarray(target_x, dtype="float64")
+    ty = np.asarray(target_y, dtype="float64")
+    result = np.full(tx.shape, np.inf, dtype="float64")
+    for start in range(0, tx.size, IDW_CHUNK_SIZE):
+        end = min(start + IDW_CHUNK_SIZE, tx.size)
+        dx = tx[start:end, None] - sx[None, :]
+        dy = ty[start:end, None] - sy[None, :]
+        result[start:end] = np.min(np.sqrt(dx * dx + dy * dy), axis=1)
+    return result
+
+
+def apply_legacy_station_observation_correction(
     base_values: np.ndarray,
     rows: np.ndarray,
     cols: np.ndarray,
@@ -1019,6 +1524,45 @@ def apply_station_observation_correction(
                 residual_corrected[occurrence_gap],
             )
     return np.clip(corrected_values, 0.0, None)
+
+
+def apply_station_observation_correction(
+    base_values: np.ndarray,
+    *,
+    ratio_values: np.ndarray,
+    station_prec_values: np.ndarray,
+    station_occurrence_values: np.ndarray,
+    confidence_values: np.ndarray,
+    allow_exact_dry: bool = True,
+) -> dict[str, np.ndarray]:
+    base = np.clip(np.asarray(base_values, dtype="float64"), 0.0, None)
+    confidence = np.clip(np.asarray(confidence_values, dtype="float64"), 0.0, 1.0)
+    station_occurrence = np.clip(np.asarray(station_occurrence_values, dtype="float64"), 0.0, 1.0)
+    background_occurrence = (base >= WET_STATION_MEAN_MM).astype("float64")
+    occurrence_probability = (1.0 - confidence) * background_occurrence + confidence * station_occurrence
+    wet_mask = occurrence_probability >= OCCURRENCE_DECISION_THRESHOLD
+
+    ratios = np.clip(np.asarray(ratio_values, dtype="float64"), RATIO_CLIP[0], RATIO_CLIP[1])
+    amount_corrected = base * np.exp(confidence * np.log(ratios))
+    station_amount = np.clip(np.asarray(station_prec_values, dtype="float64"), 0.0, None)
+    occurrence_gap = wet_mask & (background_occurrence < 0.5) & (station_occurrence >= OCCURRENCE_DECISION_THRESHOLD)
+    if np.any(occurrence_gap):
+        amount_corrected[occurrence_gap] = (
+            (1.0 - confidence[occurrence_gap]) * base[occurrence_gap]
+            + confidence[occurrence_gap] * station_amount[occurrence_gap]
+        )
+    high_confidence_dry = bool(allow_exact_dry) & (~wet_mask) & (confidence >= EXACT_DRY_CONFIDENCE) & (
+        station_occurrence < OCCURRENCE_DECISION_THRESHOLD
+    )
+    corrected = np.clip(amount_corrected, 0.0, None)
+    corrected[high_confidence_dry] = 0.0
+    return {
+        "corrected": corrected,
+        "amount_corrected": np.clip(amount_corrected, 0.0, None),
+        "wet_mask": wet_mask,
+        "high_confidence_dry": high_confidence_dry,
+        "occurrence_probability": occurrence_probability,
+    }
 
 
 def _empty_rule_accumulators(shape: tuple[int, int]) -> dict[str, np.ndarray]:
@@ -1391,6 +1935,180 @@ def no_available_station_steps(
     return missing
 
 
+def enforce_monthly_occurrence_conservation(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+) -> dict[str, Any]:
+    grouped: dict[tuple[int, int], list[tuple[pd.Timestamp, Path]]] = {}
+    for ts, path in records:
+        stamp = pd.Timestamp(ts)
+        grouped.setdefault((int(stamp.year), int(stamp.month)), []).append((stamp, path))
+
+    weights = stations["weight"].to_numpy(dtype="float64")
+    station_ids = stations["station_id"].tolist()
+    month_summaries: list[dict[str, Any]] = []
+    max_factor = 1.0
+    high_factor_cell_count = 0
+    high_factor_target_volume_mm = 0.0
+    eligible_cell_month_count = 0
+    unresolved_cell_count = 0
+    unresolved_volume_mm = 0.0
+    high_removed_fraction_cell_count = 0
+    high_removed_fraction_volume_mm = 0.0
+    target_volume_mm = 0.0
+    removed_volume_mm = 0.0
+
+    for (year, month), month_records in sorted(grouped.items()):
+        target_sum: np.ndarray | None = None
+        corrected_sum: np.ndarray | None = None
+        output_paths: list[Path] = []
+        profile: dict[str, Any] | None = None
+        for day_index, (ts, source_path) in enumerate(month_records):
+            output_path = target_dir / source_path.name
+            if not output_path.exists():
+                continue
+            output_paths.append(output_path)
+            with rasterio.open(source_path) as src:
+                arr = src.read(1).astype("float64")
+                nodata = src.nodata
+                if nodata is not None:
+                    arr[arr == nodata] = np.nan
+                target = arr.copy()
+                occurrence_probability = (arr >= WET_STATION_MEAN_MM).astype("float64")
+                grid_station = sample_station_values(src, stations)
+                obs = station_values_for_time(station_series, ts, station_ids)
+                valid = valid_station_observation_mask(obs, grid_station, weights)
+                if np.any(valid):
+                    fields = interpolated_station_correction_fields(src, arr, stations, obs, grid_station, valid)
+                    rows = fields["rows"]
+                    cols = fields["cols"]
+                    correction = apply_station_observation_correction(
+                        arr[rows, cols],
+                        ratio_values=np.asarray(fields["ratio_values"], dtype="float64"),
+                        station_prec_values=np.asarray(fields["station_prec_values"], dtype="float64"),
+                        station_occurrence_values=np.asarray(fields["station_occurrence_values"], dtype="float64"),
+                        confidence_values=np.asarray(fields["confidence_values"], dtype="float64"),
+                        allow_exact_dry=bool(np.all(obs[valid] < WET_STATION_MEAN_MM)),
+                    )
+                    target[rows, cols] = correction["amount_corrected"]
+                    occurrence_probability[rows, cols] = correction["occurrence_probability"]
+                if profile is None:
+                    profile = src.profile.copy()
+            with rasterio.open(output_path) as corrected_src:
+                corrected = corrected_src.read(1).astype("float64")
+                if corrected_src.nodata is not None:
+                    corrected[corrected == corrected_src.nodata] = np.nan
+            valid_grid = np.isfinite(target)
+            if target_sum is None:
+                target_sum = np.zeros(target.shape, dtype="float64")
+                corrected_sum = np.zeros(target.shape, dtype="float64")
+            target_sum[valid_grid] += np.clip(target[valid_grid], 0.0, None)
+            corrected_valid = valid_grid & np.isfinite(corrected)
+            assert corrected_sum is not None
+            corrected_sum[corrected_valid] += np.clip(corrected[corrected_valid], 0.0, None)
+
+        if target_sum is None or corrected_sum is None or profile is None:
+            continue
+
+        factor = np.ones(target_sum.shape, dtype="float64")
+        scalable = corrected_sum > MIN_GRID_PRECIP_MM
+        factor[scalable] = target_sum[scalable] / corrected_sum[scalable]
+        factor = np.clip(factor, 0.0, None)
+        unresolved = (target_sum > MIN_GRID_PRECIP_MM) & ~scalable
+        high_factor = scalable & (factor > MAX_MONTHLY_REDISTRIBUTION_FACTOR)
+        removed = np.clip(target_sum - corrected_sum, 0.0, None)
+        removed_fraction = np.zeros(target_sum.shape, dtype="float64")
+        eligible = target_sum > MIN_GRID_PRECIP_MM
+        removed_fraction[eligible] = removed[eligible] / target_sum[eligible]
+        high_removed_fraction = eligible & (removed_fraction > MAX_MONTHLY_REMOVED_FRACTION)
+        month_max_factor = float(np.nanmax(factor[scalable])) if np.any(scalable) else 1.0
+        month_unresolved_volume = float(np.sum(target_sum[unresolved])) if np.any(unresolved) else 0.0
+        month_high_factor_volume = float(np.sum(target_sum[high_factor])) if np.any(high_factor) else 0.0
+        month_target_volume = float(np.sum(target_sum[eligible])) if np.any(eligible) else 0.0
+        month_removed_volume = float(np.sum(removed[eligible])) if np.any(eligible) else 0.0
+        month_high_removed_volume = (
+            float(np.sum(target_sum[high_removed_fraction])) if np.any(high_removed_fraction) else 0.0
+        )
+        month_eligible_count = int(np.count_nonzero(eligible))
+        max_factor = max(max_factor, month_max_factor)
+        high_factor_cell_count += int(np.count_nonzero(high_factor))
+        high_factor_target_volume_mm += month_high_factor_volume
+        eligible_cell_month_count += month_eligible_count
+        unresolved_cell_count += int(np.count_nonzero(unresolved))
+        unresolved_volume_mm += month_unresolved_volume
+        high_removed_fraction_cell_count += int(np.count_nonzero(high_removed_fraction))
+        high_removed_fraction_volume_mm += month_high_removed_volume
+        target_volume_mm += month_target_volume
+        removed_volume_mm += month_removed_volume
+
+        for _ts, source_path in month_records:
+            output_path = target_dir / source_path.name
+            if not output_path.exists():
+                continue
+            with rasterio.open(output_path) as src:
+                corrected = src.read(1).astype("float64")
+                nodata = src.nodata
+                if nodata is not None:
+                    corrected[corrected == nodata] = np.nan
+                adjusted = corrected.copy()
+                wet = np.isfinite(adjusted) & (adjusted > 0.0) & scalable
+                adjusted[wet] *= factor[wet]
+                out_profile = src.profile.copy()
+                out_profile.update(dtype="float32", compress="lzw")
+                if nodata is None:
+                    out_profile["nodata"] = -9999.0
+            out_to_write = np.where(np.isfinite(adjusted), adjusted, out_profile["nodata"]).astype("float32")
+            write_raster(output_path, out_profile, out_to_write)
+
+        month_summaries.append(
+            {
+                "month": f"{year:04d}-{month:02d}",
+                "max_redistribution_factor": month_max_factor,
+                "eligible_cell_count": month_eligible_count,
+                "high_factor_cell_count": int(np.count_nonzero(high_factor)),
+                "high_factor_target_volume_mm": month_high_factor_volume,
+                "max_removed_fraction": float(np.max(removed_fraction[eligible])) if np.any(eligible) else 0.0,
+                "max_allowed_removed_fraction": float(MAX_MONTHLY_REMOVED_FRACTION),
+                "high_removed_fraction_cell_count": int(np.count_nonzero(high_removed_fraction)),
+                "high_removed_fraction_target_volume_mm": month_high_removed_volume,
+                "target_volume_mm": month_target_volume,
+                "removed_volume_mm": month_removed_volume,
+                "removed_volume_percent": ratio_percent(month_removed_volume, month_target_volume),
+                "unresolved_cell_count": int(np.count_nonzero(unresolved)),
+                "unresolved_volume_mm": month_unresolved_volume,
+            }
+        )
+
+    return {
+        "method": "same_cell_same_month_amount_conservation",
+        "months": month_summaries,
+        "max_redistribution_factor": float(max_factor),
+        "max_allowed_redistribution_factor": float(MAX_MONTHLY_REDISTRIBUTION_FACTOR),
+        "eligible_cell_month_count": int(eligible_cell_month_count),
+        "high_factor_cell_count": int(high_factor_cell_count),
+        "high_factor_cell_month_percent": ratio_percent(high_factor_cell_count, eligible_cell_month_count),
+        "high_factor_target_volume_mm": float(high_factor_target_volume_mm),
+        "max_allowed_removed_fraction": float(MAX_MONTHLY_REMOVED_FRACTION),
+        "high_removed_fraction_cell_count": int(high_removed_fraction_cell_count),
+        "high_removed_fraction_cell_month_percent": ratio_percent(
+            high_removed_fraction_cell_count, eligible_cell_month_count,
+        ),
+        "high_removed_fraction_target_volume_mm": float(high_removed_fraction_volume_mm),
+        "target_volume_mm": float(target_volume_mm),
+        "removed_volume_mm": float(removed_volume_mm),
+        "removed_volume_percent": ratio_percent(removed_volume_mm, target_volume_mm),
+        "unresolved_cell_count": int(unresolved_cell_count),
+        "unresolved_volume_mm": float(unresolved_volume_mm),
+        "qc_blocked": bool(
+            high_factor_cell_count > 0
+            or high_removed_fraction_cell_count > 0
+            or unresolved_cell_count > 0
+        ),
+    }
+
+
 def apply_grid_bias_correction(
     records: list[tuple[pd.Timestamp, Path]],
     target_dir: Path,
@@ -1400,7 +2118,11 @@ def apply_grid_bias_correction(
     transfer_rules: dict[str, Any] | None = None,
     *,
     return_stats: bool = False,
+    algorithm: str = DEFAULT_STATION_CORRECTION_ALGORITHM,
 ) -> int | dict[str, Any]:
+    algorithm_key = str(algorithm or DEFAULT_STATION_CORRECTION_ALGORITHM).strip().lower()
+    if algorithm_key not in {STATION_CORRECTION_ALGORITHM_V2, STATION_CORRECTION_ALGORITHM_LEGACY}:
+        raise ValueError(f"Unknown station precipitation correction algorithm: {algorithm}")
     written = 0
     processed_count = 0
     skipped_existing_count = 0
@@ -1441,20 +2163,31 @@ def apply_grid_bias_correction(
                 rows = fields["rows"]
                 cols = fields["cols"]
                 base_values = out[rows, cols]
-                corrected_values = apply_station_observation_correction(
-                    base_values,
-                    rows,
-                    cols,
-                    ratio_values=np.asarray(fields["ratio_values"], dtype="float64"),
-                    residual_values=np.asarray(fields["residual_values"], dtype="float64"),
-                    station_prec_values=np.asarray(fields["station_prec_values"], dtype="float64"),
-                    obs_mean=float(obs_mean),
-                    grid_mean=float(grid_mean),
-                )
-                out[rows, cols] = np.clip(corrected_values, 0.0, None)
+                if algorithm_key == STATION_CORRECTION_ALGORITHM_LEGACY:
+                    corrected_values = apply_legacy_station_observation_correction(
+                        base_values,
+                        rows,
+                        cols,
+                        ratio_values=np.asarray(fields["ratio_values"], dtype="float64"),
+                        residual_values=np.asarray(fields["residual_values"], dtype="float64"),
+                        station_prec_values=np.asarray(fields["station_prec_values"], dtype="float64"),
+                        obs_mean=float(obs_mean),
+                        grid_mean=float(grid_mean),
+                    )
+                    out[rows, cols] = np.clip(corrected_values, 0.0, None)
+                else:
+                    correction = apply_station_observation_correction(
+                        base_values,
+                        ratio_values=np.asarray(fields["ratio_values"], dtype="float64"),
+                        station_prec_values=np.asarray(fields["station_prec_values"], dtype="float64"),
+                        station_occurrence_values=np.asarray(fields["station_occurrence_values"], dtype="float64"),
+                        confidence_values=np.asarray(fields["confidence_values"], dtype="float64"),
+                        allow_exact_dry=bool(np.all(obs[valid] < WET_STATION_MEAN_MM)),
+                    )
+                    out[rows, cols] = correction["corrected"]
             else:
                 no_station_step_count += 1
-                if transfer_rules is not None:
+                if algorithm_key == STATION_CORRECTION_ALGORITHM_LEGACY and transfer_rules is not None:
                     out, applied, _source = apply_transfer_rule_to_array(out, transfer_rules, pd.Timestamp(ts))
                     if applied:
                         transfer_rule_step_count += 1
@@ -1483,8 +2216,18 @@ def apply_grid_bias_correction(
     )
     if skipped_existing_count and processed_count == 0:
         print("提示: 本次没有重新计算已有订正文件；如需刷新空间订正统计和结果，请启用覆盖。")
+    monthly_conservation: dict[str, Any] | None = None
+    if (
+        algorithm_key == STATION_CORRECTION_ALGORITHM_V2
+        and processed_count > 0
+        and skipped_existing_count == 0
+    ):
+        monthly_conservation = enforce_monthly_occurrence_conservation(
+            records, target_dir, stations, station_series,
+        )
     stats = {
         "method": "grid_plus_station_bias",
+        "algorithm": algorithm_key,
         "written_files": int(written),
         "processed_steps": int(processed_count),
         "skipped_existing_steps": int(skipped_existing_count),
@@ -1496,6 +2239,8 @@ def apply_grid_bias_correction(
         "ratio_clip_steps": int(clipped_step_count),
         "grid_missed_precip_repair_steps": int(occurrence_repair_count),
         "transfer_rules_available": bool(transfer_rules is not None),
+        "monthly_conservation": monthly_conservation,
+        "qc_blocked": bool(monthly_conservation and monthly_conservation.get("qc_blocked")),
     }
     return stats if return_stats else written
 
@@ -1573,6 +2318,7 @@ def main() -> None:
     config = read_config(args.配置)
     meteo = dict(config.get("气象策略", {}))
     mode = str(meteo.get("降水方案", "grid_only")).strip()
+    correction_algorithm = configured_station_correction_algorithm(meteo)
     prec_source = args.降水源 or configured_precip_source(config)
     profile = resolve_profile(config, None)
     paths = build_profile_paths(config, profile)
@@ -1592,6 +2338,7 @@ def main() -> None:
     station_series, fmt = load_station_precip(station_prec_path)
     station_series.index = pd.to_datetime(station_series.index)
     station_series.columns = [str(col).strip() for col in station_series.columns]
+    station_series_raw = station_series.copy()
     model_step_hours = normalize_time_step_hours(config.get("时间步长_小时", 24.0))
     station_series, station_time_aggregation = aggregate_station_precip_for_model_step(
         station_series,
@@ -1630,6 +2377,12 @@ def main() -> None:
     stations = stations[stations["station_id"].isin(available_ids)].copy()
     if stations.empty:
         raise ValueError("站点信息与站点降水之间没有可匹配的站号。")
+    day_basis_diagnostics = station_product_day_basis_diagnostics(
+        records,
+        stations,
+        station_series_raw,
+        model_step_hours=model_step_hours,
+    )
     if mode == "thiessen_station_only":
         no_station_steps = no_available_station_steps(records, stations, station_series)
         if no_station_steps:
@@ -1642,6 +2395,8 @@ def main() -> None:
 
     print(f"率定模式: {profile}")
     print(f"降水方案: {mode}")
+    if mode == "grid_plus_station_bias":
+        print(f"站点订正算法: {correction_algorithm}")
     print(f"降水源: {prec_source}")
     print(f"资料口径: {TIME_BASIS_LABELS.get(task_time_basis(config, context='calibration'), '当前任务时段')}")
     print(f"基础目录: {base_dir}")
@@ -1666,13 +2421,20 @@ def main() -> None:
     transfer_rules: dict[str, Any] | None = None
     processing_stats: dict[str, Any] = {}
     if mode == "grid_plus_station_bias":
-        transfer_rule_summary = fit_grid_bias_transfer_rules(
-            all_base_records,
-            target_dir,
-            stations,
-            station_series,
-            overwrite=args.覆盖,
-        )
+        if correction_algorithm == STATION_CORRECTION_ALGORITHM_LEGACY:
+            transfer_rule_summary = fit_grid_bias_transfer_rules(
+                all_base_records,
+                target_dir,
+                stations,
+                station_series,
+                overwrite=args.覆盖,
+            )
+        else:
+            transfer_rule_summary = {
+                "schema": TRANSFER_RULES_SCHEMA,
+                "available": False,
+                "status": "disabled_for_occurrence_amount_v2",
+            }
         if transfer_rule_summary.get("available"):
             month_count = sum(
                 1
@@ -1697,12 +2459,19 @@ def main() -> None:
             args.覆盖,
             transfer_rules,
             return_stats=True,
+            algorithm=correction_algorithm,
         )
         processing_stats = dict(correction_result) if isinstance(correction_result, dict) else {}
         written = int(processing_stats.get("written_files", correction_result if isinstance(correction_result, int) else 0))
     elif mode == "thiessen_station_only":
         written = apply_thiessen(records, target_dir, stations, station_series, args.覆盖, use_timestamp_names=use_timestamp_names)
         processing_stats = {"method": "thiessen_station_only", "written_files": int(written)}
+    if args.覆盖:
+        processing_stats["removed_stale_files"] = remove_stale_strategy_rasters(
+            target_dir,
+            records,
+            use_timestamp_names=use_timestamp_names,
+        )
     summary = summarize_record_participation(
         config=config,
         mode=mode,
@@ -1722,6 +2491,7 @@ def main() -> None:
         use_timestamp_names=use_timestamp_names,
         transfer_rule_summary=transfer_rule_summary,
         processing_stats=processing_stats,
+        day_basis_diagnostics=day_basis_diagnostics,
     )
     summary_path = write_strategy_summary(target_dir, summary)
     print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")
