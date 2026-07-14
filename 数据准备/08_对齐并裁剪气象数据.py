@@ -28,7 +28,7 @@ from 公共函数 import (
 from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip_source  # type: ignore
 
 
-DATE_RE = re.compile(r"(\d{4}\.\d{2}\.\d{2})")
+DATE_RE = re.compile(r"(?<!\d)(\d{4})[._-](\d{2})[._-](\d{2})(?!\d)")
 NODATA = -9999.0
 MAX_REPAIR_CELLS = 5
 MAX_REPAIR_FRACTION = 0.02
@@ -39,6 +39,13 @@ def resolve_config_entry_path(config, raw_value):
     return Path(resolved).resolve(strict=False) if resolved else Path("")
 
 
+def parse_raster_date(file_name):
+    match = DATE_RE.search(Path(file_name).name)
+    if not match:
+        return None
+    return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
 def collect_files(input_dir, start_date, end_date):
     records = []
     directory = Path(input_dir)
@@ -46,10 +53,9 @@ def collect_files(input_dir, start_date, end_date):
         return records
     seen_dates: dict[datetime, list[str]] = {}
     for file in directory.glob("*.tif"):
-        match = DATE_RE.search(file.name)
-        if not match:
+        date = parse_raster_date(file.name)
+        if date is None:
             continue
-        date = datetime.strptime(match.group(1), "%Y.%m.%d")
         if start_date <= date <= end_date:
             seen_dates.setdefault(date, []).append(file.name)
             records.append((date, file))
@@ -60,6 +66,50 @@ def collect_files(input_dir, start_date, end_date):
         raise RuntimeError(f"输入目录 {directory} 存在重复日期 {first_date.strftime('%Y.%m.%d')}，例如：{sample}")
     records.sort(key=lambda item: item[0])
     return records
+
+
+def require_records(records, label, input_dir):
+    if records:
+        return records
+    raise FileNotFoundError(
+        f"{label}目录没有找到目标时段内的日尺度 TIF：{input_dir}。"
+        "文件名需包含 YYYY-MM-DD、YYYY.MM.DD 或 YYYY_MM_DD 日期。"
+    )
+
+
+def resolve_processing_window(time_cfg):
+    default_start = datetime.strptime(f"{int(time_cfg['开始年份'])}-01-01", "%Y-%m-%d")
+    default_end = datetime.strptime(f"{int(time_cfg['结束年份'])}-12-31", "%Y-%m-%d")
+
+    def parsed_values(keys):
+        values = []
+        for key in keys:
+            raw = str(time_cfg.get(key, "") or "").strip()
+            if raw:
+                values.append(datetime.strptime(raw[:10], "%Y-%m-%d"))
+        return values
+
+    starts = parsed_values(("预热开始", "率定开始", "验证开始"))
+    ends = parsed_values(("预热结束", "率定结束", "验证结束"))
+    return min(starts) if starts else default_start, max(ends) if ends else default_end
+
+
+def validate_mask_dates(prec_masks, temp_masks, evap_masks):
+    date_sets = {
+        "降水": set(prec_masks),
+        "气温": set(temp_masks),
+        "蒸散发": set(evap_masks),
+    }
+    expected = date_sets["降水"]
+    if any(dates != expected for dates in date_sets.values()):
+        union = set().union(*date_sets.values())
+        details = []
+        for label, dates in date_sets.items():
+            missing = sorted(union - dates)
+            if missing:
+                details.append(f"{label}缺少 {missing[:5]}")
+        raise RuntimeError("降水/气温/蒸散发日期不一致：" + "；".join(details))
+    return sorted(expected)
 
 
 def _finite_mask(data):
@@ -93,7 +143,11 @@ def _nearest_fill_small_gaps(data, fill_mask, valid_mask, label, stamp):
     return repaired, missing
 
 
-def align_single(input_file, dem_profile, dem_shape, basin_mask):
+def resampling_for_series(prefix):
+    return Resampling.average if str(prefix).upper() == "PREC" else Resampling.bilinear
+
+
+def align_single(input_file, dem_profile, dem_shape, basin_mask, resampling):
     with rasterio.open(input_file) as src:
         out = np.full(dem_shape, np.nan, dtype="float32")
         nodata = src.nodata
@@ -106,7 +160,7 @@ def align_single(input_file, dem_profile, dem_shape, basin_mask):
             dst_crs=dem_profile["crs"],
             src_nodata=nodata,
             dst_nodata=np.nan,
-            resampling=Resampling.bilinear,
+            resampling=resampling,
         )
         if nodata is not None:
             out[out == nodata] = np.nan
@@ -122,6 +176,8 @@ def write_series(records, output_dir, prefix, dem_profile, dem_shape, basin_mask
     count = 0
     masks = {}
     repaired_total = 0
+    resampling = resampling_for_series(prefix)
+    print(f"[重采样] {prefix}: {resampling.name}")
     for index, (date, input_file) in enumerate(records):
         stamp = date.strftime("%Y.%m.%d")
         output_file = Path(output_dir) / f"{index}_{prefix}_{date.strftime('%Y.%m.%d')}.tif"
@@ -137,7 +193,7 @@ def write_series(records, output_dir, prefix, dem_profile, dem_shape, basin_mask
             masks[stamp] = existing
             count += 1
             continue
-        data = align_single(input_file, dem_profile, dem_shape, basin_mask)
+        data = align_single(input_file, dem_profile, dem_shape, basin_mask, resampling)
         valid_mask = _finite_mask(data) & basin_mask
         if reference_masks is not None:
             expected = reference_masks.get(stamp)
@@ -186,8 +242,8 @@ def main():
     ensure_workspace_dirs(paths)
 
     time_cfg = config["时间"]
-    start_date = datetime.strptime(f"{int(time_cfg['开始年份'])}-01-01", "%Y-%m-%d")
-    end_date = datetime.strptime(f"{int(time_cfg['结束年份'])}-12-31", "%Y-%m-%d")
+    start_date, end_date = resolve_processing_window(time_cfg)
+    print(f"[时段] 按工作区实际计算窗口处理：{start_date:%Y-%m-%d} 至 {end_date:%Y-%m-%d}")
 
     dem_file = resolve_workspace_dem_path(paths["gis_dir"], prefer=infer_dem_kind_from_raster(config.get("DEM_tif", "")))
     with rasterio.open(dem_file) as dem:
@@ -241,8 +297,12 @@ def main():
         evap_input = paths["raw_evap_daily_dir"]
         print(f"[蒸散发] 使用 ERA5 处理结果: {evap_input}")
 
+    prec_records = require_records(collect_files(prec_input, start_date, end_date), "降水", prec_input)
+    temp_records = require_records(collect_files(temp_input, start_date, end_date), "气温", temp_input)
+    evap_records = require_records(collect_files(evap_input, start_date, end_date), "蒸散发", evap_input)
+
     prec_count, prec_masks, prec_repaired = write_series(
-        collect_files(prec_input, start_date, end_date),
+        prec_records,
         prec_output,
         "PREC",
         dem_profile,
@@ -251,28 +311,24 @@ def main():
         overwrite=bool(args.覆盖),
     )
     temp_count, temp_masks, temp_repaired = write_series(
-        collect_files(temp_input, start_date, end_date),
+        temp_records,
         paths["aligned_temp_dir"],
         "TEMP",
         dem_profile,
         dem_shape,
         basin_mask,
         overwrite=bool(args.覆盖),
-        reference_masks=prec_masks,
     )
     evap_count, evap_masks, evap_repaired = write_series(
-        collect_files(evap_input, start_date, end_date),
+        evap_records,
         paths["aligned_evap_dir"],
         "EVAP",
         dem_profile,
         dem_shape,
         basin_mask,
         overwrite=bool(args.覆盖),
-        reference_masks=prec_masks,
     )
-    for stamp in sorted(prec_masks):
-        if stamp not in temp_masks or stamp not in evap_masks:
-            raise RuntimeError(f"{stamp} 缺少气温或蒸散发输出，不能保证三类驱动一致。")
+    for stamp in validate_mask_dates(prec_masks, temp_masks, evap_masks):
         if not np.array_equal(prec_masks[stamp], temp_masks[stamp]) or not np.array_equal(prec_masks[stamp], evap_masks[stamp]):
             raise RuntimeError(f"{stamp} 降水/气温/蒸散发有效像元掩膜不一致。")
     summary = {
