@@ -14,7 +14,7 @@ if str(STUDIO_DIR) not in sys.path:
 from initial_state_sensitivity_runner import (  # noqa: E402
     _select_local_flow,
     build_proxy_forcing_layout,
-    build_scientific_acceptance,
+    build_initial_state_diagnostic,
     summarize_snapshot,
 )
 
@@ -41,7 +41,7 @@ class InitialStateSensitivityRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(summary["total_storage_mm"]["mean"], 20.0)
         self.assertEqual(summary["snapshot_time"], "2025-05-31")
 
-    def test_scientific_acceptance_requires_water_and_initial_state_gates(self) -> None:
+    def test_initial_state_diagnostic_reports_warnings_without_blocking_modeling(self) -> None:
         metadata = {
             "model_water_balance": {
                 "available": True,
@@ -51,20 +51,19 @@ class InitialStateSensitivityRunnerTests(unittest.TestCase):
                 },
             }
         }
-        blocked = build_scientific_acceptance(metadata, {"converged": False})
-        self.assertFalse(blocked["formal_result_accepted"])
-        self.assertIn("unresolved_water_source", blocked["blockers"])
-        self.assertIn("initial_state_sensitivity_not_converged", blocked["blockers"])
+        sensitive = build_initial_state_diagnostic(metadata, {"converged": False})
+        self.assertEqual(sensitive["status"], "initial_state_sensitive")
+        self.assertIn("unresolved_water_source", sensitive["warnings"])
+        self.assertIn("initial_state_sensitivity_detected", sensitive["warnings"])
 
         metadata["model_water_balance"]["hydrological_screening"] = {
             "formal_interval_acceptance": True,
             "reasons": [],
         }
-        accepted = build_scientific_acceptance(metadata, {"converged": True})
-        self.assertTrue(accepted["formal_result_accepted"])
-        self.assertEqual(accepted["status"], "accepted")
+        converged = build_initial_state_diagnostic(metadata, {"converged": True})
+        self.assertEqual(converged["status"], "converged")
 
-    def test_scientific_acceptance_rejects_repeated_forcing_proxy(self) -> None:
+    def test_initial_state_diagnostic_labels_repeated_forcing_proxy(self) -> None:
         metadata = {
             "model_water_balance": {
                 "available": True,
@@ -74,12 +73,12 @@ class InitialStateSensitivityRunnerTests(unittest.TestCase):
                 },
             }
         }
-        result = build_scientific_acceptance(
+        result = build_initial_state_diagnostic(
             metadata,
             {"converged": True, "formal_acceptance_eligible": False},
         )
-        self.assertFalse(result["formal_result_accepted"])
-        self.assertIn("initial_state_proxy_not_formal_evidence", result["blockers"])
+        self.assertTrue(result["repeated_forcing_proxy_used"])
+        self.assertIn("repeated_forcing_proxy_used", result["warnings"])
 
     def test_local_flow_selection_does_not_use_boundary_dominated_total(self) -> None:
         values, basis = _select_local_flow(

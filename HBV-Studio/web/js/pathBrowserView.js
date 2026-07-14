@@ -223,7 +223,6 @@
   }
 
   window.HBVStudioPathBrowserView = {
-    PATH_MEMORY_STORAGE_KEY,
     configDirectory,
     normalizeExtensions,
     openPathRequestState,

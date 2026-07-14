@@ -275,7 +275,7 @@ const frontendModuleContracts = [
   {
     script: "./js/pathBrowserView.js",
     global: "HBVStudioPathBrowserView",
-    exports: ["PATH_MEMORY_STORAGE_KEY", "configDirectory", "normalizeExtensions", "openPathRequestState", "pathCandidatesForTarget", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "readLastDirectory", "selectedPathState", "writeLastDirectory"],
+    exports: ["configDirectory", "normalizeExtensions", "openPathRequestState", "pathCandidatesForTarget", "pathModalCloseState", "pathModalOpenState", "preferredPathForTarget", "pathListingQueryState", "pathListingDomState", "pathListingState", "readLastDirectory", "selectedPathState", "writeLastDirectory"],
   },
   {
     script: "./js/dataPrepView.js",

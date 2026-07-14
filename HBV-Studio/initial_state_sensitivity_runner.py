@@ -263,30 +263,28 @@ def _runoff_depth_mm(module: Any, values: np.ndarray) -> float:
     return float(np.sum(q[finite]) * step_seconds / (area_km2 * 1000.0))
 
 
-def build_scientific_acceptance(metadata: dict[str, Any], sensitivity: dict[str, Any]) -> dict[str, Any]:
+def build_initial_state_diagnostic(metadata: dict[str, Any], sensitivity: dict[str, Any]) -> dict[str, Any]:
     water_balance = dict(metadata.get("model_water_balance", {}) or {})
     water_screening = dict(water_balance.get("hydrological_screening", {}) or {})
-    water_accepted = bool(water_screening.get("formal_interval_acceptance", False))
-    formal_initial_state_evidence = bool(sensitivity.get("formal_acceptance_eligible", True))
-    initial_state_accepted = bool(sensitivity.get("converged", False) and formal_initial_state_evidence)
-    blockers = list(water_screening.get("reasons", []) or [])
+    converged = bool(sensitivity.get("converged", False))
+    uses_repeated_forcing = not bool(sensitivity.get("formal_acceptance_eligible", True))
+    warnings = list(water_screening.get("reasons", []) or [])
     if not water_balance.get("available"):
-        blockers.append("model_water_balance_pending_or_unavailable")
-    if not initial_state_accepted:
-        blockers.append("initial_state_sensitivity_not_converged")
-    if not formal_initial_state_evidence:
-        blockers.append("initial_state_proxy_not_formal_evidence")
-    blockers = list(dict.fromkeys(str(item) for item in blockers if str(item).strip()))
-    accepted = bool(water_accepted and initial_state_accepted and not blockers)
+        warnings.append("model_water_balance_pending_or_unavailable")
+    if not converged:
+        warnings.append("initial_state_sensitivity_detected")
+    if uses_repeated_forcing:
+        warnings.append("repeated_forcing_proxy_used")
+    warnings = list(dict.fromkeys(str(item) for item in warnings if str(item).strip()))
     return {
-        "status": "accepted" if accepted else "blocked_by_scientific_qc",
-        "formal_result_accepted": accepted,
-        "model_water_balance_accepted": water_accepted,
-        "initial_state_sensitivity_accepted": initial_state_accepted,
-        "blockers": blockers,
+        "status": "converged" if converged else "initial_state_sensitive",
+        "converged": converged,
+        "model_water_balance_available": bool(water_balance.get("available")),
+        "repeated_forcing_proxy_used": uses_repeated_forcing,
+        "warnings": warnings,
         "notes": [
-            "Outlet NSE/KGE cannot override interval water-availability or warm-up convergence gates.",
-            "A blocked result remains usable for internal diagnosis, not formal interval validation.",
+            "Initial-state sensitivity is an engineering diagnostic, not a model-run gate.",
+            "Within-year warm-up is valid when it covers the available pre-evaluation period; extend it only when the application requires lower initial-state sensitivity.",
         ],
     }
 
@@ -307,11 +305,15 @@ def update_run_metadata(run_path: Path, sensitivity: dict[str, Any]) -> dict[str
             "warmup_end_total_storage_relative_difference_percent"
         ),
     }
-    metadata["scientific_acceptance"] = build_scientific_acceptance(metadata, sensitivity)
+    diagnostic = build_initial_state_diagnostic(metadata, sensitivity)
+    metadata["initial_state_sensitivity"]["diagnostic_status"] = diagnostic["status"]
+    metadata["engineering_diagnostics"] = dict(metadata.get("engineering_diagnostics", {}) or {})
+    metadata["engineering_diagnostics"]["initial_state"] = diagnostic
+    metadata.pop("scientific_acceptance", None)
     temporary = metadata_path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(metadata_path)
-    return metadata["scientific_acceptance"]
+    return diagnostic
 
 
 def run_sensitivity(run_path: Path) -> dict[str, Any]:
@@ -568,13 +570,13 @@ def main() -> None:
     output_path = Path(args.output).resolve(strict=False) if args.output else run_path / "initial_state_sensitivity.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    acceptance = update_run_metadata(run_path, result)
+    diagnostic = update_run_metadata(run_path, result)
     print(
         json.dumps(
             {
                 "output": str(output_path),
                 "converged": result["converged"],
-                "formal_result_accepted": acceptance["formal_result_accepted"],
+                "diagnostic_status": diagnostic["status"],
             },
             ensure_ascii=False,
         )

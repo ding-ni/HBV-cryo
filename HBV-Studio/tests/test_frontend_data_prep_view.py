@@ -720,8 +720,10 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               runtimePrecipSource: "custom_tif",
               isDaily: true,
             });
-            if (missingDailyMetadata.ready || missingDailyMetadata.missing.join(",") !== "precip_unit,precip_day_basis" || missingDailyMetadata.message !== "请显式确认日降水单位和日界。") {
-              throw new Error(`daily import metadata gate mismatch: ${JSON.stringify(missingDailyMetadata)}`);
+            if (!missingDailyMetadata.ready || missingDailyMetadata.missing.length || missingDailyMetadata.message !== "" ||
+                missingDailyMetadata.request.precip_unit !== "mm/day" ||
+                missingDailyMetadata.request.precip_day_basis !== "product_calendar_day") {
+              throw new Error(`daily import metadata defaults mismatch: ${JSON.stringify(missingDailyMetadata)}`);
             }
             const allLocalHint = view.meteoModeHintState({
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },

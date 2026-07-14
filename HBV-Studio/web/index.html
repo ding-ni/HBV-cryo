@@ -519,18 +519,16 @@
                     </div>
                   </div>
                   <div class="field-group">
-                    <label>日降水输入单位（必选）</label>
+                    <label>日降水输入单位</label>
                     <select id="wz-import-prec-unit">
-                      <option value="">请选择</option>
-                      <option value="mm/day">mm/day</option>
+                      <option value="mm/day" selected>mm/day（默认）</option>
                       <option value="m/day">m/day（导入时换算）</option>
                     </select>
                   </div>
                   <div class="field-group">
-                    <label>日降水日期口径（必选）</label>
+                    <label>日降水日期口径</label>
                     <select id="wz-import-prec-day-basis">
-                      <option value="">请选择</option>
-                      <option value="product_calendar_day">产品自然日</option>
+                      <option value="product_calendar_day" selected>按文件名日期使用（默认）</option>
                       <option value="beijing_calendar_day">北京时间自然日</option>
                       <option value="hydrological_day_08">08:00 至次日 08:00 水文日</option>
                     </select>

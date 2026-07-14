@@ -900,7 +900,7 @@ def detect_object_type(config: dict[str, Any]) -> str:
     return OBJECT_FULL_UPSTREAM
 
 
-def precipitation_product_metadata_error(config: dict[str, Any]) -> str:
+def precipitation_product_metadata_warning(config: dict[str, Any]) -> str:
     metadata = dict(config.get("降水产品元数据", config.get("precipitation_product_metadata", {})) or {})
     if not metadata:
         return ""
@@ -915,10 +915,10 @@ def precipitation_product_metadata_error(config: dict[str, Any]) -> str:
     if empirical_diagnostic_allowed and run_purpose in {"qc_only", "diagnostic_only", "internal_diagnostic"}:
         return ""
     status = str(metadata.get("metadata_status", "pending_confirmation") or "pending_confirmation")
-    return f"降水产品元数据尚未确认（{status}），当前工作区仅允许质检，禁止正式率定。"
+    return f"降水产品说明尚未确认（{status}）；模型仍按当前输入运行，请在项目说明中记录数据来源。"
 
 
-def precipitation_strategy_qc_error(summary: dict[str, Any]) -> str:
+def precipitation_strategy_qc_warning(summary: dict[str, Any]) -> str:
     processing = dict(summary.get("processing_stats", {}) or {})
     if not bool(processing.get("qc_blocked", False)):
         return ""
@@ -927,7 +927,7 @@ def precipitation_strategy_qc_error(summary: dict[str, Any]) -> str:
         "站点订正降水月量守恒 QC 未通过："
         f"高倍率像元-月份 {int(monthly.get('high_factor_cell_count', 0) or 0)}，"
         f"移除比例超过 30% 的像元-月份 {int(monthly.get('high_removed_fraction_cell_count', 0) or 0)}，"
-        f"未分配像元-月份 {int(monthly.get('unresolved_cell_count', 0) or 0)}；禁止正式率定。"
+        f"未分配像元-月份 {int(monthly.get('unresolved_cell_count', 0) or 0)}；请结合项目资料判断是否采用。"
     )
 
 
@@ -941,7 +941,7 @@ def daily_forcing_manifest_error(config: dict[str, Any], profile: str) -> str:
     paths = build_profile_paths(config, profile)
     manifest_path = Path(paths["aligned_dir"]) / "daily_forcing_manifest.json"
     if not manifest_path.exists():
-        return f"缺少日强迫契约清单：{manifest_path}。请重新执行本地日 TIF 导入并确认单位与日界。"
+        return f"缺少日强迫清单：{manifest_path}。请重新执行本地日 TIF 导入。"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -952,7 +952,7 @@ def daily_forcing_manifest_error(config: dict[str, Any], profile: str) -> str:
     if not bool(precipitation.get("unit_confirmed")) or precipitation.get("output_unit") != "mm/day":
         return "日降水单位尚未确认为 mm/day，请重新导入。"
     if not bool(precipitation.get("day_basis_confirmed")) or not str(precipitation.get("day_basis", "")).strip():
-        return "日降水日界尚未确认，请重新导入。"
+        return "日降水日期口径缺失，请重新导入；默认可按文件名日期使用。"
     return ""
 
 
@@ -1006,11 +1006,12 @@ def required_boundary_coverage_error(config: dict[str, Any], profile: str) -> st
     )
 
 
-def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> None:
+def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> list[str]:
     errors: list[str] = []
-    metadata_error = precipitation_product_metadata_error(config)
-    if metadata_error:
-        errors.append(metadata_error)
+    warnings: list[str] = []
+    metadata_warning = precipitation_product_metadata_warning(config)
+    if metadata_warning:
+        warnings.append(metadata_warning)
     manifest_error = daily_forcing_manifest_error(config, profile)
     if manifest_error:
         errors.append(manifest_error)
@@ -1020,16 +1021,17 @@ def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> No
         summary_path = Path(paths["aligned_prec_effective_dir"]) / "precipitation_strategy_summary.json"
         if summary_path.exists():
             try:
-                summary_error = precipitation_strategy_qc_error(json.loads(summary_path.read_text(encoding="utf-8")))
+                summary_warning = precipitation_strategy_qc_warning(json.loads(summary_path.read_text(encoding="utf-8")))
             except Exception as exc:
-                summary_error = f"站点订正降水 QC 摘要无法读取：{exc}"
-            if summary_error:
-                errors.append(summary_error)
+                summary_warning = f"站点订正降水 QC 摘要无法读取：{exc}"
+            if summary_warning:
+                warnings.append(summary_warning)
     boundary_error = required_boundary_coverage_error(config, profile)
     if boundary_error:
         errors.append(boundary_error)
     if errors:
         raise ValueError("正式运行输入契约未通过：\n- " + "\n- ".join(errors))
+    return warnings
 
 
 def resolve_objective_mode(config: dict[str, Any], explicit: Any, profile: str) -> str:
@@ -2068,7 +2070,9 @@ def main() -> None:
         preserve_gui_root=gui_root,
     )
     profile = resolve_profile(config, args.率定模式)
-    validate_profile_input_contracts(config, profile)
+    input_warnings = validate_profile_input_contracts(config, profile)
+    for warning in input_warnings:
+        print(f"[输入提示] {warning}", file=sys.stderr)
     requested_objective_mode = normalize_objective_mode(getattr(args, "目标函数", None))
     objective_mode = resolve_objective_mode(config, getattr(args, "目标函数", None), profile)
     calibration_workflow = resolve_calibration_workflow(config, getattr(args, "calibration_workflow", ""), profile)

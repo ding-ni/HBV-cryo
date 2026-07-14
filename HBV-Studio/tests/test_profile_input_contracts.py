@@ -18,34 +18,34 @@ import profile_runner as runner  # noqa: E402
 
 
 class ProfileInputContractTests(unittest.TestCase):
-    def test_metadata_pending_blocks_formal_calibration(self) -> None:
-        error = runner.precipitation_product_metadata_error(
+    def test_metadata_pending_is_reported_as_project_warning(self) -> None:
+        warning = runner.precipitation_product_metadata_warning(
             {"降水产品元数据": {"metadata_status": "pending", "formal_run_allowed": False}}
         )
 
-        self.assertIn("仅允许质检", error)
+        self.assertIn("模型仍按当前输入运行", warning)
 
-    def test_empirical_metadata_allows_only_explicit_internal_diagnostic(self) -> None:
+    def test_empirical_metadata_suppresses_warning_for_explicit_internal_diagnostic(self) -> None:
         metadata = {
             "metadata_status": "empirically_inferred",
             "formal_run_allowed": False,
             "empirical_diagnostic_allowed": True,
         }
         self.assertEqual(
-            runner.precipitation_product_metadata_error(
+            runner.precipitation_product_metadata_warning(
                 {"运行用途": "internal_diagnostic", "降水产品元数据": metadata}
             ),
             "",
         )
         self.assertIn(
-            "禁止正式率定",
-            runner.precipitation_product_metadata_error(
+            "模型仍按当前输入运行",
+            runner.precipitation_product_metadata_warning(
                 {"运行用途": "formal_calibration", "降水产品元数据": metadata}
             ),
         )
 
-    def test_monthly_precipitation_qc_blocks_formal_calibration(self) -> None:
-        error = runner.precipitation_strategy_qc_error(
+    def test_monthly_precipitation_qc_is_reported_as_warning(self) -> None:
+        warning = runner.precipitation_strategy_qc_warning(
             {
                 "processing_stats": {
                     "qc_blocked": True,
@@ -58,17 +58,17 @@ class ProfileInputContractTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("高倍率像元-月份 4", error)
-        self.assertIn("移除比例超过 30% 的像元-月份 2", error)
-        self.assertIn("未分配像元-月份 1", error)
+        self.assertIn("高倍率像元-月份 4", warning)
+        self.assertIn("移除比例超过 30% 的像元-月份 2", warning)
+        self.assertIn("未分配像元-月份 1", warning)
 
-    def test_v2_daily_workspace_requires_confirmed_daily_forcing_manifest(self) -> None:
+    def test_corrected_daily_workspace_requires_daily_forcing_manifest(self) -> None:
         config = {"气象策略": {"station_correction_algorithm": "occurrence_amount_v2"}}
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with mock.patch.object(runner, "build_profile_paths", return_value={"aligned_dir": root}):
                 missing = runner.daily_forcing_manifest_error(config, runner.PROFILE_DAILY)
-                self.assertIn("缺少日强迫契约清单", missing)
+                self.assertIn("缺少日强迫清单", missing)
                 (root / "daily_forcing_manifest.json").write_text(
                     json.dumps(
                         {

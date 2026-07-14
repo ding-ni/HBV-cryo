@@ -92,8 +92,6 @@ BUILD_CONTRACTS = {
     "state_snapshot": "per_cell_branch_states_v2",
     "model_water_balance": "hbv_cryo_model_water_balance_v1",
     "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
-    "historical_spinup_forcing": "hbv_cryo_historical_spinup_forcing_manifest_v1",
-    "historical_spinup_sensitivity": "hbv_cryo_continuous_historical_spinup_sensitivity_v1",
     "era5_accumulation_boundary": "hbv_cryo_era5_accumulation_following_midnight_v1",
     "path_memory": "hbvstudio.pathBrowser.lastDirectory.v1",
 }

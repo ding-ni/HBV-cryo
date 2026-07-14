@@ -16,6 +16,8 @@ from services.time_utils import parse_time_from_name
 
 DAILY_FORCING_MANIFEST_SCHEMA = "hbv_cryo_daily_forcing_manifest_v1"
 DAILY_PRECIP_UNITS = ("mm/day", "m/day")
+DEFAULT_DAILY_PRECIP_UNIT = "mm/day"
+DEFAULT_DAILY_PRECIP_DAY_BASIS = "product_calendar_day"
 DAILY_PRECIP_DAY_BASES = (
     "product_calendar_day",
     "beijing_calendar_day",
@@ -124,12 +126,14 @@ def validate_precipitation_import_metadata(
             "day_basis": str(payload.get("precip_day_basis", "") or "").strip(),
             "scale_to_mm": 1.0,
         }
-    unit = str(payload.get("precip_unit", "") or "").strip().lower()
-    day_basis = str(payload.get("precip_day_basis", "") or "").strip()
+    unit = str(payload.get("precip_unit", "") or DEFAULT_DAILY_PRECIP_UNIT).strip().lower()
+    day_basis = str(
+        payload.get("precip_day_basis", "") or DEFAULT_DAILY_PRECIP_DAY_BASIS
+    ).strip()
     if unit not in DAILY_PRECIP_UNITS:
-        raise ValueError(f"日尺度降水单位必须显式确认，可选值：{', '.join(DAILY_PRECIP_UNITS)}。")
+        raise ValueError(f"日尺度降水单位无效，可选值：{', '.join(DAILY_PRECIP_UNITS)}。")
     if day_basis not in DAILY_PRECIP_DAY_BASES:
-        raise ValueError(f"日尺度降水日界必须显式确认，可选值：{', '.join(DAILY_PRECIP_DAY_BASES)}。")
+        raise ValueError(f"日尺度降水日期口径无效，可选值：{', '.join(DAILY_PRECIP_DAY_BASES)}。")
     return {
         "required": True,
         "input_unit": unit,

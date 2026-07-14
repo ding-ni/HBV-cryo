@@ -147,9 +147,11 @@ class MeteoImportServiceTests(unittest.TestCase):
         self.assertEqual(meteo_import_resampling_name("temp_dir"), "bilinear")
         self.assertEqual(meteo_import_resampling_name("evap_dir"), "bilinear")
 
-    def test_daily_precipitation_metadata_is_required_and_m_per_day_is_scaled(self) -> None:
-        with self.assertRaisesRegex(ValueError, "单位必须显式确认"):
-            validate_precipitation_import_metadata({}, time_step_hours=24.0)
+    def test_daily_precipitation_metadata_has_project_friendly_defaults_and_scales_m_per_day(self) -> None:
+        defaults = validate_precipitation_import_metadata({}, time_step_hours=24.0)
+        self.assertEqual(defaults["input_unit"], "mm/day")
+        self.assertEqual(defaults["day_basis"], "product_calendar_day")
+        self.assertEqual(defaults["scale_to_mm"], 1.0)
         metadata = validate_precipitation_import_metadata(
             {"precip_unit": "m/day", "precip_day_basis": "beijing_calendar_day"},
             time_step_hours=24.0,

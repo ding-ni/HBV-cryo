@@ -775,14 +775,9 @@
     const directoryState = customMeteoImportDirectoryState(model);
     const dirs = directoryState.dirs || {};
     const isDaily = Boolean(model.isDaily);
-    const precipUnit = String(model.precipUnit || model.precip_unit || "").trim();
-    const precipDayBasis = String(model.precipDayBasis || model.precip_day_basis || "").trim();
-    const metadataMissing = isDaily
-      ? [
-          ...(precipUnit ? [] : ["precip_unit"]),
-          ...(precipDayBasis ? [] : ["precip_day_basis"]),
-        ]
-      : [];
+    const precipUnit = String(model.precipUnit || model.precip_unit || "mm/day").trim();
+    const precipDayBasis = String(model.precipDayBasis || model.precip_day_basis || "product_calendar_day").trim();
+    const metadataMissing = [];
     const ready = Boolean(directoryState.ready) && metadataMissing.length === 0;
     const request = {
       prec_source: String(model.runtimePrecipSource || "").trim(),
@@ -797,7 +792,7 @@
         ? ""
         : directoryState.missing.length
           ? "请选择降水、气温和蒸散发三个目录。"
-          : "请显式确认日降水单位和日界。",
+          : "请检查日降水输入设置。",
       missing: [...directoryState.missing, ...metadataMissing],
       writeBackUpdates: directoryState.writeBackUpdates,
       requestPath: "/api/meteo/import/start",
