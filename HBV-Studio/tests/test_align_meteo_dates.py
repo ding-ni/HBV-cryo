@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from datetime import datetime
@@ -80,6 +81,53 @@ class AlignMeteoDateTests(unittest.TestCase):
         self.assertEqual(align_meteo.resampling_for_series("PREC"), align_meteo.Resampling.average)
         self.assertEqual(align_meteo.resampling_for_series("TEMP"), align_meteo.Resampling.bilinear)
         self.assertEqual(align_meteo.resampling_for_series("EVAP"), align_meteo.Resampling.bilinear)
+
+    def test_writes_daily_forcing_manifest_for_aligned_series(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_records = {}
+            source_dirs = {}
+            target_dirs = {}
+            for key in ("prec", "temp", "evap"):
+                source_dir = root / f"source_{key}"
+                target_dir = root / f"target_{key}"
+                source_dir.mkdir()
+                target_dir.mkdir()
+                first = source_dir / f"{key}_2025-01-01.tif"
+                second = source_dir / f"{key}_2025-01-02.tif"
+                first.write_bytes(f"{key}-first".encode("ascii"))
+                second.write_bytes(f"{key}-second".encode("ascii"))
+                source_records[key] = [
+                    (datetime(2025, 1, 1), first),
+                    (datetime(2025, 1, 2), second),
+                ]
+                source_dirs[key] = source_dir
+                target_dirs[key] = target_dir
+
+            manifest_path = root / "daily_forcing_manifest.json"
+            align_meteo.write_daily_forcing_manifest(
+                manifest_path=manifest_path,
+                start_date=datetime(2025, 1, 1),
+                end_date=datetime(2025, 1, 2),
+                date_count=2,
+                source_records=source_records,
+                source_dirs=source_dirs,
+                target_dirs=target_dirs,
+                dem_file=root / "dem.tif",
+                dem_profile={"crs": "EPSG:4490", "transform": (1, 0, 90, 0, -1, 30)},
+                dem_shape=(2, 3),
+            )
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema"], "hbv_cryo_daily_forcing_manifest_v1")
+            self.assertEqual(manifest["start_date"], "2025-01-01")
+            self.assertEqual(manifest["end_date"], "2025-01-02")
+            self.assertEqual(manifest["date_count"], 2)
+            self.assertEqual(manifest["precipitation"]["output_unit"], "mm/day")
+            self.assertEqual(manifest["precipitation"]["day_basis"], "product_calendar_day")
+            self.assertEqual(manifest["source_series"]["prec"]["file_count"], 2)
+            self.assertEqual(manifest["grid"]["width"], 3)
+            self.assertTrue(manifest["qc"]["active_masks_equal"])
 
 
 if __name__ == "__main__":

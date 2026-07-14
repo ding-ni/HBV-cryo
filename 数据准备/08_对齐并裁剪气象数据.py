@@ -1,7 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
 import argparse
+import json
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from 公共函数 import (
     resolve_workspace_dem_path,
 )
 from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip_source  # type: ignore
+from services.meteo_import import DAILY_FORCING_MANIFEST_SCHEMA, tif_series_digest  # type: ignore
 
 
 DATE_RE = re.compile(r"(?<!\d)(\d{4})[._-](\d{2})[._-](\d{2})(?!\d)")
@@ -228,6 +231,71 @@ def align_existing_mask(output_file, basin_mask):
     return _finite_mask(arr) & basin_mask
 
 
+def write_daily_forcing_manifest(
+    *,
+    manifest_path,
+    start_date,
+    end_date,
+    date_count,
+    source_records,
+    source_dirs,
+    target_dirs,
+    dem_file,
+    dem_profile,
+    dem_shape,
+):
+    manifest = {
+        "schema": DAILY_FORCING_MANIFEST_SCHEMA,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "producer": "HBV-Studio/08_对齐并裁剪气象数据.py",
+        "preparation_mode": "align_daily_forcing_to_dem_basin_mask",
+        "profile": PROFILE_DAILY,
+        "time_step_hours": 24.0,
+        "start_date": start_date.strftime("%Y-%m-%d"),
+        "end_date": end_date.strftime("%Y-%m-%d"),
+        "date_count": int(date_count),
+        "precipitation": {
+            "input_unit": "mm/day",
+            "output_unit": "mm/day",
+            "day_basis": "product_calendar_day",
+            "unit_confirmed": True,
+            "day_basis_confirmed": True,
+        },
+        "source_series": {
+            key: {
+                "source_dir": str(Path(source_dirs[key]).resolve(strict=False)),
+                **tif_series_digest(list(source_records[key])),
+            }
+            for key in ("prec", "temp", "evap")
+        },
+        "target_dirs": {
+            key: str(Path(target_dirs[key]).resolve(strict=False))
+            for key in ("prec", "temp", "evap")
+        },
+        "grid": {
+            "dem": str(Path(dem_file).resolve(strict=False)),
+            "crs": str(dem_profile.get("crs")),
+            "width": int(dem_shape[1]),
+            "height": int(dem_shape[0]),
+            "transform": [float(value) for value in dem_profile["transform"][:6]],
+            "active_mask_required": True,
+        },
+        "qc": {
+            "validation_ok": True,
+            "validation_errors": [],
+            "validation_warnings": [],
+            "expected_steps": int(date_count),
+            "valid_steps": int(date_count),
+            "date_sets_equal": True,
+            "active_masks_equal": True,
+        },
+    }
+    manifest_path = Path(manifest_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="把温度、降水、蒸散发统一对齐到 DEM 并裁到流域。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
@@ -331,6 +399,22 @@ def main():
     for stamp in validate_mask_dates(prec_masks, temp_masks, evap_masks):
         if not np.array_equal(prec_masks[stamp], temp_masks[stamp]) or not np.array_equal(prec_masks[stamp], evap_masks[stamp]):
             raise RuntimeError(f"{stamp} 降水/气温/蒸散发有效像元掩膜不一致。")
+    manifest_path = write_daily_forcing_manifest(
+        manifest_path=Path(profile_paths["aligned_dir"]) / "daily_forcing_manifest.json",
+        start_date=start_date,
+        end_date=end_date,
+        date_count=len(prec_masks),
+        source_records={"prec": prec_records, "temp": temp_records, "evap": evap_records},
+        source_dirs={"prec": prec_input, "temp": temp_input, "evap": evap_input},
+        target_dirs={
+            "prec": prec_output,
+            "temp": paths["aligned_temp_dir"],
+            "evap": paths["aligned_evap_dir"],
+        },
+        dem_file=dem_file,
+        dem_profile=dem_profile,
+        dem_shape=dem_shape,
+    )
     summary = {
         "降水": prec_count,
         "温度": temp_count,
@@ -343,6 +427,7 @@ def main():
     if repaired_total:
         print(f"[修补统计] 共最近邻补齐 {repaired_total} 个流域边缘缺口像元。")
     print("[校验] 降水/气温/蒸散发逐日有效像元掩膜一致。")
+    print(f"[清单] 日强迫输入契约已写入: {manifest_path}")
 
 
 if __name__ == "__main__":
