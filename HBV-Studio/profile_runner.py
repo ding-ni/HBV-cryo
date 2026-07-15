@@ -46,6 +46,7 @@ from 公共函数 import (  # type: ignore
     边界条件配置,
 )
 from services.boundary import BoundaryInflowInspectContext, inspect_boundary_inflow_csv
+from services.time_utils import time_step_missing_text
 
 
 GUI_ROOT = APP_ROOT / "HBV-Studio"
@@ -128,7 +129,9 @@ def resolve_runtime_time_config(config: dict[str, Any]) -> tuple[dict[str, Any],
     calib_start_ts = pd.to_datetime(calib_start_raw)
     expected_warmup_end = calib_start_ts - pd.Timedelta(hours=step_hours)
     if expected_warmup_end < warmup_start_ts:
-        raise ValueError("预热期至少需要覆盖率定开始前 1 个时间步。")
+        raise ValueError(
+            f"预热期至少需要覆盖率定开始前 {time_step_missing_text(1, step_hours)}。"
+        )
 
     warmup_end_raw = str(time_cfg.get("预热结束", "") or "").strip()
     if warmup_end_raw:
@@ -1002,7 +1005,8 @@ def required_boundary_coverage_error(config: dict[str, Any], profile: str) -> st
     samples = "、".join(format_runtime_time_value(pd.Timestamp(ts), step_hours) for ts in missing[:3])
     return (
         "上游边界入流在预热末 14 日及正式评价期缺少 "
-        f"{len(missing)} 个时间步，例如：{samples}；该时段禁止零填补或插值后正式率定。"
+        f"{time_step_missing_text(len(missing), step_hours)}，例如：{samples}；"
+        "该时段禁止零填补或插值后正式率定。"
     )
 
 

@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.time_utils import time_step_count_text
+
 
 @dataclass(frozen=True)
 class WorkspaceValidationContext:
@@ -131,10 +133,18 @@ def build_engineering_focus_checks(
                 }
             )
         if expected_steps is not None:
+            expected_start = forcing.get("expected_start") if forcing else None
+            expected_end = forcing.get("expected_end") if forcing else None
+            expected_range = (
+                f"{context.format_timestamp_for_display(expected_start, step_hours)} 至 "
+                f"{context.format_timestamp_for_display(expected_end, step_hours)}，"
+                if expected_start is not None and expected_end is not None
+                else ""
+            )
             items.append(
                 {
-                    "label": "期望时间步数",
-                    "value": str(expected_steps),
+                    "label": "目标气象时段",
+                    "value": f"{expected_range}共 {time_step_count_text(expected_steps, step_hours)}",
                     "status": "ok" if forcing_ok is not False else "warn",
                 }
             )
@@ -220,6 +230,11 @@ def build_engineering_focus_checks(
                     "status": status,
                     "target_step": 3,
                     "items": [
+                        {
+                            "label": "边界资料时段",
+                            "value": str(boundary_info.get("period_summary", "") or "未识别起止时间"),
+                            "status": "ok" if boundary_info.get("period_summary") else "warn",
+                        },
                         {"label": "识别时间步长", "value": f"{int(detected_step)} 小时" if detected_step is not None else "未识别", "status": "ok" if step_match in {True, None} else "fail"},
                         {
                             "label": "覆盖率",

@@ -29,6 +29,7 @@ from 公共函数 import (
 )
 from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip_source  # type: ignore
 from services.meteo_import import DAILY_FORCING_MANIFEST_SCHEMA, tif_series_digest  # type: ignore
+from services.time_utils import summarize_time_coverage  # type: ignore
 
 
 DATE_RE = re.compile(r"(?<!\d)(\d{4})[._-](\d{2})[._-](\d{2})(?!\d)")
@@ -416,13 +417,14 @@ def main():
         dem_shape=dem_shape,
     )
     summary = {
-        "降水": prec_count,
-        "温度": temp_count,
-        "蒸散发": evap_count,
+        "降水": prec_records,
+        "气温": temp_records,
+        "潜在蒸散发": evap_records,
     }
 
-    for name, count in summary.items():
-        print(f"{name}: {count} 个文件")
+    for name, records in summary.items():
+        coverage = summarize_time_coverage([timestamp for timestamp, _ in records], 24.0)
+        print(f"{name}: {coverage['period_summary']}")
     repaired_total = int(prec_repaired + temp_repaired + evap_repaired)
     if repaired_total:
         print(f"[修补统计] 共最近邻补齐 {repaired_total} 个流域边缘缺口像元。")

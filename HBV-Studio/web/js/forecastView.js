@@ -835,9 +835,13 @@
     return String(status || "").toLowerCase() === "ok";
   }
 
-  function stepText(count) {
+  function stepText(count, stepHours = 24) {
     const number = Number(count || 0);
-    return Number.isFinite(number) && number > 0 ? `${number} 个时间步` : "等待完整时段";
+    if (!Number.isFinite(number) || number <= 0) return "等待完整时段";
+    const step = Number(stepHours || 24);
+    if (Math.abs(step - 1) < 1e-9) return `${number} 小时`;
+    if (Math.abs(step - 24) < 1e-9) return `${number} 日`;
+    return `${number} 个 ${step} 小时时段`;
   }
 
   function variableLabel(key, fallback) {
@@ -859,7 +863,8 @@
       const label = variableLabel(item.key, item.label);
       const covered = Number(item.covered_steps ?? item.valid_time_steps ?? 0);
       const expected = Number(item.expected_steps ?? expectedSteps ?? 0);
-      return expected > 0 ? `${label}${covered}/${expected}` : `${label}${Number(item.valid_time_steps || 0)}步`;
+      if (item.period_summary) return `${label}：${item.period_summary}`;
+      return expected > 0 ? `${label}已覆盖${covered}/${expected}` : `${label}起止时间未识别`;
     }).join("，");
     return {
       value: complete ? "三类气象驱动完整" : fail ? "气象驱动需补齐" : "气象驱动需复核",
@@ -939,7 +944,7 @@
       {
         label: "预报时段",
         value: rangeText(windowInfo.forecast_start, windowInfo.forecast_end),
-        detail: stepText(expectedSteps),
+        detail: stepText(expectedSteps, windowInfo.time_step_hours),
         status: expectedSteps > 0 ? "ok" : "warn",
       },
       {
@@ -1053,7 +1058,7 @@
       {
         label: "预报窗口",
         value: range,
-        detail: Number(windowInfo.expected_steps || 0) > 0 ? `${windowInfo.expected_steps} 个时间步` : "等待完整窗口",
+        detail: stepText(windowInfo.expected_steps, windowInfo.time_step_hours),
         status: Number(windowInfo.expected_steps || 0) > 0 ? "ok" : "warn",
       },
       {

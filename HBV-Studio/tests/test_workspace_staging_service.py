@@ -15,6 +15,7 @@ from services.workspace_staging import (  # noqa: E402
     WorkspaceRuntimeDirsContext,
     WorkspaceStagingContext,
     seed_workspace_runtime_dirs,
+    stage_boundary_inflow_file,
     stage_observed_runoff_file,
     stage_vector_shapefile,
 )
@@ -104,6 +105,21 @@ class WorkspaceStagingServiceTests(unittest.TestCase):
                 stage_observed_runoff_file({"运行目录": str(root / "runtime")}, source, context)
             with self.assertRaisesRegex(ValueError, "缺少运行目录"):
                 stage_observed_runoff_file({}, csv_source, context)
+
+    def test_stage_boundary_inflow_file_copies_csv_and_excel_into_project_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            for filename in ("boundary.csv", "boundary.xlsx", "boundary.xls", "boundary.xlsm"):
+                source = root / filename
+                source.write_bytes(filename.encode("ascii"))
+
+                staged = stage_boundary_inflow_file(
+                    {"运行目录": str(root / "runtime")}, source, context
+                )
+
+                self.assertEqual(staged, (root / "workspace" / "observed" / filename).resolve(strict=False))
+                self.assertEqual(staged.read_bytes(), filename.encode("ascii"))
 
     def test_seed_workspace_runtime_dirs_creates_expected_directories_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

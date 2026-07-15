@@ -13,7 +13,13 @@ import unicodedata
 
 import pandas as pd
 
-from services.time_utils import detect_series_step_hours, format_timestamp_for_display, normalize_time_step_hours
+from services.time_utils import (
+    detect_series_step_hours,
+    format_timestamp_for_display,
+    normalize_time_step_hours,
+    summarize_time_coverage,
+    time_step_missing_text,
+)
 
 
 @dataclass(frozen=True)
@@ -84,9 +90,36 @@ def read_boundary_inflow_table(path: Path) -> tuple[pd.DataFrame, str]:
     if suffix in EXCEL_SUFFIXES:
         engine = "xlrd" if suffix == ".xls" else "openpyxl"
         try:
-            return pd.read_excel(path, engine=engine), "excel"
+            sheets = pd.read_excel(path, engine=engine, sheet_name=None)
         except ImportError as exc:
             raise ValueError(f"当前环境缺少读取 {suffix} 所需依赖：{engine}") from exc
+        candidates: list[tuple[int, int, str, pd.DataFrame]] = []
+        for order, (sheet_name, frame) in enumerate(sheets.items()):
+            if frame is None or frame.empty:
+                continue
+            time_column = detect_boundary_time_column(frame)
+            if time_column is None:
+                continue
+            try:
+                flow_column = detect_boundary_flow_column(frame, excluded=[time_column])
+            except ValueError:
+                continue
+            if flow_column is None:
+                continue
+            valid_rows = int(
+                (
+                    pd.to_datetime(frame[time_column], errors="coerce").notna()
+                    & pd.to_numeric(frame[flow_column], errors="coerce").notna()
+                ).sum()
+            )
+            if valid_rows:
+                candidates.append((valid_rows, -order, str(sheet_name), frame))
+        if not candidates:
+            raise ValueError(f"未在 Excel 的任何工作表中识别到有效时间列和流量列：{path}")
+        _, _, sheet_name, selected = max(candidates, key=lambda item: (item[0], item[1]))
+        selected = selected.copy()
+        selected.attrs["hbv_sheet_name"] = sheet_name
+        return selected, "excel"
     raise ValueError(f"暂不支持的上游边界入流文件类型：{suffix or '(无扩展名)'}")
 
 
@@ -267,6 +300,7 @@ def _inspect_boundary_inflow_csv_base(
     base = {
         "columns": list(frame.columns),
         "file_kind": file_kind,
+        "sheet_name": frame.attrs.get("hbv_sheet_name"),
         "date_field": str(actual_date_field),
         "flow_field": str(actual_flow_field),
         "total_rows": int(len(frame)),
@@ -350,6 +384,8 @@ def inspect_boundary_inflow_csv(
         out_of_range_steps = [ts for ts in actual_index.tolist() if ts not in expected_set]
         coverage_ratio = (len(expected_set & actual_set) / len(expected_set)) if expected_set else None
 
+    coverage = summarize_time_coverage(actual_index, normalized_expected_step or source_step_hours or 24.0)
+
     return {
         **base,
         "expected_time_step_hours": expected_step_hours if expected_step_hours is not None else normalized_expected_step,
@@ -357,6 +393,7 @@ def inspect_boundary_inflow_csv(
         "missing_steps": missing_steps,
         "out_of_range_steps": out_of_range_steps,
         "coverage_ratio": coverage_ratio,
+        "period_summary": coverage["period_summary"],
     }
 
 
@@ -392,16 +429,20 @@ def boundary_info_messages(
     missing_steps = list(boundary_info.get("missing_steps", []))
     if missing_steps:
         sample = "\u3001".join(format_timestamp_for_display(ts, step_hours) for ts in missing_steps[:3])
+        missing_text = time_step_missing_text(len(missing_steps), step_hours)
         if gap_mode == "interpolate":
-            warnings.append(f"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41\u7f3a\u5c11 {len(missing_steps)} \u4e2a\u65f6\u95f4\u6b65\uff0c\u4f8b\u5982\uff1a{sample}\uff1b\u8fd0\u884c\u65f6\u4f1a\u6309\u7ebf\u6027\u63d2\u503c\u8865\u9f50\u3002")
+            warnings.append(f"上游边界入流缺少 {missing_text}，例如：{sample}；运行时会按线性插值补齐。")
         elif gap_mode in {"", "zero", "0"}:
-            warnings.append(f"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41\u7f3a\u5c11 {len(missing_steps)} \u4e2a\u65f6\u95f4\u6b65\uff0c\u4f8b\u5982\uff1a{sample}\uff1b\u8fd0\u884c\u65f6\u4f1a\u6309 0 \u586b\u8865\u3002")
+            warnings.append(f"上游边界入流缺少 {missing_text}，例如：{sample}；运行时会按 0 填补。")
         else:
-            issues.append(f"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41\u65f6\u95f4\u8986\u76d6\u4e0d\u5b8c\u6574\uff0c\u7f3a\u5c11 {len(missing_steps)} \u4e2a\u65f6\u95f4\u6b65\uff0c\u4f8b\u5982\uff1a{sample}")
+            issues.append(f"上游边界入流时间覆盖不完整，缺少 {missing_text}，例如：{sample}")
     out_of_range_steps = list(boundary_info.get("out_of_range_steps", []))
     if out_of_range_steps:
         sample = "\u3001".join(format_timestamp_for_display(ts, step_hours) for ts in out_of_range_steps[:3])
-        warnings.append(f"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41\u6709 {len(out_of_range_steps)} \u4e2a\u65f6\u95f4\u6b65\u843d\u5728\u5f53\u524d\u914d\u7f6e\u65f6\u95f4\u8303\u56f4\u4e4b\u5916\uff0c\u4f8b\u5982\uff1a{sample}")
+        warnings.append(
+            f"上游边界入流有 {time_step_missing_text(len(out_of_range_steps), step_hours)}落在当前配置时间范围之外，"
+            f"例如：{sample}"
+        )
     if boundary_info.get("invalid_rows", 0) > 0:
         warnings.append(f"\u4e0a\u6e38\u8fb9\u754c\u5165\u6d41\u4e2d\u6709 {boundary_info['invalid_rows']} \u884c\u65e0\u6cd5\u89e3\u6790\u65f6\u95f4\u6216\u6d41\u91cf\uff0c\u5df2\u5728\u8bfb\u53d6\u65f6\u5ffd\u7565\u3002")
     zero_count = int(boundary_info.get("zero_count", 0))
@@ -454,6 +495,7 @@ def boundary_preview(
     return {
         "columns": data["columns"],
         "file_kind": data.get("file_kind"),
+        "sheet_name": data.get("sheet_name"),
         "date_field": data.get("date_field"),
         "flow_field": data.get("flow_field"),
         "total_rows": data["total_rows"],
@@ -470,6 +512,7 @@ def boundary_preview(
         "negative_count": data["negative_count"],
         "zero_count": data["zero_count"],
         "coverage_ratio": data.get("coverage_ratio"),
+        "period_summary": data.get("period_summary"),
         "expected_steps": data.get("expected_steps"),
         "missing_count": len(data.get("missing_steps", [])),
         "out_of_range_count": len(data.get("out_of_range_steps", [])),

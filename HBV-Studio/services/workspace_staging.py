@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 
 OBSERVED_FLOW_SUFFIXES = {".csv", ".xlsx", ".xls", ".xlsm"}
+BOUNDARY_INFLOW_SUFFIXES = OBSERVED_FLOW_SUFFIXES
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,33 @@ def stage_observed_runoff_file(
     resolved_config = _resolved_staging_config(config, context, config_path)
     if not str(resolved_config.get("运行目录", "")).strip():
         raise ValueError("缺少运行目录，无法归档观测径流文件。")
+    paths = context.build_workspace_paths(resolved_config)
+    observed_dir = Path(paths["observed_dir"]).resolve(strict=False)
+    observed_dir.mkdir(parents=True, exist_ok=True)
+    dst = (observed_dir / src.name).resolve(strict=False)
+
+    if src.resolve(strict=False) != dst:
+        shutil.copy2(src, dst)
+    return dst
+
+
+def stage_boundary_inflow_file(
+    config: dict[str, Any],
+    raw_path: Any,
+    context: WorkspaceStagingContext,
+    *,
+    config_path: Path | None = None,
+) -> Path:
+    src = context.resolve_any_path(str(raw_path), must_exist=True)
+    if not src.is_file():
+        raise ValueError(f"上游边界入流路径不是文件：{src}")
+    if src.suffix.lower() not in BOUNDARY_INFLOW_SUFFIXES:
+        allowed = ", ".join(sorted(BOUNDARY_INFLOW_SUFFIXES))
+        raise ValueError(f"上游边界入流文件类型不支持：{src.suffix or '(无扩展名)'}，支持 {allowed}")
+
+    resolved_config = _resolved_staging_config(config, context, config_path)
+    if not str(resolved_config.get("运行目录", "")).strip():
+        raise ValueError("缺少运行目录，无法归档上游边界入流文件。")
     paths = context.build_workspace_paths(resolved_config)
     observed_dir = Path(paths["observed_dir"]).resolve(strict=False)
     observed_dir.mkdir(parents=True, exist_ok=True)

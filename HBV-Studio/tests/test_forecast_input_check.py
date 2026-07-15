@@ -151,7 +151,7 @@ class ForecastInputCheckTests(unittest.TestCase):
 
             self.assertEqual(check["status"], "warn")
             self.assertEqual(check["errors"], [])
-            self.assertTrue(any("窗口外文件将不参与本次预报" in item["summary"] for item in check["variables"]))
+            self.assertTrue(any("位于窗口外" in item["summary"] for item in check["variables"]))
             self.assertTrue(any(item["out_of_window_steps"] == 1 for item in check["variables"]))
             ready = svc.ensure_forecast_input_ready(_forecast_payload(root, config_path, source_run, dates=dates))
             self.assertEqual(ready["status"], "warn")

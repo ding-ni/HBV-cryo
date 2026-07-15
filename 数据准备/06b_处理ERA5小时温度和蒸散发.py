@@ -13,8 +13,10 @@ import xarray as xr
 from rasterio.crs import CRS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 
 from 公共函数 import build_workspace_paths, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config, year_range  # type: ignore
+from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 
 def time_dim_name(arr: xr.DataArray) -> str:
@@ -275,10 +277,18 @@ def main() -> None:
     for year in years:
         evap_count += build_hourly_et(year, paths, config, overwrite=bool(args.覆盖))
 
+    outputs = []
     if prec_source == "era5":
-        print(f"[完成] 小时降水文件数: {prec_count}")
-    print(f"[完成] 小时温度文件数: {temp_count}")
-    print(f"[完成] 小时蒸散发文件数: {evap_count}")
+        outputs.append(("小时降水", paths["raw_prec_era5_hourly_dir"]))
+    outputs.extend(
+        [
+            ("小时气温", paths["raw_temp_hourly_dir"]),
+            ("小时潜在蒸散发", paths["raw_evap_hourly_dir"]),
+        ]
+    )
+    for label, directory in outputs:
+        check = validate_tif_time_series(label, Path(directory), 1.0)
+        print(f"[完成] {label}: {check['period_summary']}")
 
 
 if __name__ == "__main__":

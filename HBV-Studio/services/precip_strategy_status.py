@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from services.time_utils import time_step_count_text
+
 
 @dataclass(frozen=True)
 class PrecipStrategyStatusContext:
@@ -31,6 +33,7 @@ def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
     hydro = dict(summary.get("hydrological_diagnostics", {}) or {})
     parts: list[str] = []
     stats = dict(summary.get("processing_stats", {}) or {})
+    step_hours = float(summary.get("time_step_hours", 24.0) or 24.0)
     if stats:
         algorithm = str(stats.get("algorithm", "") or "").strip()
         if algorithm:
@@ -42,10 +45,10 @@ def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
         if station_steps or rule_steps or pass_steps or skipped_steps:
             parts.append(
                 "订正执行："
-                f"实测站点 {station_steps} 时段；"
-                f"规则外推 {rule_steps} 时段；"
-                f"原样保留 {pass_steps} 时段；"
-                f"已有输出跳过 {skipped_steps} 时段"
+                f"实测站点参与 {time_step_count_text(station_steps, step_hours)}；"
+                f"规则外推 {time_step_count_text(rule_steps, step_hours)}；"
+                f"原样保留 {time_step_count_text(pass_steps, step_hours)}；"
+                f"已有输出复用 {time_step_count_text(skipped_steps, step_hours)}"
             )
     elevation_support = dict(summary.get("station_elevation_support", {}) or {})
     elevation_status = str(elevation_support.get("status", "") or "")
@@ -143,19 +146,28 @@ def check_precip_strategy_outputs(
             time_basis_label = str(summary.get("time_basis_label", "") or "").strip()
             selected_steps = int(summary.get("selected_steps", 0) or 0)
             written_files = int(summary.get("written_files", 0) or 0)
+            step_hours = float(summary.get("time_step_hours", 24.0) or 24.0)
+            actual_period = str(summary.get("actual_period", "") or "").strip()
             zero_steps = int(summary.get("zero_available_station_steps", 0) or 0)
             skipped_steps = int(summary.get("skipped_out_of_scope_steps", 0) or 0)
-            parts = [f"{label}文件数：{count}"]
+            parts = [
+                f"{label}：{actual_period}"
+                if actual_period
+                else f"{label}旧结果仅记录 {time_step_count_text(count, step_hours)}，未记录起止时间"
+            ]
             processing_stats = dict(summary.get("processing_stats", {}) or {})
             qc_blocked = bool(processing_stats.get("qc_blocked", False))
             if time_basis_label:
                 parts.append(f"资料口径：{time_basis_label}")
             if selected_steps or written_files:
-                parts.append(f"参与时段：{written_files or selected_steps}/{selected_steps or count}")
+                parts.append(
+                    f"参与订正 {time_step_count_text(written_files or selected_steps, step_hours)}"
+                    f"（目标 {time_step_count_text(selected_steps or count, step_hours)}）"
+                )
             if zero_steps:
-                parts.append(f"无可用站点时段：{zero_steps}")
+                parts.append(f"无可用站点并保留原场：{time_step_count_text(zero_steps, step_hours)}")
             if skipped_steps:
-                parts.append(f"已忽略口径外时段：{skipped_steps}")
+                parts.append(f"已忽略资料口径外：{time_step_count_text(skipped_steps, step_hours)}")
             parts.extend(_hydro_diagnostic_message(summary))
             if qc_blocked:
                 monthly = dict(processing_stats.get("monthly_conservation", {}) or {})
@@ -187,4 +199,4 @@ def check_precip_strategy_outputs(
             return count > 0 and not qc_blocked, "；".join(parts), count
         except Exception:
             pass
-    return count > 0, f"{label}文件数：{count}", count
+    return count > 0, f"{label}旧结果仅记录 {count} 个栅格，未记录起止时间，请重新生成摘要", count

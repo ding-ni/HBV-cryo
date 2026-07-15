@@ -29,6 +29,63 @@ def format_timestamp_for_display(timestamp: pd.Timestamp, step_hours: float) -> 
     return ts.strftime("%Y-%m-%d %H:%M")
 
 
+def time_step_count_text(count: int, step_hours: float) -> str:
+    """Describe a hydrological series length in calendar units, not implementation steps."""
+    numeric_count = int(count)
+    step = float(step_hours)
+    if abs(step - 1.0) <= 1e-9:
+        return f"{numeric_count} 小时"
+    if abs(step - 24.0) <= 1e-9:
+        return f"{numeric_count} 日"
+    return f"{numeric_count} 个 {step:g} 小时时段"
+
+
+def time_step_missing_text(count: int, step_hours: float) -> str:
+    step = float(step_hours)
+    if abs(step - 1.0) <= 1e-9:
+        return f"{int(count)} 小时"
+    if abs(step - 24.0) <= 1e-9:
+        return f"{int(count)} 日"
+    return f"{int(count)} 个时段"
+
+
+def summarize_time_coverage(timestamps: Any, step_hours: float) -> dict[str, Any]:
+    """Return a user-facing start/end/continuity summary for a dated series."""
+    ordered = sorted({pd.Timestamp(item) for item in timestamps if pd.notna(item)})
+    if not ordered:
+        return {
+            "start_time": None,
+            "end_time": None,
+            "count": 0,
+            "missing_times": [],
+            "continuous": False,
+            "period_summary": "未识别到有效时间范围",
+        }
+    step = float(step_hours)
+    start = ordered[0]
+    end = ordered[-1]
+    expected = pd.date_range(start=start, end=end, freq=pd.Timedelta(hours=step))
+    actual = set(ordered)
+    missing = [pd.Timestamp(item) for item in expected if pd.Timestamp(item) not in actual]
+    if not missing:
+        continuity = "逐小时连续无缺测" if abs(step - 1.0) <= 1e-9 else (
+            "逐日连续无缺测" if abs(step - 24.0) <= 1e-9 else "时序连续无缺测"
+        )
+    else:
+        continuity = f"内部缺少 {time_step_missing_text(len(missing), step)}"
+    return {
+        "start_time": start,
+        "end_time": end,
+        "count": len(ordered),
+        "missing_times": missing,
+        "continuous": not missing,
+        "period_summary": (
+            f"{format_timestamp_for_display(start, step)} 至 "
+            f"{format_timestamp_for_display(end, step)}，共 {time_step_count_text(len(ordered), step)}，{continuity}"
+        ),
+    }
+
+
 def detect_series_step_hours(timestamps: pd.Series) -> float | None:
     diffs = timestamps.sort_values().drop_duplicates().diff().dropna()
     if diffs.empty:
@@ -90,7 +147,10 @@ def time_sequence_messages(time_values: dict[str, pd.Timestamp], step_hours: flo
     expected_end = expected_warmup_end(time_values, step_hours)
     if warmup_start is not None and expected_end is not None:
         if warmup_start > expected_end:
-            messages.append("预热期至少需要覆盖率定开始前 1 个时间步。")
+            messages.append(
+                "预热期至少需要覆盖率定开始前 "
+                + ("1 小时。" if abs(float(step_hours) - 1.0) <= 1e-9 else "1 日。")
+            )
         elif configured_warmup_end is not None and configured_warmup_end != expected_end:
             expected_label = format_timestamp_for_display(expected_end, step_hours)
             messages.append(f"时间.预热结束 必须紧邻率定开始，当前应为 {expected_label}")

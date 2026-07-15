@@ -198,7 +198,7 @@ class BoundaryServiceTests(unittest.TestCase):
 
         self.assertTrue(enabled)
         self.assertEqual(series.tolist(), [10.0, 0.0, 0.0, 0.0])
-        self.assertTrue(any("仅重叠" in str(item.message) for item in caught))
+        self.assertTrue(any("内仅覆盖" in str(item.message) for item in caught))
 
     def test_boundary_xlsx_is_supported_by_preview_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -234,6 +234,40 @@ class BoundaryServiceTests(unittest.TestCase):
         self.assertEqual(preview["coverage_ratio"], 1.0)
         self.assertTrue(enabled)
         self.assertEqual(series.tolist(), [11.0, 12.5])
+
+    def test_boundary_excel_selects_the_sheet_with_valid_time_and_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "boundary_multi_sheet.xlsx"
+            with pd.ExcelWriter(path, engine="openpyxl") as writer:
+                pd.DataFrame({"说明": ["项目资料", "非数据页"]}).to_excel(
+                    writer, sheet_name="说明", index=False
+                )
+                pd.DataFrame(
+                    {
+                        "监测时间": pd.date_range("2026-05-01 08:00", periods=24, freq="1h"),
+                        "上游流量(m^3/s)": range(24),
+                    }
+                ).to_excel(writer, sheet_name="小时流量", index=False)
+            context = BoundaryInflowInspectContext(
+                resolve_path=lambda raw, must_exist=True: Path(raw),
+                profile_daily="daily",
+                profile_hourly="hourly",
+            )
+
+            preview = inspect_boundary_inflow_csv(str(path), context, date_field="", flow_field="")
+            series, enabled = read_boundary_inflow_series(
+                str(path),
+                pd.date_range("2026-05-01 08:00", periods=24, freq="1h"),
+                date_field="",
+                flow_field="",
+                expected_step_hours=1,
+            )
+
+        self.assertEqual(preview["sheet_name"], "小时流量")
+        self.assertEqual(preview["date_field"], "监测时间")
+        self.assertEqual(preview["flow_field"], "上游流量(m^3/s)")
+        self.assertTrue(enabled)
+        self.assertEqual(series.tolist(), list(range(24)))
 
     def test_inspect_boundary_hourly_file_reports_daily_resampling(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

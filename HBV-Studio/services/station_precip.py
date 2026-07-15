@@ -9,7 +9,7 @@ import pandas as pd
 
 from services.event_config import TIME_BASIS_EVENT_WINDOWS, TIME_BASIS_FORECAST_WINDOW, TIME_BASIS_LABELS, event_date_range
 from services.meteo_config import METEO_KEY, METEO_PRECIP_MODE_KEY, METEO_STATION_META_KEY, METEO_STATION_PREC_KEY
-from services.time_utils import detect_series_step_hours
+from services.time_utils import detect_series_step_hours, time_step_count_text
 
 
 HYDROLOGICAL_DAY_START_HOUR = 8
@@ -818,7 +818,8 @@ def station_precip_task_context_summary(
     station_start_text = format_time_for_check(station_start, step_hours)
     station_end_text = format_time_for_check(station_end, step_hours)
     coverage_text = (
-        f"{covered_count}/{expected_count} \u6b65\uff08{coverage_ratio * 100:.1f}%\uff09"
+        f"已覆盖 {time_step_count_text(covered_count, step_hours)}/"
+        f"目标 {time_step_count_text(expected_count, step_hours)}（{coverage_ratio * 100:.1f}%）"
         if coverage_ratio is not None and expected_count > 0
         else "\u672a\u5f62\u6210\u53ef\u6838\u5bf9\u65f6\u6bb5"
     )
@@ -855,10 +856,10 @@ def station_precip_task_context_summary(
             {"label": "\u68c0\u67e5\u53e3\u5f84", "value": time_basis_label, "status": "ok" if event_valid_count > 0 else "fail"},
             {"label": "\u4e8b\u4ef6\u8986\u76d6", "value": f"{event_ok_count}/{event_count} \u573a\u5b8c\u6574" if event_count else "\u672a\u5f62\u6210", "status": "ok" if event_count and event_ok_count == event_count else "fail" if event_valid_count <= 0 else "warn"},
             {"label": "\u8fd0\u884c\u7a97\u53e3\u5e76\u96c6", "value": scope_value, "status": "ok" if expected_steps else "warn"},
-            {"label": "\u8986\u76d6\u6b65\u6570", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "时段覆盖", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
             {"label": "\u53ef\u7528\u7ad9\u70b9", "value": count_text, "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "\u65e0\u7ad9\u70b9\u65f6\u95f4\u6b65", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "\u6700\u5927\u8fde\u7eed\u65e0\u7ad9\u70b9", "value": f"{max_consecutive_zero_steps} \u6b65", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "无站点资料", "value": time_step_count_text(zero_available_steps, step_hours), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "最长连续无站点", "value": time_step_count_text(max_consecutive_zero_steps, step_hours), "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
         ]
     elif time_basis == TIME_BASIS_FORECAST_WINDOW or context == "forecast":
         headline = (
@@ -873,9 +874,9 @@ def station_precip_task_context_summary(
         items = [
             {"label": "\u68c0\u67e5\u53e3\u5f84", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
             {"label": "\u9884\u62a5\u7a97\u53e3", "value": f"{start} \u81f3 {end}" if start and end else "\u672a\u5b8c\u6574\u914d\u7f6e", "status": "ok" if expected_steps else "warn"},
-            {"label": "\u8986\u76d6\u6b65\u6570", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "时段覆盖", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
             {"label": "\u53ef\u7528\u7ad9\u70b9", "value": count_text, "status": "ok" if min_available_station_count and min_available_station_count > 0 else "warn"},
-            {"label": "\u6700\u5927\u8fde\u7eed\u65e0\u7ad9\u70b9", "value": f"{max_consecutive_zero_steps} \u6b65", "status": "ok" if max_consecutive_zero_steps == 0 else "warn"},
+            {"label": "最长连续无站点", "value": time_step_count_text(max_consecutive_zero_steps, step_hours), "status": "ok" if max_consecutive_zero_steps == 0 else "warn"},
             {"label": "\u964d\u6c34\u5904\u7406", "value": "\u9884\u62a5\u9875\u4f7f\u7528\u76ee\u6807\u6805\u683c\uff0c\u7ad9\u70b9\u96e8\u91cf\u5148\u5728\u6c14\u8c61\u51c6\u5907\u4e2d\u5236\u56fe", "status": "ok"},
         ]
     else:
@@ -890,10 +891,10 @@ def station_precip_task_context_summary(
         items = [
             {"label": "\u68c0\u67e5\u53e3\u5f84", "value": time_basis_label, "status": "ok" if expected_steps else "warn"},
             {"label": "\u8fde\u7eed\u65f6\u6bb5", "value": f"{start} \u81f3 {end}" if start and end else "\u672a\u5b8c\u6574\u914d\u7f6e", "status": "ok" if expected_steps else "warn"},
-            {"label": "\u8986\u76d6\u6b65\u6570", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
+            {"label": "时段覆盖", "value": coverage_text, "status": "ok" if coverage_ratio is not None and coverage_ratio >= 0.99 else "warn" if covered_count > 0 else "fail"},
             {"label": "\u53ef\u7528\u7ad9\u70b9", "value": count_text, "status": "ok" if min_available_station_count and min_available_station_count > 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "\u65e0\u7ad9\u70b9\u65f6\u95f4\u6b65", "value": str(zero_available_steps), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
-            {"label": "\u6700\u5927\u8fde\u7eed\u65e0\u7ad9\u70b9", "value": f"{max_consecutive_zero_steps} \u6b65", "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "无站点资料", "value": time_step_count_text(zero_available_steps, step_hours), "status": "ok" if zero_available_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
+            {"label": "最长连续无站点", "value": time_step_count_text(max_consecutive_zero_steps, step_hours), "status": "ok" if max_consecutive_zero_steps == 0 else "fail" if mode == "thiessen_station_only" else "warn"},
         ]
 
     return {

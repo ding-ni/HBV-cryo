@@ -17,6 +17,7 @@ import pandas as pd
 
 import profile_runner
 import precipitation_strategy_runner
+from services.time_utils import time_step_missing_text
 from forward_run import build_legacy_argv, build_param_vector, build_runtime_cli_args, resolve_input_path
 from profile_runner import patch_profile_behavior, patch_runtime_environment, resolve_profile
 
@@ -315,7 +316,9 @@ def archive_forecast_inputs(
         missing = [timestamp for timestamp in expected_index if timestamp not in time_to_file]
         if missing:
             sample = "、".join(module.format_time_value(item) for item in missing[:3])
-            raise ValueError(f"预报{label}目录缺少 {len(missing)} 个时间步，例如：{sample}")
+            raise ValueError(
+                f"预报{label}目录缺少 {time_step_missing_text(len(missing), step_hours)}，例如：{sample}"
+            )
         out_of_window = [timestamp for timestamp in time_to_file if timestamp not in expected_set]
         target_dir = archive_root / key
         if target_dir.exists():

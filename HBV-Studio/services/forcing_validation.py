@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
-from services.time_utils import parse_time_from_name
+from services.time_utils import parse_time_from_name, time_step_count_text
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,16 @@ class HourlyForcingReadyContext:
     validate_forcing_bundle: Callable[..., dict[str, Any]]
 
 
+def forcing_period_text(result: dict[str, Any], step_hours: float | None = None) -> str:
+    summary = str(result.get("period_summary", "") or "").strip()
+    if summary:
+        return summary
+    count = int(result.get("valid_time_steps", 0) or 0)
+    if step_hours is None:
+        return f"仅识别到 {count} 个时段，旧检查结果未提供起止时间"
+    return f"仅识别到 {time_step_count_text(count, step_hours)}，旧检查结果未提供起止时间"
+
+
 def series_group_status(
     entries: list[tuple[str, Path]],
     step_hours: float,
@@ -84,7 +94,10 @@ def series_group_status(
         total += int(result["valid_time_steps"])
     ready = all(result["ok"] and int(result["valid_time_steps"]) > 0 for result in results)
     if ready:
-        message = "；".join(f"{result['label']}: {result['valid_time_steps']}" for result in results)
+        message = "；".join(
+            f"{result.get('label') or entries[index][0]}：{forcing_period_text(result, step_hours)}"
+            for index, result in enumerate(results)
+        )
         return True, message, total, results
     issues = [result["errors"][0] for result in results if result["errors"]]
     if issues:
@@ -104,8 +117,8 @@ def prefer_raw_or_aligned_group_status(
         return True, raw_message, raw_count
     if aligned_ok:
         return True, f"{aligned_message}（已导入并完成网格对齐）", aligned_count
-    raw_has_files = any(int(result["total_files"]) > 0 for result in raw_results)
-    aligned_has_files = any(int(result["total_files"]) > 0 for result in aligned_results)
+    raw_has_files = any(int(result.get("total_files", 0) or 0) > 0 for result in raw_results)
+    aligned_has_files = any(int(result.get("total_files", 0) or 0) > 0 for result in aligned_results)
     if aligned_has_files:
         return False, aligned_message, aligned_count
     if raw_has_files:
@@ -392,7 +405,12 @@ def check_hourly_era5_download_status(
     if context.configured_precip_source(config) == "era5":
         patterns.append(Path(paths["raw_prec_era5_dir"]).glob("era5_tp_hourly_*.nc"))
     count = sum(len(list(items)) for items in patterns)
-    return count > 0, f"小时 ERA5 原始 NetCDF 文件数：{count}", count
+    time_cfg = dict(config.get("时间", {}) or {})
+    start = str(time_cfg.get("预热开始", "") or "").replace("T", " ")
+    end = str(time_cfg.get("验证结束", "") or "").replace("T", " ")
+    period = f"目标时段 {start} 至 {end}；" if start and end else ""
+    coverage_note = period or "下载目标时段尚未填写；"
+    return count > 0, f"{coverage_note}小时 ERA5 原始文件组已准备 {count} 个，处理后将逐小时核验起止时间与缺测", count
 
 
 def hourly_forcing_ready_status(
@@ -404,13 +422,22 @@ def hourly_forcing_ready_status(
 ) -> tuple[bool, str, int]:
     base_paths = context.build_workspace_paths(config)
     forcing = context.validate_forcing_bundle(config, profile, precip_source=precip_source)
-    counts = {key: forcing["directories"][key]["valid_time_steps"] for key in ("prec", "temp", "evap")}
+    labels = {"prec": "降水", "temp": "气温", "evap": "蒸散发"}
+    periods = {
+        key: forcing_period_text(forcing["directories"][key], 1.0)
+        for key in ("prec", "temp", "evap")
+    }
     detail = ""
     if forcing["errors"]:
         detail = f"；问题：{'；'.join(forcing['errors'][:2])}"
+    message = (
+        "小时气象驱动："
+        + "；".join(f"{labels[key]}：{periods[key]}" for key in ("prec", "temp", "evap"))
+        + f"（工程目录={base_paths['workspace_root']}）{detail}"
+    )
     return (
         forcing["ok"],
-        f"小时气象驱动：降水={counts['prec']} 气温={counts['temp']} 蒸散={counts['evap']}（工程目录={base_paths['workspace_root']}）{detail}",
+        message,
         forcing["total_valid_steps"],
     )
 
@@ -468,9 +495,9 @@ def check_daily_prec_status(
     source_key = context.resolve_precip_source(config, precip_source)
     if source_key == "custom_tif":
         aligned = Path(paths["aligned_prec_custom_base_dir"])
-        count = context.count_matching(aligned)
+        ready, message, count, _ = series_group_status([("工程本地降水输入", aligned)], 24.0, context)
         if count > 0:
-            return True, "当前为本地栅格降水模式，降水已导入工程独立降水目录。", count
+            return ready, message, count
         return True, "当前为本地栅格降水模式，不需要执行原始降水预处理。", 0
     source = context.effective_precip_source(source_key)
     if source == "era5":
@@ -524,9 +551,9 @@ def check_hourly_prec_status(
     source_key = context.resolve_precip_source(config, precip_source)
     if source_key == "custom_tif":
         aligned = Path(profile_paths.get("aligned_prec_custom_dir", profile_paths["aligned_prec_custom_base_dir"]))
-        count = context.count_matching(aligned)
+        ready, message, count, _ = series_group_status([("工程小时降水输入", aligned)], 1.0, context)
         if count > 0:
-            return True, "当前为本地栅格降水模式，小时降水已导入工程独立降水目录。", count
+            return ready, message, count
         return True, "当前为本地栅格降水模式，不需要执行原始小时降水标准化。", 0
     source = context.effective_precip_source(source_key)
     if source == "era5":
@@ -564,7 +591,11 @@ def check_aligned_forcing_status(
     ]
     count = sum(int(item["valid_time_steps"]) for item in scans)
     ready = all(item["ok"] for item in scans)
-    message = "；".join(item["errors"][0] for item in scans if item["errors"]) or f"{label}气象驱动有效时间步：{count}"
+    fallback_labels = ("降水", "气温", "蒸散发")
+    message = "；".join(item["errors"][0] for item in scans if item["errors"]) or "；".join(
+        f"{item.get('label') or fallback_labels[index]}：{forcing_period_text(item, step_hours)}"
+        for index, item in enumerate(scans)
+    )
     return ready, message, count
 
 
@@ -592,7 +623,21 @@ def check_forcing_inputs_ready(
         base_ready = False
 
     forcing = context.validate_forcing_bundle(config, profile, precip_source=precip_source)
-    message = f"基础输入{'齐全' if base_ready else '缺失'}；{forcing_label}气象驱动有效时间步数：{forcing['total_valid_steps']}"
+    step_hours = float(config.get("时间步长_小时", 1.0 if profile == "hourly" else 24.0) or 24.0)
+    directories = dict(forcing.get("directories", {}) or {})
+    if all(key in directories for key in ("prec", "temp", "evap")):
+        fallback_labels = {"prec": "降水", "temp": "气温", "evap": "蒸散发"}
+        period_message = "；".join(
+            f"{directories[key].get('label') or fallback_labels[key]}："
+            f"{forcing_period_text(directories[key], step_hours)}"
+            for key in ("prec", "temp", "evap")
+        )
+    else:
+        period_message = (
+            f"气象驱动旧检查结果仅返回 {time_step_count_text(int(forcing.get('total_valid_steps', 0) or 0), step_hours)}，"
+            "未返回各变量起止时间"
+        )
+    message = f"基础输入{'齐全' if base_ready else '缺失'}；{period_message}"
     if forcing["errors"]:
         message += f"；问题：{'；'.join(forcing['errors'][:2])}"
     return base_ready and forcing["ok"], message, int(forcing["total_valid_steps"]) + int(base_ready)
@@ -662,6 +707,8 @@ def validate_forcing_bundle(
         "errors": errors,
         "warnings": warnings,
         "expected_steps": len(expected_index) if expected_index is not None else None,
+        "expected_start": expected_index[0] if expected_index is not None and len(expected_index) else None,
+        "expected_end": expected_index[-1] if expected_index is not None and len(expected_index) else None,
         "directories": directories,
         "grid_checks": grid_checks,
         "mask_consistency": mask_consistency,

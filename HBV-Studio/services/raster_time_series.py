@@ -9,7 +9,12 @@ from typing import Any
 
 import pandas as pd
 
-from services.time_utils import format_timestamp_for_display, parse_time_from_name
+from services.time_utils import (
+    format_timestamp_for_display,
+    parse_time_from_name,
+    summarize_time_coverage,
+    time_step_missing_text,
+)
 
 
 TIF_SCAN_CACHE_LOCK = threading.Lock()
@@ -90,6 +95,14 @@ def scan_tif_time_series(directory: Path) -> dict[str, Any]:
     with TIF_SCAN_CACHE_LOCK:
         TIF_SCAN_CACHE[cache_key] = {"signature": signature, "data": copy.deepcopy(result)}
     return result
+
+
+def _time_series_period_summary(
+    timestamps: list[pd.Timestamp],
+    step_hours: float,
+) -> tuple[str, list[pd.Timestamp]]:
+    coverage = summarize_time_coverage(timestamps, step_hours)
+    return str(coverage["period_summary"]), list(coverage["missing_times"])
 
 
 def _grid_alignment_signature(directory: Path, dem_path: Path) -> tuple[Any, ...]:
@@ -189,6 +202,7 @@ def validate_tif_time_series(
     time_basis_label: str = "当前配置时间范围",
 ) -> dict[str, Any]:
     result = scan_tif_time_series(directory)
+    period_summary, internal_missing_steps = _time_series_period_summary(result["timestamps"], step_hours)
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -208,6 +222,13 @@ def validate_tif_time_series(
         sample = "、".join(names[:3])
         errors.append(f"{label}目录存在重复时间戳 {format_timestamp_for_display(first_ts, step_hours)}，例如：{sample}")
 
+    if expected_index is None and internal_missing_steps:
+        sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in internal_missing_steps[:3])
+        errors.append(
+            f"{label}时间序列内部不连续，缺少 {time_step_missing_text(len(internal_missing_steps), step_hours)}，"
+            f"例如：{sample}"
+        )
+
     missing_steps: list[pd.Timestamp] = []
     out_of_range_steps: list[pd.Timestamp] = []
     if expected_index is not None:
@@ -218,10 +239,16 @@ def validate_tif_time_series(
         out_of_range_steps = [ts for ts in result["timestamps"] if ts not in expected_set]
         if missing_steps:
             sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in missing_steps[:3])
-            errors.append(f"{label}时间覆盖不完整，缺少 {len(missing_steps)} 个时间步，例如：{sample}")
+            errors.append(
+                f"{label}时间覆盖不完整，缺少 {time_step_missing_text(len(missing_steps), step_hours)}，"
+                f"例如：{sample}"
+            )
         if out_of_range_steps:
             sample = "、".join(format_timestamp_for_display(ts, step_hours) for ts in out_of_range_steps[:3])
-            warnings.append(f"{label}有 {len(out_of_range_steps)} 个时间步落在{time_basis_label}之外，例如：{sample}")
+            warnings.append(
+                f"{label}有 {time_step_missing_text(len(out_of_range_steps), step_hours)}落在{time_basis_label}之外，"
+                f"例如：{sample}"
+            )
 
     result.update(
         {
@@ -231,6 +258,10 @@ def validate_tif_time_series(
             "warnings": warnings,
             "missing_steps": missing_steps,
             "out_of_range_steps": out_of_range_steps,
+            "start_time": result["timestamps"][0] if result["timestamps"] else None,
+            "end_time": result["timestamps"][-1] if result["timestamps"] else None,
+            "internal_missing_steps": internal_missing_steps,
+            "period_summary": period_summary,
         }
     )
     return result

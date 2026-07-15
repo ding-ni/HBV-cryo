@@ -116,7 +116,8 @@ class ForecastInputServiceTests(unittest.TestCase):
         self.assertEqual(summary["covered_steps"], 2)
         self.assertEqual(summary["missing_steps"], 1)
         self.assertEqual(summary["out_of_window_steps"], 1)
-        self.assertIn("2/3", summary["summary"])
+        self.assertIn("2026-01-01 至 2026-01-03", summary["summary"])
+        self.assertIn("已覆盖 2 日/目标 3 日", summary["summary"])
 
     def test_forecast_output_preview_uses_explicit_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

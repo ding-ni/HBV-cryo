@@ -17,6 +17,7 @@ from typing import Any
 RUN_PY_FILE_ROLE = "__run_py_file__"
 RUNTIME_DIR_NAME = "运行目录"
 INSTALLED_USER_DATA_DIR_NAME = "用户数据"
+USER_WORKSPACE_SEED_MARKER = ".hbvstudio_workspace_seeded_v1"
 
 
 class _SourcelessPycFinder:
@@ -277,17 +278,24 @@ def seed_user_data() -> None:
     target_workspaces.mkdir(parents=True, exist_ok=True)
     migrate_existing_user_data(target_root)
     source_workspaces = GUI_ROOT / "workspaces"
-    if source_workspaces.exists():
-        for src in source_workspaces.glob("*.json"):
-            dst = target_workspaces / src.name
-            try:
-                payload = json.loads(src.read_text(encoding="utf-8-sig"))
-            except Exception:
-                if not dst.exists():
+    seed_marker = target_workspaces / USER_WORKSPACE_SEED_MARKER
+    existing_user_workspaces = any(target_workspaces.glob("*.json"))
+    if not seed_marker.exists():
+        # Packaged workspaces are first-run examples only. Once users own this
+        # directory, startup must never restore deleted configs or overwrite edits.
+        if not existing_user_workspaces and source_workspaces.exists():
+            for src in source_workspaces.glob("*.json"):
+                dst = target_workspaces / src.name
+                if dst.exists():
+                    continue
+                try:
+                    payload = json.loads(src.read_text(encoding="utf-8-sig"))
+                except Exception:
                     shutil.copy2(src, dst)
-                continue
-            rewritten = rewrite_workspace_for_user_root(payload, src, target_root)
-            dst.write_text(json.dumps(rewritten, ensure_ascii=False, indent=2), encoding="utf-8")
+                    continue
+                rewritten = rewrite_workspace_for_user_root(payload, src, target_root)
+                dst.write_text(json.dumps(rewritten, ensure_ascii=False, indent=2), encoding="utf-8")
+        seed_marker.write_text("initialized\n", encoding="ascii")
 
     if installed_mode():
         source_runtime = PACKAGE_RUNTIME_ROOT

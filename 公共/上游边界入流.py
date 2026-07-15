@@ -17,6 +17,14 @@ DEFAULT_MIN_DAILY_HOURS = 18
 HYDROLOGICAL_DAY_START_HOUR = 8
 MIN_ZERO_FILL_COVERAGE_RATIO = 0.5
 
+
+def _time_quantity(count, step_hours):
+    if step_hours is not None and abs(float(step_hours) - 1.0) <= 1e-9:
+        return f"{int(count)} 小时"
+    if step_hours is not None and abs(float(step_hours) - 24.0) <= 1e-9:
+        return f"{int(count)} 日"
+    return f"{int(count)} 个时段"
+
 DATE_COLUMN_HINTS = ("date", "datetime", "time", "日期", "时间")
 FLOW_COLUMN_HINTS = (
     "flow",
@@ -78,9 +86,36 @@ def read_boundary_inflow_table(path_like: str | Path) -> tuple[pd.DataFrame, str
     if suffix in EXCEL_SUFFIXES:
         engine = "xlrd" if suffix == ".xls" else "openpyxl"
         try:
-            return pd.read_excel(path, engine=engine), "excel"
+            sheets = pd.read_excel(path, engine=engine, sheet_name=None)
         except ImportError as exc:
             raise ValueError(f"当前环境缺少读取 {suffix} 所需依赖：{engine}") from exc
+        candidates: list[tuple[int, int, str, pd.DataFrame]] = []
+        for order, (sheet_name, frame) in enumerate(sheets.items()):
+            if frame is None or frame.empty:
+                continue
+            time_column = detect_time_column(frame)
+            if time_column is None:
+                continue
+            try:
+                flow_column = detect_flow_column(frame, excluded=[time_column])
+            except ValueError:
+                continue
+            if flow_column is None:
+                continue
+            valid_rows = int(
+                (
+                    pd.to_datetime(frame[time_column], errors="coerce").notna()
+                    & pd.to_numeric(frame[flow_column], errors="coerce").notna()
+                ).sum()
+            )
+            if valid_rows:
+                candidates.append((valid_rows, -order, str(sheet_name), frame))
+        if not candidates:
+            raise ValueError(f"未在 Excel 的任何工作表中识别到有效时间列和流量列：{path}")
+        _, _, sheet_name, selected = max(candidates, key=lambda item: (item[0], item[1]))
+        selected = selected.copy()
+        selected.attrs["hbv_sheet_name"] = sheet_name
+        return selected, "excel"
     raise ValueError(f"暂不支持的上游边界入流文件类型：{suffix or '(无扩展名)'}")
 
 
@@ -224,6 +259,7 @@ def _read_grouped_boundary_series(
     grouped = valid.groupby(time_column, as_index=True)[flow_column].mean().sort_index().astype("float64")
     return grouped, {
         "file_kind": file_kind,
+        "sheet_name": frame.attrs.get("hbv_sheet_name"),
         "date_field": str(time_column),
         "flow_field": str(flow_column),
         "valid_rows": int(len(valid)),
@@ -286,7 +322,7 @@ def read_boundary_inflow_series(
             )
         elif gap_mode in {"", "zero", "0"} and coverage_ratio < MIN_ZERO_FILL_COVERAGE_RATIO:
             warnings.warn(
-                f"上游边界入流与当前模拟时段仅重叠 {coverage_ratio * 100:.1f}% 时间步，"
+                f"上游边界入流在当前模拟时段内仅覆盖 {coverage_ratio * 100:.1f}%，"
                 "缺失部分将按 0 m3/s 填补；请确认这不是时间范围或时区配置错误。",
                 RuntimeWarning,
                 stacklevel=2,
@@ -302,7 +338,7 @@ def read_boundary_inflow_series(
         missing = target_index[series.isna()]
         sample = "、".join(pd.Timestamp(item).strftime("%Y-%m-%d %H:%M") for item in missing[:3])
         raise ValueError(
-            f"上游边界入流时间覆盖不完整，缺少 {int(series.isna().sum())} 个时间步，"
+            f"上游边界入流时间覆盖不完整，缺少 {_time_quantity(int(series.isna().sum()), expected_step_hours)}，"
             f"例如：{sample or '请检查原始文件'}"
         )
     series = series.fillna(0.0).astype(float)

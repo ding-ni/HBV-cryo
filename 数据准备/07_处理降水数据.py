@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 
 from 公共函数 import (
     bbox_dict,
@@ -17,6 +18,7 @@ from 公共函数 import (
     temporary_argv,
     year_range,
 )
+from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 
 def main():
@@ -57,7 +59,8 @@ def main():
         total = 0
         for year in years:
             total += module.process_precipitation(year)
-        print(f"[完成] ERA5 日降水文件数：{total}")
+        check = validate_tif_time_series("ERA5 日降水", Path(paths["raw_prec_era5_daily_dir"]), 24.0)
+        print(f"[完成] ERA5 日降水：{check['period_summary']}")
         return
 
     if runtime_source == "mswep":

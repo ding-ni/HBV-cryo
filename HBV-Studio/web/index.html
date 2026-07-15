@@ -257,9 +257,8 @@
                     <option value="interpolate">线性插值</option>
                   </select>
                 </div>
-                <div class="field-group"><label>时间字段名</label><input id="wz-boundary-date" type="text" value="date"></div>
-                <div class="field-group"><label>流量字段名</label><input id="wz-boundary-flow" type="text" value="flow"></div>
               </div>
+              <div class="hint-box">支持 CSV、XLS、XLSX、XLSM。系统自动选择有效工作表并识别时间列和流量列；保存后文件会归档到当前项目。</div>
               <div class="action-row">
                 <button class="ghost-button" id="wz-boundary-preview-btn">预览边界入流数据</button>
               </div>
@@ -320,7 +319,7 @@
                   </div>
                 </div>
               </div>
-              <div class="field-grid two" style="margin-top:12px">
+              <div class="field-grid" style="margin-top:12px">
                 <div class="field-group">
                   <label>降水数据源</label>
                   <select id="wz-prec-source">
@@ -329,13 +328,6 @@
                     <option value="cmfd">CMFD 本地原始文件</option>
                     <option value="custom_tif">本地栅格目录（仅登记来源，第 6 步自动带入）</option>
                   </select>
-                </div>
-                <div class="field-group hidden" id="wz-hourly-prec-group">
-                  <label>原始小时降水目录</label>
-                  <div class="path-input">
-                    <input id="wz-hourly-prec-dir" type="text" placeholder="小时尺度时需要">
-                    <button class="browse-button" data-target="wz-hourly-prec-dir" data-browse-kind="dir">选择</button>
-                  </div>
                 </div>
               </div>
               <div class="field-group hidden" id="wz-custom-prec-group" style="margin-top:12px">
@@ -495,7 +487,7 @@
                 </div>
               </div>
               <div id="wz-meteo-import-panel" class="hidden">
-                <p class="step-desc">选择包含栅格 GeoTIFF 文件的目录。文件命名格式需为 <code>NNN_VAR_YYYY.MM.DD.tif</code>（如 <code>000_PREC_2006.01.01.tif</code>）。导入时会先检查文件名时间戳，再按时间顺序导入；若网格与 DEM 不一致，将自动裁剪对齐。若第 4 步已经填写本地栅格目录，这里会自动带入，无需重复选择。</p>
+                <p class="step-desc" id="wz-meteo-import-desc">选择包含栅格 GeoTIFF 文件的目录。系统按当前项目时间尺度识别文件名时间戳、检查连续性并按时间顺序导入；若网格与 DEM 不一致，将自动裁剪对齐。若第 4 步已经填写本地栅格目录，这里会自动带入，无需重复选择。</p>
                 <div class="field-grid two">
                   <div class="field-group">
                     <label>降水栅格目录（必选）</label>
@@ -518,20 +510,22 @@
                       <button class="browse-button" data-target="wz-import-evap-dir" data-browse-kind="dir">选择</button>
                     </div>
                   </div>
-                  <div class="field-group">
-                    <label>日降水输入单位</label>
-                    <select id="wz-import-prec-unit">
-                      <option value="mm/day" selected>mm/day（默认）</option>
-                      <option value="m/day">m/day（导入时换算）</option>
-                    </select>
-                  </div>
-                  <div class="field-group">
-                    <label>日降水日期口径</label>
-                    <select id="wz-import-prec-day-basis">
-                      <option value="product_calendar_day" selected>按文件名日期使用（默认）</option>
-                      <option value="beijing_calendar_day">北京时间自然日</option>
-                      <option value="hydrological_day_08">08:00 至次日 08:00 水文日</option>
-                    </select>
+                  <div id="wz-daily-prec-metadata" class="field-grid two" style="grid-column:1 / -1">
+                    <div class="field-group">
+                      <label>日降水输入单位</label>
+                      <select id="wz-import-prec-unit">
+                        <option value="mm/day" selected>mm/day（默认）</option>
+                        <option value="m/day">m/day（导入时换算）</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label>日降水日期口径</label>
+                      <select id="wz-import-prec-day-basis">
+                        <option value="product_calendar_day" selected>按文件名日期使用（默认）</option>
+                        <option value="beijing_calendar_day">北京时间自然日</option>
+                        <option value="hydrological_day_08">08:00 至次日 08:00 水文日</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
                 <div class="action-row" style="margin-top:12px">

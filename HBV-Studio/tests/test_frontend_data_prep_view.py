@@ -194,7 +194,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
               timescale: "hourly",
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
             });
-            if (customConditionalFields.step3Skipped || !customConditionalFields.stationFieldsVisible || !customConditionalFields.hourlyPrecipVisible || !customConditionalFields.customPrecVisible || !customConditionalFields.customTempVisible || !customConditionalFields.customPetVisible) {
+            if (customConditionalFields.step3Skipped || !customConditionalFields.stationFieldsVisible || customConditionalFields.hourlyPrecipVisible || !customConditionalFields.customPrecVisible || !customConditionalFields.customTempVisible || !customConditionalFields.customPetVisible) {
               throw new Error(`custom conditional fields mismatch: ${JSON.stringify(customConditionalFields)}`);
             }
             const dailyFullFocus = view.projectFocusHintState({ hourly: false, objectType: "full_upstream_basin" });
@@ -330,7 +330,7 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (!boundaryPreview.html.includes("流量范围 -1.23 ~ 4.57 m³/s") || !boundaryPreview.html.includes("建议模式 小时尺度")) {
               throw new Error(`boundary preview summary html mismatch: ${boundaryPreview.html}`);
             }
-            if (!boundaryPreview.html.includes("focus-proxy") || !boundaryPreview.html.includes("fail:当前边界入流和项目时段相比仍有缺口") || !boundaryPreview.html.includes(":6")) {
+            if (!boundaryPreview.html.includes("focus-proxy") || !boundaryPreview.html.includes("fail:当前边界入流和项目时段相比仍有缺口") || !boundaryPreview.html.includes(":7")) {
               throw new Error(`boundary preview focus checks missing: ${boundaryPreview.html}`);
             }
             const stepCheck = boundaryPreview.checks.find(item => item.label === "识别时间步长");
@@ -724,6 +724,19 @@ class FrontendDataPrepViewTests(unittest.TestCase):
                 missingDailyMetadata.request.precip_unit !== "mm/day" ||
                 missingDailyMetadata.request.precip_day_basis !== "product_calendar_day") {
               throw new Error(`daily import metadata defaults mismatch: ${JSON.stringify(missingDailyMetadata)}`);
+            }
+            const hourlyMeteoRequest = view.meteoImportRequestState({
+              configPath: "C:/ws/hourly.json",
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+              registeredDirs: { prec: "D:/hourly/p", temp: "D:/hourly/t", pet: "D:/hourly/e" },
+              importDirs: {},
+              runtimePrecipSource: "custom_tif",
+              isDaily: false,
+              precipUnit: "m/day",
+              precipDayBasis: "hydrological_day_08",
+            });
+            if (!hourlyMeteoRequest.ready || "precip_unit" in hourlyMeteoRequest.request || "precip_day_basis" in hourlyMeteoRequest.request) {
+              throw new Error(`hourly import must not carry daily metadata: ${JSON.stringify(hourlyMeteoRequest)}`);
             }
             const allLocalHint = view.meteoModeHintState({
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },

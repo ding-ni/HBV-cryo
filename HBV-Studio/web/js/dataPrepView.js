@@ -320,7 +320,7 @@
     return {
       step3Skipped: Boolean(model.fullUpstream),
       stationFieldsVisible: String(model.precipMode || "grid_only") !== "grid_only",
-      hourlyPrecipVisible: String(model.timescale || "daily") !== "daily",
+      hourlyPrecipVisible: false,
       customPrecVisible: sources.prec === "custom_tif",
       customTempVisible: sources.temp === "custom_tif",
       customPetVisible: sources.pet === "custom_tif",
@@ -487,6 +487,7 @@
     const coverage = hasCoverage ? `${formatNumber(Number(d.coverage_ratio) * 100, 1)}%` : "未与当前项目时段对比";
     const zeroRatio = validRows ? `${formatNumber((zeroCount / Math.max(1, validRows)) * 100, 1)}%` : "—";
     const checks = [
+      { label: "边界资料时段", value: d.period_summary || `${d.date_range?.start || "—"} 至 ${d.date_range?.end || "—"}`, status: d.date_range?.start && d.date_range?.end ? "ok" : "warn" },
       { label: "识别时间步长", value: detectedStep, status: d.time_step_hours && d.expected_time_step_hours && Number(d.time_step_hours) !== Number(d.expected_time_step_hours) ? "fail" : "ok" },
       { label: "当前项目时间步长", value: expectedStep, status: "ok" },
       { label: "覆盖率", value: coverage, status: coverageLow ? "fail" : "ok" },
@@ -508,6 +509,8 @@
         <strong>边界入流概览</strong><br>
         有效记录 ${escapeHtml(String(validRows))}/${escapeHtml(String(d.total_rows || 0))} 行；
         时间范围 ${escapeHtml(d.date_range?.start || "—")} → ${escapeHtml(d.date_range?.end || "—")}；
+        ${d.sheet_name ? `工作表 ${escapeHtml(d.sheet_name)}；` : ""}
+        自动识别 ${escapeHtml(d.date_field || "—")} / ${escapeHtml(d.flow_field || "—")}；
         流量范围 ${escapeHtml(formatNumber(d.flow_stats?.min, 2))} ~ ${escapeHtml(formatNumber(d.flow_stats?.max, 2))} m³/s；
         建议模式 ${escapeHtml(suggestedProfile)}。
       </div>

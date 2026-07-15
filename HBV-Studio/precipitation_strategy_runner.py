@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 
 from 公共函数 import config_base_dir, read_config, resolve_path  # type: ignore
 from profile_runner import PROFILE_DAILY, build_profile_paths, configured_precip_source, resolve_profile
+from services.time_utils import summarize_time_coverage, time_step_count_text
 
 
 MIN_GRID_PRECIP_MM = 0.05
@@ -1397,6 +1398,11 @@ def format_time(value: Any, step_hours: float) -> str:
     return ts.strftime("%Y-%m-%d %H:%M")
 
 
+def record_period_text(records: list[tuple[pd.Timestamp, Path]], step_hours: float) -> str:
+    coverage = summarize_time_coverage([timestamp for timestamp, _ in records], step_hours)
+    return str(coverage["period_summary"])
+
+
 def summarize_record_participation(
     *,
     config: dict[str, Any],
@@ -1528,6 +1534,7 @@ def summarize_record_participation(
         "precip_source": prec_source,
         "time_basis": time_basis,
         "time_basis_label": time_basis_label,
+        "time_step_hours": float(step_hours),
         "expected_steps": expected_steps,
         "selected_steps": int(len(records)),
         "written_files": int(written),
@@ -1536,6 +1543,7 @@ def summarize_record_participation(
         "skipped_out_of_scope_steps": int(skipped_out_of_scope),
         "actual_start": format_time(timestamps[0], step_hours) if len(timestamps) else "",
         "actual_end": format_time(timestamps[-1], step_hours) if len(timestamps) else "",
+        "actual_period": record_period_text(records, step_hours),
         "station_format": station_format,
         "station_time_aggregation": station_time_aggregation or {"enabled": False},
         "matched_station_count": int(len(station_ids)),
@@ -2346,6 +2354,7 @@ def apply_grid_bias_correction(
     *,
     return_stats: bool = False,
     algorithm: str = DEFAULT_STATION_CORRECTION_ALGORITHM,
+    step_hours: float = 24.0,
 ) -> int | dict[str, Any]:
     algorithm_key = str(algorithm or DEFAULT_STATION_CORRECTION_ALGORITHM).strip().lower()
     if algorithm_key not in {STATION_CORRECTION_ALGORITHM_V2, STATION_CORRECTION_ALGORITHM_LEGACY}:
@@ -2430,16 +2439,18 @@ def apply_grid_bias_correction(
             write_raster(output, profile, out_to_write)
             processed_count += 1
             written += 1
+    period_text = record_period_text(records, step_hours)
     print(
         "空间订正摘要: "
-        f"本次实际处理时段 {processed_count}；"
-        f"已有输出跳过 {skipped_existing_count}；"
+        f"处理范围 {period_text}；"
+        f"本次新计算 {time_step_count_text(processed_count, step_hours)}；"
+        f"已有输出复用 {time_step_count_text(skipped_existing_count, step_hours)}；"
         f"有效站点-时段样本 {total_valid_station_steps}；"
-        f"无可用站点时段 {no_station_step_count}；"
-        f"规则外推时段 {transfer_rule_step_count}；"
-        f"原样保留时段 {pass_through_step_count}；"
-        f"倍率裁剪时段 {clipped_step_count}；"
-        f"格点漏报降水修复时段 {occurrence_repair_count}"
+        f"无可用站点 {time_step_count_text(no_station_step_count, step_hours)}；"
+        f"规则外推 {time_step_count_text(transfer_rule_step_count, step_hours)}；"
+        f"原样保留 {time_step_count_text(pass_through_step_count, step_hours)}；"
+        f"倍率裁剪 {time_step_count_text(clipped_step_count, step_hours)}；"
+        f"格点漏报修复 {time_step_count_text(occurrence_repair_count, step_hours)}"
     )
     if skipped_existing_count and processed_count == 0:
         print("提示: 本次没有重新计算已有订正文件；如需刷新空间订正统计和结果，请启用覆盖。")
@@ -2528,12 +2539,14 @@ def apply_thiessen(
             write_raster(output, profile, out_to_write)
             processed_count += 1
             written += 1
+    step_hours = 24.0 if all(pd.Timestamp(ts).hour == 0 for ts, _ in records) else 1.0
     print(
         "泰森分配摘要: "
-        f"本次实际处理时段 {processed_count}；"
-        f"已有输出跳过 {skipped_existing_count}；"
+        f"处理范围 {record_period_text(records, step_hours)}；"
+        f"本次新计算 {time_step_count_text(processed_count, step_hours)}；"
+        f"已有输出复用 {time_step_count_text(skipped_existing_count, step_hours)}；"
         f"可用站点组合 {len(nearest_cache)}；"
-        f"无可用站点时段 {no_station_step_count}"
+        f"无可用站点 {time_step_count_text(no_station_step_count, step_hours)}"
     )
     if skipped_existing_count and processed_count == 0:
         print("提示: 本次没有重新计算已有泰森分配文件；如需刷新结果，请启用覆盖。")
@@ -2596,7 +2609,10 @@ def main() -> None:
         raise ValueError("降水方案没有落在当前资料口径内的可用时间步，请检查时间设置、事件表或站点降水资料。")
     if missing_expected_steps:
         sample = "、".join(format_time(ts, normalize_time_step_hours(config.get("时间步长_小时", 24.0))) for ts in missing_expected_steps[:5])
-        raise ValueError(f"降水方案缺少当前资料口径内 {len(missing_expected_steps)} 个时间步，例如：{sample}。")
+        raise ValueError(
+            f"降水方案缺少当前资料口径内 {time_step_count_text(len(missing_expected_steps), model_step_hours)}，"
+            f"例如：{sample}。"
+        )
 
     with rasterio.open(records[0][1]) as src:
         stations = load_station_metadata(station_meta_path, src.crs)
@@ -2637,7 +2653,7 @@ def main() -> None:
             f"累计为日降水；有效日数 {int(station_time_aggregation.get('valid_days', 0))}"
         )
     print(f"匹配站点数: {len(stations)}")
-    print(f"时间步文件数: {len(records)}")
+    print(f"处理时间范围: {record_period_text(records, model_step_hours)}")
     if skipped_out_of_scope:
         print(f"已忽略资料口径外时间步: {skipped_out_of_scope}")
     if use_timestamp_names:
@@ -2687,6 +2703,7 @@ def main() -> None:
             transfer_rules,
             return_stats=True,
             algorithm=correction_algorithm,
+            step_hours=model_step_hours,
         )
         processing_stats = dict(correction_result) if isinstance(correction_result, dict) else {}
         written = int(processing_stats.get("written_files", correction_result if isinstance(correction_result, int) else 0))
@@ -2734,7 +2751,10 @@ def main() -> None:
         "source_daily_forcing_manifest": sha256_file_identity(base_dir.parent / "daily_forcing_manifest.json"),
     }
     summary_path = write_strategy_summary(target_dir, summary)
-    print(f"完成：{written} 个文件可用（新写入或复用已有输出） {target_dir}")
+    print(
+        f"完成：{record_period_text(records, model_step_hours)}；"
+        f"结果已写入或复用 {target_dir}"
+    )
     print(f"降水方案摘要: {summary_path}")
 
 

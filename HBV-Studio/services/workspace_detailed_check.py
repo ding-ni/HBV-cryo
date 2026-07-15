@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.time_utils import time_step_count_text, time_step_missing_text
+
 
 @dataclass(frozen=True)
 class WorkspaceDetailedCheckContext:
@@ -557,7 +559,22 @@ def workspace_detailed_check(
         )
     if forcing["expected_steps"] is not None:
         summary.append({"group": "气象数据", "label": "资料口径", "value": str(forcing.get("time_basis_label", "连续时段")), "ok": True})
-        summary.append({"group": "气象数据", "label": "期望时间步数", "value": str(forcing["expected_steps"]), "ok": True})
+        expected_start = forcing.get("expected_start")
+        expected_end = forcing.get("expected_end")
+        expected_range = (
+            f"{context.format_timestamp_for_display(expected_start, step_hours)} 至 "
+            f"{context.format_timestamp_for_display(expected_end, step_hours)}，"
+            if expected_start is not None and expected_end is not None
+            else ""
+        )
+        summary.append(
+            {
+                "group": "气象数据",
+                "label": "目标气象时段",
+                "value": f"{expected_range}共 {time_step_count_text(int(forcing['expected_steps']), step_hours)}",
+                "ok": True,
+            }
+        )
     event_windows = dict(forcing.get("event_windows") or {})
     if event_windows:
         summary.append(
@@ -589,7 +606,8 @@ def workspace_detailed_check(
                 f"缺 {int(first.get('missing_vs_precip', 0) or 0)} 格"
             )
         else:
-            detail = f"已抽查 {checked_steps} 个时间步"
+            scale_label = "小时尺度时点" if abs(step_hours - 1.0) <= 1e-9 else "日尺度日期"
+            detail = f"已抽查 {checked_steps} 个{scale_label}"
         summary.append(
             {
                 "group": "气象数据",
@@ -604,7 +622,10 @@ def workspace_detailed_check(
             {
                 "group": "气象数据",
                 "label": f"{label}有效时间栅格",
-                "value": f"{item['valid_time_steps']} / {item['total_files']}",
+                "value": str(
+                    item.get("period_summary")
+                    or f"旧检查结果仅识别到 {time_step_count_text(int(item['valid_time_steps']), step_hours)}，未记录起止时间"
+                ),
                 "ok": item["ok"],
             }
         )
@@ -634,16 +655,24 @@ def workspace_detailed_check(
                 {
                     "group": "气象数据",
                     "label": f"{label}时间覆盖",
-                    "value": f"缺少 {len(item['missing_steps'])} 个时间步，例如 {sample}",
+                    "value": f"缺少 {time_step_missing_text(len(item['missing_steps']), step_hours)}，例如 {sample}",
                     "ok": False,
                 }
             )
         elif forcing["expected_steps"] is not None:
+            expected_start = forcing.get("expected_start")
+            expected_end = forcing.get("expected_end")
+            expected_period = (
+                f"{context.format_timestamp_for_display(expected_start, step_hours)} 至 "
+                f"{context.format_timestamp_for_display(expected_end, step_hours)}"
+                if expected_start is not None and expected_end is not None
+                else forcing.get("time_basis_label", "当前任务时段")
+            )
             summary.append(
                 {
                     "group": "气象数据",
                     "label": f"{label}时间覆盖",
-                    "value": f"已覆盖{forcing.get('time_basis_label', '当前任务时段')} {forcing['expected_steps']} 个时间步",
+                    "value": f"完整覆盖 {expected_period}",
                     "ok": item["ok"],
                 }
             )

@@ -627,7 +627,16 @@
       const result = task?.result || {};
       const issues = [...(result.validation_errors || []), ...(result.validation_warnings || [])];
       const tail = result.validation_ok ? "导入后检查通过。" : `仍需继续检查：${issues.slice(0, 2).join("；") || "请到第 7 步继续检查。"} `;
-      return `已导入降水 ${result.prec_count || 0}、气温 ${result.temp_count || 0}、蒸散 ${result.evap_count || 0} 个文件；${result.aligned ? "网格已一致。" : "已自动裁剪对齐到 DEM 网格。"}${tail}`;
+      const periods = result.periods || {};
+      const periodParts = [
+        ["降水", periods.prec],
+        ["气温", periods.temp],
+        ["蒸散发", periods.evap],
+      ].filter(([, value]) => String(value || "").trim()).map(([label, value]) => `${label}：${value}`);
+      const coverage = periodParts.length
+        ? periodParts.join("；")
+        : "旧版导入结果未记录气象起止时间，请在输入检查中重新核验";
+      return `${coverage}；${result.aligned ? "网格已一致。" : "已自动裁剪对齐到 DEM 网格。"}${tail}`;
     }
     return taskLastMeaningfulLog(task, helpers) || "气象导入失败。";
   }

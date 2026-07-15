@@ -229,7 +229,7 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
 
         self.assertEqual(written, 1)
         log = stdout.getvalue()
-        self.assertIn("\u5df2\u6709\u8f93\u51fa\u8df3\u8fc7 1", log)
+        self.assertIn("已有输出复用 1 日", log)
         self.assertIn("\u672c\u6b21\u6ca1\u6709\u91cd\u65b0\u8ba1\u7b97", log)
 
     def test_hydro_diagnostics_quantifies_station_error_and_basin_precip_change(self) -> None:

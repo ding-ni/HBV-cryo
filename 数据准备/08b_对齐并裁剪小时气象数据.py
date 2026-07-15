@@ -27,6 +27,7 @@ from 公共函数 import (
     resolve_workspace_dem_path,
 )  # type: ignore
 from profile_runner import PROFILE_HOURLY, build_profile_paths, configured_precip_source
+from services.time_utils import summarize_time_coverage  # type: ignore
 
 
 NODATA = -9999.0
@@ -269,8 +270,11 @@ def main() -> None:
         evap_input_dir = base_paths["raw_evap_hourly_dir"]
         print(f"[蒸散发] 使用 ERA5 处理结果: {evap_input_dir}")
 
+    prec_records = collect_files(precip_input)
+    temp_records = collect_files(temp_input_dir)
+    evap_records = collect_files(evap_input_dir)
     prec_count, prec_masks, prec_repaired = write_series(
-        collect_files(precip_input),
+        prec_records,
         precip_output,
         "PREC",
         dem_profile,
@@ -279,7 +283,7 @@ def main() -> None:
         overwrite=bool(args.覆盖),
     )
     temp_count, temp_masks, temp_repaired = write_series(
-        collect_files(temp_input_dir),
+        temp_records,
         paths["aligned_temp_dir"],
         "TEMP",
         dem_profile,
@@ -289,7 +293,7 @@ def main() -> None:
         reference_masks=prec_masks,
     )
     evap_count, evap_masks, evap_repaired = write_series(
-        collect_files(evap_input_dir),
+        evap_records,
         paths["aligned_evap_dir"],
         "EVAP",
         dem_profile,
@@ -304,12 +308,13 @@ def main() -> None:
         if not np.array_equal(prec_masks[stamp], temp_masks[stamp]) or not np.array_equal(prec_masks[stamp], evap_masks[stamp]):
             raise RuntimeError(f"{stamp} 降水/气温/蒸散发有效像元掩膜不一致。")
     summary = {
-        "降水": prec_count,
-        "温度": temp_count,
-        "蒸散发": evap_count,
+        "降水": prec_records,
+        "气温": temp_records,
+        "潜在蒸散发": evap_records,
     }
-    for name, value in summary.items():
-        print(f"{name}: {value} 个文件")
+    for name, records in summary.items():
+        coverage = summarize_time_coverage([timestamp for timestamp, _ in records], 1.0)
+        print(f"{name}: {coverage['period_summary']}")
     repaired_total = int(prec_repaired + temp_repaired + evap_repaired)
     if repaired_total:
         print(f"[修补统计] 共最近邻补齐 {repaired_total} 个流域边缘缺口像元。")

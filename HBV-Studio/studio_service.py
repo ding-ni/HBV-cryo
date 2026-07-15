@@ -304,6 +304,7 @@ from services.time_utils import (
     is_date_only_string,
     normalize_time_step_hours,
     parse_time_from_name,
+    summarize_time_coverage,
     time_sequence_messages,
 )
 from services.template_sync import TuotuoheSyncStartContext
@@ -376,6 +377,7 @@ from services.workspace_layout import (
 from services.workspace_staging import WorkspaceStagingContext
 from services.workspace_staging import WorkspaceRuntimeDirsContext
 from services.workspace_staging import seed_workspace_runtime_dirs as build_seed_workspace_runtime_dirs
+from services.workspace_staging import stage_boundary_inflow_file as build_stage_boundary_inflow_file
 from services.workspace_staging import stage_observed_runoff_file as build_stage_observed_runoff_file
 from services.workspace_staging import stage_vector_shapefile as build_stage_vector_shapefile
 from services.workspace_validation import WorkspaceValidationContext
@@ -499,7 +501,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026.07.14.3"
+APP_VERSION = "2026.07.15.2"
 SERVER_STARTED_AT = time.time()
 
 
@@ -707,6 +709,15 @@ def stage_vector_shapefile(
 
 def stage_observed_runoff_file(config: dict[str, Any], raw_path: Any, *, config_path: Path | None = None) -> Path:
     return build_stage_observed_runoff_file(
+        config,
+        raw_path,
+        _workspace_staging_context(),
+        config_path=config_path,
+    )
+
+
+def stage_boundary_inflow_file(config: dict[str, Any], raw_path: Any, *, config_path: Path | None = None) -> Path:
+    return build_stage_boundary_inflow_file(
         config,
         raw_path,
         _workspace_staging_context(),
@@ -2475,15 +2486,23 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
     elif step == 3:
         boundary = dict(config.get("边界条件", {}))
         if step_data.get("boundary_csv"):
-            boundary["上游边界入流_csv"] = step_data["boundary_csv"]
+            staged_boundary = stage_boundary_inflow_file(
+                config,
+                step_data["boundary_csv"],
+                config_path=path,
+            )
+            detected_boundary = inspect_boundary_inflow_csv(
+                str(staged_boundary),
+                date_field="",
+                flow_field="",
+            )
+            boundary["上游边界入流_csv"] = str(staged_boundary)
+            boundary["时间字段"] = str(detected_boundary["date_field"])
+            boundary["流量字段"] = str(detected_boundary["flow_field"])
+            if detected_boundary.get("sheet_name"):
+                boundary["工作表"] = str(detected_boundary["sheet_name"])
         if step_data.get("gap_fill"):
             boundary["缺失填补"] = step_data["gap_fill"]
-        date_field = step_data.get("date_field", step_data.get("boundary_date"))
-        flow_field = step_data.get("flow_field", step_data.get("boundary_flow"))
-        if date_field:
-            boundary["时间字段"] = date_field
-        if flow_field:
-            boundary["流量字段"] = flow_field
         config["边界条件"] = boundary
     else:
         # Steps 4+ send Chinese keys directly — generic merge
@@ -2891,12 +2910,15 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                 raise ValueError(f"{label_map[key]}目录没有落在{time_basis_label}内的 tif 文件。请检查时间设置、事件表或重新选择目录。")
         target_path = Path(target_dir)
         reuse_existing = same_path(src_dir, target_path)
-        start_label = format_timestamp_for_display(ordered_files[0][0], config.get("时间步长_小时", 24.0))
-        end_label = format_timestamp_for_display(ordered_files[-1][0], config.get("时间步长_小时", 24.0))
+        coverage = summarize_time_coverage(
+            [timestamp for timestamp, _ in ordered_files],
+            time_step_hours,
+        )
+        period_summary = str(coverage["period_summary"])
         if reuse_existing:
-            log(f"[扫描] {label_map[key]}：识别 {len(ordered_files)} 个时间步，范围 {start_label} -> {end_label}。源目录就是当前工作区目录，将直接复用。")
+            log(f"[扫描] {label_map[key]}：{period_summary}。源目录就是当前工作区目录，将直接复用。")
         else:
-            log(f"[扫描] {label_map[key]}：识别 {len(ordered_files)} 个时间步，范围 {start_label} -> {end_label}，将按时间顺序导入。")
+            log(f"[扫描] {label_map[key]}：{period_summary}，将按时间顺序导入。")
         if out_of_range_count > 0:
             log(f"[筛选] {label_map[key]}：已自动忽略 {out_of_range_count} 个落在{time_basis_label}之外的 tif 文件。")
         prepared_inputs.append(
@@ -2908,6 +2930,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                 "ordered_files": ordered_files,
                 "reuse_existing": reuse_existing,
                 "out_of_range_count": out_of_range_count,
+                "period_summary": period_summary,
                 "source_digest": tif_series_digest(ordered_files),
             }
         )
@@ -2946,7 +2969,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
             count = 0
             ordered_files = list(item["ordered_files"])
             total_item = len(ordered_files)
-            log(f"[导入] 开始处理{item['label']}，共 {total_item} 个文件。")
+            log(f"[导入] 开始处理{item['label']}：{item['period_summary']}。")
             for idx, (timestamp, src_path_obj) in enumerate(ordered_files, start=1):
                 src_path = str(src_path_obj)
                 fname = Path(src_path).name
@@ -3069,7 +3092,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                     timestamp=format_timestamp_for_display(timestamp, config.get("时间步长_小时", 24.0)),
                 )
             counts[label] = count
-            log(f"[完成] {item['label']}临时导入完成，共 {count} 个文件。")
+            log(f"[完成] {item['label']}临时导入完成：{item['period_summary']}。")
 
         for item in prepared_inputs:
             if item["reuse_existing"]:
@@ -3101,6 +3124,10 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "validation_warnings": forcing["warnings"][:5],
         "expected_steps": forcing["expected_steps"],
         "valid_steps": forcing["total_valid_steps"],
+        "periods": {
+            key: str(dict(forcing.get("directories", {}).get(key, {}) or {}).get("period_summary", "") or "")
+            for key in ("prec", "temp", "evap")
+        },
         "time_basis": forcing.get("time_basis"),
         "time_basis_label": forcing.get("time_basis_label"),
         "import_order": "timestamp_asc",
@@ -3179,6 +3206,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         "out_of_range_ignored": {str(item["key"]).replace("_dir", ""): int(item.get("out_of_range_count", 0)) for item in prepared_inputs},
         "expected_steps": forcing["expected_steps"],
         "valid_steps": forcing["total_valid_steps"],
+        "periods": dict(summary["periods"]),
         "time_basis": forcing.get("time_basis"),
         "time_basis_label": forcing.get("time_basis_label"),
         "import_order": "timestamp_asc",
@@ -3189,7 +3217,11 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
     state_path = write_meteo_state(config, state_payload, profile)
     summary["state_file"] = str(state_path)
     if forcing["ok"]:
-        log(f"[完成] 导入完成：降水 {summary['prec_count']}、气温 {summary['temp_count']}、蒸散发 {summary['evap_count']}。气象驱动检查通过。")
+        period_message = "；".join(
+            f"{label}：{summary['periods'].get(key) or '未识别到有效时间范围'}"
+            for key, label in (("prec", "降水"), ("temp", "气温"), ("evap", "蒸散发"))
+        )
+        log(f"[完成] 导入完成，气象驱动检查通过。{period_message}")
     else:
         issue_preview = "；".join((forcing["errors"] + forcing["warnings"])[:3]) or "仍需进一步检查。"
         log(f"[完成] 文件已导入，但气象驱动检查未完全通过：{issue_preview}")

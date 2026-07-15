@@ -65,7 +65,7 @@ class RasterTimeSeriesServiceTests(unittest.TestCase):
         self.assertEqual(len(result["warnings"]), 1)
         self.assertIn("无法解析时间", result["errors"][0])
         self.assertIn("重复时间戳", result["errors"][1])
-        self.assertIn("缺少 1 个时间步", result["errors"][2])
+        self.assertIn("缺少 1 日", result["errors"][2])
         self.assertIn("落在率定窗口之外", result["warnings"][0])
 
     def test_validate_tif_time_series_reports_missing_directory(self) -> None:
@@ -77,6 +77,43 @@ class RasterTimeSeriesServiceTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["total_files"], 0)
         self.assertIn("目录不存在", result["errors"][0])
+
+    def test_period_summary_uses_hydrological_daily_and_hourly_units(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            daily_dir = root / "daily"
+            hourly_dir = root / "hourly"
+            daily_dir.mkdir()
+            hourly_dir.mkdir()
+            for name in ("P_2025.01.01.tif", "P_2025.01.02.tif", "P_2025.01.03.tif"):
+                (daily_dir / name).write_bytes(b"")
+            for name in (
+                "P_2025.01.01.08.tif",
+                "P_2025.01.01.09.tif",
+                "P_2025.01.01.10.tif",
+            ):
+                (hourly_dir / name).write_bytes(b"")
+
+            daily = validate_tif_time_series("降水", daily_dir, 24)
+            hourly = validate_tif_time_series("降水", hourly_dir, 1)
+
+        self.assertEqual(daily["period_summary"], "2025-01-01 至 2025-01-03，共 3 日，逐日连续无缺测")
+        self.assertEqual(
+            hourly["period_summary"],
+            "2025-01-01 08:00 至 2025-01-01 10:00，共 3 小时，逐小时连续无缺测",
+        )
+
+    def test_hourly_internal_gap_names_missing_hour(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hourly_dir = Path(temp_dir)
+            (hourly_dir / "P_2025.01.01.08.tif").write_bytes(b"")
+            (hourly_dir / "P_2025.01.01.10.tif").write_bytes(b"")
+
+            result = validate_tif_time_series("降水", hourly_dir, 1)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["period_summary"], "2025-01-01 08:00 至 2025-01-01 10:00，共 2 小时，内部缺少 1 小时")
+        self.assertIn("缺少 1 小时，例如：2025-01-01 09:00", result["errors"][0])
 
     def test_validate_tif_grid_alignment_skips_missing_dem_or_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

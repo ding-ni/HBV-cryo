@@ -306,7 +306,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
 
         def validate_tif_time_series(label: str, directory: Path, step_hours: float) -> dict[str, Any]:
             call_log.append(("scan", label, directory, step_hours))
-            return results.get(
+            result = dict(results.get(
                 label,
                 {
                     "label": label,
@@ -316,7 +316,16 @@ class ForcingValidationServiceTests(unittest.TestCase):
                     "valid_time_steps": 0,
                     "total_files": 0,
                 },
-            )
+            ))
+            count = int(result.get("valid_time_steps", 0) or 0)
+            if count > 0 and not result.get("period_summary"):
+                start = pd.Timestamp("2025-01-01 08:00" if step_hours < 24 else "2025-01-01")
+                end = start + pd.Timedelta(hours=step_hours * (count - 1))
+                if step_hours < 24:
+                    result["period_summary"] = f"{start:%Y-%m-%d %H:%M} 至 {end:%Y-%m-%d %H:%M}，共 {count} 小时，逐小时连续无缺测"
+                else:
+                    result["period_summary"] = f"{start:%Y-%m-%d} 至 {end:%Y-%m-%d}，共 {count} 日，逐日连续无缺测"
+            return result
 
         def count_matching(path: Path, pattern: str = "*.tif") -> int:
             call_log.append(("count", path, pattern))
@@ -344,7 +353,12 @@ class ForcingValidationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(ready)
-        self.assertEqual(message, "日尺度气象驱动有效时间步：6")
+        self.assertEqual(
+            message,
+            "降水：仅识别到 3 日，旧检查结果未提供起止时间；"
+            "气温：仅识别到 2 日，旧检查结果未提供起止时间；"
+            "蒸散发：仅识别到 1 日，旧检查结果未提供起止时间",
+        )
         self.assertEqual(count, 6)
         self.assertEqual(calls[0], ("paths", "daily"))
         self.assertEqual(calls[1], ("precip", "daily", "custom_tif"))
@@ -399,7 +413,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
             )
 
         self.assertTrue(ready)
-        self.assertEqual(message, "基础输入齐全；气象驱动有效时间步数：5")
+        self.assertEqual(message, "基础输入齐全；气象驱动旧检查结果仅返回 5 日，未返回各变量起止时间")
         self.assertEqual(count, 6)
         self.assertEqual(calls[0], ("paths", "daily"))
         self.assertEqual(calls[1], ("dem", gis_dir, "1km"))
@@ -425,7 +439,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
             )
 
         self.assertFalse(ready)
-        self.assertEqual(message, "基础输入缺失；小时气象驱动有效时间步数：3；问题：气象缺少降水；气象缺少气温")
+        self.assertEqual(message, "基础输入缺失；气象驱动旧检查结果仅返回 3 小时，未返回各变量起止时间；问题：气象缺少降水；气象缺少气温")
         self.assertEqual(count, 3)
 
     def test_summarize_nc_download_status_reports_existing_and_missing_groups(self) -> None:
@@ -493,7 +507,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
             ready, message, count = check_hourly_era5_download_status({}, context)
 
         self.assertTrue(ready)
-        self.assertEqual(message, "小时 ERA5 原始 NetCDF 文件数：6")
+        self.assertEqual(message, "下载目标时段尚未填写；小时 ERA5 原始文件组已准备 6 个，处理后将逐小时核验起止时间与缺测")
         self.assertEqual(count, 6)
 
     def test_hourly_forcing_ready_status_formats_directory_counts(self) -> None:
@@ -520,7 +534,12 @@ class ForcingValidationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(ready)
-        self.assertEqual(message, "小时气象驱动：降水=2 气温=3 蒸散=4（工程目录=workspace）")
+        self.assertEqual(
+            message,
+            "小时气象驱动：降水：仅识别到 2 小时，旧检查结果未提供起止时间；"
+            "气温：仅识别到 3 小时，旧检查结果未提供起止时间；"
+            "蒸散发：仅识别到 4 小时，旧检查结果未提供起止时间（工程目录=workspace）",
+        )
         self.assertEqual(count, 9)
         self.assertEqual(calls, [("workspace_paths",), ("forcing", "hourly", "custom_tif")])
 
@@ -541,7 +560,13 @@ class ForcingValidationServiceTests(unittest.TestCase):
         ready, message, count = hourly_forcing_ready_status({}, context, profile="hourly")
 
         self.assertFalse(ready)
-        self.assertEqual(message, "小时气象驱动：降水=1 气温=0 蒸散=0（工程目录=workspace）；问题：降水缺少时间步；气温缺少时间步")
+        self.assertEqual(
+            message,
+            "小时气象驱动：降水：仅识别到 1 小时，旧检查结果未提供起止时间；"
+            "气温：仅识别到 0 小时，旧检查结果未提供起止时间；"
+            "蒸散发：仅识别到 0 小时，旧检查结果未提供起止时间（工程目录=workspace）；"
+            "问题：降水缺少时间步；气温缺少时间步",
+        )
         self.assertEqual(count, 1)
 
     def test_prefer_raw_or_aligned_group_status_prefers_ready_raw_series(self) -> None:
@@ -560,7 +585,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(ready)
-        self.assertEqual(message, "raw: 4")
+        self.assertEqual(message, "raw：2025-01-01 至 2025-01-04，共 4 日，逐日连续无缺测")
         self.assertEqual(count, 4)
 
     def test_prefer_raw_or_aligned_group_status_falls_back_to_ready_aligned_series(self) -> None:
@@ -579,7 +604,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(ready)
-        self.assertEqual(message, "aligned: 3（已导入并完成网格对齐）")
+        self.assertEqual(message, "aligned：2025-01-01 至 2025-01-03，共 3 日，逐日连续无缺测（已导入并完成网格对齐）")
         self.assertEqual(count, 3)
 
     def test_configured_daily_meteo_sources_uses_defaults_and_legacy_pet_key(self) -> None:
@@ -616,7 +641,11 @@ class ForcingValidationServiceTests(unittest.TestCase):
         ready, message, count = check_daily_temp_evap_status({}, context, profile="daily")
 
         self.assertTrue(ready)
-        self.assertEqual(message, "日尺度 ERA5 温度中间结果: 3；日尺度潜在蒸散发中间结果: 2")
+        self.assertEqual(
+            message,
+            "日尺度 ERA5 温度中间结果：2025-01-01 至 2025-01-03，共 3 日，逐日连续无缺测；"
+            "日尺度潜在蒸散发中间结果：2025-01-01 至 2025-01-02，共 2 日，逐日连续无缺测",
+        )
         self.assertEqual(count, 5)
 
     def test_check_daily_era5_processed_status_skips_when_temp_and_pet_are_custom_tif(self) -> None:
@@ -668,7 +697,12 @@ class ForcingValidationServiceTests(unittest.TestCase):
         ready, message, count = check_hourly_temp_evap_status({}, context, profile="hourly")
 
         self.assertTrue(ready)
-        self.assertEqual(message, "工程气温输入: 4；工程潜在蒸散发输入: 4（已导入并完成网格对齐）")
+        self.assertEqual(
+            message,
+            "工程气温输入：2025-01-01 08:00 至 2025-01-01 11:00，共 4 小时，逐小时连续无缺测；"
+            "工程潜在蒸散发输入：2025-01-01 08:00 至 2025-01-01 11:00，共 4 小时，逐小时连续无缺测"
+            "（已导入并完成网格对齐）",
+        )
         self.assertEqual(count, 8)
         self.assertIn(("scan", "小时尺度 ERA5 温度中间结果", Path("raw_hourly_temp"), 1.0), calls)
         self.assertIn(("scan", "工程潜在蒸散发输入", Path("aligned_hourly_evap"), 1.0), calls)
@@ -677,12 +711,22 @@ class ForcingValidationServiceTests(unittest.TestCase):
         context = self._preprocess_context(
             precip_source="custom_tif",
             counts={Path("aligned_custom"): 2},
+            scan_results={
+                "工程本地降水输入": {
+                    "label": "工程本地降水输入",
+                    "ok": True,
+                    "errors": [],
+                    "warnings": [],
+                    "valid_time_steps": 2,
+                    "total_files": 2,
+                }
+            },
         )
 
         ready, message, count = check_daily_prec_status({}, context, profile="daily")
 
         self.assertTrue(ready)
-        self.assertEqual(message, "当前为本地栅格降水模式，降水已导入工程独立降水目录。")
+        self.assertEqual(message, "工程本地降水输入：2025-01-01 至 2025-01-02，共 2 日，逐日连续无缺测")
         self.assertEqual(count, 2)
 
     def test_check_hourly_prec_status_uses_effective_cmfd_paths(self) -> None:
@@ -714,7 +758,11 @@ class ForcingValidationServiceTests(unittest.TestCase):
         ready, message, count = check_hourly_prec_status({}, context, profile="hourly")
 
         self.assertTrue(ready)
-        self.assertEqual(message, "工程降水输入: 5（已导入并完成网格对齐）")
+        self.assertEqual(
+            message,
+            "工程降水输入：2025-01-01 08:00 至 2025-01-01 12:00，共 5 小时，逐小时连续无缺测"
+            "（已导入并完成网格对齐）",
+        )
         self.assertEqual(count, 5)
         self.assertIn(("workspace_paths",), calls)
         self.assertIn(("scan", "小时尺度降水中间结果", Path("raw_hourly_cmfd"), 1.0), calls)

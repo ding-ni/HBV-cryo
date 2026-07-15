@@ -2858,6 +2858,18 @@ function updateMeteoModeHint() {
   hint.className = hintState.hint.className;
 }
 
+function syncMeteoTimescaleFields() {
+  const hourly = isHourlyTimescaleSelected();
+  const dailyMetadata = $("#wz-daily-prec-metadata");
+  if (dailyMetadata) dailyMetadata.classList.toggle("hidden", hourly);
+  const description = $("#wz-meteo-import-desc");
+  if (description) {
+    description.innerHTML = hourly
+      ? "选择最终的小时降水、小时气温和小时 PET GeoTIFF 目录。文件名需要包含小时，例如 <code>PREC_2025.01.01.08.tif</code>；系统会检查时间范围、逐小时连续性和格网，并写入当前工程。"
+      : "选择最终的日降水、日气温和日 PET GeoTIFF 目录。文件名需要包含日期，例如 <code>P_2025.01.01.tif</code>；系统会检查时间范围、逐日连续性和格网，并写入当前工程。";
+  }
+}
+
 function applyStep6MeteoDefaults({ force = false, switchMode = false } = {}) {
   const copied = syncCustomMeteoImportInputs(force);
   if (switchMode) setRadioValue("wz-meteo-mode", allMeteoSourcesUseLocalTif() ? "import" : "pipeline");
@@ -2881,9 +2893,6 @@ function updateConditionalFields() {
   const stationFields = $("#wz-station-fields");
   if (stationFields) stationFields.classList.toggle("hidden", !fieldState.stationFieldsVisible);
 
-  const hourlyGroup = $("#wz-hourly-prec-group");
-  if (hourlyGroup) hourlyGroup.classList.toggle("hidden", !fieldState.hourlyPrecipVisible);
-
   const customPrecGroup = $("#wz-custom-prec-group");
   if (customPrecGroup) customPrecGroup.classList.toggle("hidden", !fieldState.customPrecVisible);
 
@@ -2895,6 +2904,7 @@ function updateConditionalFields() {
 
   syncTaskPrecipSourceControl();
   syncWizardTimeInputMode();
+  syncMeteoTimescaleFields();
   syncCustomMeteoImportInputs();
   updateMeteoMode();
   renderPrecipStrategyStatus();
@@ -2983,8 +2993,6 @@ function collectStepData(step) {
     case 3: return {
       boundary_csv: $("#wz-boundary-csv").value.trim(),
       gap_fill: $("#wz-gap-fill").value,
-      date_field: $("#wz-boundary-date").value.trim(),
-      flow_field: $("#wz-boundary-flow").value.trim(),
     };
     case 4: return {
       气象策略: {
@@ -2994,7 +3002,6 @@ function collectStepData(step) {
         降水源: $("#wz-prec-source").value,
         站点降水_csv: $("#wz-station-prec").value.trim(),
         站点信息_csv: $("#wz-station-meta").value.trim(),
-        原始小时降水目录: $("#wz-hourly-prec-dir").value.trim(),
         自带降水tif目录: $("#wz-custom-prec-dir")?.value.trim() || "",
         温度来源: $("#wz-temp-source")?.value || "era5",
         自带温度tif目录: $("#wz-custom-temp-dir")?.value.trim() || "",
@@ -3054,6 +3061,9 @@ async function saveCurrentWizardStep() {
           result.validation?.event_windows || null,
           result.validation?.event_observation_coverage || null,
         );
+      }
+      if (step === 3 && $("#wz-boundary-csv")) {
+        $("#wz-boundary-csv").value = result.config.边界条件?.上游边界入流_csv || $("#wz-boundary-csv").value;
       }
     }
     if (step === 1) {
@@ -3133,15 +3143,12 @@ function populateWizardFromConfig(cfg, path) {
   // step 3
   $("#wz-boundary-csv").value  = cfg.边界条件?.上游边界入流_csv || "";
   $("#wz-gap-fill").value      = cfg.边界条件?.缺失填补 || "zero";
-  $("#wz-boundary-date").value = cfg.边界条件?.时间字段 || "date";
-  $("#wz-boundary-flow").value = cfg.边界条件?.流量字段 || "flow";
 
   // step 4
   setRadioAndCard("wz-precip-mode", cfg.气象策略?.降水方案 || "grid_only");
   $("#wz-station-prec").value    = cfg.气象策略?.站点降水_csv || "";
   $("#wz-station-meta").value    = cfg.气象策略?.站点信息_csv || "";
   $("#wz-prec-source").value     = workspaceConfiguredPrecipSource(cfg);
-  $("#wz-hourly-prec-dir").value = cfg.气象策略?.原始小时降水目录 || "";
   if ($("#wz-custom-prec-dir")) $("#wz-custom-prec-dir").value = cfg.气象策略?.自带降水tif目录 || "";
   const tempSrc = cfg.气象策略?.温度来源 || "era5";
   if ($("#wz-temp-source")) $("#wz-temp-source").value = tempSrc;
@@ -3226,7 +3233,7 @@ function resetWizard() {
   [
     "#wz-basin-shp", "#wz-obs-csv", "#wz-dem-tif", "#wz-glacier-shp",
     "#wz-event-file", "#wz-boundary-csv", "#wz-station-prec", "#wz-station-meta",
-    "#wz-hourly-prec-dir", "#wz-custom-prec-dir", "#wz-custom-temp-dir",
+    "#wz-custom-prec-dir", "#wz-custom-temp-dir",
     "#wz-custom-pet-dir", "#wz-import-prec-dir", "#wz-import-temp-dir",
     "#wz-import-evap-dir", "#wz-import-prec-unit", "#wz-import-prec-day-basis",
     "#wz-import-dem", "#wz-import-flowacc",
@@ -3239,8 +3246,6 @@ function resetWizard() {
   $("#wz-fao-elev").value = "4500";
   if ($("#wz-time-basis")) $("#wz-time-basis").value = "continuous";
   $("#wz-gap-fill").value = "zero";
-  $("#wz-boundary-date").value = "date";
-  $("#wz-boundary-flow").value = "flow";
   setRadioAndCard("wz-precip-mode", "grid_only");
   setRadioValue("wz-meteo-mode", "pipeline");
   $("#wz-prec-source").value = "era5";
@@ -3442,14 +3447,12 @@ async function autoComputeElevation() {
 
 async function previewBoundary() {
   const csvPath   = $("#wz-boundary-csv").value.trim();
-  const dateField = $("#wz-boundary-date").value.trim() || "date";
-  const flowField = $("#wz-boundary-flow").value.trim() || "flow";
   if (!csvPath) { showToast("请先选择边界入流文件。", true); return; }
   try {
     const query = window.HBVStudioDataPrepView.boundaryPreviewRequestState({
       csvPath,
-      dateField,
-      flowField,
+      dateField: "",
+      flowField: "",
       hourly: isHourlyTimescaleSelected(),
       expectedStart: getWizardTimeValue("#wz-warmup-start"),
       expectedEnd: getWizardTimeValue("#wz-valid-end"),
@@ -3791,8 +3794,8 @@ async function importMeteoFiles() {
     },
     runtimePrecipSource: getEffectiveRuntimePrecipSource(),
     isDaily: Math.abs(Number(state.currentWorkspace?.时间步长_小时 || 24) - 24) < 1e-9,
-    precipUnit: $("#wz-import-prec-unit")?.value || "",
-    precipDayBasis: $("#wz-import-prec-day-basis")?.value || "",
+    precipUnit: isHourlyTimescaleSelected() ? "" : ($("#wz-import-prec-unit")?.value || ""),
+    precipDayBasis: isHourlyTimescaleSelected() ? "" : ($("#wz-import-prec-day-basis")?.value || ""),
   });
   if (!requestState.ready) { showToast(requestState.message, true); return; }
   const targets = {
@@ -6022,7 +6025,7 @@ function bindEvents() {
 
   // boundary preview
   $("#wz-boundary-preview-btn").addEventListener("click", () => previewBoundary());
-  ["#wz-boundary-csv", "#wz-boundary-date", "#wz-boundary-flow", "#wz-gap-fill"].forEach(selector => {
+  ["#wz-boundary-csv", "#wz-gap-fill"].forEach(selector => {
     $(selector)?.addEventListener("change", clearBoundaryPreview);
     $(selector)?.addEventListener("input", clearBoundaryPreview);
   });

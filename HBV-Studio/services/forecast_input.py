@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.time_utils import time_step_count_text
+
 
 def _default_inspect_boundary_inflow_csv(*args: Any, **kwargs: Any) -> dict[str, Any]:
     raise ValueError("边界入流检查函数未配置。")
@@ -141,11 +143,18 @@ def forecast_input_dir_summary(
     else:
         status = "ok"
     if expected_steps > 0:
-        summary = f"{covered_steps}/{expected_steps} 个预报时步可用"
+        expected_start = format_time_for_check(expected_index[0], step_hours)
+        expected_end = format_time_for_check(expected_index[-1], step_hours)
+        summary = (
+            f"{expected_start} 至 {expected_end}，"
+            f"已覆盖 {time_step_count_text(covered_steps, step_hours)}/"
+            f"目标 {time_step_count_text(expected_steps, step_hours)}"
+        )
         if out_count:
-            summary += f"，另有 {out_count} 个窗口外文件将不参与本次预报"
+            summary += f"，另有 {time_step_count_text(out_count, step_hours)}位于窗口外"
     else:
-        summary = f"识别到 {valid_steps} 个有效时间步，填写预报时段后可核对覆盖"
+        summary = str(check.get("period_summary", "") or "未识别到有效时间范围")
+        summary += "；填写预报时段后可核对目标覆盖"
     timestamps = list(check.get("timestamps", []) or [])
     return {
         "key": key,
@@ -161,6 +170,7 @@ def forecast_input_dir_summary(
         "covered_steps": covered_steps,
         "missing_steps": missing_count,
         "out_of_window_steps": out_count,
+        "period_summary": str(check.get("period_summary", "") or ""),
         "first_time": format_time_for_check(timestamps[0], step_hours) if timestamps else "",
         "last_time": format_time_for_check(timestamps[-1], step_hours) if timestamps else "",
     }
@@ -433,9 +443,11 @@ def forecast_boundary_input_summary(
     warnings: list[str] = []
     if missing:
         sample = "、".join(format_time_for_check(item, step_hours) for item in missing[:3])
-        errors.append(f"预报边界入流缺少 {len(missing)} 个时间步，例如：{sample}")
+        errors.append(f"预报边界入流缺少 {time_step_count_text(len(missing), step_hours)}，例如：{sample}")
     if out_of_window:
-        warnings.append(f"边界入流文件中有 {len(out_of_window)} 个预报窗口外时间步，将不参与本次预报。")
+        warnings.append(
+            f"边界入流文件中有 {time_step_count_text(len(out_of_window), step_hours)}位于预报窗口外，将不参与本次预报。"
+        )
     negative_count = int(info.get("negative_count", 0) or 0)
     if negative_count:
         warnings.append(f"边界入流存在 {negative_count} 条负值记录，建议核对。")
@@ -446,7 +458,14 @@ def forecast_boundary_input_summary(
         "label": "上游边界入流",
         "path": str(resolved.resolve(strict=False)),
         "status": status,
-        "summary": f"{covered}/{expected_steps} 个预报边界入流时步可用" if expected_steps else f"识别到 {covered} 条有效边界入流记录",
+        "summary": (
+            f"{format_time_for_check(expected_index[0], step_hours)} 至 "
+            f"{format_time_for_check(expected_index[-1], step_hours)}，"
+            f"已覆盖 {time_step_count_text(covered, step_hours)}/目标 {time_step_count_text(expected_steps, step_hours)}"
+            if expected_steps and expected_index is not None
+            else str(info.get("period_summary", "") or f"识别到 {covered} 条有效边界入流记录，未形成起止摘要")
+        ),
+        "period_summary": str(info.get("period_summary", "") or ""),
         "errors": errors,
         "warnings": warnings,
         "total_files": 1,
@@ -573,7 +592,7 @@ def forecast_input_check(payload: dict[str, Any], context: ForecastInputCheckCon
     status = "fail" if errors else "warn" if warnings or expected_steps <= 0 else "ok"
     coverage_complete = not errors and expected_steps > 0
     headline = (
-        f"预报气象覆盖完整：{forecast_start} 至 {forecast_end}，共 {expected_steps} 个时间步。"
+        f"预报气象覆盖完整：{forecast_start} 至 {forecast_end}，共 {time_step_count_text(expected_steps, step_hours)}。"
         if coverage_complete
         else "预报气象输入仍需核对。"
     )
