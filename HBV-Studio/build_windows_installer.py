@@ -204,6 +204,9 @@ def write_build_manifest(version: str, package_paths: list[Path]) -> Path:
 
 
 def run_windowed_pyinstaller(stage_parent: Path, build_root: Path) -> Path:
+    bundle_dir = stage_parent / APP_NAME
+    if bundle_dir.exists():
+        shutil.rmtree(bundle_dir)
     cmd = [
         sys.executable,
         "-m",
@@ -233,7 +236,7 @@ def run_windowed_pyinstaller(stage_parent: Path, build_root: Path) -> Path:
     for module in portable.EXCLUDED_MODULES:
         cmd.extend(["--exclude-module", module])
     subprocess.run(cmd, cwd=str(PROJECT_ROOT), check=True)
-    return stage_parent / APP_NAME
+    return bundle_dir
 
 
 def find_required_dem() -> Path:

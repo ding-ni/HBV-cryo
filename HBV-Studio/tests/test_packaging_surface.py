@@ -16,6 +16,26 @@ import build_windows_installer as installer  # noqa: E402
 
 
 class PackagingSurfaceTests(unittest.TestCase):
+    def test_installer_build_removes_stale_stage_before_pyinstaller(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage_parent = root / "stage"
+            bundle_dir = stage_parent / installer.APP_NAME
+            stale_workspace = bundle_dir / "HBV-Studio" / "workspaces" / "user-project.json"
+            stale_workspace.parent.mkdir(parents=True)
+            stale_workspace.write_text("{}", encoding="utf-8")
+
+            def fake_run(*args, **kwargs):
+                self.assertFalse(bundle_dir.exists())
+                bundle_dir.mkdir(parents=True)
+                return mock.Mock(returncode=0)
+
+            with mock.patch.object(installer.subprocess, "run", side_effect=fake_run):
+                result = installer.run_windowed_pyinstaller(stage_parent, root / "build")
+
+            self.assertEqual(result, bundle_dir)
+            self.assertFalse(stale_workspace.exists())
+
     def test_installer_manifest_declares_era5_accumulation_contract(self) -> None:
         self.assertEqual(
             installer.BUILD_CONTRACTS["era5_accumulation_boundary"],
