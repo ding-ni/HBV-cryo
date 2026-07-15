@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -15,18 +16,58 @@ if str(STUDIO_DIR) not in sys.path:
 from services.meteo_import import (  # noqa: E402
     MeteoImportStartContext,
     MeteoImportWorkerContext,
+    discover_hourly_forcing_metadata,
     meteo_import_start_plan,
     meteo_import_worker_run,
     meteo_import_resampling_name,
     ordered_tif_files_by_timestamp,
+    rebase_hourly_forcing_metadata,
     replace_directory_from_stage,
     should_report_file_progress,
     tif_series_digest,
+    validate_distinct_meteo_source_dirs,
     validate_precipitation_import_metadata,
 )
 
 
 class MeteoImportServiceTests(unittest.TestCase):
+    def test_meteo_source_directories_must_be_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with self.assertRaisesRegex(ValueError, "潜在蒸散发与降水使用了同一目录"):
+                validate_distinct_meteo_source_dirs(
+                    {"prec": root / "prec", "temp": root / "temp", "evap": root / "prec"}
+                )
+
+    def test_hourly_generator_metadata_is_discovered_and_rebased(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_dirs = {"prec": root / "prec", "temp": root / "temp", "evap": root / "evap"}
+            for path in source_dirs.values():
+                path.mkdir()
+            summary = {
+                "time_basis": "hydrological_day_08_to_08_local",
+                "outputs": {
+                    "precipitation_dir": str(source_dirs["prec"]),
+                    "temperature_dir": str(source_dirs["temp"]),
+                    "evaporation_dir": str(source_dirs["evap"]),
+                },
+            }
+            (root / "hourly_forcing_summary.json").write_text(
+                json.dumps(summary), encoding="utf-8"
+            )
+
+            discovered = discover_hourly_forcing_metadata(source_dirs)
+            targets = {"prec": root / "out_p", "temp": root / "out_t", "evap": root / "out_e"}
+            rebased = rebase_hourly_forcing_metadata(discovered, targets)
+
+        payload = rebased["hourly_forcing_summary.json"]
+        self.assertEqual(payload["outputs"]["evaporation_dir"], str(targets["evap"].resolve(strict=False)))
+        self.assertEqual(
+            payload["studio_import_provenance"]["source_outputs"]["precipitation_dir"],
+            str(source_dirs["prec"]),
+        )
+
     def test_meteo_import_start_plan_builds_task_metadata(self) -> None:
         config = {"profile": "hourly"}
         context = MeteoImportStartContext(
@@ -173,3 +214,4 @@ class MeteoImportServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    discover_hourly_forcing_metadata,

@@ -184,10 +184,13 @@ from services.meteo_import import DAILY_FORCING_MANIFEST_SCHEMA
 from services.meteo_import import meteo_import_start_plan as build_meteo_import_start_plan
 from services.meteo_import import meteo_import_worker_run as build_meteo_import_worker_run
 from services.meteo_import import meteo_import_resampling_name
+from services.meteo_import import discover_hourly_forcing_metadata
 from services.meteo_import import ordered_tif_files_by_timestamp
+from services.meteo_import import rebase_hourly_forcing_metadata
 from services.meteo_import import replace_directory_from_stage
 from services.meteo_import import should_report_file_progress
 from services.meteo_import import tif_series_digest
+from services.meteo_import import validate_distinct_meteo_source_dirs
 from services.meteo_import import validate_precipitation_import_metadata
 from services.meteo_config import (
     EffectivePrecipPathContext,
@@ -501,7 +504,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026.07.15.2"
+APP_VERSION = "2026.07.15.3"
 SERVER_STARTED_AT = time.time()
 
 
@@ -2848,6 +2851,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
     label_map = {"prec_dir": "降水", "temp_dir": "气温", "evap_dir": "蒸散发"}
     prepared_inputs: list[dict[str, Any]] = []
     staged_dirs: list[Path] = []
+    selected_source_dirs: dict[str, Path] = {}
 
     def log(message: str) -> None:
         if task_id:
@@ -2887,6 +2891,7 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         if not src_dir_raw:
             raise ValueError(f"缺少 {key} 路径。")
         src_dir = resolve_any_path(src_dir_raw, must_exist=True)
+        selected_source_dirs[key.replace("_dir", "")] = src_dir
         ordered_files = ordered_tif_files_by_timestamp(src_dir)
         if not ordered_files:
             raise ValueError(f"目录 {src_dir} 中没有 .tif 文件。")
@@ -2934,6 +2939,13 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
                 "source_digest": tif_series_digest(ordered_files),
             }
         )
+
+    validate_distinct_meteo_source_dirs(selected_source_dirs)
+    hourly_source_metadata = (
+        discover_hourly_forcing_metadata(selected_source_dirs)
+        if abs(time_step_hours - 1.0) <= 1e-9
+        else {}
+    )
 
     for item in prepared_inputs:
         target_dir = Path(item["target_dir"])
@@ -3105,6 +3117,29 @@ def perform_meteo_import(payload: dict[str, Any], *, task_id: str | None = None)
         for stage_dir in staged_dirs:
             if stage_dir.exists():
                 shutil.rmtree(stage_dir, ignore_errors=True)
+
+    if abs(time_step_hours - 1.0) <= 1e-9:
+        aligned_dir = Path(paths["aligned_dir"])
+        aligned_dir.mkdir(parents=True, exist_ok=True)
+        rebased_metadata = rebase_hourly_forcing_metadata(
+            hourly_source_metadata,
+            {
+                "prec": Path(dir_map["prec_dir"]),
+                "temp": Path(dir_map["temp_dir"]),
+                "evap": Path(dir_map["evap_dir"]),
+            },
+        )
+        for filename in ("hourly_forcing_summary.json", "hourly_forcing_manifest.json"):
+            target_metadata = aligned_dir / filename
+            if filename in rebased_metadata:
+                target_metadata.write_text(
+                    json.dumps(rebased_metadata[filename], ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                log(f"[清单] 已归档前处理工具小时强迫清单：{filename}。")
+            elif target_metadata.exists():
+                target_metadata.unlink()
+                log(f"[清单] 当前来源没有 {filename}，已移除工作区内的旧清单，避免沿用过期口径。")
 
     log("[校验] 开始检查导入后气象驱动的时间覆盖与连续性。")
     forcing = validate_forcing_bundle(config, profile, precip_source=precip_source)

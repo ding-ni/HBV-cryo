@@ -781,7 +781,18 @@
     const precipUnit = String(model.precipUnit || model.precip_unit || "mm/day").trim();
     const precipDayBasis = String(model.precipDayBasis || model.precip_day_basis || "product_calendar_day").trim();
     const metadataMissing = [];
-    const ready = Boolean(directoryState.ready) && metadataMissing.length === 0;
+    const normalizedDirs = Object.fromEntries(Object.entries(dirs).map(([key, value]) => [
+      key,
+      String(value || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase(),
+    ]));
+    const labels = { prec: "降水", temp: "气温", pet: "潜在蒸散发" };
+    const duplicatePairs = [];
+    for (const [left, right] of [["prec", "temp"], ["prec", "pet"], ["temp", "pet"]]) {
+      if (normalizedDirs[left] && normalizedDirs[left] === normalizedDirs[right]) {
+        duplicatePairs.push(`${labels[left]}与${labels[right]}`);
+      }
+    }
+    const ready = Boolean(directoryState.ready) && metadataMissing.length === 0 && duplicatePairs.length === 0;
     const request = {
       prec_source: String(model.runtimePrecipSource || "").trim(),
       prec_dir: String(dirs.prec || "").trim(),
@@ -795,9 +806,12 @@
         ? ""
         : directoryState.missing.length
           ? "请选择降水、气温和蒸散发三个目录。"
+          : duplicatePairs.length
+            ? `${duplicatePairs.join("、")}不能选择同一个目录，请分别选择对应变量。`
           : "请检查日降水输入设置。",
       missing: [...directoryState.missing, ...metadataMissing],
       writeBackUpdates: directoryState.writeBackUpdates,
+      duplicatePairs,
       requestPath: "/api/meteo/import/start",
       request,
       payload: {

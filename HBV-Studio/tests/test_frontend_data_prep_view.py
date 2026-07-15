@@ -712,6 +712,17 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (incompleteMeteoRequest.ready || incompleteMeteoRequest.message !== "请选择降水、气温和蒸散发三个目录。" || incompleteMeteoRequest.missing.join(",") !== "prec,pet" || incompleteMeteoRequest.writeBackUpdates.length) {
               throw new Error(`incomplete meteo import request mismatch: ${JSON.stringify(incompleteMeteoRequest)}`);
             }
+            const duplicateMeteoRequest = view.meteoImportRequestState({
+              configPath: "C:/ws/A.json",
+              sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },
+              registeredDirs: { prec: "D:/meteo/prec", temp: "D:/meteo/temp", pet: "D:/meteo/prec/" },
+              importDirs: {},
+              runtimePrecipSource: "custom_tif",
+              isDaily: false,
+            });
+            if (duplicateMeteoRequest.ready || duplicateMeteoRequest.duplicatePairs.join(",") !== "降水与潜在蒸散发" || !duplicateMeteoRequest.message.includes("不能选择同一个目录")) {
+              throw new Error(`duplicate meteo directory guard mismatch: ${JSON.stringify(duplicateMeteoRequest)}`);
+            }
             const missingDailyMetadata = view.meteoImportRequestState({
               configPath: "C:/ws/A.json",
               sources: { prec: "custom_tif", temp: "custom_tif", pet: "custom_tif" },

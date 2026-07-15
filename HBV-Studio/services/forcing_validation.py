@@ -196,7 +196,7 @@ def inspect_hourly_forcing_summary(
         "summary": None,
     }
     if not summary_path.exists():
-        result["warnings"].append("未找到小时强迫摘要 hourly_forcing_summary.json，无法核对 08:00 水文日时间基准和守恒检查结果。")
+        result["status"] = "not_provided_direct_hourly_tif"
         return result
     try:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -267,6 +267,17 @@ def _valid_raster_mask(path: Path) -> np.ndarray:
         if src.nodata is not None:
             mask &= arr != src.nodata
         return mask
+
+
+def _valid_raster_values(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    import rasterio
+
+    with rasterio.open(path) as src:
+        arr = src.read(1).astype("float64")
+        mask = np.isfinite(arr) & (arr > -9000.0) & (arr < 1.0e10)
+        if src.nodata is not None:
+            mask &= arr != src.nodata
+        return arr, mask
 
 
 def _time_file_map(directory: Path) -> dict[pd.Timestamp, Path]:
@@ -343,6 +354,73 @@ def validate_forcing_mask_consistency(
             f"例如：{preview}。请覆盖重跑气象对齐裁剪步骤。"
         )
     result["ok"] = len(result["errors"]) == 0
+    return result
+
+
+def validate_forcing_variable_distinctness(
+    directories: dict[str, dict[str, Any]],
+    *,
+    max_checked_steps: int = 12,
+) -> dict[str, Any]:
+    """Reject a common import mistake where precipitation was also selected as PET."""
+    result: dict[str, Any] = {
+        "ok": True,
+        "checked_steps": 0,
+        "identical_steps": 0,
+        "errors": [],
+        "warnings": [],
+        "examples": [],
+    }
+    prec_text = str(dict(directories.get("prec", {}) or {}).get("path", "") or "").strip()
+    evap_text = str(dict(directories.get("evap", {}) or {}).get("path", "") or "").strip()
+    if not prec_text or not evap_text:
+        return result
+    prec_dir = Path(prec_text)
+    evap_dir = Path(evap_text)
+    if not prec_dir.exists() or not evap_dir.exists():
+        return result
+    prec_map = _time_file_map(prec_dir)
+    evap_map = _time_file_map(evap_dir)
+    common = sorted(set(prec_map) & set(evap_map))
+    if not common:
+        return result
+    if len(common) <= max_checked_steps:
+        samples = common
+    else:
+        last = len(common) - 1
+        indices = sorted({round(pos * last / (max_checked_steps - 1)) for pos in range(max_checked_steps)})
+        samples = [common[index] for index in indices]
+    identical_steps = 0
+    compared_steps = 0
+    for stamp in samples:
+        try:
+            prec_values, prec_mask = _valid_raster_values(prec_map[stamp])
+            evap_values, evap_mask = _valid_raster_values(evap_map[stamp])
+        except Exception as exc:
+            result["warnings"].append(f"降水/PET 变量独立性抽查无法读取 {stamp}：{exc}")
+            continue
+        if prec_values.shape != evap_values.shape:
+            continue
+        overlap = prec_mask & evap_mask
+        if not np.any(overlap):
+            continue
+        compared_steps += 1
+        if np.array_equal(prec_values[overlap], evap_values[overlap]):
+            identical_steps += 1
+            result["examples"].append(str(stamp))
+    result["checked_steps"] = compared_steps
+    result["identical_steps"] = identical_steps
+    if compared_steps >= 3 and identical_steps == compared_steps:
+        sample = "、".join(result["examples"][:3])
+        result["errors"].append(
+            "降水与潜在蒸散发在全部抽查时段的栅格数值完全相同，极可能误选了同一变量目录；"
+            f"抽查 {compared_steps} 个时段，例如：{sample}。请重新选择正确的 PET 目录并重新导入。"
+        )
+    elif compared_steps > 0 and identical_steps == compared_steps:
+        result["warnings"].append(
+            f"降水与潜在蒸散发在本次 {compared_steps} 个抽查时段完全相同；资料太短，无法自动判定，请人工复核。"
+        )
+    result["ok"] = not result["errors"]
     return result
 
 
@@ -688,6 +766,9 @@ def validate_forcing_bundle(
     mask_consistency = validate_forcing_mask_consistency(directories)
     errors.extend(mask_consistency["errors"])
     warnings.extend(mask_consistency["warnings"])
+    variable_distinctness = validate_forcing_variable_distinctness(directories)
+    errors.extend(variable_distinctness["errors"])
+    warnings.extend(variable_distinctness["warnings"])
     hourly_summary = None
     if active_profile == "hourly" or step_hours < 24.0:
         explicit_time_errors = hourly_explicit_time_errors(config, step_hours)
@@ -712,6 +793,7 @@ def validate_forcing_bundle(
         "directories": directories,
         "grid_checks": grid_checks,
         "mask_consistency": mask_consistency,
+        "variable_distinctness": variable_distinctness,
         "total_valid_steps": sum(int(item["valid_time_steps"]) for item in directories.values()),
         "profile": active_profile,
         "time_basis": time_basis,

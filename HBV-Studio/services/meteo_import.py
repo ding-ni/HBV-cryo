@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -23,6 +24,16 @@ DAILY_PRECIP_DAY_BASES = (
     "beijing_calendar_day",
     "hydrological_day_08",
 )
+HOURLY_FORCING_METADATA_FILES = (
+    "hourly_forcing_summary.json",
+    "hourly_forcing_manifest.json",
+)
+METEO_SOURCE_LABELS = {"prec": "降水", "temp": "气温", "evap": "潜在蒸散发"}
+HOURLY_OUTPUT_KEYS = {
+    "prec": "precipitation_dir",
+    "temp": "temperature_dir",
+    "evap": "evaporation_dir",
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +56,75 @@ class MeteoImportStartPlan:
     label: str
     command: list[str]
     metadata: dict[str, Any]
+
+
+def _normalized_path_key(path: Path) -> str:
+    return str(Path(path).resolve(strict=False)).replace("/", "\\").rstrip("\\").lower()
+
+
+def validate_distinct_meteo_source_dirs(source_dirs: dict[str, Path]) -> None:
+    seen: dict[str, str] = {}
+    for key in ("prec", "temp", "evap"):
+        path = Path(source_dirs[key])
+        normalized = _normalized_path_key(path)
+        if normalized in seen:
+            other = seen[normalized]
+            raise ValueError(
+                f"气象来源目录选择错误：{METEO_SOURCE_LABELS[key]}与{METEO_SOURCE_LABELS[other]}使用了同一目录：{path}。"
+                "降水、气温和潜在蒸散发必须分别选择对应变量目录。"
+            )
+        seen[normalized] = key
+
+
+def discover_hourly_forcing_metadata(source_dirs: dict[str, Path]) -> dict[str, dict[str, Any]]:
+    """Read generator metadata when the three selected variable folders share one product parent."""
+    validate_distinct_meteo_source_dirs(source_dirs)
+    parents = {_normalized_path_key(Path(path).parent) for path in source_dirs.values()}
+    if len(parents) != 1:
+        return {}
+    parent = Path(next(iter(source_dirs.values()))).parent
+    discovered: dict[str, dict[str, Any]] = {}
+    for filename in HOURLY_FORCING_METADATA_FILES:
+        path = parent / filename
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"小时强迫清单无法读取：{path}（{exc}）") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"小时强迫清单不是有效 JSON 对象：{path}")
+        outputs = dict(payload.get("outputs", {}) or {})
+        for key, output_key in HOURLY_OUTPUT_KEYS.items():
+            recorded = str(outputs.get(output_key, "") or "").strip()
+            if recorded and Path(recorded).name.lower() != Path(source_dirs[key]).name.lower():
+                raise ValueError(
+                    f"小时强迫清单与当前选择不一致：清单中的{METEO_SOURCE_LABELS[key]}目录为 {recorded}，"
+                    f"当前选择为 {source_dirs[key]}。"
+                )
+        discovered[filename] = {"source_path": str(path.resolve(strict=False)), "payload": payload}
+    return discovered
+
+
+def rebase_hourly_forcing_metadata(
+    metadata: dict[str, dict[str, Any]],
+    target_dirs: dict[str, Path],
+) -> dict[str, dict[str, Any]]:
+    rebased: dict[str, dict[str, Any]] = {}
+    for filename, item in metadata.items():
+        payload = dict(item.get("payload", {}) or {})
+        source_outputs = dict(payload.get("outputs", {}) or {})
+        payload["outputs"] = {
+            output_key: str(Path(target_dirs[key]).resolve(strict=False))
+            for key, output_key in HOURLY_OUTPUT_KEYS.items()
+        }
+        payload["studio_import_provenance"] = {
+            "source_metadata": str(item.get("source_path", "") or ""),
+            "source_outputs": source_outputs,
+            "imported_outputs": dict(payload["outputs"]),
+        }
+        rebased[filename] = payload
+    return rebased
 
 
 def meteo_import_start_plan(payload: dict[str, Any], context: MeteoImportStartContext) -> MeteoImportStartPlan:

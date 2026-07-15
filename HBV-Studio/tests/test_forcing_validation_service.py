@@ -33,9 +33,11 @@ from services.forcing_validation import (  # noqa: E402
     check_hourly_temp_evap_status,
     configured_daily_meteo_sources,
     hourly_forcing_ready_status,
+    inspect_hourly_forcing_summary,
     prefer_raw_or_aligned_group_status,
     summarize_nc_download_status,
     validate_forcing_mask_consistency,
+    validate_forcing_variable_distinctness,
     validate_forcing_bundle,
 )
 
@@ -874,6 +876,21 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertTrue(any("守恒检查未通过" in item for item in result["errors"]))
         self.assertTrue(any("开始时间晚于配置期望" in item for item in result["errors"]))
 
+    def test_direct_hourly_tif_without_generator_summary_has_no_ambiguous_basis_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            result = inspect_hourly_forcing_summary(
+                root,
+                expected_index=None,
+                precip_dir=root / "prec",
+                temp_dir=root / "temp",
+                evap_dir=root / "evap",
+            )
+
+        self.assertFalse(result["exists"])
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(result["status"], "not_provided_direct_hourly_tif")
+
     def test_forcing_mask_consistency_detects_pet_holes(self) -> None:
         try:
             import rasterio
@@ -913,6 +930,44 @@ class ForcingValidationServiceTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(any("有效像元掩膜不一致" in item for item in result["errors"]))
         self.assertEqual(result["examples"][0]["missing_vs_precip"], 1)
+
+    def test_forcing_variable_distinctness_rejects_precipitation_copied_as_pet(self) -> None:
+        try:
+            import rasterio
+        except ImportError:
+            self.skipTest("rasterio is not installed")
+        from rasterio.transform import from_origin
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            profile = {
+                "driver": "GTiff",
+                "height": 2,
+                "width": 2,
+                "count": 1,
+                "dtype": "float32",
+                "crs": "EPSG:4326",
+                "transform": from_origin(0, 2, 1, 1),
+                "nodata": -9999.0,
+            }
+            for name in ("prec", "evap"):
+                (root / name).mkdir()
+            for day, value in (("01", 1.0), ("02", 2.0), ("03", 3.0)):
+                data = np.full((2, 2), value, dtype="float32")
+                for name in ("prec", "evap"):
+                    with rasterio.open(root / name / f"X_2025.01.{day}.tif", "w", **profile) as dst:
+                        dst.write(data, 1)
+
+            result = validate_forcing_variable_distinctness(
+                {
+                    "prec": {"path": str(root / "prec")},
+                    "evap": {"path": str(root / "evap")},
+                }
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["checked_steps"], 3)
+        self.assertIn("极可能误选了同一变量目录", result["errors"][0])
 
 
 if __name__ == "__main__":
