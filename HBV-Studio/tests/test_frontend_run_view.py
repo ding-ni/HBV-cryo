@@ -76,6 +76,12 @@ class FrontendRunViewTests(unittest.TestCase):
             if (current.label !== "当前口径" || current.badgeClass !== "status-ok") {
               throw new Error(`unexpected current status: ${JSON.stringify(current)}`);
             }
+            const currentHourly = runView.objectiveVersionStatus({ objective_family: "hourly_alpine_qtp_v1" });
+            if (currentHourly.label !== "当前口径" ||
+                currentHourly.value !== "当前小时尺度综合评价口径" ||
+                currentHourly.badgeClass !== "status-ok") {
+              throw new Error(`unexpected hourly status: ${JSON.stringify(currentHourly)}`);
+            }
             const legacy = runView.objectiveVersionStatus({ objective_family: "weighted_daily_universal" });
             if (legacy.label !== "历史口径" || legacy.badgeClass !== "status-warn") {
               throw new Error(`unexpected legacy status: ${JSON.stringify(legacy)}`);

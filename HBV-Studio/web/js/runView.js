@@ -7,6 +7,11 @@
     legacy: "历史结果",
   });
   const CURRENT_OBJECTIVE_FAMILY = "daily_unified_professional_v1";
+  const CURRENT_HOURLY_OBJECTIVE_FAMILY = "hourly_alpine_qtp_v1";
+  const CURRENT_OBJECTIVE_FAMILIES = new Set([
+    CURRENT_OBJECTIVE_FAMILY,
+    CURRENT_HOURLY_OBJECTIVE_FAMILY,
+  ]);
   const FLOOD_EVENT_OBJECTIVE_FAMILY = "flood_event_calibration_v1";
   const LEGACY_OBJECTIVE_FAMILIES = new Set(["weighted_daily_universal", "weighted_multi_criteria"]);
 
@@ -152,14 +157,23 @@
   function objectiveVersionStatus(metaOrRun = {}, options = {}) {
     const family = objectiveFamilyKey(metaOrRun);
     const currentFamily = String(options.currentObjectiveFamily || CURRENT_OBJECTIVE_FAMILY).toLowerCase();
+    const currentFamilies = new Set(CURRENT_OBJECTIVE_FAMILIES);
+    currentFamilies.add(currentFamily);
+    for (const value of options.currentObjectiveFamilies || []) {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (normalized) currentFamilies.add(normalized);
+    }
     const eventFamily = String(options.floodEventObjectiveFamily || FLOOD_EVENT_OBJECTIVE_FAMILY).toLowerCase();
     const legacyFamilies = options.legacyObjectiveFamilies || LEGACY_OBJECTIVE_FAMILIES;
-    if (family === currentFamily) {
+    if (currentFamilies.has(family)) {
+      const isHourly = family === CURRENT_HOURLY_OBJECTIVE_FAMILY;
       return {
         state: "current",
         label: "当前口径",
-        value: "当前综合评价口径",
-        detail: "该结果使用当前统一日尺度水文评价口径，可用于径流拟合与冰雪融水过程复核。",
+        value: isHourly ? "当前小时尺度综合评价口径" : "当前日尺度综合评价口径",
+        detail: isHourly
+          ? "该结果使用当前小时尺度高寒区综合评价口径，可用于小时径流拟合与冰雪融水过程复核。"
+          : "该结果使用当前统一日尺度水文评价口径，可用于径流拟合与冰雪融水过程复核。",
         badgeClass: "status-ok",
       };
     }
