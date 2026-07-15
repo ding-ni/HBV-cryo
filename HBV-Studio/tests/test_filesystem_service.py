@@ -25,6 +25,7 @@ from services.filesystem import (  # noqa: E402
     replace_placeholders,
     resolve_config_related_path,
     resolve_any_path,
+    resolve_workspace_save_path,
     same_path,
     to_display_path,
 )
@@ -78,6 +79,35 @@ class FilesystemServiceTests(unittest.TestCase):
                 resolve_any_path("missing", context, must_exist=True)
             with self.assertRaisesRegex(ValueError, "缺少路径参数"):
                 resolve_any_path("", context)
+
+    def test_workspace_save_path_uses_configured_workspace_dir_for_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            gui_root = root / "HBV-Studio"
+            workspace_dir = root / "用户数据" / "workspaces"
+            context = self._context(root, gui_root)
+
+            prefixed = resolve_workspace_save_path("workspaces/正式方案.json", workspace_dir, context)
+            plain = resolve_workspace_save_path("正式方案.json", workspace_dir, context)
+
+        expected = (workspace_dir / "正式方案.json").resolve(strict=False)
+        self.assertEqual(prefixed, expected)
+        self.assertEqual(plain, expected)
+
+    def test_workspace_save_path_preserves_absolute_legacy_path_and_blocks_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            gui_root = root / "HBV-Studio"
+            workspace_dir = root / "用户数据" / "workspaces"
+            legacy = gui_root / "workspaces" / "legacy.json"
+            context = self._context(root, gui_root)
+
+            self.assertEqual(
+                resolve_workspace_save_path(str(legacy), workspace_dir, context),
+                legacy.resolve(strict=False),
+            )
+            with self.assertRaises(ValueError):
+                resolve_workspace_save_path("workspaces/../outside.json", workspace_dir, context)
 
     def test_root_checks_and_display_paths_use_resolved_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

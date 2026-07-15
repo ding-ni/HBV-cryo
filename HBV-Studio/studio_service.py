@@ -100,6 +100,7 @@ from services.filesystem import (
     resolve_config_related_path as build_resolve_config_related_path,
     replace_placeholders as build_replace_placeholders,
     resolve_any_path as build_resolve_any_path,
+    resolve_workspace_save_path as build_resolve_workspace_save_path,
     safe_iterdir as _safe_iterdir,
     same_path,
     to_display_path as build_to_display_path,
@@ -504,7 +505,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026.07.15.4"
+APP_VERSION = "2026.07.15.5"
 SERVER_STARTED_AT = time.time()
 
 
@@ -829,6 +830,10 @@ def _filesystem_placeholder_context() -> FilesystemPlaceholderContext:
 
 def resolve_any_path(raw_path: str, *, must_exist: bool = False) -> Path:
     return build_resolve_any_path(raw_path, _filesystem_path_context(), must_exist=must_exist)
+
+
+def resolve_workspace_save_path(raw_path: str) -> Path:
+    return build_resolve_workspace_save_path(raw_path, WORKSPACE_DIR, _filesystem_path_context())
 
 
 def is_within_current_project(candidate: Path) -> bool:
@@ -4713,7 +4718,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         raw_path = str(payload.get("path", "")).strip()
         if not raw_path:
             raise ValueError("缺少工作区配置保存路径。")
-        path = resolve_any_path(raw_path, must_exist=False)
+        path = resolve_workspace_save_path(raw_path)
         normalized = normalize_config_before_save(payload.get("data", {}), path)
         write_json_file(path, normalized)
         self.send_json({"ok": True, "path": str(path.resolve()), "display_path": to_display_path(path), "data": read_json_file(path)})

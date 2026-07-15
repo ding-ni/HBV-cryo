@@ -270,6 +270,35 @@ def resolve_any_path(raw_path: str, context: FilesystemPathContext, *, must_exis
     return path
 
 
+def resolve_workspace_save_path(
+    raw_path: str,
+    workspace_dir: Path,
+    context: FilesystemPathContext,
+) -> Path:
+    """Resolve new workspace paths under the configured workspace directory.
+
+    Absolute paths remain supported for existing portable and legacy workspaces.
+    The frontend historically submits ``workspaces/<name>.json``; in installed
+    mode that relative path must target the user-data workspace directory, not
+    the read-only application bundle.
+    """
+    text = str(raw_path or "").strip()
+    if not text:
+        raise ValueError("缺少工作区配置保存路径。")
+    expanded = context.replace_placeholders(text)
+    expanded = context.remap_legacy_project_path(expanded)
+    path = Path(str(expanded)).expanduser()
+    if path.is_absolute():
+        return path.resolve(strict=False)
+
+    parts = list(path.parts)
+    if parts and parts[0].lower() == "workspaces":
+        parts = parts[1:]
+    if not parts:
+        raise ValueError("缺少工作区配置文件名。")
+    return ensure_within(workspace_dir, workspace_dir.joinpath(*parts))
+
+
 def ensure_within(root: Path, candidate: Path) -> Path:
     resolved_root = root.resolve()
     resolved = candidate.resolve(strict=False)

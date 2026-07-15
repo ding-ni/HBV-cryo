@@ -153,6 +153,23 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             svc.StudioHandler.POST_ROUTE_HANDLERS["/api/auto-config"],
         )
 
+    def test_workspace_save_relative_path_uses_installed_user_workspace_directory(self) -> None:
+        handler = object.__new__(svc.StudioHandler)
+        responses: list[dict] = []
+        handler.send_json = lambda payload, status=200: responses.append(payload) or True
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace_dir = root / "用户数据" / "workspaces"
+            with mock.patch.object(svc, "WORKSPACE_DIR", workspace_dir):
+                handler._api_post_workspace_save(
+                    {"path": "workspaces/正式方案.json", "data": {"流域名称": "测试流域"}}
+                )
+
+            target = workspace_dir / "正式方案.json"
+            self.assertTrue(target.exists())
+            self.assertEqual(responses[0]["path"], str(target.resolve()))
+            self.assertFalse((svc.GUI_ROOT / "workspaces" / "正式方案.json").exists())
+
     def test_api_route_specs_are_unique_grouped_and_drive_handler_maps(self) -> None:
         route_keys = [(spec.method, spec.path) for spec in api_routes.API_ROUTE_SPECS]
         self.assertEqual(len(route_keys), len(set(route_keys)))
