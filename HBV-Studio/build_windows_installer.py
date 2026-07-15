@@ -509,6 +509,7 @@ Source: "{{#MySourceDir}}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recurses
 [InstallDelete]
 Type: files; Name: "{{group}}\\HBVStudio.lnk"
 Type: files; Name: "{{autodesktop}}\\HBVStudio.lnk"
+Type: files; Name: "{{app}}\\HBV-Studio\\workspaces\\*.json"
 
 [Icons]
 Name: "{{group}}\\HBVStudio"; Filename: "{{app}}\\{{#MyAppExeName}}"; Parameters: "--installed-mode"; WorkingDir: "{{app}}"; IconFilename: "{shortcut_icon_value}"

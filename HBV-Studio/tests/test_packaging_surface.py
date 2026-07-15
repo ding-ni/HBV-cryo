@@ -36,6 +36,23 @@ class PackagingSurfaceTests(unittest.TestCase):
             self.assertEqual(result, bundle_dir)
             self.assertFalse(stale_workspace.exists())
 
+    def test_installer_upgrade_deletes_only_bundled_workspace_jsons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle_dir = root / "bundle"
+            bundle_dir.mkdir()
+            with (
+                mock.patch.object(installer, "INNO_BUILD_ROOT", root / "inno"),
+                mock.patch.object(installer, "OUTPUT_DIR", root / "output"),
+                mock.patch.object(installer, "BRANDING_ICON", root / "missing.ico"),
+                mock.patch.object(installer, "resolve_inno_language", return_value=("english", "compiler:Default.isl")),
+            ):
+                script_path = installer.write_inno_setup_script(bundle_dir, "test-version")
+
+            script = script_path.read_text(encoding="utf-8-sig")
+            self.assertIn('Type: files; Name: "{app}\\HBV-Studio\\workspaces\\*.json"', script)
+            self.assertNotIn('{app}\\用户数据\\workspaces', script)
+
     def test_installer_manifest_declares_era5_accumulation_contract(self) -> None:
         self.assertEqual(
             installer.BUILD_CONTRACTS["era5_accumulation_boundary"],
