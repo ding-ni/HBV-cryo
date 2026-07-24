@@ -143,16 +143,16 @@ def merge_netcdf_files(month_files: Sequence[str | Path], output_file: str | Pat
 
     output = Path(output_file)
     datasets: list[Any] = []
-    temp_dir: Path | None = None
-    partial_file = output.with_suffix(output.suffix + ".merge_part")
+    merged: Any | None = None
+    temp_dir = Path(tempfile.mkdtemp(prefix="hbv_era5_merge_"))
+    ascii_output = temp_dir / "merged.nc"
+    staging_file: Path | None = None
     try:
-        for source in sources:
+        for index, source in enumerate(sources):
             try:
                 datasets.append(xr.open_dataset(source, engine="netcdf4"))
             except Exception:
-                if temp_dir is None:
-                    temp_dir = Path(tempfile.mkdtemp(prefix="hbv_era5_merge_"))
-                ascii_copy = temp_dir / source.name
+                ascii_copy = temp_dir / f"source_{index:02d}.nc"
                 shutil.copy2(source, ascii_copy)
                 datasets.append(xr.open_dataset(ascii_copy, engine="netcdf4"))
 
@@ -166,31 +166,51 @@ def merge_netcdf_files(month_files: Sequence[str | Path], output_file: str | Pat
         merged = merged.isel({time_name: unique_sorted_time_indices(merged[time_name].values)})
         merged = merged.sortby(time_name)
 
-        if partial_file.exists():
-            partial_file.unlink()
-        # 关闭源再写，降低 Windows 文件锁冲突
+        # netCDF4/HDF5 在 Windows 中文长路径上可能无法直接创建文件，
+        # 因此先在 ASCII 临时目录完整写出并校验。源数据必须保持打开，
+        # 因为 xarray concat 默认仍会惰性读取各月文件。
+        merged.to_netcdf(ascii_output, engine="netcdf4")
+        merged.close()
+        merged = None
         for dataset in datasets:
             dataset.close()
         datasets.clear()
-        merged.to_netcdf(partial_file)
-        merged.close()
-        if not is_usable_netcdf(partial_file):
-            raise RuntimeError(f"合并结果不可读：{partial_file}")
-        os.replace(partial_file, output)
+        if not is_usable_netcdf(ascii_output):
+            raise RuntimeError(f"合并结果不可读：{ascii_output}")
+
+        # 目标目录中使用唯一临时名，避免上次失败遗留或安全软件占用固定
+        # .merge_part。复制完成后再原子替换正式年文件。
+        output.parent.mkdir(parents=True, exist_ok=True)
+        handle, staging_name = tempfile.mkstemp(
+            prefix=f".{output.stem}_merge_",
+            suffix=".part",
+            dir=output.parent,
+        )
+        os.close(handle)
+        staging_file = Path(staging_name)
+        shutil.copyfile(ascii_output, staging_file)
+        if staging_file.stat().st_size != ascii_output.stat().st_size:
+            raise RuntimeError(f"合并结果复制不完整：{staging_file}")
+        os.replace(staging_file, output)
+        staging_file = None
         return output
     finally:
+        if merged is not None:
+            try:
+                merged.close()
+            except Exception:
+                pass
         for dataset in datasets:
             try:
                 dataset.close()
             except Exception:
                 pass
-        if partial_file.exists():
+        if staging_file is not None and staging_file.exists():
             try:
-                partial_file.unlink()
+                staging_file.unlink()
             except Exception:
                 pass
-        if temp_dir is not None:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def _chunk_label(year: int, months: Sequence[int]) -> str:

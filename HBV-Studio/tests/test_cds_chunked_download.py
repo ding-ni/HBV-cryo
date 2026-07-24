@@ -53,6 +53,35 @@ class CdsChunkedDownloadTests(unittest.TestCase):
                 self.assertEqual(merged.sizes["valid_time"], 3)
                 self.assertTrue(np.all(np.diff(merged["valid_time"].values) > np.timedelta64(0, "h")))
 
+    def test_merge_uses_unique_staging_and_tolerates_stale_fixed_part(self) -> None:
+        from cds_chunked_download import merge_netcdf_files
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            root = temp_root / "中文路径" / "原始气象" / "降水"
+            root.mkdir(parents=True)
+            source = root / "month.nc"
+            ascii_source = temp_root / "month_ascii.nc"
+            ds = xr.Dataset(
+                {"tp": (("valid_time", "latitude", "longitude"), np.ones((1, 1, 1)))},
+                coords={
+                    "valid_time": np.array(["2025-01-01T00"], dtype="datetime64[h]"),
+                    "latitude": [30.0],
+                    "longitude": [90.0],
+                },
+            )
+            ds.to_netcdf(ascii_source)
+            source.write_bytes(ascii_source.read_bytes())
+            output = root / "era5_tp_hourly_2025.nc"
+            stale_fixed_part = output.with_suffix(output.suffix + ".merge_part")
+            stale_fixed_part.mkdir()
+
+            merge_netcdf_files([source], output)
+
+            self.assertTrue(output.exists())
+            self.assertTrue(stale_fixed_part.is_dir())
+            self.assertFalse(list(root.glob(".era5_tp_hourly_2025_merge_*.part")))
+
     def test_download_chunked_uses_monthly_requests(self) -> None:
         from cds_chunked_download import download_era5_land_year_chunked
 
