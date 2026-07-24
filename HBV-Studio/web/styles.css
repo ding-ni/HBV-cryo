@@ -226,6 +226,30 @@ body {
   background: var(--danger-light);
 }
 
+.license-banner {
+  margin: 0 18px 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(20, 79, 84, 0.18);
+  background: rgba(20, 79, 84, 0.06);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.license-banner.warn {
+  border-color: rgba(180, 120, 20, 0.35);
+  background: rgba(255, 214, 102, 0.22);
+  color: #7a4d00;
+}
+.license-banner.expired {
+  border-color: rgba(181, 69, 56, 0.35);
+  background: rgba(181, 69, 56, 0.10);
+  color: #8a2f26;
+}
+.license-banner[hidden] {
+  display: none !important;
+}
+
 /* ===== Buttons ===== */
 .primary-button {
   display: inline-flex;

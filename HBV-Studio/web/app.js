@@ -327,7 +327,7 @@ const frontendModuleContracts = [
   {
     script: "./js/appRuntime.js",
     global: "HBVStudioAppRuntime",
-    exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
+    exports: ["finiteNumber", "focusStatusClass", "focusStatusLabel", "formatDateTime", "formatDurationSeconds", "formatNumber", "healthQueryState", "licenseBannerState", "normalizePath", "pollingScheduleState", "profileBadge", "profileLabel", "quitRequestState", "samePath", "servicePillState", "shortPath", "sidebarContextState", "sidebarCountsState", "slashPath", "toastState", "viewNavigationState", "viewSelectionState", "windowUnloadRequestState"],
   },
   {
     script: "./js/appDataFlow.js",
@@ -6457,7 +6457,18 @@ async function init() {
     const healthQuery = window.HBVStudioAppRuntime.healthQueryState();
     const health = await apiGet(healthQuery.healthPath);
     const connectedAt = health.server_time ? String(health.server_time).split(" ").pop() : new Date().toLocaleTimeString();
-    setServiceState(true, `本地服务已连接 · ${connectedAt}`);
+    const license = health.license || null;
+    const licenseState = window.HBVStudioAppRuntime.licenseBannerState(license);
+    applyDomUpdates(licenseState.domUpdates);
+    if (license && license.expired) {
+      setServiceState(true, `授权已到期 · 仅可查看结果`);
+      showToast(String(license.message || "项目授权已到期"), true);
+    } else if (license && license.warning) {
+      setServiceState(true, `本地服务已连接 · 授权将到期`);
+      showToast(String(license.message || "项目授权即将到期"), false);
+    } else {
+      setServiceState(true, `本地服务已连接 · ${connectedAt}`);
+    }
     await refreshAll();
     startPolling();
   } catch (err) {

@@ -51,7 +51,10 @@ def source_files_latest_mtime(context: HealthContext) -> tuple[float, str]:
 
 
 def health_payload(context: HealthContext) -> dict[str, Any]:
+    from services.project_license import license_payload
+
     latest_source_mtime, latest_source_file = source_files_latest_mtime(context)
+    license_info = license_payload()
     return {
         "ok": True,
         "time": time.time(),
@@ -62,4 +65,8 @@ def health_payload(context: HealthContext) -> dict[str, Any]:
         "source_latest_mtime": latest_source_mtime,
         "source_latest_file": latest_source_file,
         "source_stale": bool(latest_source_mtime and latest_source_mtime > context.server_started_at + 1.0),
+        "license": license_info,
+        "license_ok": bool(license_info.get("ok")),
+        "license_expired": bool(license_info.get("expired")),
+        "license_message": str(license_info.get("message") or ""),
     }

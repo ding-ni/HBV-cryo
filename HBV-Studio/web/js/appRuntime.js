@@ -132,6 +132,39 @@
     };
   }
 
+  function licenseBannerState(license = null) {
+    const info = license && typeof license === "object" ? license : null;
+    if (!info) {
+      return {
+        visible: false,
+        text: "",
+        className: "license-banner",
+        domUpdates: [{ selector: "#license-banner", text: "", className: "license-banner", visible: false }],
+      };
+    }
+    const expired = Boolean(info.expired);
+    const warning = Boolean(info.warning);
+    const show = expired || warning;
+    const message = String(info.message || "");
+    const detail = String(info.detail || "");
+    const text = detail ? `${message} ${detail}` : message;
+    const tone = expired ? "expired" : warning ? "warn" : "";
+    const className = tone ? `license-banner ${tone}` : "license-banner";
+    return {
+      visible: show,
+      text,
+      className,
+      domUpdates: [
+        {
+          selector: "#license-banner",
+          text: show ? text : "",
+          className,
+          visible: show,
+        },
+      ],
+    };
+  }
+
   function itemCount(value) {
     return Array.isArray(value) ? value.length : 0;
   }
@@ -261,6 +294,7 @@
     profileLabel,
     quitRequestState,
     servicePillState,
+    licenseBannerState,
     sidebarContextState,
     sidebarCountsState,
     normalizePath,

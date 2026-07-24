@@ -296,6 +296,7 @@ from services.runtime_params import (
     safe_float,
     sanitize_param_values,
 )
+from services.project_license import license_blocks_post, license_payload
 from services.system_status import (
     HealthContext,
     health_payload as build_health_payload,
@@ -505,7 +506,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026.07.24.1"
+APP_VERSION = "2026.07.24.2"
 SERVER_STARTED_AT = time.time()
 
 
@@ -4463,6 +4464,10 @@ class StudioHandler(BaseHTTPRequestHandler):
         if not parsed.path.startswith("/api/"):
             self.send_error_json("不支持的路径。", status=404)
             return
+        blocked, reason = license_blocks_post(parsed.path)
+        if blocked:
+            self.send_error_json(reason, status=403)
+            return
         self.handle_api_post(parsed)
 
     def _dispatch_api_route(self, route_handlers: dict[str, str], path: str, argument: Any) -> None:
@@ -4857,7 +4862,11 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
     mark_server_activity()
+    license_info = license_payload()
     print(f"HBV-Studio server v{APP_VERSION} on {host}:{port}")
+    print(f"License: {license_info.get('message')}")
+    if license_info.get("expired"):
+        print(f"License detail: {license_info.get('detail')}")
     server = ExclusiveThreadingHTTPServer((host, port), StudioHandler)
     threading.Thread(target=monitor_server_lifecycle, args=(server,), daemon=True).start()
     try:
