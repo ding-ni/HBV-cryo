@@ -468,21 +468,32 @@ def check_daily_era5_download_status(
     return summarize_nc_download_status(entries)
 
 
+def _yearly_hourly_nc_files(directory: Path, prefix: str) -> list[Path]:
+    """只统计按年合并文件 era5_xxx_hourly_YYYY.nc，忽略月分片与 .chunks。"""
+    import re
+
+    pattern = re.compile(rf"^{re.escape(prefix)}_\d{{4}}\.nc$", re.IGNORECASE)
+    root = Path(directory)
+    if not root.exists():
+        return []
+    return sorted(path for path in root.glob(f"{prefix}_*.nc") if pattern.match(path.name))
+
+
 def check_hourly_era5_download_status(
     config: dict[str, Any],
     context: ForcingDownloadStatusContext,
 ) -> tuple[bool, str, int]:
     paths = context.build_workspace_paths(config)
-    patterns = [
-        Path(paths["raw_temp_dir"]).glob("era5_t2m_hourly_*.nc"),
-        Path(paths["raw_solar_dir"]).glob("era5_ssrd_hourly_*.nc"),
-        Path(paths["raw_wind_dir"]).glob("era5_u10_hourly_*.nc"),
-        Path(paths["raw_wind_dir"]).glob("era5_v10_hourly_*.nc"),
-        Path(paths["raw_dewpoint_dir"]).glob("era5_d2m_hourly_*.nc"),
+    file_groups = [
+        _yearly_hourly_nc_files(Path(paths["raw_temp_dir"]), "era5_t2m_hourly"),
+        _yearly_hourly_nc_files(Path(paths["raw_solar_dir"]), "era5_ssrd_hourly"),
+        _yearly_hourly_nc_files(Path(paths["raw_wind_dir"]), "era5_u10_hourly"),
+        _yearly_hourly_nc_files(Path(paths["raw_wind_dir"]), "era5_v10_hourly"),
+        _yearly_hourly_nc_files(Path(paths["raw_dewpoint_dir"]), "era5_d2m_hourly"),
     ]
     if context.configured_precip_source(config) == "era5":
-        patterns.append(Path(paths["raw_prec_era5_dir"]).glob("era5_tp_hourly_*.nc"))
-    count = sum(len(list(items)) for items in patterns)
+        file_groups.append(_yearly_hourly_nc_files(Path(paths["raw_prec_era5_dir"]), "era5_tp_hourly"))
+    count = sum(len(items) for items in file_groups)
     time_cfg = dict(config.get("时间", {}) or {})
     start = str(time_cfg.get("预热开始", "") or "").replace("T", " ")
     end = str(time_cfg.get("验证结束", "") or "").replace("T", " ")

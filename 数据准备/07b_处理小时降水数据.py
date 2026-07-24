@@ -54,7 +54,17 @@ def main() -> None:
         if list(target_dir.glob("*.tif")):
             print(f"[完成] ERA5 小时降水已生成 -> {target_dir}")
             return
-        raise FileNotFoundError("当前降水来源为 ERA5，请先运行“处理小时温度与蒸散”步骤；该步骤会同步生成 ERA5 小时降水。")
+        yearly = sorted(Path(paths["raw_prec_era5_dir"]).glob("era5_tp_hourly_????.nc"))
+        if yearly:
+            raise FileNotFoundError(
+                "已找到按年小时降水 NC，但尚未生成小时 TIF。"
+                "请先运行“处理小时温度与蒸散”（06b）以写出 ERA5 小时降水栅格。"
+                f" 年文件示例：{yearly[0].name}"
+            )
+        raise FileNotFoundError(
+            "当前降水来源为 ERA5，请先完成“下载小时 ERA5 变量”，再运行“处理小时温度与蒸散”；"
+            "该步骤会同步生成 ERA5 小时降水。"
+        )
     source_dir_raw = str(meteo.get("原始小时降水目录", "")).strip()
     if source_dir_raw:
         source_dir = Path(resolve_path(source_dir_raw, base=config_base_dir(config))).resolve(strict=False)

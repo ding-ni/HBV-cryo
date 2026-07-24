@@ -16,9 +16,22 @@
 
 import os
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+_COMMON_DIR = Path(__file__).resolve().parents[1]
+if str(_COMMON_DIR) not in sys.path:
+    sys.path.insert(0, str(_COMMON_DIR))
+
+from cds_chunked_download import (  # type: ignore
+    DEFAULT_CHUNK_MONTHS,
+    SIX_HOURLY_TIMES,
+    download_era5_land_year_chunked,
+    format_cds_size_error,
+    is_usable_netcdf,
+)
 
 # ============================================================
 # 路径配置
@@ -203,113 +216,52 @@ def download_accumulation_boundary(variable, output_dir, prefix, boundary_year):
     return output_file
 
 
-def download_era5_temperature(year):
-    """下载 ERA5-Land 2m温度数据"""
+def _download_daily_era5_variable(variable, output_file, year, *, label):
+    """日尺度 ERA5-Land：6 小时时次，按月分片后合并为年文件。"""
     import cdsapi
 
-    c = cdsapi.Client()
+    output_path = Path(output_file)
+    if is_usable_netcdf(output_path):
+        print(f"   {year}: 文件已存在，跳过")
+        return
 
+    print(f"   {year}: 下载中（{label}，按月分片）...")
+    try:
+        download_era5_land_year_chunked(
+            cdsapi.Client(),
+            variable=variable,
+            year=int(year),
+            area=TUOTUOHE_BBOX,
+            output_file=output_path,
+            times=SIX_HOURLY_TIMES,
+            chunk_months=DEFAULT_CHUNK_MONTHS,
+            on_chunk_error=lambda exc: format_cds_size_error(
+                exc,
+                hint="日尺度 ERA5 已按月分片；若仍 too large，请缩小下载范围或保持 1 个月/请求。",
+            ),
+        )
+        print(f"   {year}: [OK]")
+    except Exception as exc:
+        print(f"   {year}: [ERROR] {format_cds_size_error(exc)}")
+        raise
+
+
+def download_era5_temperature(year):
+    """下载 ERA5-Land 2m温度数据"""
     output_file = os.path.join(RAW_TEMP_DIR, f"era5_t2m_{year}.nc")
-
-    if os.path.exists(output_file):
-        # 检查是否是有效的 NetCDF
-        with open(output_file, 'rb') as f:
-            header = f.read(2)
-        if header != b'PK':  # 不是 ZIP
-            print(f"   {year}: 文件已存在，跳过")
-            return
-
-    print(f"   {year}: 下载中...")
-
-    c.retrieve(
-        'reanalysis-era5-land',
-        {
-            'variable': '2m_temperature',
-            'year': str(year),
-            'month': [f'{m:02d}' for m in range(1, 13)],
-            'day': [f'{d:02d}' for d in range(1, 32)],
-            'time': ['00:00', '06:00', '12:00', '18:00'],  # 每6小时
-            'area': TUOTUOHE_BBOX,
-            'format': 'netcdf',
-        },
-        output_file
-    )
-
-    # 自动解压 ZIP 文件
-    extract_if_zip(output_file)
-    print(f"   {year}: [OK]")
+    _download_daily_era5_variable("2m_temperature", output_file, year, label="t2m")
 
 
 def download_era5_evaporation(year):
     """下载 ERA5-Land 蒸散发数据"""
-    import cdsapi
-
-    c = cdsapi.Client()
-
     output_file = os.path.join(RAW_EVAP_DIR, f"era5_evap_{year}.nc")
-
-    if os.path.exists(output_file):
-        # 检查是否是有效的 NetCDF
-        with open(output_file, 'rb') as f:
-            header = f.read(2)
-        if header != b'PK':  # 不是 ZIP
-            print(f"   {year}: 文件已存在，跳过")
-            return
-
-    print(f"   {year}: 下载中...")
-
-    c.retrieve(
-        'reanalysis-era5-land',
-        {
-            'variable': 'total_evaporation',
-            'year': str(year),
-            'month': [f'{m:02d}' for m in range(1, 13)],
-            'day': [f'{d:02d}' for d in range(1, 32)],
-            'time': ['00:00', '06:00', '12:00', '18:00'],
-            'area': TUOTUOHE_BBOX,
-            'format': 'netcdf',
-        },
-        output_file
-    )
-
-    # 自动解压 ZIP 文件
-    extract_if_zip(output_file)
-    print(f"   {year}: [OK]")
+    _download_daily_era5_variable("total_evaporation", output_file, year, label="evap")
 
 
 def download_era5_precipitation(year):
     """下载 ERA5-Land 总降水数据"""
-    import cdsapi
-
-    c = cdsapi.Client()
-
     output_file = os.path.join(RAW_PREC_ERA5_DIR, f"era5_tp_{year}.nc")
-
-    if os.path.exists(output_file):
-        with open(output_file, 'rb') as f:
-            header = f.read(2)
-        if header != b'PK':
-            print(f"   {year}: 文件已存在，跳过")
-            return
-
-    print(f"   {year}: 下载中...")
-
-    c.retrieve(
-        'reanalysis-era5-land',
-        {
-            'variable': 'total_precipitation',
-            'year': str(year),
-            'month': [f'{m:02d}' for m in range(1, 13)],
-            'day': [f'{d:02d}' for d in range(1, 32)],
-            'time': ['00:00', '06:00', '12:00', '18:00'],
-            'area': TUOTUOHE_BBOX,
-            'format': 'netcdf',
-        },
-        output_file
-    )
-
-    extract_if_zip(output_file)
-    print(f"   {year}: [OK]")
+    _download_daily_era5_variable("total_precipitation", output_file, year, label="tp")
 
 
 def download_era5_all(download_actual_evaporation=False, download_precipitation=False, download_temperature=True):

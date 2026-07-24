@@ -18,6 +18,18 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+_COMMON_DIR = Path(__file__).resolve().parents[1]
+if str(_COMMON_DIR) not in sys.path:
+    sys.path.insert(0, str(_COMMON_DIR))
+
+from cds_chunked_download import (  # type: ignore
+    DEFAULT_CHUNK_MONTHS,
+    SIX_HOURLY_TIMES,
+    download_era5_land_year_chunked,
+    format_cds_size_error,
+    is_usable_netcdf,
+)
+
 # ============================================================
 # 配置
 # ============================================================
@@ -171,10 +183,10 @@ def validate_boundary_download(file_path, variable, boundary_year):
 
 
 def download_variable(c, variable, output_dir, prefix, year):
-    """下载单个变量单年数据"""
+    """下载单个变量单年数据（按月分片后合并）。"""
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{prefix}_{year}.nc")
-    partial_file = output_file + ".part"
+    output_path = Path(output_file)
 
     if os.path.exists(output_file):
         valid, reason = validate_download(output_file, variable, year)
@@ -182,37 +194,36 @@ def download_variable(c, variable, output_dir, prefix, year):
             print(f"   {year}: 已存在且校验通过，跳过")
             return True
         print(f"   {year}: 现有文件未通过校验，将重新下载（{reason}）")
+        try:
+            os.remove(output_file)
+        except OSError:
+            pass
 
-    if os.path.exists(partial_file):
-        os.remove(partial_file)
-
-    print(f"   {year}: 下载中...")
+    print(f"   {year}: 下载中（按月分片）...")
 
     try:
-        c.retrieve(
-            'reanalysis-era5-land',
-            {
-                'variable': variable,
-                'year': str(year),
-                'month': [f'{m:02d}' for m in range(1, 13)],
-                'day': [f'{d:02d}' for d in range(1, 32)],
-                'time': ['00:00', '06:00', '12:00', '18:00'],
-                'area': TUOTUOHE_BBOX,
-                'format': 'netcdf',
-            },
-            partial_file
+        download_era5_land_year_chunked(
+            c,
+            variable=variable,
+            year=int(year),
+            area=TUOTUOHE_BBOX,
+            output_file=output_path,
+            times=SIX_HOURLY_TIMES,
+            chunk_months=DEFAULT_CHUNK_MONTHS,
+            skip_if_exists=False,
+            exists_checker=is_usable_netcdf,
+            on_chunk_error=lambda exc: format_cds_size_error(
+                exc,
+                hint="FAO56 输入变量已按月分片下载；若仍失败请缩小范围。",
+            ),
         )
-        extract_if_zip(partial_file)
-        valid, reason = validate_download(partial_file, variable, year)
+        valid, reason = validate_download(output_file, variable, year)
         if not valid:
             raise RuntimeError(f"下载结果校验失败：{reason}")
-        os.replace(partial_file, output_file)
         print(f"   {year}: [OK]")
         return True
     except Exception as e:
-        if os.path.exists(partial_file):
-            os.remove(partial_file)
-        print(f"   {year}: [ERROR] {e}")
+        print(f"   {year}: [ERROR] {format_cds_size_error(e)}")
         return False
 
 
