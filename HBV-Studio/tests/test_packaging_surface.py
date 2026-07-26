@@ -48,7 +48,7 @@ class PackagingSurfaceTests(unittest.TestCase):
             self.assertEqual(result, bundle_dir)
             self.assertFalse(stale_workspace.exists())
 
-    def test_installer_upgrade_deletes_only_bundled_workspace_jsons(self) -> None:
+    def test_installer_upgrade_preserves_misplaced_workspace_jsons_for_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bundle_dir = root / "bundle"
@@ -62,7 +62,7 @@ class PackagingSurfaceTests(unittest.TestCase):
                 script_path = installer.write_inno_setup_script(bundle_dir, "test-version")
 
             script = script_path.read_text(encoding="utf-8-sig")
-            self.assertIn('Type: files; Name: "{app}\\HBV-Studio\\workspaces\\*.json"', script)
+            self.assertNotIn('{app}\\HBV-Studio\\workspaces\\*.json', script)
             self.assertNotIn('{app}\\用户数据\\workspaces', script)
 
     def test_installer_manifest_declares_era5_accumulation_contract(self) -> None:
