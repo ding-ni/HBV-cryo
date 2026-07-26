@@ -506,7 +506,7 @@ LAST_WINDOW_UNLOAD_AT = 0.0
 SERVER_ACTIVITY_LOCK = threading.Lock()
 INSTALLED_IDLE_SHUTDOWN_SECONDS = 90.0
 WINDOW_UNLOAD_SHUTDOWN_GRACE_SECONDS = 3.0
-APP_VERSION = "2026.07.24.3"
+APP_VERSION = "2026.07.26.1"
 SERVER_STARTED_AT = time.time()
 
 
@@ -2407,7 +2407,10 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
     step_data = payload.get("data", {})
     if not workspace_path:
         raise ValueError("缺少 workspace_path。")
-    path = resolve_any_path(workspace_path, must_exist=False)
+    # New-workspace wizard paths are submitted as ``workspaces/<name>.json``.
+    # In installed mode those relative paths must live under the writable
+    # user-data workspace directory, just like the regular save endpoint.
+    path = resolve_workspace_save_path(workspace_path)
     if path.exists():
         config = read_json_file(path)
     else:

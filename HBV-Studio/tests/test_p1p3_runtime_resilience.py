@@ -170,6 +170,31 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
             self.assertEqual(responses[0]["path"], str(target.resolve()))
             self.assertFalse((svc.GUI_ROOT / "workspaces" / "正式方案.json").exists())
 
+    def test_wizard_save_relative_path_uses_installed_user_workspace_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace_dir = root / "用户数据" / "workspaces"
+            with (
+                mock.patch.object(svc, "WORKSPACE_DIR", workspace_dir),
+                mock.patch.object(svc, "build_empty_workspace", return_value={"流域名称": "向导流域"}),
+                mock.patch.object(svc, "normalize_config_before_save", side_effect=lambda config, path: config),
+                mock.patch.object(svc, "read_runtime_config", side_effect=svc.read_json_file),
+                mock.patch.object(svc, "seed_workspace_runtime_dirs"),
+                mock.patch.object(svc, "wizard_validate_step", return_value={"ok": True}),
+            ):
+                result = svc.wizard_save_step(
+                    {
+                        "workspace_path": "workspaces/向导流域.json",
+                        "step": 1,
+                        "data": {"name": "向导流域", "timescale": "hourly"},
+                    }
+                )
+
+            target = workspace_dir / "向导流域.json"
+            self.assertTrue(target.exists())
+            self.assertEqual(result["path"], str(target.resolve()))
+            self.assertFalse((svc.GUI_ROOT / "workspaces" / "向导流域.json").exists())
+
     def test_api_route_specs_are_unique_grouped_and_drive_handler_maps(self) -> None:
         route_keys = [(spec.method, spec.path) for spec in api_routes.API_ROUTE_SPECS]
         self.assertEqual(len(route_keys), len(set(route_keys)))

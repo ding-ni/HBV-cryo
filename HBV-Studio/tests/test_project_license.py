@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from unittest import mock
 
 from services.project_license import (
     LICENSE_EXPIRES_ON,
@@ -12,6 +13,16 @@ from services.project_license import (
 
 
 class ProjectLicenseTests(unittest.TestCase):
+    def test_unlimited_local_variant_never_expires(self) -> None:
+        with mock.patch("services.project_license.LICENSE_MODE", "unlimited"):
+            status = evaluate_license(today=date(2099, 1, 1))
+            blocked, message = license_blocks_post("/api/data-prep/start", today=date(2099, 1, 1))
+        self.assertTrue(status.ok)
+        self.assertFalse(status.expired)
+        self.assertEqual(status.expires_on, "")
+        self.assertFalse(blocked)
+        self.assertEqual(message, "")
+
     def test_expires_on_is_project_end_of_2027(self) -> None:
         self.assertEqual(LICENSE_EXPIRES_ON, date(2027, 12, 31))
 

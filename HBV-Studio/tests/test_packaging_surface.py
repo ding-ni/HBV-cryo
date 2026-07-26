@@ -16,6 +16,18 @@ import build_windows_installer as installer  # noqa: E402
 
 
 class PackagingSurfaceTests(unittest.TestCase):
+    def test_installer_stages_explicit_license_variant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle_dir = Path(tmp) / "bundle"
+            variant_file = installer.configure_staged_license(bundle_dir, "unlimited")
+            self.assertIn('LICENSE_MODE = "unlimited"', variant_file.read_text(encoding="utf-8"))
+            with self.assertRaises(ValueError):
+                installer.configure_staged_license(bundle_dir, "unknown")
+
+    def test_installer_output_label_distinguishes_package_variants(self) -> None:
+        self.assertEqual(installer.output_label_suffix("外发授权版"), "_外发授权版")
+        self.assertEqual(installer.output_label_suffix(""), "")
+
     def test_installer_build_removes_stale_stage_before_pyinstaller(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

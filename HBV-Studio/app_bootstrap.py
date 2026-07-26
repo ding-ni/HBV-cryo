@@ -260,6 +260,29 @@ def migrate_existing_user_data(target_root: Path) -> None:
         shutil.copytree(legacy_logs, target_logs, dirs_exist_ok=True)
 
 
+def migrate_misplaced_installed_workspaces(target_root: Path) -> None:
+    """Recover workspace JSON files written into the installed app directory.
+
+    Versions before 2026.07.26 resolved the new-workspace wizard's relative
+    ``workspaces/<name>.json`` path against ``HBV-Studio`` instead of the
+    writable user-data root. Runtime data was still written correctly, so a
+    restart made the project appear to vanish while its runtime directory
+    remained. Copy those misplaced configs into the directory scanned at
+    startup. Existing user copies always win.
+    """
+    if not installed_mode():
+        return
+    misplaced_workspaces = GUI_ROOT / "workspaces"
+    target_workspaces = target_root / "workspaces"
+    if samefile_or_equal(misplaced_workspaces, target_workspaces) or not misplaced_workspaces.exists():
+        return
+    target_workspaces.mkdir(parents=True, exist_ok=True)
+    for src in misplaced_workspaces.glob("*.json"):
+        dst = target_workspaces / src.name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+
+
 def samefile_or_equal(left: Path, right: Path) -> bool:
     try:
         return left.resolve(strict=False) == right.resolve(strict=False)
@@ -276,6 +299,7 @@ def seed_user_data() -> None:
 
     target_workspaces = target_root / "workspaces"
     target_workspaces.mkdir(parents=True, exist_ok=True)
+    migrate_misplaced_installed_workspaces(target_root)
     migrate_existing_user_data(target_root)
     source_workspaces = GUI_ROOT / "workspaces"
     seed_marker = target_workspaces / USER_WORKSPACE_SEED_MARKER

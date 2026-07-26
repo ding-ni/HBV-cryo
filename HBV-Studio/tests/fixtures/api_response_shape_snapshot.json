@@ -28,6 +28,20 @@
     "ok": "bool"
   },
   "/api/health": {
+    "license": {
+      "days_remaining": "number",
+      "detail": "str",
+      "expired": "bool",
+      "expires_on": "str",
+      "message": "str",
+      "ok": "bool",
+      "product": "str",
+      "today": "str",
+      "warning": "bool"
+    },
+    "license_expired": "bool",
+    "license_message": "str",
+    "license_ok": "bool",
     "ok": "bool",
     "server_started_at": "number",
     "server_started_at_text": "str",

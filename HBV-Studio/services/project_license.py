@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
+from .package_variant import LICENSE_MODE
+
 
 # 项目授权截止日（含当日 23:59:59 本地日历日）
 LICENSE_EXPIRES_ON = date(2027, 12, 31)
@@ -65,6 +67,19 @@ def _as_date(value: date | datetime | None = None) -> date:
 
 def evaluate_license(*, today: date | datetime | None = None) -> LicenseStatus:
     current = _as_date(today)
+    if LICENSE_MODE == "unlimited":
+        today_text = current.isoformat()
+        return LicenseStatus(
+            expires_on="",
+            today=today_text,
+            days_remaining=999999,
+            expired=False,
+            warning=False,
+            ok=True,
+            product="HBV-Studio 本地自用版",
+            message="本地自用版，无到期限制。",
+            detail="此构建仅用于软件所有者本地开发、测试与维护。",
+        )
     days_remaining = (LICENSE_EXPIRES_ON - current).days
     expired = days_remaining < 0
     warning = (not expired) and days_remaining <= LICENSE_WARNING_DAYS
