@@ -74,7 +74,7 @@ class RunHydrologyServiceTests(unittest.TestCase):
         self.assertEqual(summary["workflow_label_zh"], "单流程参数率定")
         self.assertEqual(summary["flow_status_zh"], "径流拟合达标")
         self.assertEqual(summary["ice_status_zh"], "降雨 60.0% / 融雪 25.0% / 裸冰 15.0%")
-        self.assertIn("## 4. 洪水事件评价", report)
+        self.assertIn("## 4. 场次洪水评价", report)
         self.assertIn("| E1 | calibration | -3.20% | 2.0 h | 4.50% | 0.8100 |", report)
         self.assertIn("| 降雨产流 | 60.0% |", report)
         self.assertIn("- 出口构成口径：率定期模拟总流量口径", report)

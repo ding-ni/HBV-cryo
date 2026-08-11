@@ -12,7 +12,7 @@ from profile_runner import PARAM_BOUNDS_PROFILE_GENERIC, PARAM_BOUNDS_PROFILE_QT
 
 
 def main():
-    parser = argparse.ArgumentParser(description="训练率定 HBV-Cryo。统一转到 HBV-Studio/profile_runner.py。")
+    parser = argparse.ArgumentParser(description="率定 HBV-Cryo 参数。统一转到 HBV-Studio/profile_runner.py。")
     parser.add_argument("--配置", "--config", dest="配置", default=str(example_config_path()))
     parser.add_argument("--率定模式", "--calibration-mode", dest="率定模式", choices=["daily", "hourly"], default=None)
     parser.add_argument("--目标函数", "--objective-mode", dest="目标函数", default=None)

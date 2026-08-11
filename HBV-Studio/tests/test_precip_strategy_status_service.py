@@ -80,7 +80,7 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
             (corrected / "precipitation_strategy_summary.json").write_text(
                 json.dumps(
                     {
-                        "time_basis_label": "洪水事件窗口",
+                        "time_basis_label": "场次洪水窗口",
                         "time_step_hours": 24,
                         "actual_period": "2021-01-01 至 2021-01-10，共 10 日，逐日连续无缺测",
                         "selected_steps": 10,
@@ -102,7 +102,7 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertEqual(
             message,
             "站点订正降水：2021-01-01 至 2021-01-10，共 10 日，逐日连续无缺测；"
-            "资料口径：洪水事件窗口；参与订正 8 日（目标 10 日）；"
+            "资料口径：场次洪水窗口；参与订正 8 日（目标 10 日）；"
             "无可用站点并保留原场：2 日；已忽略资料口径外：3 日",
         )
         self.assertEqual(count, 1)
@@ -211,7 +211,7 @@ class PrecipStrategyStatusServiceTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(count, 1)
         self.assertIn("订正执行：实测站点参与 5 日；规则外推 3 日；原样保留 1 日；已有输出复用 2 日", message)
-        self.assertIn("站点订正规则：训练日 12；有效站点样本 120；独立月规则 2/12；平均倍率 1.15", message)
+        self.assertIn("站点订正规则：订正样本日 12；有效站点样本 120；独立月规则 2/12；平均倍率 1.15", message)
 
     def test_station_bias_monthly_qc_block_prevents_formal_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

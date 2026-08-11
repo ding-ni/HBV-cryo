@@ -271,7 +271,7 @@ def read_boundary_inflow_series(
     dates,
     date_field="date",
     flow_field="inflow_m3s",
-    gap_fill="zero",
+    gap_fill="preserve_missing",
     expected_step_hours=None,
     allow_no_overlap=False,
 ):
@@ -327,19 +327,24 @@ def read_boundary_inflow_series(
                 RuntimeWarning,
                 stacklevel=2,
             )
+    preserve_missing = gap_mode in {
+        "preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"
+    }
     if gap_mode == "interpolate":
         series = series.interpolate(method="linear", limit_direction="both")
     elif gap_mode in {"", "zero", "0"}:
         series = series.fillna(0.0)
+    elif preserve_missing:
+        pass
     else:
         raise ValueError(f"不支持的上游边界入流缺失填补方式：{gap_fill}")
 
-    if expected_step_hours is not None and series.isna().any():
+    if expected_step_hours is not None and series.isna().any() and not preserve_missing:
         missing = target_index[series.isna()]
         sample = "、".join(pd.Timestamp(item).strftime("%Y-%m-%d %H:%M") for item in missing[:3])
         raise ValueError(
             f"上游边界入流时间覆盖不完整，缺少 {_time_quantity(int(series.isna().sum()), expected_step_hours)}，"
             f"例如：{sample or '请检查原始文件'}"
         )
-    series = series.fillna(0.0).astype(float)
+    series = series.astype(float)
     return series.values.astype(np.float64), True

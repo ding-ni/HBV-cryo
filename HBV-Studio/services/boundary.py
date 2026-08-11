@@ -400,11 +400,11 @@ def inspect_boundary_inflow_csv(
 def boundary_info_messages(
     boundary_info: dict[str, Any],
     step_hours: float,
-    gap_fill: str = "zero",
+    gap_fill: str = "preserve_missing",
 ) -> tuple[list[str], list[str]]:
     issues: list[str] = []
     warnings: list[str] = []
-    gap_mode = str(gap_fill or "zero").strip().lower()
+    gap_mode = str(gap_fill or "preserve_missing").strip().lower()
     detected_step = boundary_info.get("time_step_hours")
     if detected_step is not None and normalize_time_step_hours(detected_step) != step_hours:
         issues.append(

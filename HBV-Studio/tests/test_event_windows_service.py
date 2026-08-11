@@ -286,7 +286,7 @@ class EventWindowsServiceTests(unittest.TestCase):
         self.assertEqual(summary["end"], "2026-06-05")
         self.assertEqual(summary["expected_steps"], 5)
         self.assertEqual(summary["valid_event_count"], 1)
-        self.assertIn("1 \u573a\u6d2a\u6c34\u4e8b\u4ef6", summary["headline"])
+        self.assertIn("1 \u4e2a\u573a\u6b21\u6d2a\u6c34\u8bc4\u4ef7\u7a97\u53e3", summary["headline"])
 
     def test_input_time_basis_ui_summary_describes_continuous_period(self) -> None:
         config = {

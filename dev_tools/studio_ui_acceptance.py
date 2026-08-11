@@ -384,30 +384,33 @@ def run_playwright_checks(url: str, screenshot_path: Path) -> dict[str, Any]:
         page.locator('[data-view-target="results"]').click()
         page.wait_for_selector("#run-list .run-card", timeout=15000)
         card_text = page.locator("#run-list").inner_text()
-        assert "daily_unified_professional_v1" in card_text
-        assert "weighted_daily_universal" in card_text
-        assert "flow_guard" in card_text
+        assert "当前口径" in card_text
+        assert "历史口径" in card_text
         assert "PBIAS" in card_text
-        assert "旧目标" in card_text
 
-        current_card = page.locator(".run-card", has_text="daily_unified_professional_v1").first
+        current_card = page.locator(".run-card", has_text="当前口径").first
         current_card.click()
         page.wait_for_selector("#metadata-grid", timeout=15000)
+        page.wait_for_function(
+            "document.querySelector('#metadata-grid')?.innerText.includes('水文结果摘要')",
+            timeout=15000,
+        )
         detail_text = page.locator("#metadata-grid").inner_text()
         note_text = page.locator("#results-entry-hint").inner_text()
         engineering_note = page.locator("#run-engineering-note").inner_text()
-        assert "峰日归因诊断" in detail_text
-        assert "退水段冰源接管诊断" in detail_text
-        assert "峰日冰源归因保护" in detail_text
-        assert "可信度受限" in (note_text + engineering_note)
+        assert "评分标准" in detail_text
+        assert "径流拟合" in detail_text
+        assert "三水源构成" in detail_text
+        assert "本地过程复核报告" in detail_text
+        assert "完整过程复核" in (note_text + engineering_note)
         page.screenshot(path=str(screenshot_path), full_page=True)
         browser.close()
     return {
         "browser_driver": "playwright",
         "card_text_has_current_objective": True,
         "card_text_has_legacy_objective": True,
-        "detail_has_peak_recession": True,
-        "confidence_warning_visible": True,
+        "detail_has_hydrology_summary": True,
+        "result_guidance_visible": True,
         "console_errors": console_errors,
         "screenshot": str(screenshot_path),
     }
@@ -569,23 +572,27 @@ async def run_chrome_cdp_checks_async(url: str, screenshot_path: Path, root: Pat
             await client.evaluate("document.querySelector('[data-view-target=\"results\"]').click()")
             await cdp_wait_for(client, "document.querySelectorAll('#run-list .run-card').length >= 2", timeout=20.0)
             card_text = await client.evaluate("document.querySelector('#run-list').innerText")
-            assert "daily_unified_professional_v1" in card_text
-            assert "weighted_daily_universal" in card_text
-            assert "flow_guard" in card_text
+            assert "当前口径" in card_text
+            assert "历史口径" in card_text
             assert "PBIAS" in card_text
-            assert "旧目标" in card_text
             await client.evaluate(
                 "Array.from(document.querySelectorAll('.run-card'))"
-                ".find(el => el.innerText.includes('daily_unified_professional_v1')).click()"
+                ".find(el => el.innerText.includes('当前口径')).click()"
             )
             await cdp_wait_for(client, "Boolean(document.querySelector('#metadata-grid'))", timeout=20.0)
+            await cdp_wait_for(
+                client,
+                "document.querySelector('#metadata-grid').innerText.includes('水文结果摘要')",
+                timeout=20.0,
+            )
             detail_text = await client.evaluate("document.querySelector('#metadata-grid').innerText")
             note_text = await client.evaluate("document.querySelector('#results-entry-hint').innerText")
             engineering_note = await client.evaluate("document.querySelector('#run-engineering-note').innerText")
-            assert "峰日归因诊断" in detail_text
-            assert "退水段冰源接管诊断" in detail_text
-            assert "峰日冰源归因保护" in detail_text
-            assert "可信度受限" in (note_text + engineering_note)
+            assert "评分标准" in detail_text
+            assert "径流拟合" in detail_text
+            assert "三水源构成" in detail_text
+            assert "本地过程复核报告" in detail_text
+            assert "完整过程复核" in (note_text + engineering_note)
             screenshot = await client.send("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True})
             screenshot_path.write_bytes(base64.b64decode(screenshot["data"]))
     finally:
@@ -600,8 +607,8 @@ async def run_chrome_cdp_checks_async(url: str, screenshot_path: Path, root: Pat
         "browser_driver": f"cdp:{exe.name}",
         "card_text_has_current_objective": True,
         "card_text_has_legacy_objective": True,
-        "detail_has_peak_recession": True,
-        "confidence_warning_visible": True,
+        "detail_has_hydrology_summary": True,
+        "result_guidance_visible": True,
         "screenshot": str(screenshot_path),
     }
 

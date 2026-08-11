@@ -661,7 +661,7 @@ def 边界条件配置(config):
         "上游边界入流_csv": resolve_path(section.get("上游边界入流_csv", ""), base=base),
         "时间字段": section.get("时间字段", "date"),
         "流量字段": section.get("流量字段", "inflow_m3s"),
-        "缺失填补": section.get("缺失填补", "zero"),
+        "缺失填补": section.get("缺失填补", "preserve_missing"),
     }
 
 

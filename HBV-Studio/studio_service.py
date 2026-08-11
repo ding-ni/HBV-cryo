@@ -74,6 +74,7 @@ from services.event_config import (
 )
 from services.event_windows import EventWindowContext
 from services.event_windows import build_expected_forcing_index as build_event_expected_forcing_index
+from services.event_windows import build_expected_boundary_index as build_event_expected_boundary_index
 from services.event_windows import build_expected_observation_index as build_event_expected_observation_index
 from services.event_windows import build_expected_time_index
 from services.event_windows import event_forcing_coverage_summary
@@ -971,6 +972,10 @@ def build_expected_forcing_index(config: dict[str, Any], *, context: str = "cali
     return build_event_expected_forcing_index(config, _event_window_context(), runtime_context=context)
 
 
+def build_expected_boundary_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
+    return build_event_expected_boundary_index(config, _event_window_context(), runtime_context=context)
+
+
 def build_expected_observation_index(config: dict[str, Any], *, context: str = "calibration") -> pd.DatetimeIndex | None:
     return build_event_expected_observation_index(config, _event_window_context(), runtime_context=context)
 
@@ -1127,7 +1132,7 @@ def inspect_boundary_inflow_csv(
 def boundary_info_messages(
     boundary_info: dict[str, Any],
     step_hours: float,
-    gap_fill: str = "zero",
+    gap_fill: str = "preserve_missing",
 ) -> tuple[list[str], list[str]]:
     return build_boundary_info_messages(boundary_info, step_hours, gap_fill)
 
@@ -1841,6 +1846,7 @@ def _workspace_validation_context() -> WorkspaceValidationContext:
         event_observation_coverage_messages=event_observation_coverage_messages,
         format_timestamp_for_display=format_timestamp_for_display,
         inspect_boundary_csv=inspect_boundary_inflow_csv,
+        build_expected_boundary_index=build_expected_boundary_index,
         build_expected_forcing_index=build_expected_forcing_index,
         boundary_info_messages=boundary_info_messages,
         resolve_precip_source=resolve_precip_source,
@@ -2449,19 +2455,23 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
                     stage_vector_shapefile(config, BUILTIN_GLACIER_SHP, role="glacier", config_path=path)
                 )
         raw_time_basis = str(step_data.get("time_basis", step_data.get("任务时段模式", "")) or "").strip().lower()
+        event_workflow = str(step_data.get("event_workflow", raw_time_basis or "continuous") or "continuous").strip().lower()
+        if event_workflow not in {"continuous", "continuous_events", "event_windows"}:
+            event_workflow = "event_windows" if raw_time_basis == TIME_BASIS_EVENT_WINDOWS else "continuous"
         time_basis = (
             TIME_BASIS_EVENT_WINDOWS
             if raw_time_basis in {"event", "events", "event_window", "event_windows", "flood_event", "洪水事件", "事件窗口", "事件资料"}
             else TIME_BASIS_CONTINUOUS
         )
         config["任务时段模式"] = time_basis
+        config["场次洪水工作流"] = event_workflow
         event_file = str(step_data.get("event_file", step_data.get("事件表路径", "")) or "").strip()
         event_mode = dict(config.get("事件资料模式", {}) or {})
         flood_events = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
         if event_file:
             event_mode["事件表路径"] = event_file
             flood_events["事件表路径"] = event_file
-        if time_basis == TIME_BASIS_EVENT_WINDOWS:
+        if event_workflow == "event_windows":
             event_mode.update(
                 {
                     "启用": True,
@@ -2473,6 +2483,27 @@ def wizard_save_step(payload: dict[str, Any]) -> dict[str, Any]:
             flood_events["启用"] = True
             flood_events["事件窗口资料"] = True
             flood_events.setdefault("模式", "diagnostic")
+        elif event_workflow == "continuous_events":
+            event_mode.update(
+                {
+                    "启用": False,
+                    "事件窗口资料": False,
+                    "允许事件间断": False,
+                    "初始条件策略": "continuous_state",
+                }
+            )
+            flood_events.update(
+                {
+                    "启用": True,
+                    "事件窗口资料": False,
+                    "模式": "objective",
+                    "作为目标函数": True,
+                    "初始条件策略": "continuous_state",
+                    "边界汇流预热天数": float(flood_events.get("边界汇流预热天数", 14.0) or 14.0),
+                    "目标事件类型": ["calibration"],
+                }
+            )
+            config["目标函数模式"] = "flood_event_calibration_v1"
         else:
             event_mode["启用"] = False
             event_mode["事件窗口资料"] = False
@@ -2552,6 +2583,7 @@ def _wizard_validation_context() -> WizardValidationContext:
         event_observation_coverage_summary=event_observation_coverage_summary,
         event_observation_coverage_messages=event_observation_coverage_messages,
         inspect_boundary_csv=inspect_boundary_inflow_csv,
+        build_expected_boundary_index=build_expected_boundary_index,
         build_expected_forcing_index=build_expected_forcing_index,
         boundary_info_messages=boundary_info_messages,
         configured_precip_source=configured_precip_source,

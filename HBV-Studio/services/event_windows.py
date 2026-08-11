@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +17,7 @@ from services.event_config import (
     event_date_range,
     event_field,
     event_initial_state_policy_summary,
+    flood_event_evaluation_enabled,
     event_window_index,
     flood_event_raw_config,
     parse_event_timestamp,
@@ -90,7 +92,10 @@ def build_expected_observation_index(
     runtime_context: str = "calibration",
 ) -> pd.DatetimeIndex | None:
     step_hours = normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0))
-    if task_time_basis(config, context=runtime_context) == TIME_BASIS_EVENT_WINDOWS:
+    if (
+        task_time_basis(config, context=runtime_context) == TIME_BASIS_EVENT_WINDOWS
+        or flood_event_evaluation_enabled(config)
+    ):
         event_info = normalized_flood_events(config, context, step_hours=step_hours)
         index = event_window_index(event_info.get("valid_events", []), "score_start", "score_end", step_hours)
         if len(index) > 0:
@@ -100,6 +105,36 @@ def build_expected_observation_index(
         start_keys=("\u7387\u5b9a\u5f00\u59cb",),
         end_keys=("\u9a8c\u8bc1\u7ed3\u675f", "\u7387\u5b9a\u7ed3\u675f"),
     )
+
+
+def build_expected_boundary_index(
+    config: dict[str, Any],
+    context: EventWindowContext,
+    *,
+    runtime_context: str = "calibration",
+) -> pd.DatetimeIndex | None:
+    step_hours = normalize_time_step_hours(config.get("\u65f6\u95f4\u6b65\u957f_\u5c0f\u65f6", 24.0))
+    if flood_event_evaluation_enabled(config):
+        event_info = normalized_flood_events(config, context, step_hours=step_hours)
+        flood_cfg = flood_event_raw_config(config)
+        try:
+            warmup_days = float(
+                flood_cfg.get("\u8fb9\u754c\u6c47\u6d41\u9884\u70ed\u5929\u6570", flood_cfg.get("boundary_routing_warmup_days", 14.0))
+            )
+        except (TypeError, ValueError):
+            warmup_days = 14.0
+        warmup_steps = max(1, int(math.ceil(max(0.0, warmup_days) * 24.0 / step_hours)))
+        required: set[pd.Timestamp] = set()
+        for event in list(event_info.get("valid_events", []) or []):
+            if str(event.get("purpose", "") or "") not in {"calibration", "validation"}:
+                continue
+            score_start = pd.Timestamp(event["score_start"])
+            score_end = pd.Timestamp(event["score_end"])
+            required_start = score_start - pd.Timedelta(hours=step_hours * warmup_steps)
+            required.update(event_date_range(required_start, score_end, step_hours).tolist())
+        if required:
+            return pd.DatetimeIndex(sorted(required))
+    return build_expected_forcing_index(config, context, runtime_context=runtime_context)
 
 
 def _format_time_for_check(value: Any, step_hours: float) -> str:
@@ -206,11 +241,14 @@ def event_observation_coverage_summary(
         }
     if observed_series is None:
         actual_index = pd.DatetimeIndex([])
+        observed_values = None
     else:
         try:
             actual_index = pd.DatetimeIndex(observed_series.dropna().index)
+            observed_values = pd.Series(observed_series, copy=False)
         except Exception:
             actual_index = pd.DatetimeIndex([])
+            observed_values = None
     actual_set = set(pd.Timestamp(ts) for ts in actual_index.tolist())
 
     rows: list[dict[str, Any]] = []
@@ -229,9 +267,17 @@ def event_observation_coverage_summary(
         coverage_ratio = (covered_steps / expected_steps) if expected_steps > 0 else None
         purpose = str(event.get("purpose", "") or "").strip().lower()
         is_required = purpose in {"calibration", "validation", ""}
+        peak_position = None
+        peak_at_boundary = False
+        if missing_count == 0 and expected_steps > 0 and observed_values is not None:
+            event_values = pd.to_numeric(observed_values.reindex(score_index), errors="coerce").to_numpy(dtype=float)
+            if len(event_values) and pd.notna(event_values).all():
+                peak_position = int(event_values.argmax())
+                peak_count = int((event_values == event_values[peak_position]).sum())
+                peak_at_boundary = peak_count == 1 and peak_position in {0, len(event_values) - 1}
         if is_required:
             required_count += 1
-        if missing_count == 0 and expected_steps > 0:
+        if missing_count == 0 and expected_steps > 0 and not peak_at_boundary:
             status = "ok"
             complete_count += 1
             if is_required:
@@ -252,6 +298,8 @@ def event_observation_coverage_summary(
                 "covered_steps": covered_steps,
                 "missing_steps": missing_count,
                 "coverage_ratio": coverage_ratio,
+                "peak_position": peak_position,
+                "peak_at_window_boundary": peak_at_boundary,
                 "status": status,
                 "missing_preview": [
                     _format_time_for_check(ts, step_hours)
@@ -293,7 +341,10 @@ def event_observation_coverage_messages(coverage: dict[str, Any] | None) -> tupl
         expected_steps = int(event.get("expected_steps", 0) or 0)
         preview = "\u3001".join(str(item) for item in list(event.get("missing_preview", []) or [])[:3])
         suffix = f"\uff1b\u4f8b\u5982 {preview}" if preview else ""
-        message = f"\u4e8b\u4ef6 {name} \u89c2\u6d4b\u5f84\u6d41\u7f3a\u6d4b {missing_steps}/{expected_steps} \u6b65{suffix}\u3002"
+        if bool(event.get("peak_at_window_boundary")):
+            message = f"场次洪水 {name} 的实测洪峰位于评价窗口首个或末个时间步，请补充完整涨水前或退水段。"
+        else:
+            message = f"场次洪水 {name} 实测流量缺测 {missing_steps}/{expected_steps} 步{suffix}。"
         if status == "fail":
             issues.append(message)
         else:
@@ -360,13 +411,13 @@ def input_time_basis_ui_summary(
         start, end, expected_steps = index_range(run_index)
         event_count = int(info.get("event_count", 0) or 0)
         valid_event_count = int(info.get("valid_event_count", 0) or 0)
-        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") or info.get("warnings") else "ok"
+        status = "fail" if valid_event_count <= 0 else "warn" if info.get("errors") else "ok"
         initial_label = str(info.get("initial_state_policy_label", "\u4e8b\u4ef6\u9884\u70ed") or "\u4e8b\u4ef6\u9884\u70ed")
         initial_note = str(info.get("initial_state_note", "") or "")
         headline = (
-            f"\u5f53\u524d\u6309 {valid_event_count} \u573a\u6d2a\u6c34\u4e8b\u4ef6\u68c0\u67e5\uff0c\u4e8b\u4ef6\u4e4b\u95f4\u5141\u8bb8\u8d44\u6599\u95f4\u65ad\u3002"
+            f"\u5df2\u8bc6\u522b {valid_event_count} \u4e2a\u573a\u6b21\u6d2a\u6c34\u8bc4\u4ef7\u7a97\u53e3\uff0c\u573a\u6b21\u4e4b\u95f4\u5141\u8bb8\u8d44\u6599\u95f4\u65ad\u3002"
             if valid_event_count > 0
-            else "\u5f53\u524d\u9009\u62e9\u6d2a\u6c34\u4e8b\u4ef6\uff0c\u4f46\u5c1a\u672a\u8bc6\u522b\u5230\u5408\u6cd5\u4e8b\u4ef6\u3002"
+            else "\u5f53\u524d\u9009\u62e9\u573a\u6b21\u6d2a\u6c34\uff0c\u4f46\u5c1a\u672a\u8bc6\u522b\u5230\u5408\u6cd5\u8bc4\u4ef7\u7a97\u53e3\u3002"
         )
         return {
             "time_basis": time_basis,
@@ -496,6 +547,13 @@ def normalized_flood_events(
             run_end_raw = score_end_raw
         else:
             run_end_raw = run_end_value
+        boundary_start_raw = event_field(
+            event,
+            "boundary_start",
+            "boundary_data_start",
+            "边界资料开始",
+            "边界入流开始",
+        )
         event_errors: list[str] = []
         time_steps_run = 0
         time_steps_score = 0
@@ -529,6 +587,8 @@ def normalized_flood_events(
                 "score_start": score_start,
                 "score_end": score_end,
                 "run_end": run_end,
+                "boundary_start": parse_event_timestamp(boundary_start_raw, end=False, step_hours=step) if boundary_start_raw not in (None, "") else None,
+                "note": str(event_field(event, "note", "备注") or ""),
                 "raw": event,
                 "valid": not event_errors,
                 "time_steps_run": time_steps_run,
@@ -543,11 +603,22 @@ def normalized_flood_events(
     for left, right in zip(valid_events, valid_events[1:]):
         if left["run_end"] >= right["run_start"]:
             warnings.append(f"\u4e8b\u4ef6\u65f6\u6bb5\u53ef\u80fd\u91cd\u53e0\uff1a{left['event_id']} \u4e0e {right['event_id']}\u3002")
+    score_order = sorted(
+        valid_events,
+        key=lambda item: (pd.Timestamp(item["score_start"]), str(item.get("event_id", ""))),
+    )
+    for left, right in zip(score_order, score_order[1:]):
+        if left["score_end"] >= right["score_start"]:
+            errors.append(f"场次洪水评价窗口重叠：{left['event_id']} 与 {right['event_id']}。")
     purpose_counts = {
         "calibration": sum(1 for event in valid_events if event.get("purpose") == "calibration"),
         "validation": sum(1 for event in valid_events if event.get("purpose") == "validation"),
         "diagnostic": sum(1 for event in valid_events if event.get("purpose") == "diagnostic"),
     }
+    if purpose_counts["calibration"] < 3:
+        warnings.append("率定场次数量有限，结果仅反映当前场次范围，不宜表述为充分率定。")
+    if purpose_counts["validation"] < 2:
+        warnings.append("验证场次数量有限，结果仅作独立检验参考，不宜表述为充分验证。")
     return {
         "enabled": truthy_config(cfg.get("\u542f\u7528", cfg.get("enabled")), default=bool(events)),
         "source_file": str(event_file.resolve(strict=False)) if event_file is not None and event_file.exists() else "",

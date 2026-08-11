@@ -27,6 +27,7 @@ class WizardValidationContext:
     event_observation_coverage_summary: Callable[..., dict[str, Any]]
     event_observation_coverage_messages: Callable[..., tuple[list[str], list[str]]]
     inspect_boundary_csv: Callable[..., dict[str, Any]]
+    build_expected_boundary_index: Callable[..., pd.DatetimeIndex | None]
     build_expected_forcing_index: Callable[..., pd.DatetimeIndex | None]
     boundary_info_messages: Callable[..., tuple[list[str], list[str]]]
     configured_precip_source: Callable[[dict[str, Any]], str]
@@ -145,11 +146,11 @@ def wizard_validate_step(
             for item in list(event_info.get("warnings", []) or []):
                 warnings.append(str(item))
             if not event_info.get("valid_event_count"):
-                missing.append("洪水事件窗口模式需要至少一场合法事件。")
+                missing.append("场次洪水窗口模式需要至少一场合法场次洪水。")
             else:
                 counts = dict(event_info.get("purpose_counts", {}) or {})
                 warnings.append(
-                    "当前按洪水事件窗口组织资料："
+                    "当前按场次洪水窗口组织资料："
                     f"{int(event_info.get('valid_event_count', 0) or 0)} 场有效，"
                     f"率定 {int(counts.get('calibration', 0) or 0)}、"
                     f"验证 {int(counts.get('validation', 0) or 0)}、"
@@ -218,13 +219,13 @@ def wizard_validate_step(
                         str(boundary_file),
                         date_field=str(boundary.get("时间字段", "date")).strip() or "date",
                         flow_field=str(boundary.get("流量字段", "inflow_m3s")).strip() or "inflow_m3s",
-                        expected_index=context.build_expected_forcing_index(config, context="calibration"),
+                        expected_index=context.build_expected_boundary_index(config, context="calibration"),
                         expected_step_hours=step_hours,
                     )
                     boundary_missing, boundary_warnings = context.boundary_info_messages(
                         boundary_info,
                         step_hours,
-                        gap_fill=str(boundary.get("缺失填补", "zero")),
+                        gap_fill=str(boundary.get("缺失填补", "preserve_missing")),
                     )
                     missing.extend(boundary_missing)
                     warnings.extend(boundary_warnings)

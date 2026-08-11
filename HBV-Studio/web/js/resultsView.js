@@ -1105,7 +1105,7 @@
       { label: "评分标准", value: hydrologySummaryValue(summary, "objective_label_zh", "综合水文目标函数"), detail: "径流拟合与三水源构成综合评分" },
       { label: "径流评价口径", value: hydrologySummaryValue(summary, "q_score_basis_zh", "出口总流量"), detail: "率定指标与观测径流比较所用流量序列" },
       { label: "径流拟合", value: hydrologySummaryValue(summary, "flow_status_zh"), detail: "综合 NSE、KGE、PBIAS 径流指标" },
-      ...(floodEval?.enabled ? [{ label: "洪水事件", value: floodEventStatusText(floodEval), detail: floodEval.objective_enabled ? "本次按事件窗口参与率定评分" : "本次输出逐场洪水诊断" }] : []),
+      ...(floodEval?.enabled ? [{ label: "场次洪水", value: floodEventStatusText(floodEval), detail: floodEval.objective_enabled ? "率定场次参与参数寻优，验证场次仅作独立评价" : "本次输出逐场洪水诊断" }] : []),
       { label: "三水源构成", value: componentFractionText(componentReport), detail: componentFractionBasisText(componentReport) },
       { label: "结果说明", value: reportPath ? shortPath(summary.diagnostics_detail_display_path || reportPath) : "结果目录内生成", detail: "水文模拟结果说明已保存至本地结果目录" },
     ];
@@ -1202,7 +1202,7 @@
         ["验证时段", timeRangeText(timeCfg.valid_start, timeCfg.valid_end, stepHours)],
       ], helpers),
       restartRows.length ? metadataSection("起报状态与预报", restartRows, helpers) : "",
-      floodRows.length ? metadataSection("洪水事件评价", floodRows, helpers) : "",
+      floodRows.length ? metadataSection("场次洪水评价", floodRows, helpers) : "",
       `
         <section class="metadata-section">
           <h4>本地过程复核报告</h4>

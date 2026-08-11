@@ -580,7 +580,7 @@ def workspace_detailed_check(
         summary.append(
             {
                 "group": "气象数据",
-                "label": "洪水事件窗口",
+                "label": "场次洪水窗口",
                 "value": f"{int(event_windows.get('valid_event_count', 0) or 0)}/{int(event_windows.get('event_count', 0) or 0)} 场有效",
                 "ok": int(event_windows.get("valid_event_count", 0) or 0) > 0,
             }

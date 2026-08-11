@@ -158,7 +158,7 @@ def glacier_formal_requirements(
             "冰川子格温度递减将降级运行，冰川融水趋势可能偏高。"
         )
     if result["objective_is_event"]:
-        notes.append("当前工作区启用事件洪水率定目标函数，应重点复核事件表、洪峰、峰现时间、洪量和退水过程。")
+        notes.append("当前工作区启用场次洪水目标函数，应重点复核场次表、洪峰流量、峰现时间、洪量和退水过程。")
     elif not result["objective_is_multi"]:
         notes.append(
             "当前结果使用简化径流评价口径；启用冰川模块时，建议采用统一日尺度综合水文评价口径，并重点复核径流过程、冰川面积占比与冰雪融水分量。"

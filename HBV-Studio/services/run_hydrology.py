@@ -114,18 +114,18 @@ def flood_event_report_lines(metadata: dict[str, Any]) -> list[str]:
         return []
     events = list(evaluation.get("events", []) or [])
     lines = [
-        "## 4. 洪水事件评价",
+        "## 4. 场次洪水评价",
         "",
-        f"- 事件评价状态：{evaluation.get('status', '—')}",
-        f"- 有效事件场次：{evaluation.get('valid_event_count', 0)}/{evaluation.get('event_count', 0)}",
-        f"- 事件目标函数：{'已启用' if evaluation.get('objective_enabled') else '未启用，仅作诊断'}",
+        f"- 场次洪水评价状态：{evaluation.get('status', '—')}",
+        f"- 有效场次数：{evaluation.get('valid_event_count', 0)}/{evaluation.get('event_count', 0)}",
+        f"- 场次洪水目标函数：{'已启用' if evaluation.get('objective_enabled') else '未启用，仅作诊断'}",
         "",
     ]
     if not events:
-        lines.extend(["当前结果未写出可显示的洪水事件。", ""])
+        lines.extend(["当前结果未写出可显示的场次洪水。", ""])
         return lines
     lines.extend([
-        "| 事件 | 类型 | 洪峰误差 | 峰现误差 | 洪量误差 | NSE | KGE | 高流量NSE | 高流量KGE | 退水误差 |",
+        "| 场次洪水 | 用途 | 洪峰流量误差 | 峰现时间误差 | 洪量误差 | NSE | KGE | 高流量NSE | 高流量KGE | 退水过程误差 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ])
     for event in events:
@@ -158,7 +158,7 @@ def workflow_label_zh(metadata: dict[str, Any]) -> str:
     if family in HISTORICAL_OBJECTIVE_FAMILIES or workflow_status == "historical":
         return "历史率定结果"
     if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
-        return "事件洪水率定"
+        return "场次洪水评价"
     if workflow == "staged_calibration_v1" or workflow_status == "experimental":
         return "过程复核结果"
     if workflow == "single_pass" or not workflow:
@@ -169,7 +169,7 @@ def workflow_label_zh(metadata: dict[str, Any]) -> str:
 def objective_label_zh(metadata: dict[str, Any]) -> str:
     family = metadata_objective_family(metadata)
     if family == FLOOD_EVENT_OBJECTIVE_FAMILY:
-        return "事件洪水率定目标函数"
+        return "场次洪水目标函数"
     if family == CURRENT_DAILY_OBJECTIVE_FAMILY:
         return "统一日尺度综合水文目标函数"
     if family in HISTORICAL_OBJECTIVE_FAMILIES:

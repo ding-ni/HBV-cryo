@@ -216,6 +216,30 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
         self.assertEqual(config["边界条件"]["时间字段"], "date")
         self.assertEqual(config["气象策略"]["降水来源"], "era5")
         self.assertEqual(config["事件资料模式"]["启用"], False)
+        self.assertEqual(config["边界条件"]["缺失填补"], "preserve_missing")
+
+    def test_normalize_config_before_save_preserves_continuous_state_event_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            config = normalize_config_before_save(
+                {
+                    "任务时段模式": "continuous",
+                    "场次洪水工作流": "continuous_events",
+                    "洪水事件率定": {"事件表路径": str(root / "events.xlsx")},
+                },
+                root / "workspaces" / "高寒区多场洪水.json",
+                context,
+            )
+
+        self.assertEqual(config["任务时段模式"], "continuous")
+        self.assertEqual(config["场次洪水工作流"], "continuous_events")
+        self.assertEqual(config["目标函数模式"], "flood_event_calibration_v1")
+        self.assertEqual(config["事件资料模式"]["初始条件策略"], "continuous_state")
+        self.assertFalse(config["事件资料模式"]["事件窗口资料"])
+        self.assertTrue(config["洪水事件率定"]["启用"])
+        self.assertEqual(config["洪水事件率定"]["模式"], "objective")
+        self.assertEqual(config["洪水事件率定"]["边界汇流预热天数"], 14.0)
 
     def test_detect_profile_from_payload_prefers_explicit_mode_then_step_hours(self) -> None:
         self.assertEqual(detect_profile_from_payload({"率定模式": "hourly", "时间步长_小时": 24}), "hourly")

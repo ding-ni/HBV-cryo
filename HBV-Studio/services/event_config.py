@@ -87,8 +87,8 @@ EVENT_INITIAL_STATE_POLICY_SUMMARIES = {
     "continuous_state": {
         "label": "\u8fde\u7eed\u72b6\u6001",
         "state_continuity_between_events": True,
-        "note": "\u4e8b\u4ef6\u95f4\u6309\u8fde\u7eed\u8fc7\u7a0b\u4f20\u9012\u72b6\u6001\uff0c\u8981\u6c42\u4e8b\u4ef6\u4e4b\u95f4\u5f3a\u8feb\u8d44\u6599\u8fde\u7eed\u3002",
-        "warning": "\u8fde\u7eed\u72b6\u6001\u7b56\u7565\u4e0d\u9002\u5408\u4e8b\u4ef6\u4e4b\u95f4\u5b58\u5728\u8d44\u6599\u7f3a\u53e3\u7684\u4e8b\u4ef6\u7a97\u53e3\u96c6\u5408\u3002",
+        "note": "场次之间连续传递积雪、土壤水及响应库状态；气象强迫须覆盖完整连续模拟期。",
+        "warning": "",
     },
 }
 
@@ -122,6 +122,12 @@ def flood_event_raw_config(config: dict[str, Any]) -> dict[str, Any]:
         if key in config and key not in cfg:
             cfg[key] = config.get(key)
     return cfg
+
+
+def flood_event_evaluation_enabled(config: dict[str, Any]) -> bool:
+    cfg = flood_event_raw_config(config)
+    objective_mode = str(config.get("目标函数模式", config.get("objective_mode", "")) or "").strip().lower()
+    return truthy_config(cfg.get("启用", cfg.get("enabled")), default=False) or objective_mode == "flood_event_calibration_v1"
 
 
 def normalize_event_initial_state_policy(value: Any) -> str:

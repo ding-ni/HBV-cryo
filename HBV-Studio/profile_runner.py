@@ -297,6 +297,13 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
         score_end_raw = _event_field(event, "score_end", "评分结束", "事件结束", "洪水结束", "结束时间", "终止时间", "end")
         run_start_raw = _event_field(event, "run_start", "运行开始", "预热开始", "warmup_start") or score_start_raw
         run_end_raw = _event_field(event, "run_end", "运行结束", "退水结束") or score_end_raw
+        boundary_start_raw = _event_field(
+            event,
+            "boundary_start",
+            "boundary_data_start",
+            "边界资料开始",
+            "边界入流开始",
+        )
         event_errors: list[str] = []
         try:
             run_start = _parse_event_timestamp(run_start_raw, end=False, step_hours=step_hours)
@@ -326,6 +333,8 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
                 "score_start": _format_event_timestamp(score_start, step_hours),
                 "score_end": _format_event_timestamp(score_end, step_hours),
                 "run_end": _format_event_timestamp(run_end, step_hours),
+                "boundary_start": _format_event_timestamp(boundary_start_raw, step_hours) if boundary_start_raw else "",
+                "note": str(_event_field(event, "note", "备注") or ""),
                 "运行开始": _format_event_timestamp(run_start, step_hours),
                 "评分开始": _format_event_timestamp(score_start, step_hours),
                 "评分结束": _format_event_timestamp(score_end, step_hours),
@@ -339,6 +348,16 @@ def normalize_runtime_flood_events(config: dict[str, Any], step_hours: float) ->
     for left, right in zip(events, events[1:]):
         if pd.Timestamp(left["run_end"]) >= pd.Timestamp(right["run_start"]):
             warnings.append(f"事件时段可能重叠：{left['event_id']} 与 {right['event_id']}。")
+    score_order = sorted(events, key=lambda item: (pd.Timestamp(item["score_start"]), str(item["event_id"])))
+    for left, right in zip(score_order, score_order[1:]):
+        if pd.Timestamp(left["score_end"]) >= pd.Timestamp(right["score_start"]):
+            errors.append(f"场次洪水评价窗口重叠：{left['event_id']} 与 {right['event_id']}。")
+    calibration_count = sum(1 for item in events if item.get("purpose") == "calibration")
+    validation_count = sum(1 for item in events if item.get("purpose") == "validation")
+    if calibration_count < 3:
+        warnings.append("率定场次数量有限，结果仅反映当前场次范围，不宜表述为充分率定。")
+    if validation_count < 2:
+        warnings.append("验证场次数量有限，结果仅作独立检验参考，不宜表述为充分验证。")
     return {
         "config": cfg,
         "events": events,
@@ -961,6 +980,34 @@ def daily_forcing_manifest_error(config: dict[str, Any], profile: str) -> str:
 
 def required_boundary_index(config: dict[str, Any]) -> tuple[pd.DatetimeIndex, float]:
     time_cfg, step_hours = resolve_runtime_time_config(config)
+    flood_cfg = _runtime_flood_event_config(config)
+    event_info = normalize_runtime_flood_events(config, step_hours)
+    event_evaluation_enabled = bool(
+        event_info.get("events")
+        and (
+            resolve_objective_mode(config, config.get("目标函数模式"), resolve_profile(config, config.get("率定模式")))
+            == OBJECTIVE_MODE_FLOOD_EVENT
+            or _runtime_truthy(flood_cfg.get("启用", flood_cfg.get("enabled")), default=False)
+        )
+    )
+    if event_evaluation_enabled:
+        try:
+            warmup_days = float(
+                flood_cfg.get("边界汇流预热天数", flood_cfg.get("boundary_routing_warmup_days", 14.0))
+            )
+        except (TypeError, ValueError):
+            warmup_days = 14.0
+        warmup_steps = max(1, int(math.ceil(max(0.0, warmup_days) * 24.0 / step_hours)))
+        required: list[pd.Timestamp] = []
+        for event in event_info.get("events", []):
+            if str(event.get("purpose", "") or "") not in {"calibration", "validation"}:
+                continue
+            score_start = pd.Timestamp(event["score_start"])
+            score_end = pd.Timestamp(event["score_end"])
+            required_start = score_start - pd.Timedelta(hours=step_hours * warmup_steps)
+            required.extend(pd.date_range(required_start, score_end, freq=pd.Timedelta(hours=step_hours)).tolist())
+        if required:
+            return pd.DatetimeIndex(sorted(set(required))), step_hours
     warmup_end = pd.to_datetime(time_cfg["预热结束"])
     evaluation_end_raw = time_cfg.get("验证结束") or time_cfg.get("率定结束")
     if not evaluation_end_raw:
@@ -1416,7 +1463,7 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
     if runtime_time_basis(config) == TIME_BASIS_EVENT_WINDOWS:
         events = list(flood_event_config.get("事件表", flood_event_config.get("events", [])) or [])
         if not events:
-            raise ValueError("已选择洪水事件窗口资料模式，但没有可用事件。请检查事件表。")
+            raise ValueError("已选择场次洪水窗口资料模式，但没有可用场次。请检查场次表。")
         objective_events = [item for item in events if str(item.get("purpose", item.get("type", ""))).lower() == "calibration"] or events
         validation_events = [item for item in events if str(item.get("purpose", item.get("type", ""))).lower() == "validation"]
         run_start = min(pd.Timestamp(item["run_start"]) for item in events)
@@ -1514,7 +1561,11 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
             ),
             "BOUNDARY_INFLOW_DATE_FIELD": str(boundary["时间字段"]) if use_boundary_inflow else "date",
             "BOUNDARY_INFLOW_FLOW_FIELD": str(boundary["流量字段"]) if use_boundary_inflow else "inflow_m3s",
-            "BOUNDARY_INFLOW_GAP_FILL": str(boundary.get("缺失填补", "zero")) if use_boundary_inflow else "zero",
+            "BOUNDARY_INFLOW_GAP_FILL": str(boundary.get("缺失填补", "preserve_missing")) if use_boundary_inflow else "preserve_missing",
+            "BOUNDARY_ROUTING_WARMUP_DAYS": float(
+                flood_event_config.get("边界汇流预热天数", flood_event_config.get("boundary_routing_warmup_days", 14.0))
+                or 14.0
+            ),
             "PROJECT_OBJECT_TYPE": object_type,
             "INTERVAL_OBJECTIVE_GUARD_ENABLED": interval_guard_enabled,
             "INTERVAL_OBJECTIVE_GUARD_WEIGHT": interval_guard_weight,

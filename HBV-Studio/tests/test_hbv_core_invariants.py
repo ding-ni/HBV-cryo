@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 
 CORE_PATH = Path(__file__).resolve().parents[2] / "HBV-Cryo" / "率定核心.py"
@@ -17,6 +18,97 @@ SPEC.loader.exec_module(CORE)
 
 
 class HbvCoreInvariantTests(unittest.TestCase):
+    def test_independent_event_positions_do_not_double_count_repeated_timestamps(self) -> None:
+        dates_one = pd.date_range("2025-06-01", periods=8, freq="1h")
+        dates = pd.DatetimeIndex(list(dates_one) + list(dates_one))
+        obs = np.asarray([1, 2, 4, 8, 6, 4, 2, 1] * 2, dtype=float)
+        sim = obs.copy()
+        previous = (
+            CORE.EVENT_RUNTIME_ENABLED,
+            CORE.EVENT_RUNTIME_MODE,
+            CORE.EVENT_RUNTIME_WINDOWS,
+            CORE.TIME_STEP_HOURS,
+        )
+        try:
+            CORE.EVENT_RUNTIME_ENABLED = True
+            CORE.EVENT_RUNTIME_MODE = "independent_event_windows"
+            CORE.EVENT_RUNTIME_WINDOWS = [
+                {"event_id": "E1", "start_idx": 0, "end_idx": 7},
+                {"event_id": "E2", "start_idx": 8, "end_idx": 15},
+            ]
+            CORE.TIME_STEP_HOURS = 1.0
+            metrics = CORE.compute_single_flood_event_metrics(
+                dates,
+                obs,
+                sim,
+                {"event_id": "E1", "score_start": dates_one[0], "score_end": dates_one[-1]},
+                CORE.normalize_flood_event_weights(),
+                6.0,
+            )
+        finally:
+            (
+                CORE.EVENT_RUNTIME_ENABLED,
+                CORE.EVENT_RUNTIME_MODE,
+                CORE.EVENT_RUNTIME_WINDOWS,
+                CORE.TIME_STEP_HOURS,
+            ) = previous
+
+        self.assertTrue(metrics["valid"])
+        self.assertEqual(metrics["total_steps"], 8)
+        self.assertEqual(metrics["duration_hours"], 8.0)
+
+    def test_event_with_internal_non_evaluable_outlet_step_is_invalid(self) -> None:
+        dates = pd.date_range("2025-06-01", periods=8, freq="1h")
+        obs = np.asarray([1, 2, 4, 8, 6, 4, 2, 1], dtype=float)
+        sim = obs.copy()
+        sim[5] = np.nan
+        previous_step = CORE.TIME_STEP_HOURS
+        try:
+            CORE.TIME_STEP_HOURS = 1.0
+            metrics = CORE.compute_single_flood_event_metrics(
+                dates,
+                obs,
+                sim,
+                {"event_id": "E1", "score_start": dates[0], "score_end": dates[-1]},
+                CORE.normalize_flood_event_weights(),
+                6.0,
+            )
+        finally:
+            CORE.TIME_STEP_HOURS = previous_step
+
+        self.assertFalse(metrics["valid"])
+        self.assertEqual(metrics["status"], "incomplete_event_data")
+        self.assertEqual(metrics["non_evaluable_simulation_steps"], 1)
+
+    def test_boundary_routing_requires_new_warmup_after_each_missing_period(self) -> None:
+        boundary = np.r_[np.ones(30), [np.nan], np.ones(30)]
+        previous = (
+            CORE.BOUNDARY_INFLOW_ENABLED,
+            CORE.BOUNDARY_ROUTING_WARMUP_DAYS,
+            CORE.TIME_STEP_HOURS,
+            CORE.SIM_DATES,
+        )
+        try:
+            CORE.BOUNDARY_INFLOW_ENABLED = True
+            CORE.BOUNDARY_ROUTING_WARMUP_DAYS = 1.0
+            CORE.TIME_STEP_HOURS = 1.0
+            CORE.SIM_DATES = pd.date_range("2025-01-01", periods=len(boundary), freq="1h")
+            routed, evaluable, periods = CORE.route_boundary_inflow_with_warmup(boundary, 1.0, 0.2)
+        finally:
+            (
+                CORE.BOUNDARY_INFLOW_ENABLED,
+                CORE.BOUNDARY_ROUTING_WARMUP_DAYS,
+                CORE.TIME_STEP_HOURS,
+                CORE.SIM_DATES,
+            ) = previous
+
+        self.assertTrue(np.isnan(routed[30]))
+        self.assertFalse(evaluable[:24].any())
+        self.assertTrue(evaluable[24:30].all())
+        self.assertFalse(evaluable[31:55].any())
+        self.assertTrue(evaluable[55:].all())
+        self.assertEqual(len(periods), 2)
+
     def test_initial_parameter_loader_accepts_studio_txt_and_metadata_json(self) -> None:
         values = {name: float(index + 1) for index, name in enumerate(CORE.param_names)}
         values.update({"K": 0.4, "K1": 0.2, "K2": 0.05, "K_MUSK": 1.0, "X_MUSK": 0.2})

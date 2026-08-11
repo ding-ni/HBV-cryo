@@ -34,6 +34,7 @@ class WorkspaceValidationContext:
     event_observation_coverage_messages: Callable[..., tuple[list[str], list[str]]]
     format_timestamp_for_display: Callable[[pd.Timestamp, float], str]
     inspect_boundary_csv: Callable[..., dict[str, Any]]
+    build_expected_boundary_index: Callable[..., pd.DatetimeIndex | None]
     build_expected_forcing_index: Callable[..., pd.DatetimeIndex | None]
     boundary_info_messages: Callable[..., tuple[list[str], list[str]]]
     resolve_precip_source: Callable[..., str]
@@ -319,9 +320,15 @@ def validate_workspace_fields(
     paths = context.build_profile_paths(config, profile)
     step_hours = context.normalize_time_step_hours(config.get("时间步长_小时", 24.0))
     time_basis = context.task_time_basis(config, context="calibration")
+    flood_cfg = dict(config.get("洪水事件率定", {}) or {}) if isinstance(config.get("洪水事件率定", {}), dict) else {}
+    event_evaluation_enabled = bool(
+        str(config.get("目标函数模式", "") or "").strip().lower() == "flood_event_calibration_v1"
+        or flood_cfg.get("启用") is True
+        or str(flood_cfg.get("启用", "") or "").strip().lower() in {"1", "true", "yes", "on", "是", "启用"}
+    )
     event_window_info = (
         context.normalized_flood_events(config, step_hours=step_hours)
-        if time_basis == context.time_basis_event_windows
+        if time_basis == context.time_basis_event_windows or event_evaluation_enabled
         else None
     )
     runtime_stage = str(stage or "calibration").strip().lower() or "calibration"
@@ -398,11 +405,11 @@ def validate_workspace_fields(
         for item in list(event_window_info.get("warnings", []) or []):
             warnings.append(str(item))
         if not event_window_info.get("valid_event_count"):
-            missing.append("事件资料模式已启用，但没有可用的洪水事件窗口。")
+            missing.append("场次洪水资料模式已启用，但没有可用的场次洪水窗口。")
         else:
             counts = dict(event_window_info.get("purpose_counts", {}) or {})
             warnings.append(
-                "当前按洪水事件窗口检查资料："
+                "当前按场次洪水窗口检查资料："
                 f"{int(event_window_info.get('valid_event_count', 0) or 0)} 场有效，"
                 f"率定 {int(counts.get('calibration', 0) or 0)}、"
                 f"验证 {int(counts.get('validation', 0) or 0)}、"
@@ -430,7 +437,7 @@ def validate_workspace_fields(
                 str(obs_file),
                 expected_index=context.build_expected_observation_index(config, context="calibration"),
                 target_step_hours=step_hours,
-                return_series=time_basis == context.time_basis_event_windows,
+                return_series=event_window_info is not None,
             )
             observed_series = obs_info.pop("series", None)
             obs_missing, obs_warnings = context.observed_window_messages(config, obs_info)
@@ -479,13 +486,13 @@ def validate_workspace_fields(
                     str(boundary_file),
                     date_field=boundary_date_field,
                     flow_field=boundary_flow_field,
-                    expected_index=context.build_expected_forcing_index(config, context="calibration"),
+                    expected_index=context.build_expected_boundary_index(config, context="calibration"),
                     expected_step_hours=step_hours,
                 )
                 boundary_missing, boundary_warnings = context.boundary_info_messages(
                     boundary_info,
                     step_hours,
-                    gap_fill=str(boundary_cfg.get("缺失填补", "zero")),
+                    gap_fill=str(boundary_cfg.get("缺失填补", "preserve_missing")),
                 )
                 missing.extend(boundary_missing)
                 warnings.extend(boundary_warnings)

@@ -201,7 +201,7 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
             "上游边界入流_csv": "",
             "时间字段": "date",
             "流量字段": "flow",
-            "缺失填补": "zero",
+            "缺失填补": "preserve_missing",
         },
         "气象策略": {
             "降水方案": "grid_only",
@@ -272,6 +272,10 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
         config["任务时段模式"] = context.time_basis_event_windows
     else:
         config["任务时段模式"] = context.time_basis_continuous
+    event_workflow = str(config.get("场次洪水工作流", "") or "").strip().lower()
+    if event_workflow not in {"continuous", "continuous_events", "event_windows"}:
+        event_workflow = "event_windows" if config["任务时段模式"] == context.time_basis_event_windows else "continuous"
+    config["场次洪水工作流"] = event_workflow
     if not config.get("DEM_tif"):
         config["DEM_tif"] = str(context.builtin_dem.resolve())
     if (not str(config.get("冰川边界_shp", "")).strip()) and context.builtin_glacier_shp.exists():
@@ -316,7 +320,7 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
     boundary.setdefault("上游边界入流_csv", "")
     boundary.setdefault("时间字段", "date")
     boundary.setdefault("流量字段", "flow")
-    boundary.setdefault("缺失填补", "zero")
+    boundary.setdefault("缺失填补", "preserve_missing")
     config["边界条件"] = boundary
 
     event_mode = dict(config.get("事件资料模式", {}) or {})
@@ -331,7 +335,7 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
     if event_file:
         event_mode["事件表路径"] = event_file
         flood_events["事件表路径"] = event_file
-    if config["任务时段模式"] == context.time_basis_event_windows:
+    if event_workflow == "event_windows":
         event_mode["启用"] = True
         event_mode["事件窗口资料"] = True
         event_mode.setdefault("允许事件间断", True)
@@ -339,6 +343,19 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
         flood_events.setdefault("启用", True)
         flood_events["事件窗口资料"] = True
         flood_events.setdefault("模式", "diagnostic")
+    elif event_workflow == "continuous_events":
+        event_mode["启用"] = False
+        event_mode["事件窗口资料"] = False
+        event_mode["允许事件间断"] = False
+        event_mode["初始条件策略"] = "continuous_state"
+        flood_events["启用"] = True
+        flood_events["事件窗口资料"] = False
+        flood_events["模式"] = "objective"
+        flood_events["作为目标函数"] = True
+        flood_events["初始条件策略"] = "continuous_state"
+        flood_events.setdefault("边界汇流预热天数", 14.0)
+        flood_events.setdefault("目标事件类型", ["calibration"])
+        config["目标函数模式"] = "flood_event_calibration_v1"
     else:
         event_mode.setdefault("启用", False)
         event_mode.setdefault("事件窗口资料", False)

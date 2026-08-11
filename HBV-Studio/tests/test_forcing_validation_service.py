@@ -119,7 +119,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
             },
             normalize_time_step_hours=lambda value: 24.0,
             task_time_basis=lambda config, **kwargs: time_basis,
-            time_basis_labels={"continuous": "率定时段", "event_windows": "洪水事件窗口"},
+            time_basis_labels={"continuous": "率定时段", "event_windows": "场次洪水窗口"},
             time_basis_event_windows="event_windows",
             build_expected_forcing_index=lambda config, **kwargs: expected_index,
             normalized_flood_events=lambda config, **kwargs: {"events": [{"event_id": "E1"}]},
@@ -796,7 +796,7 @@ class ForcingValidationServiceTests(unittest.TestCase):
         result = validate_forcing_bundle({"时间步长_小时": 24}, context)
 
         self.assertEqual(result["time_basis"], "event_windows")
-        self.assertEqual(result["time_basis_label"], "洪水事件窗口")
+        self.assertEqual(result["time_basis_label"], "场次洪水窗口")
         self.assertEqual(result["event_windows"], {"event_count": 1})
         self.assertEqual(result["event_forcing_coverage"], {"status": "ok", "event_count": 1})
 

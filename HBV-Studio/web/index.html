@@ -211,10 +211,11 @@
               </div>
               <div class="field-grid two" style="margin-top:12px">
                 <div class="field-group">
-                  <label>资料时段口径</label>
+                  <label>水文建模工作流</label>
                   <select id="wz-time-basis">
-                    <option value="continuous">连续时段</option>
-                    <option value="event_windows">洪水事件窗口</option>
+                    <option value="continuous">连续时段率定</option>
+                    <option value="continuous_events">连续状态多场洪水（高寒区推荐）</option>
+                    <option value="event_windows">逐场独立洪水</option>
                   </select>
                 </div>
                 <div class="field-group">
@@ -225,7 +226,7 @@
                   </div>
                 </div>
               </div>
-              <div class="hint-box" id="wz-event-mode-hint" style="margin-top:12px">连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。</div>
+              <div class="hint-box" id="wz-event-mode-hint" style="margin-top:12px">连续时段率定面向完整径流过程；高寒区多场洪水宜连续演算积雪、土壤水和响应库状态，再按场次窗口评价。</div>
               <div id="wz-event-file-summary" style="margin-top:12px"></div>
               <div class="field-grid two" style="margin-top:12px">
                 <div class="field-group"><label>融雪度日因子分区阈值（米） <small style="color:var(--muted)">— 高/低海拔分别使用不同 CFMAX</small></label><input id="wz-cfmax" type="number" step="0.1" value="5000"></div>
@@ -252,14 +253,15 @@
                   </div>
                 </div>
                 <div class="field-group">
-                  <label>缺失填补方式</label>
+                  <label>边界缺测处理</label>
                   <select id="wz-gap-fill">
-                    <option value="zero">零值填补</option>
+                    <option value="preserve_missing">保留缺测（推荐）</option>
+                    <option value="zero">按零流量处理（仅确认无入流时）</option>
                     <option value="interpolate">线性插值</option>
                   </select>
                 </div>
               </div>
-              <div class="hint-box">支持 CSV、XLS、XLSX、XLSM。系统自动选择有效工作表并识别时间列和流量列；保存后文件会归档到当前项目。</div>
+              <div class="hint-box">支持 CSV、XLS、XLSX、XLSM。缺测边界不会自动解释为零流量；边界资料恢复后需完成汇流预热，出口总流量才进入评价。</div>
               <div class="action-row">
                 <button class="ghost-button" id="wz-boundary-preview-btn">预览边界入流数据</button>
               </div>
@@ -612,18 +614,18 @@
                   <div class="radio-card-group objective-mode-card-group" id="task-objective-mode-cards">
                     <label class="radio-card selected" data-objective-mode="daily_unified_professional_v1">
                       <input type="radio" name="task-objective-mode-radio" value="daily_unified_professional_v1" checked>
-                      <strong>连续期综合率定</strong>
+                      <strong>连续时段率定</strong>
                       <small>面向完整连续径流过程，综合考察水量、过程线和水文响应稳定性。</small>
                     </label>
                     <label class="radio-card" data-objective-mode="flood_event_calibration_v1">
                       <input type="radio" name="task-objective-mode-radio" value="flood_event_calibration_v1">
-                      <strong>洪水事件率定（次洪）</strong>
-                      <small>以洪水事件窗口为对象，突出洪峰、峰现时间、洪量、退水和高流量过程。</small>
+                      <strong>场次洪水评价</strong>
+                      <small>率定场次进入目标函数，验证场次仅用最优参数独立评价洪峰、峰现时间、洪量、退水和高流量过程。</small>
                     </label>
                   </div>
                   <select id="task-objective-mode" class="hidden" aria-hidden="true">
                     <option value="daily_unified_professional_v1">综合水文目标函数</option>
-                    <option value="flood_event_calibration_v1">洪水事件率定（次洪）</option>
+                    <option value="flood_event_calibration_v1">场次洪水目标函数</option>
                   </select>
                 </div>
                 <div class="field-group" id="task-mc-samples-group">

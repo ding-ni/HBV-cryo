@@ -1483,9 +1483,10 @@ function manualPresetContextWarning(preset, data = state._runData) {
 
 function timeBasisLabel(value) {
   const key = String(value || "").trim().toLowerCase();
-  if (key === "event_windows") return "洪水事件窗口";
+  if (key === "continuous_events") return "连续状态多场洪水";
+  if (key === "event_windows") return "逐场独立洪水";
   if (key === "forecast_window") return "预报窗口";
-  return "连续时段";
+  return "连续时段率定";
 }
 
 function selectedTaskManualPreset() {
@@ -1690,7 +1691,7 @@ function objectiveLabel(value) {
   return ({
     auto: "自动选择",
     daily_unified_professional_v1: "统一日尺度专业目标函数",
-    flood_event_calibration_v1: "洪水事件率定（次洪）",
+    flood_event_calibration_v1: "场次洪水目标函数",
     weighted_multi_criteria: "旧版多指标目标函数（历史结果）",
     weighted_daily_universal: "旧版日尺度加权目标函数（历史结果）",
     single_objective_nse: "单指标纳什效率系数",
@@ -1721,7 +1722,7 @@ function objectiveDetail(meta) {
     return "流量拟合优先，结合融雪、融冰、洪峰和退水过程进行综合评价";
   }
   if (String(mode || "").toLowerCase() === FLOOD_EVENT_OBJECTIVE_FAMILY) {
-    return "按洪水事件窗口评价洪峰、峰现时间、洪量、退水和高流量过程；事件资料模式下按场独立预热";
+    return "按场次洪水窗口评价洪峰流量、峰现时间、洪量、退水过程和高流量过程；连续状态多场洪水保持事件间状态连续";
   }
   if (LEGACY_OBJECTIVE_FAMILIES.has(String(mode || "").toLowerCase())) {
     return "历史结果，仅作兼容查看，建议用当前口径重算后再解释冰雪融水过程";
@@ -1814,7 +1815,7 @@ function updateCalibrationPlainGuide() {
       ? "当前策略仅快速筛选，用来快速看参数敏感性和候选区间。"
       : "当前策略先快速筛选，再把更好的候选送入精细搜索，是默认更稳妥的方案。";
   const objectiveText = objectiveMode === FLOOD_EVENT_OBJECTIVE_FAMILY
-    ? "当前评分标准为洪水事件率定；连续资料按完整时段运行并在事件窗口评分，事件资料模式按场独立预热并只要求事件内资料完整。"
+    ? "当前采用场次洪水目标函数；连续状态多场洪水按完整连续时段演算并在场次窗口评价，逐场独立洪水按场设置初始状态并要求评价窗口内资料完整。"
     : "当前评分标准为综合水文目标函数，优先保证连续径流拟合，并兼顾冰雪融水过程。";
   host.textContent = `运行说明：快速筛选样本数表示前期候选参数组数；搜索轮数表示后续优化轮数；每轮候选数倍率=${loadInfo.popsize}，每轮样本数约为参数数 ${CALIBRATION_PARAM_COUNT} × ${loadInfo.popsize} = ${loadInfo.population}。${objectiveText}${methodText}`;
   host.className = "hint-box";
@@ -2313,7 +2314,7 @@ function floodEventStatusText(evaluation = {}) {
   if (!evaluation?.enabled) return "未启用";
   const valid = Number(evaluation.valid_event_count || 0);
   const total = Number(evaluation.event_count || 0);
-  const mode = evaluation.objective_enabled ? "事件目标函数" : "事件诊断";
+  const mode = evaluation.objective_enabled ? "场次洪水目标函数" : "场次洪水诊断";
   return `${mode}：${valid}/${total} 场有效`;
 }
 
@@ -2979,7 +2980,8 @@ function collectStepData(step) {
       obs_csv: $("#wz-obs-csv").value.trim(),
       dem_tif: $("#wz-dem-tif").value.trim(),
       glacier_shp: $("#wz-glacier-shp").value.trim(),
-      time_basis: $("#wz-time-basis")?.value || "continuous",
+      time_basis: $("#wz-time-basis")?.value === "event_windows" ? "event_windows" : "continuous",
+      event_workflow: $("#wz-time-basis")?.value || "continuous",
       event_file: $("#wz-event-file")?.value.trim() || "",
       warmup_start: getWizardTimeValue("#wz-warmup-start"),
       warmup_end: getWizardTimeValue("#wz-warmup-end"),
@@ -3050,7 +3052,9 @@ async function saveCurrentWizardStep() {
         if ($("#wz-basin-shp")) $("#wz-basin-shp").value = result.config.流域边界_shp || $("#wz-basin-shp").value;
         if ($("#wz-obs-csv")) $("#wz-obs-csv").value = result.config.观测径流_csv || $("#wz-obs-csv").value;
         if ($("#wz-glacier-shp")) $("#wz-glacier-shp").value = result.config.冰川边界_shp || $("#wz-glacier-shp").value;
-        if ($("#wz-time-basis")) $("#wz-time-basis").value = result.config.任务时段模式 || $("#wz-time-basis").value;
+        if ($("#wz-time-basis")) {
+          $("#wz-time-basis").value = result.config.场次洪水工作流 || result.config.任务时段模式 || $("#wz-time-basis").value;
+        }
         if ($("#wz-event-file")) {
           const eventMode = result.config.事件资料模式 || {};
           const floodMode = result.config.洪水事件率定 || {};
@@ -3128,7 +3132,9 @@ function populateWizardFromConfig(cfg, path) {
   const eventModeCfg = cfg.事件资料模式 || {};
   const floodEventCfg = cfg.洪水事件率定 || {};
   const timeBasis = cfg.任务时段模式 || cfg.time_basis || cfg.资料时段模式 || (eventModeCfg.启用 ? "event_windows" : "continuous");
-  if ($("#wz-time-basis")) $("#wz-time-basis").value = timeBasis === "event_windows" ? "event_windows" : "continuous";
+  const eventWorkflow = cfg.场次洪水工作流
+    || (timeBasis === "event_windows" ? "event_windows" : (floodEventCfg.启用 && floodEventCfg.模式 === "objective" ? "continuous_events" : "continuous"));
+  if ($("#wz-time-basis")) $("#wz-time-basis").value = eventWorkflow;
   if ($("#wz-event-file")) $("#wz-event-file").value = eventModeCfg.事件表路径 || floodEventCfg.事件表路径 || eventModeCfg.events_file || floodEventCfg.events_file || "";
   setWizardTimeValue("#wz-warmup-start", cfg.时间?.预热开始 || "");
   setWizardTimeValue("#wz-warmup-end", cfg.时间?.预热结束 || "");
@@ -3142,7 +3148,7 @@ function populateWizardFromConfig(cfg, path) {
 
   // step 3
   $("#wz-boundary-csv").value  = cfg.边界条件?.上游边界入流_csv || "";
-  $("#wz-gap-fill").value      = cfg.边界条件?.缺失填补 || "zero";
+  $("#wz-gap-fill").value      = cfg.边界条件?.缺失填补 || "preserve_missing";
 
   // step 4
   setRadioAndCard("wz-precip-mode", cfg.气象策略?.降水方案 || "grid_only");
@@ -6003,6 +6009,9 @@ function bindEvents() {
     });
   });
   $("#wz-time-basis")?.addEventListener("change", () => {
+    if ($("#wz-time-basis").value === "continuous_events") {
+      setObjectiveMode("flood_event_calibration_v1");
+    }
     updateEventModeHint();
     updateObservationHint();
     clearBoundaryPreview();

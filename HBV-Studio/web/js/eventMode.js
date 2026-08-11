@@ -47,7 +47,7 @@
     if (!evaluation?.enabled) return "未启用";
     const valid = Number(evaluation.valid_event_count || 0);
     const total = Number(evaluation.event_count || 0);
-    const mode = evaluation.objective_enabled ? "事件目标函数" : "事件诊断";
+    const mode = evaluation.objective_enabled ? "场次洪水目标函数" : "场次洪水诊断";
     return `${mode}：${valid}/${total} 场有效`;
   }
 
@@ -63,18 +63,22 @@
     const evaluation = floodEventEvaluation(meta);
     if (!evaluation?.enabled) return [];
     const rows = [
-      ["事件评价", floodEventStatusText(evaluation), ""],
-      ["事件目标值", floodEventObjectiveText(evaluation, helpers), "数值越小表示洪水过程偏差越小"],
+      ["场次洪水评价", floodEventStatusText(evaluation), ""],
+      ["场次目标值", floodEventObjectiveText(evaluation, helpers), "数值越小表示场次洪水过程偏差越小"],
     ];
     const eventMode = meta?.event_mode || meta?.time_config?.event_runtime || {};
     if (eventMode?.enabled) {
-      const modeText = eventMode.runtime_mode === "independent_event_windows" ? "事件窗口独立运行" : "事件窗口资料";
+      const modeText = eventMode.runtime_mode === "independent_event_windows"
+        ? "逐场独立洪水"
+        : eventMode.runtime_mode === "continuous_state_events"
+          ? "连续状态多场洪水"
+          : "场次洪水资料";
       const initialPolicy = eventMode.initial_state_policy_label
         || initialPolicyLabel(eventMode.initial_state_policy)
         || eventMode.initial_state_policy
         || "事件预热";
       rows.push([
-        "事件资料模式",
+        "场次洪水工作流",
         `${modeText}，${Number(eventMode.event_count || 0)} 场`,
         `初始条件：${initialPolicy}`,
       ]);
@@ -103,8 +107,8 @@
     const evaluation = floodEventEvaluation(meta);
     if (!evaluation?.enabled) return [];
     return [
-      { l: "洪水事件", v: floodEventStatusText(evaluation) },
-      { l: "事件目标值", v: floodEventObjectiveText(evaluation, helpers) },
+      { l: "场次洪水", v: floodEventStatusText(evaluation) },
+      { l: "场次目标值", v: floodEventObjectiveText(evaluation, helpers) },
     ];
   }
 
@@ -170,13 +174,13 @@
     const formatMetricValue = helpers.formatMetricValue || defaultFormatMetricValue;
     const events = eventChartEvents(meta, finiteNumber);
     if (!events.length) {
-      setEmptyEventChart(host, panel, "当前结果未记录可绘制的逐场洪水事件指标，完整事件表见结果目录 flood_events.csv。");
+      setEmptyEventChart(host, panel, "当前结果未记录可绘制的场次洪水指标，完整事件表见结果目录 flood_events.csv。");
       return;
     }
 
     if (panel) panel.style.display = "";
     if (!window.Plotly) {
-      host.innerHTML = '<div class="hint-box">图表组件未加载，逐场指标可在洪水事件评价摘要或结果目录 flood_events.csv 中查看。</div>';
+      host.innerHTML = '<div class="hint-box">图表组件未加载，逐场指标可在场次洪水评价摘要或结果目录 flood_events.csv 中查看。</div>';
       return;
     }
 
@@ -222,7 +226,7 @@
       plot_bgcolor: "transparent",
       barmode: "group",
       legend: { orientation: "h", y: 1.14 },
-      xaxis: { title: "洪水事件", tickangle: names.length > 5 ? -25 : 0, automargin: true },
+      xaxis: { title: "场次洪水", tickangle: names.length > 5 ? -25 : 0, automargin: true },
       yaxis: { title: "相对误差 %", zeroline: true, zerolinecolor: "rgba(36,52,65,0.28)" },
       yaxis2: { title: "峰现误差 h", overlaying: "y", side: "right", zeroline: false },
     };
@@ -278,11 +282,11 @@
     return `
       <div class="event-window-summary">
         <div class="event-window-title">
-          <strong>洪水事件表</strong>
+          <strong>场次洪水表</strong>
           <span class="${statusClass(status)}">${escapeHtml(`${validCount}/${eventCount} 场有效`)}</span>
         </div>
         ${eventInfo.source_file ? `<div class="event-window-source" title="${escapeHtml(eventInfo.source_file)}">事件表：${escapeHtml(shortPath(eventInfo.source_file) || "已读取")}</div>` : ""}
-        <div class="event-window-source">推荐表头：编号、开始时间、结束时间。事件之间允许资料间断。</div>
+        <div class="event-window-source">字段：事件编号、用途、边界资料开始、评分开始、评分结束和备注。</div>
         <div class="event-window-row event-window-head">
           <span>事件</span>
           <span>洪水时段</span>
@@ -334,7 +338,7 @@
           <span>洪水时段</span>
           <span>结论</span>
         </div>
-        ${rows || '<div class="hint-box status-warn">尚未形成可检查的洪水事件。</div>'}
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的场次洪水。</div>'}
         ${more}
       </div>
     `;
@@ -378,7 +382,7 @@
           <span>洪水时段</span>
           <span>结论</span>
         </div>
-        ${rows || '<div class="hint-box status-warn">尚未形成可检查的洪水事件。</div>'}
+        ${rows || '<div class="hint-box status-warn">尚未形成可检查的场次洪水。</div>'}
         ${more}
       </div>
     `;
@@ -403,16 +407,24 @@
   function eventModeHintState(model = {}) {
     const basis = String(model.basis || "continuous");
     const eventFile = String(model.eventFile || "").trim();
+    if (basis === "continuous_events") {
+      return {
+        text: eventFile
+          ? "连续演算积雪水当量、土壤含水量及上下层响应库状态；场次表仅定义率定与验证评价窗口。"
+          : "请提供场次洪水表。气象强迫须覆盖完整连续模拟期，实测流量仅在评价窗口内要求完整。",
+        className: `hint-box ${eventFile ? "status-ok" : "status-warn"}`,
+      };
+    }
     if (basis === "event_windows") {
       return {
         text: eventFile
-          ? "当前按洪水事件组织资料。系统只检查每场洪水内部资料，事件之间允许间断。"
-          : "已选择洪水事件，请提供事件表。推荐表头为：编号、开始时间、结束时间。",
+          ? "每场洪水独立初始化并运行，仅适用于单场复核或已有可靠外部初始状态的情况。"
+          : "请提供逐场独立洪水表，并为每场设置运行开始与评分时段。",
         className: `hint-box ${eventFile ? "status-ok" : "status-warn"}`,
       };
     }
     return {
-      text: "连续时段要求完整覆盖预热、率定和验证期；洪水事件只要求每场洪水内部资料连续。",
+      text: "连续时段率定要求气象强迫与实测流量覆盖完整评价期，以总体径流过程为评价对象。",
       className: "hint-box",
     };
   }

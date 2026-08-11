@@ -180,9 +180,9 @@
     if (family === eventFamily) {
       return {
         state: "current",
-        label: "事件口径",
-        value: "事件洪水率定结果",
-        detail: "该结果按洪水事件窗口评价；事件资料模式下每场事件独立预热。",
+        label: "场次洪水口径",
+        value: "场次洪水评价结果",
+        detail: "该结果按场次洪水窗口评价；连续状态工作流在场次之间连续传递模型状态，逐场独立工作流仅用于具有可靠初始状态的专项模拟。",
         badgeClass: "status-ok",
       };
     }

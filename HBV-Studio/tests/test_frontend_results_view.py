@@ -1031,12 +1031,12 @@ class FrontendResultsViewTests(unittest.TestCase):
                   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
                 },
                 eventMetricItems() {
-                  return [{ l: "洪水事件", v: "事件目标函数：2/3 场有效" }];
+                  return [{ l: "场次洪水", v: "场次洪水目标函数：2/3 场有效" }];
                 },
               },
             );
             const metricText = metricItems.map(item => `${item.l}:${item.v}`).join("|");
-            if (metricText !== "模式:日尺度|步长:24 小时|率定纳什效率系数:0.8123|验证纳什效率系数:0.7012|率定 KGE 综合效率:0.7346|率定水量偏差:-1.23%|洪水事件:事件目标函数：2/3 场有效") {
+            if (metricText !== "模式:日尺度|步长:24 小时|率定纳什效率系数:0.8123|验证纳什效率系数:0.7012|率定 KGE 综合效率:0.7346|率定水量偏差:-1.23%|场次洪水:场次洪水目标函数：2/3 场有效") {
               throw new Error(`unexpected result metric items: ${metricText}`);
             }
             const fields = results.renderRunExportFields([{ key: "q<sim>", label: "模拟流量", checked: true }], helpers);
@@ -1424,7 +1424,7 @@ class FrontendResultsViewTests(unittest.TestCase):
               componentFractionReport() { return { ok: true }; },
               componentFractionText() { return "雨水 50% / 融雪 30% / 冰川 20%"; },
               floodEventEvaluation() { return { enabled: true, objective_enabled: false }; },
-              floodEventStatusText() { return "事件目标函数：2/3 场有效"; },
+              floodEventStatusText() { return "场次洪水目标函数：2/3 场有效"; },
               hydrologySummaryValue(summary, key, fallback = "—") { return summary?.[key] || fallback; },
               isStudioEditableRun() { return true; },
               replayCompatibilityInfo() { return { obsReplay: true, boundaryReplay: true }; },
@@ -1432,7 +1432,7 @@ class FrontendResultsViewTests(unittest.TestCase):
               runWorkspaceFilterPath: "C:/ws/active",
               shortPath(value) { return String(value || "").split(/[\\/]/).pop() || ""; },
             });
-            if (!engineering.summaryHtml.includes("正式率定") || !engineering.summaryHtml.includes("事件目标函数：2/3 场有效")) {
+            if (!engineering.summaryHtml.includes("正式率定") || !engineering.summaryHtml.includes("场次洪水目标函数：2/3 场有效")) {
               throw new Error("engineering summary cards missing");
             }
             if (!engineering.summaryHtml.includes("水文模拟结果说明.md") || !engineering.summaryHtml.includes("雨水 50%")) {
@@ -1507,7 +1507,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!detail.metadataHtml.includes("正式率定&lt;A&gt;") || detail.metadataHtml.includes("正式率定<A>")) {
               throw new Error("detail metadata should escape hydrology summary values");
             }
-            if (!detail.metadataHtml.includes("雨水&lt;50%&gt;") || !detail.metadataHtml.includes("起报状态与预报") || !detail.metadataHtml.includes("洪水事件评价")) {
+            if (!detail.metadataHtml.includes("雨水&lt;50%&gt;") || !detail.metadataHtml.includes("起报状态与预报") || !detail.metadataHtml.includes("场次洪水评价")) {
               throw new Error("detail metadata sections missing");
             }
             if (!detail.metadataHtml.includes('data-run-detail-open-dir="C:/runs/A"') || !detail.metadataHtml.includes('data-run-detail-open-report="C:/runs/A/report&amp;detail.md"')) {

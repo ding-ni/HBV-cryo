@@ -72,7 +72,10 @@ def observed_window_messages(
         elif coverage_ratio < 0.95:
             warnings.append(f"观测径流在当前模拟时段内覆盖率只有 {coverage_ratio * 100:.1f}%，目标函数会只在部分时间步上计算。")
 
-    if context.task_time_basis(config, context="calibration") == context.time_basis_event_windows:
+    if (
+        context.task_time_basis(config, context="calibration") == context.time_basis_event_windows
+        or str(config.get("场次洪水工作流", "") or "").strip().lower() == "continuous_events"
+    ):
         return issues, warnings
 
     obs_start = pd.to_datetime(obs_info.get("start"))

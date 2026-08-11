@@ -98,7 +98,71 @@ def _hourly_event_config() -> dict:
     }
 
 
+def _continuous_hourly_event_config() -> dict:
+    config = _hourly_event_config()
+    config["任务时段模式"] = "continuous"
+    config["场次洪水工作流"] = "continuous_events"
+    config["目标函数模式"] = "flood_event_calibration_v1"
+    config["洪水事件率定"]["事件窗口资料"] = False
+    config["事件资料模式"] = {
+        "启用": False,
+        "事件窗口资料": False,
+        "初始条件策略": "continuous_state",
+    }
+    config["洪水事件率定"]["边界汇流预热天数"] = 14
+    return config
+
+
 class EventWindowValidationTests(unittest.TestCase):
+    def test_continuous_event_boundary_index_allows_winter_gaps(self) -> None:
+        config = _continuous_hourly_event_config()
+
+        boundary_index = svc.build_expected_boundary_index(config)
+        forcing_index = svc.build_expected_forcing_index(config)
+
+        self.assertIn(pd.Timestamp("2025-04-17 02:00"), set(boundary_index))
+        self.assertIn(pd.Timestamp("2025-08-02 07:00"), set(boundary_index))
+        self.assertNotIn(pd.Timestamp("2025-01-15 00:00"), set(boundary_index))
+        self.assertIn(pd.Timestamp("2025-01-15 00:00"), set(forcing_index))
+
+    def test_continuous_event_boundary_index_requires_complete_score_window(self) -> None:
+        config = _continuous_hourly_event_config()
+        expected_index = svc.build_expected_boundary_index(config)
+        missing_timestamp = pd.Timestamp("2025-05-01 05:00")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "boundary.csv"
+            available = expected_index[expected_index != missing_timestamp]
+            pd.DataFrame({"date": available, "flow": 10.0}).to_csv(path, index=False, encoding="utf-8-sig")
+            info = svc.inspect_boundary_inflow_csv(
+                str(path),
+                expected_index=expected_index,
+                expected_step_hours=1,
+            )
+
+        self.assertEqual(info["missing_steps"], [missing_timestamp])
+
+    def test_continuous_event_boundary_index_requires_full_routing_warmup(self) -> None:
+        config = _continuous_hourly_event_config()
+        expected_index = svc.build_expected_boundary_index(config)
+        first_score_start = pd.Timestamp("2025-05-01 02:00")
+        available_start = first_score_start - pd.Timedelta(days=13)
+        first_period_end = pd.Timestamp("2025-05-01 07:00")
+        available = expected_index[
+            ~((expected_index < available_start) & (expected_index <= first_period_end))
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "boundary.csv"
+            pd.DataFrame({"date": available, "flow": 10.0}).to_csv(path, index=False, encoding="utf-8-sig")
+            info = svc.inspect_boundary_inflow_csv(
+                str(path),
+                expected_index=expected_index,
+                expected_step_hours=1,
+            )
+
+        self.assertEqual(len(info["missing_steps"]), 24)
+        self.assertEqual(info["missing_steps"][0], pd.Timestamp("2025-04-17 02:00"))
     def test_expected_indexes_use_event_windows_not_full_period(self) -> None:
         config = _event_config()
         forcing_index = svc.build_expected_forcing_index(config)

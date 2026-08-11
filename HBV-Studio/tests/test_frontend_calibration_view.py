@@ -142,7 +142,7 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             if (floodGuide.className !== "hint-box" ||
                 !floodGuide.text.includes("50") ||
                 !floodGuide.text.includes("500") ||
-                !floodGuide.text.includes("\u6d2a\u6c34\u4e8b\u4ef6\u7387\u5b9a") ||
+                !floodGuide.text.includes("\u573a\u6b21\u6d2a\u6c34\u76ee\u6807\u51fd\u6570") ||
                 !floodGuide.text.includes("\u76f4\u63a5\u8fdb\u5165\u7cbe\u7ec6\u641c\u7d22")) {
               throw new Error(`flood guide mismatch: ${JSON.stringify(floodGuide)}`);
             }
@@ -226,6 +226,8 @@ class FrontendCalibrationViewTests(unittest.TestCase):
             ["node", "-e", script],
             cwd=STUDIO_DIR,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=20,
         )

@@ -51,7 +51,7 @@ class FrontendEventModeTests(unittest.TestCase):
             if (eventMode.floodEventEvaluation(meta) !== evaluation) {
               throw new Error("evaluation fallback path mismatch");
             }
-            if (eventMode.floodEventStatusText(evaluation) !== "事件目标函数：2/3 场有效") {
+            if (eventMode.floodEventStatusText(evaluation) !== "场次洪水目标函数：2/3 场有效") {
               throw new Error("status text mismatch");
             }
             if (eventMode.floodEventObjectiveText(evaluation) !== "0.1235") {
@@ -63,13 +63,13 @@ class FrontendEventModeTests(unittest.TestCase):
 
             const rows = eventMode.floodEventRows(meta);
             if (rows.length !== 16) throw new Error(`unexpected row count: ${rows.length}`);
-            if (rows[0][0] !== "事件评价" || rows[0][1] !== "事件目标函数：2/3 场有效") {
+            if (rows[0][0] !== "场次洪水评价" || rows[0][1] !== "场次洪水目标函数：2/3 场有效") {
               throw new Error(`unexpected first row: ${JSON.stringify(rows[0])}`);
             }
-            if (rows[1][0] !== "事件目标值" || rows[1][1] !== "0.1235") {
+            if (rows[1][0] !== "场次目标值" || rows[1][1] !== "0.1235") {
               throw new Error(`unexpected objective row: ${JSON.stringify(rows[1])}`);
             }
-            if (rows[2][0] !== "事件资料模式" || rows[2][1] !== "事件窗口独立运行，3 场" || rows[2][2] !== "初始条件：来源状态") {
+            if (rows[2][0] !== "场次洪水工作流" || rows[2][1] !== "逐场独立洪水，3 场" || rows[2][2] !== "初始条件：来源状态") {
               throw new Error(`unexpected event runtime row: ${JSON.stringify(rows[2])}`);
             }
             if (rows[3][0] !== "2020-07 洪水" || rows[3][1] !== "洪峰 0.13% / 峰现 0.5 h / 洪量 0.75%") {
@@ -82,10 +82,10 @@ class FrontendEventModeTests(unittest.TestCase):
 
             const metricItems = eventMode.floodEventMetricItems(meta);
             if (metricItems.length !== 2) throw new Error(`unexpected metric item count: ${metricItems.length}`);
-            if (metricItems[0].l !== "洪水事件" || metricItems[0].v !== "事件目标函数：2/3 场有效") {
+            if (metricItems[0].l !== "场次洪水" || metricItems[0].v !== "场次洪水目标函数：2/3 场有效") {
               throw new Error(`unexpected flood event metric item: ${JSON.stringify(metricItems[0])}`);
             }
-            if (metricItems[1].l !== "事件目标值" || metricItems[1].v !== "0.1235") {
+            if (metricItems[1].l !== "场次目标值" || metricItems[1].v !== "0.1235") {
               throw new Error(`unexpected flood event objective metric item: ${JSON.stringify(metricItems[1])}`);
             }
             if (eventMode.floodEventMetricItems({}).length !== 0) {
@@ -143,16 +143,20 @@ class FrontendEventModeTests(unittest.TestCase):
             };
 
             const continuousHint = eventMode.eventModeHintState({ basis: "continuous" });
-            if (continuousHint.className !== "hint-box" || !continuousHint.text.includes("连续时段要求完整覆盖")) {
+            if (continuousHint.className !== "hint-box" || !continuousHint.text.includes("连续时段率定")) {
               throw new Error(`continuous event hint mismatch: ${JSON.stringify(continuousHint)}`);
             }
             const missingEventFileHint = eventMode.eventModeHintState({ basis: "event_windows", eventFile: "" });
-            if (missingEventFileHint.className !== "hint-box status-warn" || !missingEventFileHint.text.includes("请提供事件表")) {
+            if (missingEventFileHint.className !== "hint-box status-warn" || !missingEventFileHint.text.includes("请提供逐场独立洪水表")) {
               throw new Error(`missing event file hint mismatch: ${JSON.stringify(missingEventFileHint)}`);
             }
             const eventFileHint = eventMode.eventModeHintState({ basis: "event_windows", eventFile: "C:/events/flood.csv" });
-            if (eventFileHint.className !== "hint-box status-ok" || !eventFileHint.text.includes("当前按洪水事件组织资料")) {
-              throw new Error(`event file hint mismatch: ${JSON.stringify(eventFileHint)}`);
+            if (eventFileHint.className !== "hint-box status-ok" || !eventFileHint.text.includes("每场洪水独立初始化")) {
+                throw new Error(`event file hint mismatch: ${JSON.stringify(eventFileHint)}`);
+            }
+            const continuousEventsHint = eventMode.eventModeHintState({ basis: "continuous_events", eventFile: "C:/events/flood.csv" });
+            if (continuousEventsHint.className !== "hint-box status-ok" || !continuousEventsHint.text.includes("连续演算积雪水当量")) {
+              throw new Error(`continuous event hint mismatch: ${JSON.stringify(continuousEventsHint)}`);
             }
 
             const html = eventMode.renderWizardEventSummary({
@@ -192,7 +196,7 @@ class FrontendEventModeTests(unittest.TestCase):
                 },
               ],
             }, helpers);
-            if (!html.includes("洪水事件表") || !html.includes("事件流量覆盖")) {
+            if (!html.includes("场次洪水表") || !html.includes("事件流量覆盖")) {
               throw new Error(`event and observation summaries should be combined: ${html}`);
             }
             if (!html.includes("洪水&lt;一&gt;") || html.includes("洪水<一>")) {
@@ -299,7 +303,7 @@ class FrontendEventModeTests(unittest.TestCase):
                 ],
               },
             }, helpers);
-            for (const text of ["事件资料时段需复核", "洪水事件表", "事件内气象覆盖", "事件流量覆盖"]) {
+            for (const text of ["事件资料时段需复核", "场次洪水表", "事件内气象覆盖", "事件流量覆盖"]) {
               if (!validationHtml.includes(text)) {
                 throw new Error(`validation event section missing ${text}: ${validationHtml}`);
               }

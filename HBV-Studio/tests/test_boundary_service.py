@@ -6,6 +6,7 @@ import unittest
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -199,6 +200,26 @@ class BoundaryServiceTests(unittest.TestCase):
         self.assertTrue(enabled)
         self.assertEqual(series.tolist(), [10.0, 0.0, 0.0, 0.0])
         self.assertTrue(any("内仅覆盖" in str(item.message) for item in caught))
+
+    def test_boundary_preserve_missing_does_not_convert_gaps_to_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "boundary.csv"
+            pd.DataFrame(
+                {"date": ["2026-01-01", "2026-01-03"], "flow": [10.0, 12.0]}
+            ).to_csv(path, index=False, encoding="utf-8-sig")
+
+            series, enabled = read_boundary_inflow_series(
+                str(path),
+                pd.date_range("2026-01-01", periods=3, freq="1D"),
+                date_field="date",
+                flow_field="flow",
+                gap_fill="preserve_missing",
+                expected_step_hours=24,
+            )
+
+        self.assertTrue(enabled)
+        self.assertEqual(series[[0, 2]].tolist(), [10.0, 12.0])
+        self.assertTrue(np.isnan(series[1]))
 
     def test_boundary_xlsx_is_supported_by_preview_and_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

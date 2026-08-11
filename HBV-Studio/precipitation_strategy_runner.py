@@ -48,7 +48,7 @@ TIME_BASIS_EVENT_WINDOWS = "event_windows"
 TIME_BASIS_FORECAST_WINDOW = "forecast_window"
 TIME_BASIS_LABELS = {
     TIME_BASIS_CONTINUOUS: "连续时段",
-    TIME_BASIS_EVENT_WINDOWS: "洪水事件窗口",
+    TIME_BASIS_EVENT_WINDOWS: "场次洪水窗口",
     TIME_BASIS_FORECAST_WINDOW: "预报窗口",
 }
 
@@ -2686,7 +2686,7 @@ def main() -> None:
             )
             print(
                 "订正规则: "
-                f"训练日 {int(transfer_rule_summary.get('training_days', 0) or 0)}；"
+                f"订正样本日 {int(transfer_rule_summary.get('training_days', 0) or 0)}；"
                 f"有效站点样本 {int(transfer_rule_summary.get('valid_station_samples', 0) or 0)}；"
                 f"有独立月规则 {month_count}/12；"
                 f"平均倍率 {transfer_rule_summary.get('global_ratio_mean', '未形成')}"

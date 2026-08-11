@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 from glob import glob
-from math import log, radians, sin
+from math import ceil, log, radians, sin
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,7 +99,8 @@ CACHE_DIR = _prefer_existing_path(os.path.join(RESULTS_ROOT, "缓存"), os.path.
 BOUNDARY_INFLOW_FILE = ""
 BOUNDARY_INFLOW_DATE_FIELD = "date"
 BOUNDARY_INFLOW_FLOW_FIELD = "inflow_m3s"
-BOUNDARY_INFLOW_GAP_FILL = "zero"
+BOUNDARY_INFLOW_GAP_FILL = "preserve_missing"
+BOUNDARY_ROUTING_WARMUP_DAYS = 14.0
 
 SWE_ICE_THRESHOLD_MM = 10.0
 GLACIER_LAPSE_RATE_PER_M = 0.0065
@@ -209,6 +210,7 @@ WARMUP_STEPS = None
 CATCHMENT_AREA = None
 BOUNDARY_INFLOW_SERIES = None
 BOUNDARY_INFLOW_ENABLED = False
+BOUNDARY_INFLOW_VALID_MASK = None
 GLACIER_MELT_REF_RAW = None
 GLACIER_MODEL_MODE = "binary_legacy"
 GLACIER_ELEV_STATUS = "unknown"
@@ -4277,11 +4279,19 @@ def build_cfmax_grid(cfmax_low, cfmax_high):
 
 
 def route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_musk):
-    q_total_in = q_total + boundary_full
+    q_local_routed = trim_warmup(muskingum_route(q_total, k_musk, x_musk, MUSK_DT))
+    q_boundary_routed, boundary_evaluable, boundary_periods = route_boundary_inflow_with_warmup(
+        boundary_full, k_musk, x_musk
+    )
+    q_total_routed = (
+        np.where(boundary_evaluable, q_local_routed + q_boundary_routed, np.nan)
+        if BOUNDARY_INFLOW_ENABLED
+        else q_local_routed.copy()
+    )
     return {
-        "q_total": trim_warmup(muskingum_route(q_total_in, k_musk, x_musk, MUSK_DT)),
-        "q_local": trim_warmup(muskingum_route(q_total, k_musk, x_musk, MUSK_DT)),
-        "q_boundary": trim_warmup(muskingum_route(boundary_full, k_musk, x_musk, MUSK_DT)),
+        "q_total": q_total_routed,
+        "q_local": q_local_routed,
+        "q_boundary": q_boundary_routed,
         "q_rain": trim_warmup(muskingum_route(q_rain, k_musk, x_musk, MUSK_DT)),
         "q_snow": trim_warmup(muskingum_route(q_snow, k_musk, x_musk, MUSK_DT)),
         "q_ice": trim_warmup(muskingum_route(q_ice, k_musk, x_musk, MUSK_DT)),
@@ -4290,7 +4300,69 @@ def route_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_mu
         "q_rain_raw": trim_warmup(q_rain),
         "q_snow_raw": trim_warmup(q_snow),
         "q_ice_raw": trim_warmup(q_ice),
+        "boundary_evaluable_mask": boundary_evaluable,
+        "outlet_evaluable_mask": boundary_evaluable if BOUNDARY_INFLOW_ENABLED else np.ones_like(q_local_routed, dtype=bool),
+        "boundary_continuous_periods": boundary_periods,
     }
+
+
+def _finite_contiguous_slices(values):
+    finite = np.isfinite(np.asarray(values, dtype=np.float64).reshape(-1))
+    slices = []
+    start = None
+    for idx, is_valid in enumerate(finite):
+        time_break = False
+        if idx > 0 and SIM_DATES is not None and len(SIM_DATES) > idx:
+            delta_hours = (pd.Timestamp(SIM_DATES[idx]) - pd.Timestamp(SIM_DATES[idx - 1])) / pd.Timedelta(hours=1)
+            time_break = abs(float(delta_hours) - float(TIME_STEP_HOURS)) > 1e-9
+        if time_break and start is not None:
+            slices.append(slice(start, idx))
+            start = None
+        if is_valid and start is None:
+            start = idx
+        elif (not is_valid) and start is not None:
+            slices.append(slice(start, idx))
+            start = None
+    if start is not None:
+        slices.append(slice(start, len(finite)))
+    return slices
+
+
+def boundary_routing_warmup_steps():
+    return max(0, int(ceil(float(BOUNDARY_ROUTING_WARMUP_DAYS) * 24.0 / max(float(TIME_STEP_HOURS), EPS))))
+
+
+def route_boundary_inflow_with_warmup(boundary_full, k_musk, x_musk):
+    """Route each observed boundary period without treating missing inflow as zero."""
+    values = np.asarray(boundary_full, dtype=np.float64).reshape(-1)
+    routed = np.full(values.shape, np.nan, dtype=np.float64)
+    evaluable = np.zeros(values.shape, dtype=bool)
+    periods = []
+    warmup_steps = boundary_routing_warmup_steps()
+    for segment in _finite_contiguous_slices(values):
+        segment_values = values[segment]
+        routed[segment] = muskingum_route(segment_values, k_musk, x_musk, MUSK_DT)
+        segment_length = int(segment.stop - segment.start)
+        usable_start = min(segment.stop, segment.start + warmup_steps)
+        if usable_start < segment.stop:
+            evaluable[usable_start:segment.stop] = True
+        period = {
+            "start_idx": int(segment.start),
+            "end_idx": int(segment.stop - 1),
+            "time_steps": segment_length,
+            "warmup_steps": min(warmup_steps, segment_length),
+            "evaluable_steps": max(0, segment_length - warmup_steps),
+        }
+        if SIM_DATES is not None and len(SIM_DATES) >= segment.stop:
+            period["data_start"] = _event_time_text(SIM_DATES[segment.start])
+            period["data_end"] = _event_time_text(SIM_DATES[segment.stop - 1])
+            period["warmup_end"] = _event_time_text(SIM_DATES[min(segment.stop - 1, max(segment.start, usable_start - 1))])
+            period["evaluable_start"] = _event_time_text(SIM_DATES[usable_start]) if usable_start < segment.stop else None
+        periods.append(period)
+    if not BOUNDARY_INFLOW_ENABLED:
+        routed = np.zeros(values.shape, dtype=np.float64)
+        evaluable[:] = True
+    return trim_warmup(routed), trim_warmup(evaluable), periods
 
 
 def event_runtime_independent_active():
@@ -4330,11 +4402,19 @@ def route_runtime_series(q_in, k_musk, x_musk):
 
 
 def route_event_window_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, k_musk, x_musk):
-    q_total_in = q_total + boundary_full
+    q_local_routed = route_event_window_series(q_total, k_musk, x_musk)
+    q_boundary_routed, boundary_evaluable, boundary_periods = route_boundary_inflow_with_warmup(
+        boundary_full, k_musk, x_musk
+    )
+    q_total_routed = (
+        np.where(boundary_evaluable, q_local_routed + q_boundary_routed, np.nan)
+        if BOUNDARY_INFLOW_ENABLED
+        else q_local_routed.copy()
+    )
     return {
-        "q_total": route_event_window_series(q_total_in, k_musk, x_musk),
-        "q_local": route_event_window_series(q_total, k_musk, x_musk),
-        "q_boundary": route_event_window_series(boundary_full, k_musk, x_musk),
+        "q_total": q_total_routed,
+        "q_local": q_local_routed,
+        "q_boundary": q_boundary_routed,
         "q_rain": route_event_window_series(q_rain, k_musk, x_musk),
         "q_snow": route_event_window_series(q_snow, k_musk, x_musk),
         "q_ice": route_event_window_series(q_ice, k_musk, x_musk),
@@ -4343,6 +4423,9 @@ def route_event_window_series_set(q_total, boundary_full, q_rain, q_snow, q_ice,
         "q_rain_raw": trim_warmup(q_rain),
         "q_snow_raw": trim_warmup(q_snow),
         "q_ice_raw": trim_warmup(q_ice),
+        "boundary_evaluable_mask": boundary_evaluable,
+        "outlet_evaluable_mask": boundary_evaluable if BOUNDARY_INFLOW_ENABLED else np.ones_like(q_local_routed, dtype=bool),
+        "boundary_continuous_periods": boundary_periods,
     }
 
 
@@ -5273,7 +5356,7 @@ def load_all_data(end_date_override=None, skip_obs=False):
     global PREC_3D, TEMP_3D, ET_3D, LL_TEMP_3D, PREC_CELLS, TEMP_CELLS, ET_CELLS, LL_TEMP_CELLS, FLOW_ACC, PX_AREA
     global VALID_CELLS, GLACIER_MASK, GLACIER_FRACTION, GLACIER_DELTA_T, ZONE_LOW, ZONE_HIGH, GLACIER_CELLS, GLACIER_FRACTION_CELLS, GLACIER_DELTA_T_CELLS, ZONE_HIGH_CELLS, CELL_SCALE
     global SIM_DATES, CALIB_MASK, VALID_MASK, Q_OBS_FULL, Q_OBS_OBJ, Q_OBS_CALIB, Q_OBS_VALID
-    global WARMUP_STEPS, CATCHMENT_AREA, BOUNDARY_INFLOW_SERIES, BOUNDARY_INFLOW_ENABLED, GLACIER_MELT_REF_RAW, GLACIER_MODEL_MODE, GLACIER_ELEV_STATUS, RELIABILITY_FLAG, DATA_LOAD_SUMMARY, OBS_MODE_APPLIED
+    global WARMUP_STEPS, CATCHMENT_AREA, BOUNDARY_INFLOW_SERIES, BOUNDARY_INFLOW_ENABLED, BOUNDARY_INFLOW_VALID_MASK, GLACIER_MELT_REF_RAW, GLACIER_MODEL_MODE, GLACIER_ELEV_STATUS, RELIABILITY_FLAG, DATA_LOAD_SUMMARY, OBS_MODE_APPLIED
     global OBS_MONTHLY_CALIB, GLACIER_FRAC_WINDOW, BASIN_GLACIER_AREA_FRACTION
     global EVENT_RUNTIME_ENABLED, EVENT_RUNTIME_MODE, EVENT_RUNTIME_DATES, EVENT_RUNTIME_WINDOWS, EVENT_RUNTIME_META, EVENT_INITIAL_STATE_POLICY
 
@@ -5284,7 +5367,7 @@ def load_all_data(end_date_override=None, skip_obs=False):
     event_context = build_event_runtime_context()
     EVENT_RUNTIME_ENABLED = bool(event_context.get("enabled") and event_context.get("dates") is not None)
     if event_context.get("errors"):
-        raise ValueError("洪水事件窗口资料模式无法启动：" + "；".join(str(item) for item in event_context["errors"][:5]))
+        raise ValueError("场次洪水窗口资料模式无法启动：" + "；".join(str(item) for item in event_context["errors"][:5]))
     if EVENT_RUNTIME_ENABLED:
         runtime_dates = pd.DatetimeIndex(event_context["dates"])
         EVENT_RUNTIME_DATES = runtime_dates
@@ -5317,7 +5400,21 @@ def load_all_data(end_date_override=None, skip_obs=False):
         EVENT_RUNTIME_WINDOWS = []
         EVENT_RUNTIME_MODE = "continuous"
         EVENT_INITIAL_STATE_POLICY = "continuous_state"
-        EVENT_RUNTIME_META = {"enabled": False, "runtime_mode": "continuous"}
+        parsed_events = parse_flood_event_config()
+        continuous_event_evaluation = bool(parsed_events.get("enabled") and parsed_events.get("events"))
+        purpose_counts = {
+            purpose: sum(1 for event in parsed_events.get("events", []) if _event_purpose_key(event) == purpose)
+            for purpose in ("calibration", "validation", "diagnostic")
+        }
+        EVENT_RUNTIME_META = {
+            "enabled": continuous_event_evaluation,
+            "runtime_mode": "continuous_state_events" if continuous_event_evaluation else "continuous",
+            "initial_state_policy": "continuous_state",
+            "state_continuity_between_events": True,
+            "event_count": int(len(parsed_events.get("events", []))) if continuous_event_evaluation else 0,
+            "purpose_counts": purpose_counts,
+            "boundary_routing_warmup_days": float(BOUNDARY_ROUTING_WARMUP_DAYS),
+        }
 
     PREC_3D, transform, forcing_crs = load_raster_stack_for_dates(PREC_DIR, runtime_dates, cache_label="prec")
     rows, cols, ts = PREC_3D.shape
@@ -5559,6 +5656,7 @@ def load_all_data(end_date_override=None, skip_obs=False):
         allow_no_overlap=bool(skip_obs and end_date_override is not None),
     )
     BOUNDARY_INFLOW_ENABLED = bool(BOUNDARY_INFLOW_FILE)
+    BOUNDARY_INFLOW_VALID_MASK = np.isfinite(BOUNDARY_INFLOW_SERIES)
     if EVENT_RUNTIME_ENABLED:
         GLACIER_MELT_REF_RAW = load_glacier_melt_reference_series_for_dates(full_run_dates)
     else:
@@ -5722,15 +5820,26 @@ def run_simulation(opt_params, mode="full"):
             )
         boundary_full = BOUNDARY_INFLOW_SERIES.astype(np.float64, copy=True)
 
-    if mode_name == "objective_total":
+    if mode_name in {"objective_total", "objective_ice"}:
+        q_local_routed = route_runtime_series(q_total, K_MUSK, X_MUSK)
+        q_boundary_routed, boundary_evaluable, boundary_periods = route_boundary_inflow_with_warmup(
+            boundary_full, K_MUSK, X_MUSK
+        )
+        q_total_routed = (
+            np.where(boundary_evaluable, q_local_routed + q_boundary_routed, np.nan)
+            if BOUNDARY_INFLOW_ENABLED
+            else q_local_routed.copy()
+        )
         sim = {
-            "q_total": route_runtime_series(q_total + boundary_full, K_MUSK, X_MUSK),
+            "q_total": q_total_routed,
+            "q_local": q_local_routed,
+            "q_boundary": q_boundary_routed,
+            "boundary_evaluable_mask": boundary_evaluable,
+            "outlet_evaluable_mask": boundary_evaluable if BOUNDARY_INFLOW_ENABLED else np.ones_like(q_local_routed, dtype=bool),
+            "boundary_continuous_periods": boundary_periods,
         }
-    elif mode_name == "objective_ice":
-        sim = {
-            "q_total": route_runtime_series(q_total + boundary_full, K_MUSK, X_MUSK),
-            "q_ice": route_runtime_series(q_ice, K_MUSK, X_MUSK),
-        }
+        if mode_name == "objective_ice":
+            sim["q_ice"] = route_runtime_series(q_ice, K_MUSK, X_MUSK)
     else:
         if event_runtime_independent_active():
             sim = route_event_window_series_set(q_total, boundary_full, q_rain, q_snow, q_ice, K_MUSK, X_MUSK)
@@ -6303,6 +6412,13 @@ def flood_event_component_scores(metrics, peak_time_tolerance_hours):
 
 def flood_event_diagnostic_objective(metrics, weights, peak_time_tolerance_hours):
     components = flood_event_component_scores(metrics, peak_time_tolerance_hours)
+    required_components = {"peak_flow_error", "peak_time_error", "volume_error", "high_flow_skill"}
+    if not required_components.issubset(components):
+        return {
+            "score": float("nan"),
+            "components": {key: float(value) for key, value in components.items()},
+            "missing_required_components": sorted(required_components - set(components)),
+        }
     normalized = dict(weights.get("normalized", {}) or {})
     numerator = 0.0
     denominator = 0.0
@@ -6319,6 +6435,35 @@ def flood_event_diagnostic_objective(metrics, weights, peak_time_tolerance_hours
         "score": score,
         "components": {key: float(value) for key, value in components.items()},
     }
+
+
+def flood_event_position_mask(date_index, event_id, event_start, event_end):
+    """Select one event by sequence positions, even when independent runs repeat timestamps."""
+    date_index = pd.DatetimeIndex(date_index)
+    mask = np.zeros(len(date_index), dtype=bool)
+    if event_runtime_independent_active():
+        matching = [
+            item for item in EVENT_RUNTIME_WINDOWS
+            if str(item.get("event_id", "") or "") == str(event_id or "")
+        ]
+        if len(matching) == 1:
+            window = matching[0]
+            start_idx = max(0, int(window.get("start_idx", 0) or 0))
+            end_idx = min(len(date_index) - 1, int(window.get("end_idx", start_idx) or start_idx))
+            if end_idx >= start_idx:
+                positions = np.arange(start_idx, end_idx + 1)
+                within_score = (
+                    (date_index[positions] >= pd.Timestamp(event_start))
+                    & (date_index[positions] <= pd.Timestamp(event_end))
+                )
+                mask[positions[within_score]] = True
+            return mask
+
+    in_window = np.asarray((date_index >= event_start) & (date_index <= event_end), dtype=bool)
+    # A continuous simulation has one physical state per timestamp. Keep the first
+    # position if malformed input contains duplicate timestamps.
+    unique_positions = ~date_index.duplicated(keep="first")
+    return in_window & np.asarray(unique_positions, dtype=bool)
 
 
 def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weights, peak_time_tolerance_hours):
@@ -6429,7 +6574,7 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
 
     if event_start < date_index[0] or event_end > date_index[-1]:
         warnings.append("事件窗口超出当前连续模拟时段，已按可用时段裁剪评价。")
-    window_mask = (date_index >= event_start) & (date_index <= event_end)
+    window_mask = flood_event_position_mask(date_index, event_id, event_start, event_end)
     if not np.any(window_mask):
         return {
             **identity,
@@ -6448,14 +6593,16 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     event_dates = date_index[window_mask]
     obs_event = q_obs[window_mask]
     sim_event = q_sim[window_mask]
-    valid_mask = np.isfinite(obs_event) & np.isfinite(sim_event)
+    observed_valid = np.isfinite(obs_event)
+    simulated_valid = np.isfinite(sim_event)
+    valid_mask = observed_valid & simulated_valid
     valid_count = int(np.sum(valid_mask))
     total_steps = int(len(obs_event))
     duration_hours = float((event_dates[-1] - event_dates[0]) / pd.Timedelta(hours=1) + TIME_STEP_HOURS)
     base = {
         **identity,
-        "status": "ok" if valid_count >= 2 else "insufficient_valid_points",
-        "valid": bool(valid_count >= 2),
+        "status": "ok" if valid_count == total_steps and total_steps >= 2 else "incomplete_event_data",
+        "valid": bool(valid_count == total_steps and total_steps >= 2),
         "event_start": _event_time_text(event_start),
         "event_end": _event_time_text(event_end),
         "warmup_start": _event_time_text(warmup_start),
@@ -6467,10 +6614,16 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
         "window_end_used": _event_time_text(event_dates[-1]),
         "total_steps": total_steps,
         "valid_count": valid_count,
+        "missing_observation_steps": int(np.sum(~observed_valid)),
+        "non_evaluable_simulation_steps": int(np.sum(~simulated_valid)),
         "duration_hours": duration_hours,
         "warnings": warnings,
     }
-    if valid_count < 2:
+    if valid_count != total_steps or total_steps < 2:
+        if np.any(~observed_valid):
+            warnings.append("场次洪水评价窗口内实测流量存在缺测，该场不参与评价。")
+        if np.any(~simulated_valid):
+            warnings.append("场次洪水评价窗口内出口总流量不可评价；请检查边界入流完整性及汇流预热期。")
         base["diagnostic_objective"] = flood_event_diagnostic_objective(base, weights, peak_time_tolerance_hours)
         return base
 
@@ -6479,6 +6632,16 @@ def compute_single_flood_event_metrics(dates, q_obs, q_sim, event_config, weight
     dates_valid = pd.DatetimeIndex(event_dates[valid_mask])
     obs_peak_pos = int(np.nanargmax(obs_valid))
     sim_peak_pos = int(np.nanargmax(sim_valid))
+    obs_peak_count = int(np.sum(obs_valid == obs_valid[obs_peak_pos]))
+    if obs_peak_count == 1 and obs_peak_pos in {0, len(obs_valid) - 1}:
+        base.update({
+            "status": "observed_peak_at_window_boundary",
+            "valid": False,
+            "obs_peak_position": obs_peak_pos,
+            "warnings": warnings + ["实测洪峰位于评价窗口首个或末个时间步，场次划分未覆盖完整涨退水过程。"],
+        })
+        base["diagnostic_objective"] = flood_event_diagnostic_objective(base, weights, peak_time_tolerance_hours)
+        return base
     obs_peak = float(obs_valid[obs_peak_pos])
     sim_peak = float(sim_valid[sim_peak_pos])
     obs_peak_time = dates_valid[obs_peak_pos]
@@ -6616,7 +6779,7 @@ def compute_flood_event_evaluation(dates, q_obs, q_sim, config=None, evaluation_
             (
                 "每场洪水独立运行并评价，事件之间不传递模型状态。"
                 if event_runtime_independent_active()
-                else "洪水事件评价基于连续模拟序列裁剪计算。"
+                else "场次洪水评价基于连续模拟序列裁剪计算。"
             ),
             "启用事件目标函数时，逐场洪峰、峰现和洪量指标进入率定目标。",
         ],
@@ -8112,11 +8275,12 @@ def build_flood_event_objective_meta(profile_name=None):
     return {
         "type": FLOOD_EVENT_OBJECTIVE_FAMILY,
         "profile": profile_name,
-        "label": "事件洪水率定目标函数",
+        "label": "场次洪水目标函数",
         "summary": (
-            "按洪水事件窗口组织资料，每场事件独立预热并合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。"
+            "按场次洪水窗口组织资料，综合评价洪峰流量、峰现时间、洪量、退水过程和高流量过程效率；"
+            "连续状态工作流在场次之间传递模型状态，逐场独立工作流仅用于具有可靠初始状态的专项模拟。"
             if event_runtime
-            else "连续运行模型，只在配置洪水事件窗口内合成洪峰、峰现时间、洪量、退水和高流量过程效率目标。"
+            else "连续运行模型，只在配置的场次洪水窗口内综合评价洪峰流量、峰现时间、洪量、退水过程和高流量过程效率。"
         ),
         "formula": "weighted_mean(|peak_error|, |peak_time_error|, |volume_error|, recession_error, 1 - high_flow_skill)",
         "weights": parsed.get("weights", {}).get("raw", dict(DEFAULT_FLOOD_EVENT_WEIGHTS)),
@@ -8134,7 +8298,7 @@ def build_flood_event_objective_meta(profile_name=None):
             if event_runtime
             else [
                 "气象驱动和状态演化仍按完整连续时段运行，事件窗口只决定目标函数取样范围。",
-                "未显式启用事件目标函数时，洪水事件评价只作为结果诊断输出。",
+                "未显式启用场次洪水目标函数时，场次洪水评价只作为结果诊断输出。",
                 "验证类事件可用于结果复核，默认不参与事件目标函数。",
             ]
         ),
@@ -8651,6 +8815,16 @@ def save_results(result):
         "event_mode": dict(EVENT_RUNTIME_META or {}),
         "event_initial_state_policy": EVENT_INITIAL_STATE_POLICY,
         "event_count": int(dict(EVENT_RUNTIME_META or {}).get("event_count", 0) or 0),
+        "boundary_evaluation": {
+            "enabled": bool(BOUNDARY_INFLOW_ENABLED),
+            "missing_is_zero": False if str(BOUNDARY_INFLOW_GAP_FILL).strip().lower() in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"} else str(BOUNDARY_INFLOW_GAP_FILL).strip().lower() in {"", "zero", "0"},
+            "gap_handling": str(BOUNDARY_INFLOW_GAP_FILL),
+            "routing_warmup_days": float(BOUNDARY_ROUTING_WARMUP_DAYS),
+            "continuous_periods": list(sim.get("boundary_continuous_periods", []) or []),
+            "evaluable_steps": int(np.sum(np.asarray(sim.get("boundary_evaluable_mask", []), dtype=bool))),
+            "non_evaluable_steps": int(len(q_sim) - np.sum(np.asarray(sim.get("outlet_evaluable_mask", np.ones(len(q_sim), dtype=bool)), dtype=bool))),
+            "note": "边界缺测时本地区间状态继续演算，出口总流量不参与评价。",
+        },
         "flood_event_evaluation": flood_event_evaluation,
         "optimization": {
             "method": str(getattr(args, "method", "de")),
@@ -8798,7 +8972,7 @@ def save_results(result):
                 f.write(f"冰川融水参考 RMSE（汇流后）: {routed_rmse:.4f} m3/s\n")
         if flood_event_evaluation.get("enabled"):
             f.write(
-                "洪水事件评价: "
+                "场次洪水评价: "
                 f"{int(flood_event_evaluation.get('valid_event_count', 0))}/"
                 f"{int(flood_event_evaluation.get('event_count', 0))} 场有效"
             )
@@ -8829,7 +9003,7 @@ def save_results(result):
         print(f"  冰川融水参考 RMSE（汇流后）: {glacier_cmp_routed['rmse_m3s']:.2f} m3/s")
     if flood_event_evaluation.get("enabled"):
         print(
-            "  洪水事件评价: "
+            "  场次洪水评价: "
             f"{int(flood_event_evaluation.get('valid_event_count', 0))}/"
             f"{int(flood_event_evaluation.get('event_count', 0))} 场有效"
         )

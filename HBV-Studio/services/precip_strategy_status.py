@@ -70,7 +70,7 @@ def _hydro_diagnostic_message(summary: dict[str, Any]) -> list[str]:
             )
             parts.append(
                 "站点订正规则："
-                f"训练日 {int(rules.get('training_days', 0) or 0)}；"
+                f"订正样本日 {int(rules.get('training_days', 0) or 0)}；"
                 f"有效站点样本 {int(rules.get('valid_station_samples', 0) or 0)}；"
                 f"独立月规则 {month_count}/12；"
                 f"平均倍率 {_fmt_float(rules.get('global_ratio_mean'), 2)}"
