@@ -141,6 +141,7 @@ def data_prep_steps_payload(config_path_raw: str, context: DataPrepContext) -> l
             "manual": bool(step.get("manual", False)),
             "needs_prec_source": bool(step.get("needs_prec_source", False)),
             "supports_overwrite": bool(step.get("supports_overwrite", False)),
+            "time_window": step.get("time_window"),
         }
         for step in (
             context.resolve_data_prep_step(item, config)
@@ -387,6 +388,17 @@ def resolve_data_prep_step(
     resolved = dict(step)
     if config is None:
         return resolved
+
+    step_id = resolved.get("id")
+    meteo = dict(config.get("气象策略", {}) or {})
+    source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).lower()
+    if source == "era5" and step_id in ("process_prec", "process_hourly_prec"):
+        resolved["depends_on"] = ["download_era5" if step_id == "process_prec" else "process_hourly_era5"]
+    if config.get("时间") and step_id in ("download_era5", "download_hourly_era5"):
+        from 公共函数 import data_date_range
+        first, last = data_date_range(config)
+        resolved["time_window"] = {"start": first.isoformat(), "end": last.isoformat(), "hourly": step_id == "download_hourly_era5"}
+        resolved["description"] += f" 目标日期：{first} 至 {last}（含首尾日）。"
 
     glacier_enabled = bool(str(config.get("冰川边界_shp", "")).strip())
     if resolved.get("id") == "glacier_mask" and glacier_enabled:

@@ -3879,7 +3879,8 @@ function buildVisiblePrepSteps() {
 function updatePrepPanelSummary(steps) {
   const hint = $("#wz-pipeline-meteo-hint");
   if (!hint) return;
-  const summary = window.HBVStudioDataPrepView.prepPanelSummary(getWizardMeteoSources());
+  const timeWindow = (steps || []).find(step => step.time_window)?.time_window;
+  const summary = window.HBVStudioDataPrepView.prepPanelSummary(getWizardMeteoSources(), timeWindow);
   hint.textContent = summary.text;
   hint.className = summary.className;
 }

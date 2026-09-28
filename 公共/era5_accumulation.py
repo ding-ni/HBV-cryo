@@ -25,7 +25,10 @@ def find_boundary_file(directory: Any, prefix: str, year: int) -> Path:
     candidates = boundary_file_candidates(directory, prefix, year)
     for candidate in candidates:
         if candidate.is_file():
-            return candidate
+            from cds_chunked_download import netcdf_covers_range
+            midnight = f"{int(year) + 1}-01-01"
+            if netcdf_covers_range(candidate, midnight, midnight, ["00:00"]):
+                return candidate
     raise FileNotFoundError(
         f"{year} 年累计变量缺少次年 01-01 00:00 收尾样本；"
         f"请准备边界文件 {candidates[1]}。"

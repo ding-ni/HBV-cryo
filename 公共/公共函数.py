@@ -610,15 +610,13 @@ def data_date_range(config):
     from datetime import date
 
     settings = time_settings(config)
-    start = settings.get("预热开始")
-    end = settings.get("验证结束")
-    if start and len(str(start)) > 10:
-        start = str(start)[:10]
-    if end and len(str(end)) > 10:
-        end = str(end)[:10]
-    if start and end:
-        return date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
-    return date(int(settings["开始年份"]), 1, 1), date(int(settings["结束年份"]), 12, 31)
+    starts = [settings.get(key) for key in ("预热开始", "率定开始", "验证开始") if settings.get(key)]
+    ends = [settings.get(key) for key in ("预热结束", "率定结束", "验证结束") if settings.get(key)]
+    first = min(date.fromisoformat(str(value)[:10]) for value in starts) if starts else date(int(settings["开始年份"]), 1, 1)
+    last = max(date.fromisoformat(str(value)[:10]) for value in ends) if ends else date(int(settings["结束年份"]), 12, 31)
+    if first > last:
+        raise ValueError("气象数据开始日期不能晚于结束日期。")
+    return first, last
 
 
 def bbox_list(config):

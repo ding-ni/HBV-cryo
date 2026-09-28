@@ -91,11 +91,13 @@ class Era5AccumulationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             boundary = root / "era5_tp_boundary_2025.nc"
-            boundary.write_bytes(b"boundary")
+            xr.Dataset({"tp": ("time", [0.01])}, coords={"time": pd.to_datetime(["2025-01-01"])}).to_netcdf(boundary)
             self.assertEqual(find_boundary_file(root, "era5_tp", 2024), boundary)
 
             full_year = root / "era5_tp_2025.nc"
-            full_year.write_bytes(b"full")
+            xr.Dataset({"tp": ("time", [0.01])}, coords={"time": pd.to_datetime(["2025-05-01"])}).to_netcdf(full_year)
+            self.assertEqual(find_boundary_file(root, "era5_tp", 2024), boundary)
+            xr.Dataset({"tp": ("time", [0.01])}, coords={"time": pd.to_datetime(["2025-01-01"])}).to_netcdf(full_year)
             self.assertEqual(find_boundary_file(root, "era5_tp", 2024), full_year)
 
 

@@ -885,7 +885,7 @@
     };
   }
 
-  function prepPanelSummary(sources = {}) {
+  function prepPanelSummary(sources = {}, timeWindow = null) {
     const precText = sources.prec === "custom_tif"
       ? "本地栅格"
       : sources.prec === "era5"
@@ -897,7 +897,8 @@
       text: `当前流程：降水用${precText}，`
         + `气温用${sources.temp === "custom_tif" ? "本地栅格" : "ERA5"}，`
         + `潜在蒸散发用${sources.pet === "custom_tif" ? "本地栅格" : "ERA5+FAO56"}。`
-        + describeEra5Need(sources),
+        + describeEra5Need(sources)
+        + (timeWindow ? ` 目标日期：${timeWindow.start} 至 ${timeWindow.end}（含首尾日）。${timeWindow.hourly ? "累计变量补充前一天数据。" : "累计变量补充次日边界数据。"}` : ""),
       className: "hint-box status-ok",
     };
   }

@@ -27,7 +27,8 @@ from 公共函数 import (  # type: ignore
 
 
 def download_variable(client, dataset: str, variable: str, year: int, area: list[float], output_file: Path, *, chunk_months: int, start_date, end_date) -> None:
-    request_end = end_date + timedelta(days=1) if variable == "total_precipitation" else end_date
+    cumulative = variable in ("total_precipitation", "surface_solar_radiation_downwards")
+    request_start = start_date - timedelta(days=1) if cumulative else start_date
     download_era5_land_year_chunked(
         client,
         variable=variable,
@@ -36,8 +37,8 @@ def download_variable(client, dataset: str, variable: str, year: int, area: list
         output_file=output_file,
         times=HOURLY_TIMES,
         chunk_months=chunk_months,
-        start_date=start_date,
-        end_date=request_end,
+        start_date=request_start,
+        end_date=end_date,
         dataset=dataset,
         on_chunk_error=lambda exc: format_cds_size_error(
             exc,
@@ -72,9 +73,23 @@ def main() -> None:
     print(f"[范围] ERA5 小时下载范围[N,W,S,E]已外扩0.2°: {area}")
     print(f"[策略] {summarize_request_cost_hint(HOURLY_TIMES, chunk_months)}；最终仍输出按年 NC")
     start_date, end_date = data_date_range(config)
-    # Accumulated ERA5 fields need the following midnight to calculate the final day.
+    # Hourly cumulative fields need the preceding hour at the interval start.
     years = list(range(start_date.year, end_date.year + 1))
+    temp_source = str(meteo.get("温度来源", "era5")).lower()
+    pet_source = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).lower()
     client = cdsapi.Client()
+
+    # January starts need a predecessor in the previous year's annual file.
+    if start_date.month == 1 and start_date.day == 1:
+        previous_year = start_date.year - 1
+        for variable, key, prefix, needed in [
+            ("total_precipitation", "raw_prec_era5_dir", "tp", prec_source == "era5"),
+            ("surface_solar_radiation_downwards", "raw_solar_dir", "ssrd", pet_source != "custom_tif"),
+        ]:
+            if needed:
+                download_variable(client, "reanalysis-era5-land", variable, previous_year, area,
+                                  paths[key] / f"era5_{prefix}_hourly_{previous_year}.nc",
+                                  chunk_months=chunk_months, start_date=start_date, end_date=end_date)
 
     for year in years:
         if prec_source == "era5":
@@ -89,6 +104,8 @@ def main() -> None:
                 start_date=start_date,
                 end_date=end_date,
             )
+        if temp_source == "custom_tif" and pet_source == "custom_tif":
+            continue
         download_variable(
             client,
             "reanalysis-era5-land",
@@ -100,6 +117,8 @@ def main() -> None:
             start_date=start_date,
             end_date=end_date,
         )
+        if pet_source == "custom_tif":
+            continue
         download_variable(
             client,
             "reanalysis-era5-land",

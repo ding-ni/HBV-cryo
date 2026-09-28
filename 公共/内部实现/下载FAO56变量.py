@@ -16,7 +16,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 _COMMON_DIR = Path(__file__).resolve().parents[1]
@@ -195,7 +195,9 @@ def download_variable(c, variable, output_dir, prefix, year):
         if START_DATE is not None:
             from cds_chunked_download import netcdf_covers_range
             required_end = END_DATE + (timedelta(days=1) if variable == "surface_solar_radiation_downwards" else timedelta(0))
-            if netcdf_covers_range(output_file, START_DATE, required_end, SIX_HOURLY_TIMES):
+            required_start = max(START_DATE, date(int(year), 1, 1))
+            required_end = min(required_end, date(int(year), 12, 31))
+            if netcdf_covers_range(output_file, required_start, required_end, SIX_HOURLY_TIMES):
                 print(f"   {year}: 已覆盖所选时段，跳过")
                 return True
         else:

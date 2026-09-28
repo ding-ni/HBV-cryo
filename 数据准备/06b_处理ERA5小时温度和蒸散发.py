@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 
 from cds_chunked_download import is_usable_netcdf  # type: ignore
-from 公共函数 import build_workspace_paths, data_date_range, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config, year_range  # type: ignore
+from 公共函数 import build_workspace_paths, data_date_range, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config  # type: ignore
 from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 # 只认下载合并后的按年文件：era5_t2m_hourly_2025.nc
@@ -175,6 +175,20 @@ def write_hourly_stack(arr: xr.DataArray, out_dir: Path, prefix: str, value_tran
     return count
 
 
+def cumulative_predecessor(nc_file: Path, series: xr.DataArray, variable: str, scale: float = 1.0):
+    first = pd.Timestamp(series["time"].values[0])
+    previous_file = nc_file.with_name(re.sub(r"\d{4}\.nc$", f"{first.year - 1}.nc", nc_file.name))
+    if first.month != 1 or first.day != 1 or first.hour != 0:
+        return None, None
+    if not previous_file.exists():
+        raise FileNotFoundError(f"累计小时量缺少起点前一小时，请补下载：{previous_file}")
+    stamp = first - pd.Timedelta(hours=1)
+    with open_netcdf_dataset_safe(previous_file) as dataset:
+        previous = rename_time_dim(dataset[variable])
+        values = np.asarray(previous.sel(time=stamp).values, dtype=np.float64) * scale
+    return stamp, values
+
+
 def write_hourly_stack_from_yearly_nc(
     nc_file: Path,
     *,
@@ -202,6 +216,10 @@ def write_hourly_stack_from_yearly_nc(
         times = pd.DatetimeIndex(pd.to_datetime(series["time"].values))
         if len(times) == 0:
             return 0
+        if cumulative and (date_start is None or times[0] >= date_start):
+            prev_time, prev_values = cumulative_predecessor(nc_file, series, var_name, scale)
+        if cumulative and date_start is not None and times[0] >= date_start and prev_time is None:
+            raise ValueError(f"{label}缺少起点前一小时累计样本，请重新下载配置时段。")
         for start, end in monthly_time_slices(times):
             month_mask = (times >= start) & (times < end)
             if not month_mask.any():
@@ -286,6 +304,8 @@ def build_hourly_et(
         times = pd.DatetimeIndex(pd.to_datetime(t2m_all["time"].values))
         if len(times) == 0:
             return 0
+        if date_start is None or pd.Timestamp(ssrd_all["time"].values[0]) >= date_start:
+            prev_ssrd_time, prev_ssrd_vals = cumulative_predecessor(solar_file, ssrd_all, "ssrd", 1e-6)
 
         # 取空间网格一次即可
         sample = t2m_all.isel(time=0)
@@ -302,15 +322,23 @@ def build_hourly_et(
                 continue
             month_idx = np.where(month_mask)[0]
             t2m = t2m_all.isel(time=month_idx)
-            ssrd_month = ssrd_all.isel(time=month_idx)
+            selected_times = t2m["time"].values
+            predecessor = pd.Timestamp(selected_times[0]) - pd.Timedelta(hours=1)
+            solar_times = pd.DatetimeIndex(pd.to_datetime(ssrd_all["time"].values))
+            if predecessor in solar_times:
+                prev_ssrd_time = predecessor
+                prev_ssrd_vals = np.asarray(ssrd_all.sel(time=predecessor).values)
+            elif prev_ssrd_time != predecessor and (date_start is None or pd.Timestamp(selected_times[0]) >= date_start):
+                raise ValueError("小时太阳辐射缺少前一小时累计样本，请重新下载配置时段。")
+            ssrd_month = ssrd_all.sel(time=selected_times)
             ssrd_hourly, prev_ssrd_time, prev_ssrd_vals = hourly_increments_from_cumulative(
                 ssrd_month,
                 prev_time=prev_ssrd_time,
                 prev_values=prev_ssrd_vals,
             )
-            u10 = u10_all.isel(time=month_idx)
-            v10 = v10_all.isel(time=month_idx)
-            d2m = d2m_all.isel(time=month_idx)
+            u10 = u10_all.sel(time=selected_times)
+            v10 = v10_all.sel(time=selected_times)
+            d2m = d2m_all.sel(time=selected_times)
 
             t_mean = t2m.resample(time="1D").mean()
             t_min = t2m.resample(time="1D").min()
@@ -392,12 +420,14 @@ def main() -> None:
     config = read_config(args.配置)
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
-    years = list(year_range(config))
     range_start, range_end = data_date_range(config)
+    years = list(range(range_start.year, range_end.year + 1))
     date_start = pd.Timestamp(range_start)
     date_end = pd.Timestamp(range_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
     meteo = dict(config.get("气象策略", {}))
     prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
+    need_temp = str(meteo.get("温度来源", "era5")).lower() != "custom_tif"
+    need_pet = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).lower() != "custom_tif"
 
     def kelvin_to_celsius(values: np.ndarray) -> np.ndarray:
         arr = np.asarray(values, dtype=np.float64)
@@ -429,7 +459,7 @@ def main() -> None:
             )
 
     temp_count = 0
-    for year in years:
+    for year in years if need_temp else []:
         nc_file = paths["raw_temp_dir"] / f"era5_t2m_hourly_{year}.nc"
         if not nc_file.exists():
             missing.append(str(nc_file))
@@ -449,7 +479,7 @@ def main() -> None:
         )
 
     evap_count = 0
-    for year in years:
+    for year in years if need_pet else []:
         try:
             evap_count += build_hourly_et(
                 year,
@@ -472,12 +502,10 @@ def main() -> None:
     outputs = []
     if prec_source == "era5":
         outputs.append(("小时降水", paths["raw_prec_era5_hourly_dir"]))
-    outputs.extend(
-        [
-            ("小时气温", paths["raw_temp_hourly_dir"]),
-            ("小时潜在蒸散发", paths["raw_evap_hourly_dir"]),
-        ]
-    )
+    if need_temp:
+        outputs.append(("小时气温", paths["raw_temp_hourly_dir"]))
+    if need_pet:
+        outputs.append(("小时潜在蒸散发", paths["raw_evap_hourly_dir"]))
     print(f"[统计] 降水TIF={prec_count}, 气温TIF={temp_count}, 潜在蒸散发TIF={evap_count}")
     for label, directory in outputs:
         check = validate_tif_time_series(label, Path(directory), 1.0)

@@ -85,11 +85,18 @@ def series_group_status(
     entries: list[tuple[str, Path]],
     step_hours: float,
     context: ForcingPreprocessStatusContext,
+    config=None,
 ) -> tuple[bool, str, int, list[dict[str, Any]]]:
     results: list[dict[str, Any]] = []
     total = 0
     for label, directory in entries:
-        result = context.validate_tif_time_series(label, directory, step_hours)
+        kwargs = {}
+        if config and config.get("时间"):
+            from 公共函数 import data_date_range
+            first, last = data_date_range(config)
+            finish = pd.Timestamp(last) + pd.Timedelta(days=1) - pd.Timedelta(hours=step_hours)
+            kwargs["expected_index"] = pd.date_range(first, finish, freq=pd.Timedelta(hours=step_hours))
+        result = context.validate_tif_time_series(label, directory, step_hours, **kwargs)
         results.append(result)
         total += int(result["valid_time_steps"])
     ready = all(result["ok"] and int(result["valid_time_steps"]) > 0 for result in results)
@@ -110,9 +117,10 @@ def prefer_raw_or_aligned_group_status(
     aligned_entries: list[tuple[str, Path]],
     step_hours: float,
     context: ForcingPreprocessStatusContext,
+    config=None,
 ) -> tuple[bool, str, int]:
-    raw_ok, raw_message, raw_count, raw_results = series_group_status(raw_entries, step_hours, context)
-    aligned_ok, aligned_message, aligned_count, aligned_results = series_group_status(aligned_entries, step_hours, context)
+    raw_ok, raw_message, raw_count, raw_results = series_group_status(raw_entries, step_hours, context, config)
+    aligned_ok, aligned_message, aligned_count, aligned_results = series_group_status(aligned_entries, step_hours, context, config)
     if raw_ok:
         return True, raw_message, raw_count
     if aligned_ok:
@@ -424,9 +432,41 @@ def validate_forcing_variable_distinctness(
     return result
 
 
-def summarize_nc_download_status(entries: list[tuple[str, Path, str]]) -> tuple[bool, str, int]:
+def summarize_nc_download_status(entries: list[tuple[str, Path, str]], config=None, *, hourly=False) -> tuple[bool, str, int]:
     if not entries:
         return True, "当前方案不需要这一步。", 0
+    if config and config.get("时间"):
+        from datetime import date, timedelta
+        from 公共函数 import data_date_range
+        from cds_chunked_download import netcdf_covers_range, HOURLY_TIMES, SIX_HOURLY_TIMES
+
+        first, last = data_date_range(config)
+        missing = []
+        total = 0
+        times = HOURLY_TIMES if hourly else SIX_HOURLY_TIMES
+        for label, directory, pattern in entries:
+            prefix = pattern.removesuffix("_*.nc")
+            cumulative = prefix.startswith(("era5_tp", "era5_ssrd", "era5_evap"))
+            request_first = first - timedelta(days=1) if hourly and cumulative else first
+            request_last = last + timedelta(days=1) if not hourly and cumulative else last
+            for year in range(request_first.year, request_last.year + 1):
+                begin = max(request_first, date(year, 1, 1))
+                finish = min(request_last, date(year, 12, 31))
+                filename = directory / f"{prefix}_{year}.nc"
+                # Daily accumulation only needs the following midnight.
+                boundary_only = not hourly and begin > last
+                required_times = ["00:00"] if boundary_only else times
+                covered = netcdf_covers_range(filename, begin, finish, required_times)
+                if boundary_only and not covered:
+                    covered = netcdf_covers_range(directory / f"{prefix}_boundary_{year}.nc", begin, finish, required_times)
+                if covered:
+                    total += 1
+                else:
+                    missing.append(f"{label} {begin} 至 {finish}")
+        period = f"目标日期 {first} 至 {last}"
+        if missing:
+            return False, period + "；需补下载：" + "、".join(missing), total
+        return True, period + "；所需变量和边界时次已完整覆盖。", total
     existing: list[str] = []
     missing: list[str] = []
     total = 0
@@ -465,7 +505,7 @@ def check_daily_era5_download_status(
                 ("露点温度", Path(paths["raw_dewpoint_dir"]), "era5_d2m_*.nc"),
             ]
         )
-    return summarize_nc_download_status(entries)
+    return summarize_nc_download_status(entries, config)
 
 
 def _yearly_hourly_nc_files(directory: Path, prefix: str) -> list[Path]:
@@ -484,6 +524,21 @@ def check_hourly_era5_download_status(
     context: ForcingDownloadStatusContext,
 ) -> tuple[bool, str, int]:
     paths = context.build_workspace_paths(config)
+    if config.get("时间"):
+        temp_source, pet_source = configured_daily_meteo_sources(config)
+        entries = []
+        if context.configured_precip_source(config) == "era5":
+            entries.append(("小时降水", Path(paths["raw_prec_era5_dir"]), "era5_tp_hourly_*.nc"))
+        if temp_source != "custom_tif" or pet_source != "custom_tif":
+            entries.append(("小时气温", Path(paths["raw_temp_dir"]), "era5_t2m_hourly_*.nc"))
+        if pet_source != "custom_tif":
+            entries.extend([
+                ("太阳辐射", Path(paths["raw_solar_dir"]), "era5_ssrd_hourly_*.nc"),
+                ("风速U", Path(paths["raw_wind_dir"]), "era5_u10_hourly_*.nc"),
+                ("风速V", Path(paths["raw_wind_dir"]), "era5_v10_hourly_*.nc"),
+                ("露点温度", Path(paths["raw_dewpoint_dir"]), "era5_d2m_hourly_*.nc"),
+            ])
+        return summarize_nc_download_status(entries, config, hourly=True)
     file_groups = [
         _yearly_hourly_nc_files(Path(paths["raw_temp_dir"]), "era5_t2m_hourly"),
         _yearly_hourly_nc_files(Path(paths["raw_solar_dir"]), "era5_ssrd_hourly"),
@@ -570,7 +625,7 @@ def check_daily_era5_processed_status(
         aligned_entries.append(("工程潜在蒸散发输入", Path(paths["aligned_evap_dir"])))
     if not raw_entries:
         return True, "当前方案不需要这一步。", 0
-    return prefer_raw_or_aligned_group_status(raw_entries, aligned_entries, 24.0, context)
+    return prefer_raw_or_aligned_group_status(raw_entries, aligned_entries, 24.0, context, config)
 
 
 def check_daily_prec_status(
@@ -603,6 +658,7 @@ def check_daily_prec_status(
         [("工程降水输入", Path(aligned))],
         24.0,
         context,
+        config,
     )
 
 
@@ -614,17 +670,25 @@ def check_hourly_temp_evap_status(
 ) -> tuple[bool, str, int]:
     paths = context.build_workspace_paths(config)
     profile_paths = context.build_profile_paths(config, profile)
+    temp_source, pet_source = configured_daily_meteo_sources(config)
+    raw_entries, aligned_entries = [], []
+    if temp_source != "custom_tif":
+        raw_entries.append(("小时尺度 ERA5 温度中间结果", Path(paths["raw_temp_hourly_dir"])))
+        aligned_entries.append(("工程气温输入", Path(profile_paths["aligned_temp_dir"])))
+    if pet_source != "custom_tif":
+        raw_entries.append(("小时尺度潜在蒸散发中间结果", Path(paths["raw_evap_hourly_dir"])))
+        aligned_entries.append(("工程潜在蒸散发输入", Path(profile_paths["aligned_evap_dir"])))
+    if config.get("时间") and context.resolve_precip_source(config, None) == "era5":
+        raw_entries.append(("小时 ERA5 降水结果", Path(paths["raw_prec_era5_hourly_dir"])))
+        aligned_entries.append(("工程 ERA5 降水输入", Path(profile_paths["aligned_prec_era5_base_dir"])))
+    if not raw_entries:
+        return True, "当前方案不需要这一步。", 0
     return prefer_raw_or_aligned_group_status(
-        [
-            ("小时尺度 ERA5 温度中间结果", Path(paths["raw_temp_hourly_dir"])),
-            ("小时尺度潜在蒸散发中间结果", Path(paths["raw_evap_hourly_dir"])),
-        ],
-        [
-            ("工程气温输入", Path(profile_paths["aligned_temp_dir"])),
-            ("工程潜在蒸散发输入", Path(profile_paths["aligned_evap_dir"])),
-        ],
+        raw_entries,
+        aligned_entries,
         1.0,
         context,
+        config,
     )
 
 
@@ -659,6 +723,7 @@ def check_hourly_prec_status(
         [("工程降水输入", Path(aligned))],
         1.0,
         context,
+        config,
     )
 
 
@@ -673,10 +738,14 @@ def check_aligned_forcing_status(
     paths = context.build_profile_paths(config, profile)
     precip_dir, _, _ = context.effective_precip_paths(config, profile, precip_source=precip_source)
     step_hours = context.normalize_time_step_hours(config.get("时间步长_小时", 24.0))
+    kwargs = {}
+    if config.get("时间"):
+        from services.event_windows import build_expected_time_index
+        kwargs["expected_index"] = build_expected_time_index(config)
     scans = [
-        context.validate_tif_time_series("降水", precip_dir, step_hours),
-        context.validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours),
-        context.validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours),
+        context.validate_tif_time_series("降水", precip_dir, step_hours, **kwargs),
+        context.validate_tif_time_series("气温", Path(paths["aligned_temp_dir"]), step_hours, **kwargs),
+        context.validate_tif_time_series("蒸散发", Path(paths["aligned_evap_dir"]), step_hours, **kwargs),
     ]
     count = sum(int(item["valid_time_steps"]) for item in scans)
     ready = all(item["ok"] for item in scans)

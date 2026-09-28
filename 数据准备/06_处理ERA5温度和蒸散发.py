@@ -2,7 +2,6 @@
 import argparse
 import sys
 from pathlib import Path
-from datetime import date
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 
@@ -14,7 +13,6 @@ from 公共函数 import (
     old_script_path,
     patch_module,
     read_config,
-    year_range,
     data_date_range,
 )
 
@@ -29,8 +27,8 @@ def main():
     config = read_config(args.配置)
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
-    years = list(year_range(config))
     start_date, end_date = data_date_range(config)
+    years = list(range(start_date.year, end_date.year + 1))
     meteo = dict(config.get("气象策略", {}))
     temp_source = str(meteo.get("温度来源", "era5")).strip().lower()
     pet_source = str(meteo.get("潜在蒸散发来源", meteo.get("蒸散发来源", "era5_fao56"))).strip().lower()

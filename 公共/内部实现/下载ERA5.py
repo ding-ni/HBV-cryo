@@ -229,6 +229,8 @@ def _download_daily_era5_variable(variable, output_file, year, *, label):
         requested_end = END_DATE or date(int(year), 12, 31)
         if label in {"tp", "evap"} and END_DATE:
             requested_end = END_DATE + timedelta(days=1)
+        requested_start = max(requested_start, date(int(year), 1, 1))
+        requested_end = min(requested_end, date(int(year), 12, 31))
         if netcdf_covers_range(output_path, requested_start, requested_end, SIX_HOURLY_TIMES):
             print(f"   {year}: 文件已覆盖所选时段，跳过")
             return

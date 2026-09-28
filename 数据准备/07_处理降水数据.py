@@ -16,7 +16,7 @@ from 公共函数 import (
     patch_module,
     read_config,
     temporary_argv,
-    year_range,
+    data_date_range,
 )
 from services.raster_time_series import validate_tif_time_series  # type: ignore
 
@@ -31,7 +31,8 @@ def main():
     config = read_config(args.配置)
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
-    years = list(year_range(config))
+    start_date, end_date = data_date_range(config)
+    years = list(range(start_date.year, end_date.year + 1))
     configured_source = str(
         dict(config.get("气象策略", {})).get(
             "降水来源",
@@ -53,6 +54,8 @@ def main():
                 "RAW_PREC_ERA5_DIR": str(paths["raw_prec_era5_dir"]),
                 "PREC_ERA5_DAILY_DIR": str(paths["raw_prec_era5_daily_dir"]),
                 "YEARS": years,
+                "START_DATE": start_date,
+                "END_DATE": end_date,
                 "OVERWRITE": bool(args.覆盖),
             },
         )

@@ -794,6 +794,10 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             }
 
             const era5PrecipSummary = view.prepPanelSummary({ prec: "era5", temp: "custom_tif", pet: "custom_tif" });
+            const partialSummary = view.prepPanelSummary({ prec: "era5" }, {start: "2025-05-10", end: "2025-10-20", hourly: true});
+            if (!partialSummary.text.includes("2025-05-10 至 2025-10-20") || !partialSummary.text.includes("前一天")) {
+              throw new Error(`partial window summary mismatch: ${partialSummary.text}`);
+            }
             if (era5PrecipSummary.className !== "hint-box status-ok" || !era5PrecipSummary.text.includes("降水用ERA5 自动下载") || !era5PrecipSummary.text.includes("下面先下载 ERA5 降水")) {
               throw new Error(`ERA5 precip summary mismatch: ${JSON.stringify(era5PrecipSummary)}`);
             }

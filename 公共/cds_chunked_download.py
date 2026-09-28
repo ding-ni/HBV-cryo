@@ -269,10 +269,23 @@ def download_era5_land_year_chunked(
 
     try:
         requested_months = [month for month in range(first.month, last.month + 1)]
-        for offset in range(0, len(requested_months), chunk_months):
-            months = requested_months[offset : offset + chunk_months]
+        # Partial edge months need separate day lists: CDS uses month x day.
+        groups: list[list[int]] = []
+        previous_partial = False
+        for month in requested_months:
+            partial = (month == first.month and first.day != 1) or (month == last.month and last.day != calendar.monthrange(int(year), month)[1])
+            if partial:
+                groups.append([month])
+            elif groups and not previous_partial and len(groups[-1]) < chunk_months:
+                groups[-1].append(month)
+            else:
+                groups.append([month])
+            previous_partial = partial
+        for months in groups:
             chunk_file = chunk_root / _chunk_filename(output.stem, months)
-            if checker(chunk_file):
+            chunk_first = max(first, date(int(year), months[0], 1))
+            chunk_last = min(last, date(int(year), months[-1], calendar.monthrange(int(year), months[-1])[1]))
+            if checker(chunk_file) and (not requested_range or netcdf_covers_range(chunk_file, chunk_first, chunk_last, times)):
                 print(f"      [跳过] 分片已存在 {chunk_file.name}")
                 month_files.append(chunk_file)
                 continue
@@ -303,6 +316,8 @@ def download_era5_land_year_chunked(
                 extract_if_zip(partial_file)
                 if not checker(partial_file):
                     raise RuntimeError(f"分片下载结果不可读：{partial_file}")
+                if requested_range and not netcdf_covers_range(partial_file, chunk_first, chunk_last, times):
+                    raise RuntimeError(f"分片下载结果未覆盖请求时段：{chunk_first} 至 {chunk_last}")
                 os.replace(partial_file, chunk_file)
             except Exception as exc:
                 if partial_file.exists():
@@ -335,10 +350,10 @@ def _as_date(value: str | date) -> date:
 def netcdf_covers_range(path: str | Path, start: str | date, end: str | date, times: Sequence[str]) -> bool:
     """Return whether a readable NetCDF contains every requested timestamp."""
     import pandas as pd
-    import xarray as xr
+    from 公共函数 import open_netcdf_dataset_safe
 
     candidate = Path(path)
-    if not is_usable_netcdf(candidate):
+    if not candidate.is_file() or candidate.stat().st_size <= 1000:
         return False
     start_day, end_day = _as_date(start), _as_date(end)
     expected = pd.DatetimeIndex([
@@ -347,7 +362,9 @@ def netcdf_covers_range(path: str | Path, start: str | date, end: str | date, ti
         for hour in times
     ])
     try:
-        with xr.open_dataset(candidate, engine="netcdf4") as dataset:
+        with open_netcdf_dataset_safe(candidate) as dataset:
+            if not dataset.data_vars:
+                return False
             name = time_coord_name(dataset)
             actual = pd.DatetimeIndex(pd.to_datetime(dataset[name].values))
         return expected.isin(actual).all()
