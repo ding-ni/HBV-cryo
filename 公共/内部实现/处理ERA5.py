@@ -54,6 +54,8 @@ EVAP_DAILY_DIR = ""
 
 YEARS = range(2006, 2021)
 OVERWRITE = False
+START_DATE = None
+END_DATE = None
 
 
 def refresh_workspace_paths():
@@ -145,19 +147,23 @@ def process_precipitation(year):
 
     print(f"   处理 {year} 年 ERA5 降水数据...")
 
-    boundary_file = find_boundary_file(RAW_PREC_ERA5_DIR, "era5_tp", year)
-    with open_netcdf_dataset_safe(nc_file) as ds, open_netcdf_dataset_safe(boundary_file) as boundary_ds:
+    from datetime import date
+    day_start = max(START_DATE or date(year, 1, 1), date(year, 1, 1))
+    day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
+    if day_start > day_end:
+        return 0
+    boundary_file = find_boundary_file(RAW_PREC_ERA5_DIR, "era5_tp", year) if day_end.month == 12 and day_end.day == 31 else None
+    with open_netcdf_dataset_safe(nc_file) as ds:
         var_name = 'tp' if 'tp' in ds.data_vars else list(ds.data_vars)[0]
-        boundary_name = 'tp' if 'tp' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
-        precip = append_year_boundary(
-            rename_time_dim(ds[var_name]).load(),
-            rename_time_dim(boundary_ds[boundary_name]).load(),
-            year,
-        )
+        precip = rename_time_dim(ds[var_name]).load()
+        if boundary_file:
+            with open_netcdf_dataset_safe(boundary_file) as boundary_ds:
+                boundary_name = 'tp' if 'tp' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
+                precip = append_year_boundary(precip, rename_time_dim(boundary_ds[boundary_name]).load(), year)
         precip_daily = daily_totals_from_cumulative(
             precip * 1000.0,
-            start_date=f"{year}-01-01",
-            end_date=f"{year}-12-31",
+            start_date=day_start.isoformat(),
+            end_date=day_end.isoformat(),
         )
 
         os.makedirs(PREC_ERA5_DAILY_DIR, exist_ok=True)
@@ -223,7 +229,12 @@ def process_temperature(year):
         temp_c = temp - 273.15
 
         # 从小时/6小时聚合到日平均
-        temp_daily = rename_time_dim(temp_c).resample(time='1D').mean()
+        from datetime import date
+        day_start = max(START_DATE or date(year, 1, 1), date(year, 1, 1))
+        day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
+        if day_start > day_end:
+            return 0
+        temp_daily = rename_time_dim(temp_c).resample(time='1D').mean().sel(time=slice(day_start.isoformat(), day_end.isoformat()))
 
         # 确保输出目录存在
         os.makedirs(TEMP_DAILY_DIR, exist_ok=True)
@@ -289,16 +300,20 @@ def process_evaporation(year):
 
     print(f"   处理 {year} 年蒸散发数据...")
 
-    boundary_file = find_boundary_file(RAW_EVAP_DIR, "era5_evap", year)
-    with open_netcdf_dataset_safe(nc_file) as ds, open_netcdf_dataset_safe(boundary_file) as boundary_ds:
+    from datetime import date
+    day_start = max(START_DATE or date(year, 1, 1), date(year, 1, 1))
+    day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
+    if day_start > day_end:
+        return 0
+    boundary_file = find_boundary_file(RAW_EVAP_DIR, "era5_evap", year) if day_end.month == 12 and day_end.day == 31 else None
+    with open_netcdf_dataset_safe(nc_file) as ds:
         # ERA5 蒸散发变量名
         var_name = 'e' if 'e' in ds.data_vars else list(ds.data_vars)[0]
-        boundary_name = 'e' if 'e' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
-        evap = append_year_boundary(
-            rename_time_dim(ds[var_name]).load(),
-            rename_time_dim(boundary_ds[boundary_name]).load(),
-            year,
-        )
+        evap = rename_time_dim(ds[var_name]).load()
+        if boundary_file:
+            with open_netcdf_dataset_safe(boundary_file) as boundary_ds:
+                boundary_name = 'e' if 'e' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
+                evap = append_year_boundary(evap, rename_time_dim(boundary_ds[boundary_name]).load(), year)
 
         # ERA5 蒸散发单位是 m，转换为 mm
         # 且 ERA5 蒸散发是负值（向下为正），取绝对值
@@ -306,8 +321,8 @@ def process_evaporation(year):
 
         evap_daily = daily_totals_from_cumulative(
             evap_mm,
-            start_date=f"{year}-01-01",
-            end_date=f"{year}-12-31",
+            start_date=day_start.isoformat(),
+            end_date=day_end.isoformat(),
         )
 
         # 确保输出目录存在

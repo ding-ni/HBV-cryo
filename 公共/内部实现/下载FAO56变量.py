@@ -16,6 +16,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 
 _COMMON_DIR = Path(__file__).resolve().parents[1]
@@ -44,6 +45,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 TUOTUOHE_BBOX = [35.5, 90.5, 33.0, 93.5]
 START_YEAR = 2006
 END_YEAR = 2020
+START_DATE = None
+END_DATE = None
 
 RAW_DIR = ""
 SOLAR_DIR = ""
@@ -189,15 +192,18 @@ def download_variable(c, variable, output_dir, prefix, year):
     output_path = Path(output_file)
 
     if os.path.exists(output_file):
-        valid, reason = validate_download(output_file, variable, year)
-        if valid:
-            print(f"   {year}: 已存在且校验通过，跳过")
-            return True
-        print(f"   {year}: 现有文件未通过校验，将重新下载（{reason}）")
-        try:
-            os.remove(output_file)
-        except OSError:
-            pass
+        if START_DATE is not None:
+            from cds_chunked_download import netcdf_covers_range
+            required_end = END_DATE + (timedelta(days=1) if variable == "surface_solar_radiation_downwards" else timedelta(0))
+            if netcdf_covers_range(output_file, START_DATE, required_end, SIX_HOURLY_TIMES):
+                print(f"   {year}: 已覆盖所选时段，跳过")
+                return True
+        else:
+            valid, reason = validate_download(output_file, variable, year)
+            if valid:
+                print(f"   {year}: 已存在且校验通过，跳过")
+                return True
+            print(f"   {year}: 现有文件将保留并尝试补齐（{reason}）")
 
     print(f"   {year}: 下载中（按月分片）...")
 
@@ -210,6 +216,8 @@ def download_variable(c, variable, output_dir, prefix, year):
             output_file=output_path,
             times=SIX_HOURLY_TIMES,
             chunk_months=DEFAULT_CHUNK_MONTHS,
+            start_date=START_DATE,
+            end_date=(END_DATE + timedelta(days=1)) if variable == "surface_solar_radiation_downwards" and END_DATE else END_DATE,
             skip_if_exists=False,
             exists_checker=is_usable_netcdf,
             on_chunk_error=lambda exc: format_cds_size_error(
@@ -217,9 +225,8 @@ def download_variable(c, variable, output_dir, prefix, year):
                 hint="FAO56 输入变量已按月分片下载；若仍失败请缩小范围。",
             ),
         )
-        valid, reason = validate_download(output_file, variable, year)
-        if not valid:
-            raise RuntimeError(f"下载结果校验失败：{reason}")
+        if not is_usable_netcdf(output_file):
+            raise RuntimeError("下载结果 NetCDF 不可读")
         print(f"   {year}: [OK]")
         return True
     except Exception as e:
@@ -295,13 +302,14 @@ def main():
     for year in range(START_YEAR, END_YEAR + 1):
         download_variable(c, 'surface_solar_radiation_downwards',
                          SOLAR_DIR, 'era5_ssrd', year)
-    download_boundary_variable(
-        c,
-        'surface_solar_radiation_downwards',
-        SOLAR_DIR,
-        'era5_ssrd',
-        END_YEAR + 1,
-    )
+    if not END_DATE or (END_DATE.month == 12 and END_DATE.day == 31):
+        download_boundary_variable(
+            c,
+            'surface_solar_radiation_downwards',
+            SOLAR_DIR,
+            'era5_ssrd',
+            (END_DATE.year if END_DATE else END_YEAR) + 1,
+        )
 
     # 2. 风速 (U 和 V 分量)
     print("\n[2/3] 下载风速...")

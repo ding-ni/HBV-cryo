@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 
 from 公共函数 import (
     build_workspace_paths,
+    data_date_range,
+    year_range,
     ensure_workspace_dirs,
     example_config_path,
     load_legacy_module,
@@ -14,7 +16,6 @@ from 公共函数 import (
     patch_module,
     read_config,
     era5_download_bbox_list,
-    year_range,
 )
 
 
@@ -27,7 +28,8 @@ def main():
     config = read_config(args.配置)
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
-    years = list(year_range(config))
+    start_date, end_date = data_date_range(config)
+    years = list(range(start_date.year, end_date.year + 1))
     meteo = dict(config.get("气象策略", {}))
     temp_source = str(meteo.get("温度来源", "era5")).strip().lower()
     prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
@@ -74,8 +76,10 @@ def main():
                 "RAW_PREC_DIR": str(paths["raw_prec_root"]),
                 "RAW_PREC_ERA5_DIR": str(paths["raw_prec_era5_dir"]),
                 "TUOTUOHE_BBOX": download_bbox,
-                "START_YEAR": years[0],
-                "END_YEAR": years[-1],
+                "START_YEAR": start_date.year,
+                "END_YEAR": end_date.year,
+                "START_DATE": start_date,
+                "END_DATE": end_date,
             },
         )
         if args.内容 in {"pet", "era5"}:
@@ -93,8 +97,10 @@ def main():
             {
                 "PROJECT_ROOT": str(paths["workspace_root"]),
                 "TUOTUOHE_BBOX": download_bbox,
-                "START_YEAR": years[0],
-                "END_YEAR": years[-1],
+                "START_YEAR": start_date.year,
+                "END_YEAR": end_date.year,
+                "START_DATE": start_date,
+                "END_DATE": end_date,
                 "RAW_DIR": str(paths["raw_root"]),
                 "SOLAR_DIR": str(paths["raw_solar_dir"]),
                 "WIND_DIR": str(paths["raw_wind_dir"]),

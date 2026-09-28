@@ -18,7 +18,7 @@ import os
 import shutil
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 _COMMON_DIR = Path(__file__).resolve().parents[1]
@@ -31,6 +31,7 @@ from cds_chunked_download import (  # type: ignore
     download_era5_land_year_chunked,
     format_cds_size_error,
     is_usable_netcdf,
+    netcdf_covers_range,
 )
 
 # ============================================================
@@ -57,6 +58,8 @@ TUOTUOHE_BBOX = [35.5, 90.5, 33.0, 93.5]
 # 时间范围
 START_YEAR = 2006
 END_YEAR = 2020
+START_DATE = None
+END_DATE = None
 
 
 def refresh_workspace_paths():
@@ -222,8 +225,14 @@ def _download_daily_era5_variable(variable, output_file, year, *, label):
 
     output_path = Path(output_file)
     if is_usable_netcdf(output_path):
-        print(f"   {year}: 文件已存在，跳过")
-        return
+        requested_start = START_DATE or date(int(year), 1, 1)
+        requested_end = END_DATE or date(int(year), 12, 31)
+        if label in {"tp", "evap"} and END_DATE:
+            requested_end = END_DATE + timedelta(days=1)
+        if netcdf_covers_range(output_path, requested_start, requested_end, SIX_HOURLY_TIMES):
+            print(f"   {year}: 文件已覆盖所选时段，跳过")
+            return
+        print(f"   {year}: 现有文件未完整覆盖所选时段，将保留并补齐")
 
     print(f"   {year}: 下载中（{label}，按月分片）...")
     try:
@@ -235,6 +244,8 @@ def _download_daily_era5_variable(variable, output_file, year, *, label):
             output_file=output_path,
             times=SIX_HOURLY_TIMES,
             chunk_months=DEFAULT_CHUNK_MONTHS,
+            start_date=START_DATE,
+            end_date=(END_DATE + timedelta(days=1)) if END_DATE and label in {"tp", "evap"} else END_DATE,
             on_chunk_error=lambda exc: format_cds_size_error(
                 exc,
                 hint="日尺度 ERA5 已按月分片；若仍 too large，请缩小下载范围或保持 1 个月/请求。",
@@ -274,6 +285,8 @@ def download_era5_all(download_actual_evaporation=False, download_precipitation=
     print("下载 ERA5-Land 数据")
     print("=" * 60)
     print(f"工作区运行目录: {PROJECT_ROOT}")
+    data_start = START_DATE or date(START_YEAR, 1, 1)
+    data_end = END_DATE or date(END_YEAR, 12, 31)
     if download_precipitation:
         print(f"ERA5 降水目录: {RAW_PREC_ERA5_DIR}")
     if download_temperature:
@@ -310,12 +323,13 @@ def download_era5_all(download_actual_evaporation=False, download_precipitation=
             except Exception as e:
                 print(f"   [ERROR] {year}: {e}")
         try:
-            download_accumulation_boundary(
-                "total_precipitation",
-                RAW_PREC_ERA5_DIR,
-                "era5_tp",
-                END_YEAR + 1,
-            )
+            if data_end.month == 12 and data_end.day == 31:
+                download_accumulation_boundary(
+                    "total_precipitation",
+                    RAW_PREC_ERA5_DIR,
+                    "era5_tp",
+                    data_end.year + 1,
+                )
         except Exception as e:
             raise RuntimeError(f"ERA5 降水跨年收尾样本下载失败: {e}") from e
 
@@ -336,12 +350,13 @@ def download_era5_all(download_actual_evaporation=False, download_precipitation=
             except Exception as e:
                 print(f"   [ERROR] {year}: {e}")
         try:
-            download_accumulation_boundary(
-                "total_evaporation",
-                RAW_EVAP_DIR,
-                "era5_evap",
-                END_YEAR + 1,
-            )
+            if data_end.month == 12 and data_end.day == 31:
+                download_accumulation_boundary(
+                    "total_evaporation",
+                    RAW_EVAP_DIR,
+                    "era5_evap",
+                    data_end.year + 1,
+                )
         except Exception as e:
             raise RuntimeError(f"ERA5 实际蒸散发跨年收尾样本下载失败: {e}") from e
     else:
@@ -403,4 +418,3 @@ if __name__ == "__main__":
     else:
         print("\n跳过 ERA5 下载")
         print("如需下载，请确保已配置 cdsapi 后重新运行")
-

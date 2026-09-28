@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
@@ -17,15 +18,16 @@ from cds_chunked_download import (  # type: ignore
 )
 from 公共函数 import (  # type: ignore
     build_workspace_paths,
+    data_date_range,
     ensure_workspace_dirs,
     era5_download_bbox_list,
     example_config_path,
     read_config,
-    year_range,
 )
 
 
-def download_variable(client, dataset: str, variable: str, year: int, area: list[float], output_file: Path, *, chunk_months: int) -> None:
+def download_variable(client, dataset: str, variable: str, year: int, area: list[float], output_file: Path, *, chunk_months: int, start_date, end_date) -> None:
+    request_end = end_date + timedelta(days=1) if variable == "total_precipitation" else end_date
     download_era5_land_year_chunked(
         client,
         variable=variable,
@@ -34,6 +36,8 @@ def download_variable(client, dataset: str, variable: str, year: int, area: list
         output_file=output_file,
         times=HOURLY_TIMES,
         chunk_months=chunk_months,
+        start_date=start_date,
+        end_date=request_end,
         dataset=dataset,
         on_chunk_error=lambda exc: format_cds_size_error(
             exc,
@@ -67,7 +71,9 @@ def main() -> None:
     chunk_months = max(1, min(int(args.chunk_months), 12))
     print(f"[范围] ERA5 小时下载范围[N,W,S,E]已外扩0.2°: {area}")
     print(f"[策略] {summarize_request_cost_hint(HOURLY_TIMES, chunk_months)}；最终仍输出按年 NC")
-    years = list(year_range(config))
+    start_date, end_date = data_date_range(config)
+    # Accumulated ERA5 fields need the following midnight to calculate the final day.
+    years = list(range(start_date.year, end_date.year + 1))
     client = cdsapi.Client()
 
     for year in years:
@@ -80,6 +86,8 @@ def main() -> None:
                 area,
                 paths["raw_prec_era5_dir"] / f"era5_tp_hourly_{year}.nc",
                 chunk_months=chunk_months,
+                start_date=start_date,
+                end_date=end_date,
             )
         download_variable(
             client,
@@ -89,6 +97,8 @@ def main() -> None:
             area,
             paths["raw_temp_dir"] / f"era5_t2m_hourly_{year}.nc",
             chunk_months=chunk_months,
+            start_date=start_date,
+            end_date=end_date,
         )
         download_variable(
             client,
@@ -98,6 +108,8 @@ def main() -> None:
             area,
             paths["raw_solar_dir"] / f"era5_ssrd_hourly_{year}.nc",
             chunk_months=chunk_months,
+            start_date=start_date,
+            end_date=end_date,
         )
         download_variable(
             client,
@@ -107,6 +119,8 @@ def main() -> None:
             area,
             paths["raw_wind_dir"] / f"era5_u10_hourly_{year}.nc",
             chunk_months=chunk_months,
+            start_date=start_date,
+            end_date=end_date,
         )
         download_variable(
             client,
@@ -116,6 +130,8 @@ def main() -> None:
             area,
             paths["raw_wind_dir"] / f"era5_v10_hourly_{year}.nc",
             chunk_months=chunk_months,
+            start_date=start_date,
+            end_date=end_date,
         )
         download_variable(
             client,
@@ -125,6 +141,8 @@ def main() -> None:
             area,
             paths["raw_dewpoint_dir"] / f"era5_d2m_hourly_{year}.nc",
             chunk_months=chunk_months,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     print("[完成] 小时尺度 ERA5 变量下载完成。")

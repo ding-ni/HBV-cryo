@@ -12,6 +12,8 @@ import re
 import shutil
 import tempfile
 import zipfile
+import calendar
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
@@ -238,11 +240,22 @@ def download_era5_land_year_chunked(
     skip_if_exists: bool = True,
     exists_checker: Callable[[Path], bool] | None = None,
     on_chunk_error: Callable[[BaseException], str] | None = None,
+    start_date: str | date | None = None,
+    end_date: str | date | None = None,
 ) -> Path:
-    """按月（或 N 月）分片下载 ERA5-Land 单变量单年，合并为 output_file。"""
+    """按月分片下载所选日期，合并为下游兼容的按年 NetCDF。"""
     output = Path(output_file)
     checker = exists_checker or is_usable_netcdf
-    if skip_if_exists and checker(output):
+    first = date(int(year), 1, 1) if start_date is None else _as_date(start_date)
+    last = date(int(year), 12, 31) if end_date is None else _as_date(end_date)
+    first = max(first, date(int(year), 1, 1))
+    last = min(last, date(int(year), 12, 31))
+    if first > last:
+        return output
+    requested_range = start_date is not None or end_date is not None
+    if skip_if_exists and (
+        netcdf_covers_range(output, first, last, times) if requested_range else checker(output)
+    ):
         print(f"[跳过] 已存在 {output.name}")
         return output
 
@@ -255,7 +268,9 @@ def download_era5_land_year_chunked(
     month_files: list[Path] = []
 
     try:
-        for months in month_chunks(chunk_months):
+        requested_months = [month for month in range(first.month, last.month + 1)]
+        for offset in range(0, len(requested_months), chunk_months):
+            months = requested_months[offset : offset + chunk_months]
             chunk_file = chunk_root / _chunk_filename(output.stem, months)
             if checker(chunk_file):
                 print(f"      [跳过] 分片已存在 {chunk_file.name}")
@@ -266,11 +281,17 @@ def download_era5_land_year_chunked(
             if partial_file.exists():
                 partial_file.unlink()
 
+            days = sorted({
+                day
+                for month in months
+                for day in range(1, calendar.monthrange(int(year), month)[1] + 1)
+                if first <= date(int(year), month, day) <= last
+            })
             request = {
                 "variable": variable,
                 "year": str(year),
                 "month": [f"{month:02d}" for month in months],
-                "day": [f"{day:02d}" for day in range(1, 32)],
+                "day": [f"{day:02d}" for day in days],
                 "time": list(times),
                 "area": list(area),
                 "format": "netcdf",
@@ -291,8 +312,9 @@ def download_era5_land_year_chunked(
             month_files.append(chunk_file)
 
         print(f"      [合并] {len(month_files)} 个分片 -> {output.name}")
-        merge_netcdf_files(month_files, output)
-        if not checker(output):
+        merge_inputs = ([output] if output.is_file() and checker(output) else []) + month_files
+        merge_netcdf_files(merge_inputs, output)
+        if requested_range and not netcdf_covers_range(output, first, last, times):
             raise RuntimeError(f"年文件合并后校验失败：{output}")
         print(f"      [完成] {output.name}")
         shutil.rmtree(chunk_root, ignore_errors=True)
@@ -300,6 +322,37 @@ def download_era5_land_year_chunked(
     except Exception:
         print(f"      [保留分片] 失败后可重试，目录：{chunk_root}")
         raise
+
+
+def _as_date(value: str | date) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def netcdf_covers_range(path: str | Path, start: str | date, end: str | date, times: Sequence[str]) -> bool:
+    """Return whether a readable NetCDF contains every requested timestamp."""
+    import pandas as pd
+    import xarray as xr
+
+    candidate = Path(path)
+    if not is_usable_netcdf(candidate):
+        return False
+    start_day, end_day = _as_date(start), _as_date(end)
+    expected = pd.DatetimeIndex([
+        pd.Timestamp(day.isoformat()) + pd.Timedelta(hours=int(hour[:2]), minutes=int(hour[3:5]))
+        for day in pd.date_range(start_day, end_day, freq="D")
+        for hour in times
+    ])
+    try:
+        with xr.open_dataset(candidate, engine="netcdf4") as dataset:
+            name = time_coord_name(dataset)
+            actual = pd.DatetimeIndex(pd.to_datetime(dataset[name].values))
+        return expected.isin(actual).all()
+    except Exception:
+        return False
 
 
 def ensure_cdsapi_configured() -> Path:

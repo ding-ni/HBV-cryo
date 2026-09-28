@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 
 from cds_chunked_download import is_usable_netcdf  # type: ignore
-from 公共函数 import build_workspace_paths, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config, year_range  # type: ignore
+from 公共函数 import build_workspace_paths, data_date_range, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config, year_range  # type: ignore
 from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 # 只认下载合并后的按年文件：era5_t2m_hourly_2025.nc
@@ -186,6 +186,8 @@ def write_hourly_stack_from_yearly_nc(
     scale: float = 1.0,
     overwrite: bool = False,
     label: str = "小时变量",
+    date_start: pd.Timestamp | None = None,
+    date_end: pd.Timestamp | None = None,
 ) -> int:
     """从按年小时 NC 按月切片写出 TIF，降低整年数组常驻内存。"""
     require_yearly_hourly_nc(nc_file, label=label)
@@ -212,6 +214,16 @@ def write_hourly_stack_from_yearly_nc(
                     prev_time=prev_time,
                     prev_values=prev_values,
                 )
+            if date_start is not None or date_end is not None:
+                output_times = pd.DatetimeIndex(pd.to_datetime(month_arr["time"].values))
+                keep = np.ones(len(output_times), dtype=bool)
+                if date_start is not None:
+                    keep &= output_times >= date_start
+                if date_end is not None:
+                    keep &= output_times <= date_end
+                if not keep.any():
+                    continue
+                month_arr = month_arr.isel(time=np.where(keep)[0])
             count += write_hourly_stack(
                 month_arr,
                 out_dir,
@@ -239,7 +251,15 @@ def rh_from_dewpoint(t_air: np.ndarray, t_dew: np.ndarray) -> np.ndarray:
     return np.clip(rh, 0, 100)
 
 
-def build_hourly_et(year: int, paths: dict[str, Path], config: dict[str, object], *, overwrite: bool = False) -> int:
+def build_hourly_et(
+    year: int,
+    paths: dict[str, Path],
+    config: dict[str, object],
+    *,
+    overwrite: bool = False,
+    date_start: pd.Timestamp | None = None,
+    date_end: pd.Timestamp | None = None,
+) -> int:
     temp_file = require_yearly_hourly_nc(paths["raw_temp_dir"] / f"era5_t2m_hourly_{year}.nc", label="小时气温")
     solar_file = require_yearly_hourly_nc(paths["raw_solar_dir"] / f"era5_ssrd_hourly_{year}.nc", label="小时太阳辐射")
     u10_file = require_yearly_hourly_nc(paths["raw_wind_dir"] / f"era5_u10_hourly_{year}.nc", label="小时风速U")
@@ -304,6 +324,10 @@ def build_hourly_et(year: int, paths: dict[str, Path], config: dict[str, object]
             ssrd_times = pd.to_datetime(ssrd_hourly["time"].values)
             for i, day_time in enumerate(daily_times):
                 date = pd.Timestamp(day_time)
+                if date_start is not None and date.normalize() < date_start.normalize():
+                    continue
+                if date_end is not None and date.normalize() > date_end.normalize():
+                    continue
                 doy = int(date.strftime("%j"))
                 day_mask = ssrd_times.normalize() == date.normalize()
                 hourly_times = ssrd_times[day_mask]
@@ -369,6 +393,9 @@ def main() -> None:
     paths = build_workspace_paths(config)
     ensure_workspace_dirs(paths)
     years = list(year_range(config))
+    range_start, range_end = data_date_range(config)
+    date_start = pd.Timestamp(range_start)
+    date_end = pd.Timestamp(range_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
     meteo = dict(config.get("气象策略", {}))
     prec_source = str(meteo.get("降水来源", meteo.get("降水源", config.get("默认降水源", "era5")))).strip().lower()
 
@@ -397,6 +424,8 @@ def main() -> None:
                 scale=1000.0,
                 overwrite=bool(args.覆盖),
                 label="小时降水",
+                date_start=date_start,
+                date_end=date_end,
             )
 
     temp_count = 0
@@ -415,12 +444,21 @@ def main() -> None:
             scale=1.0,
             overwrite=bool(args.覆盖),
             label="小时气温",
+            date_start=date_start,
+            date_end=date_end,
         )
 
     evap_count = 0
     for year in years:
         try:
-            evap_count += build_hourly_et(year, paths, config, overwrite=bool(args.覆盖))
+            evap_count += build_hourly_et(
+                year,
+                paths,
+                config,
+                overwrite=bool(args.覆盖),
+                date_start=date_start,
+                date_end=date_end,
+            )
         except FileNotFoundError as exc:
             missing.append(str(exc))
             print(f"[跳过] {year} 小时潜在蒸散发：{exc}")

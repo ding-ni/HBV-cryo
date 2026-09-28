@@ -56,6 +56,8 @@ OUTPUT_DIR = ""
 
 YEARS = range(2006, 2021)
 OVERWRITE = False
+START_DATE = None
+END_DATE = None
 
 # 当前流域平均海拔 (m)
 ELEVATION = 4500
@@ -246,7 +248,12 @@ def process_year(year):
     u10_file = os.path.join(WIND_DIR, f"era5_u10_{year}.nc")
     v10_file = os.path.join(WIND_DIR, f"era5_v10_{year}.nc")
     dewpoint_file = os.path.join(DEWPOINT_DIR, f"era5_d2m_{year}.nc")
-    solar_boundary_file = find_boundary_file(SOLAR_DIR, "era5_ssrd", year)
+    from datetime import date
+    day_start = max(START_DATE or date(year, 1, 1), date(year, 1, 1))
+    day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
+    if day_start > day_end:
+        return 0
+    solar_boundary_file = find_boundary_file(SOLAR_DIR, "era5_ssrd", year) if day_end.month == 12 and day_end.day == 31 else None
 
     missing = []
     for name, f in [("温度", temp_file), ("辐射", solar_file),
@@ -264,28 +271,32 @@ def process_year(year):
         ds_u10 = stack.enter_context(open_netcdf_dataset_safe(u10_file))
         ds_v10 = stack.enter_context(open_netcdf_dataset_safe(v10_file))
         ds_dew = stack.enter_context(open_netcdf_dataset_safe(dewpoint_file))
-        ds_solar_boundary = stack.enter_context(open_netcdf_dataset_safe(solar_boundary_file))
+        ds_solar_boundary = stack.enter_context(open_netcdf_dataset_safe(solar_boundary_file)) if solar_boundary_file else None
 
         # 获取变量
         t2m = rename_time_dim(ds_temp['t2m'] - 273.15)  # K -> °C
-        boundary_name = 'ssrd' if 'ssrd' in ds_solar_boundary.data_vars else list(ds_solar_boundary.data_vars)[0]
-        ssrd = append_following_midnight(
-            rename_time_dim(ds_solar['ssrd']).load(),
-            rename_time_dim(ds_solar_boundary[boundary_name]).load(),
-            boundary_time=pd.Timestamp(year=int(year) + 1, month=1, day=1),
-        ) / 1e6  # J/m² -> MJ/m²
+        ssrd = rename_time_dim(ds_solar['ssrd']).load()
+        if ds_solar_boundary is not None:
+            boundary_name = 'ssrd' if 'ssrd' in ds_solar_boundary.data_vars else list(ds_solar_boundary.data_vars)[0]
+            ssrd = append_following_midnight(
+                ssrd,
+                rename_time_dim(ds_solar_boundary[boundary_name]).load(),
+                boundary_time=pd.Timestamp(year=int(year) + 1, month=1, day=1),
+            )
+        ssrd = ssrd / 1e6  # J/m² -> MJ/m²
         u10 = rename_time_dim(ds_u10['u10'])
         v10 = rename_time_dim(ds_v10['v10'])
         d2m = rename_time_dim(ds_dew['d2m'] - 273.15)  # K -> °C
 
         # ERA5-Land 累积辐射在下一天 00:00 给出上一日总量；缺边界样本时拒绝生成。
-        t_mean = t2m.resample(time='1D').mean()
-        t_min = t2m.resample(time='1D').min()
-        t_max = t2m.resample(time='1D').max()
+        day_slice = slice(day_start.isoformat(), day_end.isoformat())
+        t_mean = t2m.resample(time='1D').mean().sel(time=day_slice)
+        t_min = t2m.resample(time='1D').min().sel(time=day_slice)
+        t_max = t2m.resample(time='1D').max().sel(time=day_slice)
         rs_daily = daily_totals_from_cumulative(
             ssrd,
-            start_date=f"{year}-01-01",
-            end_date=f"{year}-12-31",
+            start_date=day_start.isoformat(),
+            end_date=day_end.isoformat(),
         ).reindex(time=t_mean["time"].values)
         u10_mean = u10.resample(time='1D').mean().reindex(time=t_mean["time"].values)
         v10_mean = v10.resample(time='1D').mean().reindex(time=t_mean["time"].values)

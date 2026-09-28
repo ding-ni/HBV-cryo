@@ -605,6 +605,22 @@ def year_range(config):
     return range(int(settings["开始年份"]), int(settings["结束年份"]) + 1)
 
 
+def data_date_range(config):
+    """Return the forcing interval, with legacy year-only fallback."""
+    from datetime import date
+
+    settings = time_settings(config)
+    start = settings.get("预热开始")
+    end = settings.get("验证结束")
+    if start and len(str(start)) > 10:
+        start = str(start)[:10]
+    if end and len(str(end)) > 10:
+        end = str(end)[:10]
+    if start and end:
+        return date.fromisoformat(str(start)[:10]), date.fromisoformat(str(end)[:10])
+    return date(int(settings["开始年份"]), 1, 1), date(int(settings["结束年份"]), 12, 31)
+
+
 def bbox_list(config):
     bbox = config["范围_bbox"]
     return [bbox["北"], bbox["西"], bbox["南"], bbox["东"]]
