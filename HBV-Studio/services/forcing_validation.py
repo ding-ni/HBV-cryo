@@ -453,12 +453,22 @@ def summarize_nc_download_status(entries: list[tuple[str, Path, str]], config=No
                 begin = max(request_first, date(year, 1, 1))
                 finish = min(request_last, date(year, 12, 31))
                 filename = directory / f"{prefix}_{year}.nc"
-                # Daily accumulation only needs the following midnight.
+                # Daily accumulated variables need the full requested days plus
+                # only the next day's 00:00 boundary sample.
                 boundary_only = not hourly and begin > last
-                required_times = ["00:00"] if boundary_only else times
-                covered = netcdf_covers_range(filename, begin, finish, required_times)
-                if boundary_only and not covered:
-                    covered = netcdf_covers_range(directory / f"{prefix}_boundary_{year}.nc", begin, finish, required_times)
+                if boundary_only:
+                    required_times = ["00:00"]
+                    covered = netcdf_covers_range(filename, begin, finish, required_times)
+                    if not covered:
+                        covered = netcdf_covers_range(directory / f"{prefix}_boundary_{year}.nc", begin, finish, required_times)
+                elif not hourly and cumulative and finish > last:
+                    covered = netcdf_covers_range(filename, begin, last, times)
+                    if covered:
+                        boundary_date = last + timedelta(days=1)
+                        boundary_file = filename if boundary_date.year == year else directory / f"{prefix}_boundary_{boundary_date.year}.nc"
+                        covered = netcdf_covers_range(boundary_file, boundary_date, boundary_date, ["00:00"])
+                else:
+                    covered = netcdf_covers_range(filename, begin, finish, times)
                 if covered:
                     total += 1
                 else:

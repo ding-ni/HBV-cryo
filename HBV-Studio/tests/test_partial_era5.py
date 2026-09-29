@@ -115,6 +115,14 @@ class PartialEra5Tests(unittest.TestCase):
             config["时间"]["预热开始"] = "2025-12-30"
             self.assertFalse(summarize_nc_download_status(entries, config)[0])
 
+    def test_daily_readiness_accepts_non_year_end_boundary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            config = {"时间": {"预热开始": "2025-05-10", "验证结束": "2025-05-10"}}
+            entries = [("precipitation", root, "era5_tp_*.nc")]
+            write_nc(root / "era5_tp_2025.nc", list(pd.date_range("2025-05-10", periods=4, freq="6h")) + [pd.Timestamp("2025-05-11")])
+            self.assertTrue(summarize_nc_download_status(entries, config)[0])
+
     def test_hourly_predecessor_and_partial_output(self):
         script = ROOT / "数据准备" / "06b_处理ERA5小时温度和蒸散发.py"
         spec = importlib.util.spec_from_file_location("partial_hourly", script)
