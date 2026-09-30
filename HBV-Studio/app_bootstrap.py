@@ -64,6 +64,42 @@ INSTALLED_EXECUTABLE_NAMES = {"hbvstudio.exe"}
 PORTABLE_EXECUTABLE_NAMES = {"hbvstudio_demo.exe"}
 
 
+def configure_bundled_geo_runtime() -> None:
+    """Point PROJ/GDAL at data shipped inside a frozen onedir bundle."""
+    roots: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            roots.append(Path(str(meipass)))
+        roots.extend((APP_ROOT / "_internal", APP_ROOT))
+    else:
+        roots.append(APP_ROOT)
+
+    proj_candidates: list[Path] = []
+    gdal_candidates: list[Path] = []
+    for root in roots:
+        proj_candidates.extend(
+            (
+                root / "pyproj" / "proj_dir" / "share" / "proj",
+                root / "rasterio" / "proj_data",
+                root / "fiona" / "proj_data",
+            )
+        )
+        gdal_candidates.extend((root / "rasterio" / "gdal_data", root / "fiona" / "gdal_data"))
+
+    proj_dir = next((path for path in proj_candidates if (path / "proj.db").is_file()), None)
+    gdal_dir = next((path for path in gdal_candidates if path.is_dir()), None)
+    if proj_dir is not None:
+        existing_proj = Path(str(os.environ.get("PROJ_DATA") or os.environ.get("PROJ_LIB") or ""))
+        if not (existing_proj / "proj.db").is_file():
+            os.environ["PROJ_DATA"] = str(proj_dir)
+            os.environ["PROJ_LIB"] = str(proj_dir)
+    if gdal_dir is not None:
+        existing_gdal = Path(str(os.environ.get("GDAL_DATA") or ""))
+        if not existing_gdal.is_dir():
+            os.environ["GDAL_DATA"] = str(gdal_dir)
+
+
 def env_flag(name: str, default: bool = False) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
     if not raw:
@@ -433,6 +469,7 @@ def run_script(script_path: Path, args: list[str]) -> None:
 
 def main() -> None:
     consume_mode_flags()
+    configure_bundled_geo_runtime()
     seed_environment()
     repair_runtime_jsons()
     os.chdir(APP_ROOT)

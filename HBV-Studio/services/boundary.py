@@ -434,6 +434,17 @@ def boundary_info_messages(
             warnings.append(f"上游边界入流缺少 {missing_text}，例如：{sample}；运行时会按线性插值补齐。")
         elif gap_mode in {"", "zero", "0"}:
             warnings.append(f"上游边界入流缺少 {missing_text}，例如：{sample}；运行时会按 0 填补。")
+        elif gap_mode in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"}:
+            if boundary_info.get("coverage_ratio") == 0:
+                issues.append(
+                    f"上游边界入流与当前模拟时段没有重叠，缺少全部 {missing_text}；"
+                    "请补充对应时段资料后再运行。"
+                )
+            else:
+                warnings.append(
+                    f"上游边界入流时间覆盖不完整，缺少 {missing_text}，例如：{sample}；"
+                    "缺测段将保留为空，仅在边界资料恢复并完成汇流预热后参与评价。"
+                )
         else:
             issues.append(f"上游边界入流时间覆盖不完整，缺少 {missing_text}，例如：{sample}")
     out_of_range_steps = list(boundary_info.get("out_of_range_steps", []))

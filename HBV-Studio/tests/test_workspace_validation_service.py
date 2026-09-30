@@ -71,6 +71,31 @@ class WorkspaceValidationServiceTests(unittest.TestCase):
         coverage_item = next(item for item in boundary["items"] if item["label"] == "覆盖率")
         self.assertEqual(coverage_item["value"], "95.0%")
 
+    def test_engineering_focus_marks_preserved_missing_coverage_as_warning(self) -> None:
+        checks = build_engineering_focus_checks(
+            {},
+            self._focus_context(),
+            profile="hourly",
+            object_type="interbasin_with_boundary",
+            step_hours=1.0,
+            boundary_csv="inflow.csv",
+            boundary_info={
+                "coverage_ratio": 0.13,
+                "gap_fill": "preserve_missing",
+                "duplicate_count": 0,
+                "negative_count": 0,
+                "out_of_range_steps": [],
+                "zero_count": 0,
+                "valid_rows": 10,
+                "time_step_hours": 1,
+            },
+        )
+
+        boundary = checks[0]
+        self.assertEqual(boundary["status"], "warn")
+        coverage_item = next(item for item in boundary["items"] if item["label"] == "覆盖率")
+        self.assertEqual(coverage_item["status"], "warn")
+
     def test_engineering_focus_summarizes_station_precip_event_coverage(self) -> None:
         checks = build_engineering_focus_checks(
             {},

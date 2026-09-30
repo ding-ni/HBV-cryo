@@ -214,10 +214,16 @@ def build_engineering_focus_checks(
             zero_ratio = int(boundary_info.get("zero_count", 0) or 0) / max(1, int(boundary_info.get("valid_rows", 0) or 0))
             detected_step = context.normalize_time_step_hours(boundary_info.get("time_step_hours"))
             step_match = detected_step == step_hours if boundary_info.get("time_step_hours") is not None else None
-            if duplicate_count > 0 or negative_count > 0 or step_match is False or (coverage_ratio is not None and coverage_ratio < 0.99):
+            gap_fill = str((boundary_info.get("gap_fill") or "") or "").strip().lower()
+            # Preserve-missing is a supported runtime mode: missing segments remain
+            # unevaluable until boundary data resumes and routing warm-up completes.
+            # Coverage is therefore a warning in that mode, while zero/interpolation
+            # still require the configured fill operation to be explicit.
+            coverage_issue = coverage_ratio is not None and coverage_ratio < 0.99
+            if duplicate_count > 0 or negative_count > 0 or step_match is False or (coverage_issue and gap_fill not in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"}):
                 status = "fail"
                 summary = "边界入流仍有关键问题，正式率定前需要先修正时间步长、覆盖率或异常值。"
-            elif zero_ratio >= 0.8 or int(boundary_info.get("invalid_rows", 0) or 0) > 0 or out_of_range_count > 0:
+            elif coverage_issue or zero_ratio >= 0.8 or int(boundary_info.get("invalid_rows", 0) or 0) > 0 or out_of_range_count > 0:
                 status = "warn"
                 summary = "边界入流可以继续核查，但仍有高零值比例或范围外记录等风险。"
             else:
@@ -240,7 +246,10 @@ def build_engineering_focus_checks(
                         {
                             "label": "覆盖率",
                             "value": (f"{coverage_ratio * 100:.1f}%" if coverage_ratio is not None else "未与当前时段对比"),
-                            "status": "ok" if coverage_ratio is None or coverage_ratio >= 0.99 else "fail",
+                            "status": (
+                                "ok" if coverage_ratio is None or coverage_ratio >= 0.99
+                                else ("warn" if gap_fill in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"} else "fail")
+                            ),
                         },
                         {
                             "label": "重复时间戳",
@@ -489,6 +498,7 @@ def validate_workspace_fields(
                     expected_index=context.build_expected_boundary_index(config, context="calibration"),
                     expected_step_hours=step_hours,
                 )
+                boundary_info["gap_fill"] = str(boundary_cfg.get("缺失填补", "preserve_missing"))
                 boundary_missing, boundary_warnings = context.boundary_info_messages(
                     boundary_info,
                     step_hours,

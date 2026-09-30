@@ -312,7 +312,7 @@ def read_boundary_inflow_series(
             if not bool(allow_no_overlap):
                 raise ValueError(
                     "上游边界入流文件没有与当前模拟时段重叠的时间步，"
-                    "不能在 zero 填补模式下静默按全 0 入流运行。"
+                    "不能在没有实际资料的情况下静默继续运行。"
                 )
             warnings.warn(
                 "当前诊断子窗口早于上游边界资料起点，子窗口边界入流显式按 0 m3/s 处理；"

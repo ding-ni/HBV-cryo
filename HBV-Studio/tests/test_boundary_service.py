@@ -93,6 +93,36 @@ class BoundaryServiceTests(unittest.TestCase):
         self.assertIn("\u65e0\u6cd5\u89e3\u6790", warnings[2])
         self.assertIn("80%", warnings[3])
 
+    def test_boundary_info_messages_preserve_missing_is_warning_when_partially_covered(self) -> None:
+        issues, warnings = boundary_info_messages(
+            {
+                "time_step_hours": 24.0,
+                "missing_steps": [pd.Timestamp("2026-01-02")],
+                "coverage_ratio": 0.5,
+                "valid_rows": 1,
+            },
+            24.0,
+            gap_fill="preserve_missing",
+        )
+
+        self.assertEqual(issues, [])
+        self.assertIn("缺测段将保留为空", warnings[0])
+
+    def test_boundary_info_messages_preserve_missing_rejects_no_overlap(self) -> None:
+        issues, warnings = boundary_info_messages(
+            {
+                "time_step_hours": 24.0,
+                "missing_steps": [pd.Timestamp("2026-01-01")],
+                "coverage_ratio": 0.0,
+                "valid_rows": 1,
+            },
+            24.0,
+            gap_fill="preserve_missing",
+        )
+
+        self.assertIn("没有重叠", issues[0])
+        self.assertEqual(warnings, [])
+
     def test_inspect_boundary_inflow_csv_reads_gb18030_and_autodetects_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

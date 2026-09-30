@@ -37,7 +37,7 @@ GUI_ROOT = portable.GUI_ROOT
 APP_NAME = "HBVStudio"
 APP_EXE_NAME = f"{APP_NAME}.exe"
 PAYLOAD_NAME = "HBVStudio_payload.zip"
-DEFAULT_F_PACKAGING_ROOT = (PROJECT_ROOT.parent / "_build_temp" / "installer_packaging").resolve()
+DEFAULT_F_PACKAGING_ROOT = (PROJECT_ROOT.parent / "hbvstudio_packaging").resolve()
 PACKAGING_ROOT = env_path("HBV_STUDIO_PACKAGING_ROOT") or DEFAULT_F_PACKAGING_ROOT
 
 COMMON_SOURCE = portable.pick_path(PROJECT_ROOT, (CN_PUBLIC,), ("common",))
