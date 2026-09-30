@@ -551,36 +551,43 @@ def open_netcdf_dataset_safe(dataset_path, *, engine="netcdf4", **kwargs):
         if str(short_candidate).lower() != str(source).lower():
             candidates.append(short_candidate)
 
-    for candidate in candidates:
-        try:
-            dataset = _open(candidate)
-            try:
-                yield dataset
-            finally:
-                dataset.close()
-            return
-        except Exception as exc:
-            attempts.append((str(candidate), exc))
-
     temp_dir = None
     temp_copy = None
     try:
-        temp_copy, temp_dir = _copy_file_to_ascii_temp(source)
-        dataset = _open(temp_copy)
+        for candidate in candidates:
+            try:
+                dataset = _open(candidate)
+            except Exception as exc:
+                attempts.append((str(candidate), exc))
+            else:
+                break
+        else:
+            try:
+                temp_copy, temp_dir = _copy_file_to_ascii_temp(source)
+                dataset = _open(temp_copy)
+            except Exception as exc:
+                attempts.append((str(temp_copy or source), exc))
+                details = " ; ".join(
+                    f"{path}: {type(err).__name__}: {err}"
+                    for path, err in attempts[-3:]
+                )
+                raise RuntimeError(
+                    f"无法打开 NetCDF 文件：{source}。已尝试原路径、短路径和 ASCII 临时副本。{details}"
+                ) from exc
+
+        processing_failed = False
         try:
             yield dataset
+        except BaseException:
+            processing_failed = True
+            raise
         finally:
-            dataset.close()
-        return
-    except Exception as exc:
-        attempts.append((str(temp_copy or source), exc))
-        details = " ; ".join(
-            f"{path}: {type(err).__name__}: {err}"
-            for path, err in attempts[-3:]
-        )
-        raise RuntimeError(
-            f"无法打开 NetCDF 文件：{source}。已尝试原路径、短路径和 ASCII 临时副本。{details}"
-        ) from exc
+            try:
+                dataset.close()
+            except Exception:
+                # Keep the original processing error when closing also fails.
+                if not processing_failed:
+                    raise
     finally:
         if temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)

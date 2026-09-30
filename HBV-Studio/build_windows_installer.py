@@ -88,7 +88,8 @@ INNO_APP_ID = "{{9B8D0C43-8A7F-4B7D-9E54-79A67A8A1BB1}}"
 
 BUILD_CONTRACTS = {
     "daily_forcing_manifest": "hbv_cryo_daily_forcing_manifest_v1",
-    "precipitation_correction": "occurrence_amount_v2",
+    "precipitation_correction": "monthly_transfer_v3",
+    "precipitation_fusion": "occurrence_amount_v2",
     "state_snapshot": "per_cell_branch_states_v2",
     "model_water_balance": "hbv_cryo_model_water_balance_v1",
     "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
