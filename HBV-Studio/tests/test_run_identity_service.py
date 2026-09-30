@@ -405,6 +405,27 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(payload["workspace_config"], "__GUI_ROOT__/workspaces/demo.json")
         self.assertEqual(payload["items"], ["__PROJECT_ROOT__/运行目录/run_a", 5])
 
+    def test_portableize_metadata_preserves_tokens_and_existing_placeholders_in_app_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir).resolve()
+            context = self._portable_path_context(project_root, project_root / "HBV-Studio")
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(project_root)
+                metadata = {
+                    "profile": "daily",
+                    "objective_scoring_policy": "calibration_only_v1",
+                    "status": "passed",
+                    "relative": "data/forcing.json",
+                    "already_portable": "__PROJECT_ROOT__/data/forcing.json",
+                    "items": ["monthly_transfer_v3", "__GUI_ROOT__/workspaces/demo.json", 5],
+                }
+                once = portableize_value_paths(metadata, context)
+                self.assertEqual(once, metadata)
+                self.assertEqual(portableize_value_paths(once, context), metadata)
+            finally:
+                os.chdir(original_cwd)
+
     def test_workspace_roots_hint_from_metadata_derives_missing_partner_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
@@ -1829,6 +1850,32 @@ class RunIdentityServiceTests(unittest.TestCase):
         self.assertEqual(patched["边界条件"]["上游边界入流_csv"], "")
         self.assertEqual(patched["边界条件"]["时间字段"], "date")
         self.assertEqual(patched["边界条件"]["流量字段"], "inflow_m3s")
+        self.assertEqual(patched["边界条件"]["缺失填补"], "preserve_missing")
+
+    def test_run_replay_defaults_missing_boundary_policy_to_preserve_missing(self) -> None:
+        context = RunReplayConfigContext(
+            default_initial_state={},
+            resolve_metadata_object_type=lambda meta: "interbasin_with_boundary",
+            metadata_boundary_enabled=lambda meta: True,
+        )
+        for metadata in ({}, {"boundary_condition": {"gap_fill": None}}, {"boundary_condition": {"gap_fill": ""}}):
+            with self.subTest(metadata=metadata):
+                patched = apply_run_replay_config_overrides({}, metadata, context)
+                self.assertEqual(patched["边界条件"]["缺失填补"], "preserve_missing")
+
+    def test_run_replay_preserves_explicit_boundary_policy(self) -> None:
+        context = RunReplayConfigContext(
+            default_initial_state={},
+            resolve_metadata_object_type=lambda meta: "interbasin_with_boundary",
+            metadata_boundary_enabled=lambda meta: True,
+        )
+        existing = {"边界条件": {"缺失填补": "zero"}}
+        self.assertEqual(apply_run_replay_config_overrides(existing, {}, context)["边界条件"]["缺失填补"], "zero")
+        patched = apply_run_replay_config_overrides(
+            {"边界条件": {"缺失填补": "preserve_missing"}},
+            {"boundary_condition": {"gap_fill": "zero"}},
+            context,
+        )
         self.assertEqual(patched["边界条件"]["缺失填补"], "zero")
 
     def test_metadata_initial_state_override_rejects_invalid_values(self) -> None:

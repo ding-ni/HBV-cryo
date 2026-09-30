@@ -244,6 +244,12 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
     metrics = dict(metadata.get("metrics", {}) or {})
     cal = dict(metrics.get("calibration", {}) or {})
     val = dict(metrics.get("validation", {}) or {})
+    cal_rmse = safe_float(cal.get("rmse_m3s"))
+    val_rmse = safe_float(val.get("rmse_m3s"))
+    if cal_rmse is None:
+        cal_rmse = cal.get("rmse")
+    if val_rmse is None:
+        val_rmse = val.get("rmse")
     component_report = component_fraction_report(metadata)
     boundary_fraction = component_report.get("boundary_inflow_fraction")
     local_fraction = component_report.get("local_runoff_fraction")
@@ -267,8 +273,8 @@ def hydrology_diagnostic_report_text(metadata: dict[str, Any], summary: dict[str
         "",
         "## 2. 径流拟合精度",
         "",
-        f"- 率定期 NSE / KGE / PBIAS / RMSE：{metric_text(cal.get('nse'))} / {metric_text(cal.get('kge'))} / {metric_text(cal.get('pbias'), 2, '%')} / {metric_text(cal.get('rmse'))}",
-        f"- 验证期 NSE / KGE / PBIAS / RMSE：{metric_text(val.get('nse'))} / {metric_text(val.get('kge'))} / {metric_text(val.get('pbias'), 2, '%')} / {metric_text(val.get('rmse'))}",
+        f"- 率定期 NSE / KGE / PBIAS / RMSE：{metric_text(cal.get('nse'))} / {metric_text(cal.get('kge'))} / {metric_text(cal.get('pbias'), 2, '%')} / {metric_text(cal_rmse)}",
+        f"- 验证期 NSE / KGE / PBIAS / RMSE：{metric_text(val.get('nse'))} / {metric_text(val.get('kge'))} / {metric_text(val.get('pbias'), 2, '%')} / {metric_text(val_rmse)}",
         f"- 综合判断：{summary.get('flow_status_zh', '—')}",
         "",
         "## 3. 出口流量构成与区间三水源",

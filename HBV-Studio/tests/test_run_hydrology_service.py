@@ -103,6 +103,29 @@ class RunHydrologyServiceTests(unittest.TestCase):
         self.assertIn("| 降雨产流 | 77.5% |", report)
         self.assertIn("上游边界入流来自边界条件", report)
 
+    def test_report_prefers_rmse_m3s_and_keeps_a_valid_zero(self) -> None:
+        metadata = self.sample_metadata()
+        metadata["metrics"]["calibration"]["rmse_m3s"] = 11.5
+        metadata["metrics"]["validation"]["rmse_m3s"] = 0.0
+        report = hydrology_diagnostic_report_text(metadata, {})
+        calibration = next(line for line in report.splitlines() if line.startswith("- 率定期 NSE"))
+        validation = next(line for line in report.splitlines() if line.startswith("- 验证期 NSE"))
+        self.assertTrue(calibration.endswith("/ 11.5000"))
+        self.assertTrue(validation.endswith("/ 0.0000"))
+
+    def test_report_falls_back_to_legacy_rmse_when_current_value_is_missing(self) -> None:
+        for current in ("absent", None, float("nan")):
+            with self.subTest(current=current):
+                metadata = self.sample_metadata()
+                if current != "absent":
+                    metadata["metrics"]["calibration"]["rmse_m3s"] = current
+                    metadata["metrics"]["validation"]["rmse_m3s"] = current
+                report = hydrology_diagnostic_report_text(metadata, {})
+                calibration = next(line for line in report.splitlines() if line.startswith("- 率定期 NSE"))
+                validation = next(line for line in report.splitlines() if line.startswith("- 验证期 NSE"))
+                self.assertTrue(calibration.endswith("/ 18.4000"))
+                self.assertTrue(validation.endswith("/ 21.7000"))
+
     def test_diagnostic_report_writer_updates_current_and_legacy_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)

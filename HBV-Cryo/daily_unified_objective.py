@@ -9,6 +9,7 @@ import pandas as pd
 
 
 OBJECTIVE_FAMILY = "daily_unified_professional_v1"
+OBJECTIVE_SCORING_POLICY = "calibration_only_v1"
 EPS = 1e-12
 NONFLOW_CAP = 0.35
 ICE_DOMINANCE_GUARD_WEIGHT = 3.0
@@ -33,11 +34,11 @@ RECESSION_TAKEOVER_MEAN_FRACTION = 0.55
 
 FLOW_GUARD_CONFIG = {
     "nse_cal": {"threshold": 0.60, "tolerance": 0.20, "weight": 3.0, "direction": "min"},
-    "nse_val": {"threshold": 0.60, "tolerance": 0.20, "weight": 2.0, "direction": "min"},
+    "nse_val": {"threshold": 0.60, "tolerance": 0.20, "weight": 0.0, "direction": "min"},
     "kge_cal": {"threshold": 0.65, "tolerance": 0.20, "weight": 2.0, "direction": "min"},
-    "kge_val": {"threshold": 0.65, "tolerance": 0.20, "weight": 1.5, "direction": "min"},
+    "kge_val": {"threshold": 0.65, "tolerance": 0.20, "weight": 0.0, "direction": "min"},
     "pbias_cal": {"threshold": 15.0, "tolerance": 10.0, "weight": 1.5, "direction": "abs_max"},
-    "pbias_val": {"threshold": 15.0, "tolerance": 10.0, "weight": 1.0, "direction": "abs_max"},
+    "pbias_val": {"threshold": 15.0, "tolerance": 10.0, "weight": 0.0, "direction": "abs_max"},
 }
 
 
@@ -387,6 +388,9 @@ def _build_initial_payload(bundle: dict[str, Any], metrics: dict[str, Any], bad_
     evidence_registry = _build_evidence_registry(bundle, length)
     return {
         "objective_family": OBJECTIVE_FAMILY,
+        "objective_scoring_policy": OBJECTIVE_SCORING_POLICY,
+        "optimization_period": "calibration_period",
+        "validation_diagnostic_only": True,
         "objective_value": float(bad_obj),
         "nse_cal": _to_float(metrics.get("nse_cal"), float("nan")),
         "nse_val": _to_float(metrics.get("nse_val"), float("nan")),
@@ -487,6 +491,7 @@ def _build_initial_payload(bundle: dict[str, Any], metrics: dict[str, Any], bad_
         },
         "diagnostic_only_constraints": {
             "glacier_fraction_window": True,
+            "validation_flow_metrics": True,
         },
         "evidence_registry": evidence_registry,
     }
@@ -671,6 +676,7 @@ def _run_hard_checks(bundle: dict[str, Any], diagnostics: dict[str, Any], eviden
 
     # H007
     djf_mask = calib_idx & np.isin(dates.month.to_numpy(dtype=np.int32), np.array([12, 1, 2], dtype=np.int32))
+    winter_sample_count = int(np.count_nonzero(djf_mask))
     winter_score_total = float(np.sum(q_score_base[djf_mask])) if np.any(djf_mask) else 0.0
     winter_ice_total = float(np.sum(q_ice[djf_mask])) if np.any(djf_mask) else 0.0
     winter_ice_ratio = float(winter_ice_total / winter_score_total) if winter_score_total > EPS else 0.0
@@ -682,6 +688,7 @@ def _run_hard_checks(bundle: dict[str, Any], diagnostics: dict[str, Any], eviden
             "failed_code": "H007_WINTER_ICE_LEAKAGE_HARD",
             "failed_reason": "winter ice leakage exceeds hard limit",
             "details": {
+                "winter_sample_count": winter_sample_count,
                 "winter_ice_ratio_djf": float(winter_ice_ratio),
                 "winter_ice_mean_m3s": float(winter_ice_mean),
                 "winter_score_base_mean_m3s": float(winter_score_mean),
@@ -735,8 +742,11 @@ def _run_hard_checks(bundle: dict[str, Any], diagnostics: dict[str, Any], eviden
             "routing_ok": True,
             "closure_ok": True,
             "basis_ok": True,
-            "winter_ice_ratio_djf": float(winter_ice_ratio),
-            "winter_ice_mean_m3s": float(winter_ice_mean),
+            "winter_sample_count": winter_sample_count,
+            "winter_ice_check_active": bool(winter_sample_count),
+            "winter_ice_check_status": "ok" if winter_sample_count else "skipped_insufficient_data",
+            "winter_ice_ratio_djf": float(winter_ice_ratio) if winter_sample_count else None,
+            "winter_ice_mean_m3s": float(winter_ice_mean) if winter_sample_count else None,
             "lag_days": lag_days,
             "closure_basis": closure_basis,
             "process_signature_report_available": bool(diagnostics.get("process_signature_report")),
@@ -745,6 +755,7 @@ def _run_hard_checks(bundle: dict[str, Any], diagnostics: dict[str, Any], eviden
 
 
 def _compute_flow_terms(metrics: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+    # Held-out flow observations may be reported, but must never rank candidates.
     nse_cal = _to_float(metrics.get("nse_cal"), float("nan"))
     log_nse_cal = _to_float(metrics.get("log_nse_cal"), float("nan"))
     nse_val = _to_float(metrics.get("nse_val"), float("nan"))
@@ -753,30 +764,26 @@ def _compute_flow_terms(metrics: dict[str, Any]) -> tuple[float, dict[str, Any]]
     kge_val = _to_float(metrics.get("kge_val"), float("nan"))
     pbias_cal = _to_float(metrics.get("pbias_cal"), float("nan"))
     pbias_val = _to_float(metrics.get("pbias_val"), float("nan"))
-    obs_count_val = int(_to_float(metrics.get("obs_count_val"), 0) or 0)
-    valid_val = bool(obs_count_val >= 30 and np.isfinite(nse_val) and np.isfinite(log_nse_val))
     if not np.isfinite(nse_cal):
         return float("nan"), {
             "active": False,
             "status": "skipped_invalid_flow_metrics",
             "nse_cal": None,
             "lognse_cal": None,
-            "nse_val": None,
-            "lognse_val": None,
+            "nse_val": nse_val if np.isfinite(nse_val) else None,
+            "lognse_val": log_nse_val if np.isfinite(log_nse_val) else None,
             "kge_cal": None,
-            "kge_val": None,
+            "kge_val": kge_val if np.isfinite(kge_val) else None,
             "pbias_cal": None,
-            "pbias_val": None,
+            "pbias_val": pbias_val if np.isfinite(pbias_val) else None,
+            "scoring_period": "calibration_period",
+            "validation_diagnostic_only": True,
             "weight_config": {},
             "penalty": None,
         }
     if not np.isfinite(log_nse_cal):
         log_nse_cal = nse_cal
     penalty = (1.0 - nse_cal) + 0.35 * (1.0 - log_nse_cal)
-    if valid_val:
-        penalty += 0.35 * (1.0 - nse_val) + 0.1225 * (1.0 - log_nse_val)
-        if np.isfinite(pbias_val):
-            penalty += 0.10 * (abs(pbias_val) / 100.0)
     if np.isfinite(pbias_cal):
         penalty += 0.10 * (abs(pbias_cal) / 100.0)
     term = {
@@ -790,13 +797,15 @@ def _compute_flow_terms(metrics: dict[str, Any]) -> tuple[float, dict[str, Any]]
         "kge_val": kge_val if np.isfinite(kge_val) else None,
         "pbias_cal": pbias_cal if np.isfinite(pbias_cal) else None,
         "pbias_val": pbias_val if np.isfinite(pbias_val) else None,
+        "scoring_period": "calibration_period",
+        "validation_diagnostic_only": True,
         "weight_config": {
             "nse_cal": 1.0,
             "lognse_cal": 0.35,
-            "nse_val": 0.35 if valid_val else 0.0,
-            "lognse_val": 0.1225 if valid_val else 0.0,
+            "nse_val": 0.0,
+            "lognse_val": 0.0,
             "pbias_cal": 0.10 if np.isfinite(pbias_cal) else 0.0,
-            "pbias_val": 0.10 if (valid_val and np.isfinite(pbias_val)) else 0.0,
+            "pbias_val": 0.0,
         },
         "penalty": float(penalty),
     }
@@ -809,11 +818,11 @@ def _flow_guard_check(value: float | None, *, threshold: float, tolerance: float
     if direction == "abs_max":
         excess = max(0.0, abs(float(value)) - float(threshold))
         status = "ok" if excess <= 0.0 else "outside_flow_floor"
-        penalty = float(weight) * ((excess / max(float(tolerance), EPS)) ** 2)
+        penalty = 0.0 if float(weight) == 0.0 else float(weight) * ((excess / max(float(tolerance), EPS)) ** 2)
     else:
         deficit = max(0.0, float(threshold) - float(value))
         status = "ok" if deficit <= 0.0 else "below_flow_floor"
-        penalty = float(weight) * ((deficit / max(float(tolerance), EPS)) ** 2)
+        penalty = 0.0 if float(weight) == 0.0 else float(weight) * ((deficit / max(float(tolerance), EPS)) ** 2)
     return status, float(penalty)
 
 
@@ -825,14 +834,26 @@ def _compute_flow_guard_terms(metrics: dict[str, Any]) -> tuple[float, dict[str,
     for key, cfg in FLOW_GUARD_CONFIG.items():
         is_validation_metric = key.endswith("_val")
         raw_value = _to_float(metrics.get(key), None)
-        if is_validation_metric and obs_count_val < 30:
+        if is_validation_metric:
+            if obs_count_val < 30:
+                diagnostic_status = "skipped_no_validation_period"
+            else:
+                diagnostic_status, _ = _flow_guard_check(
+                    raw_value,
+                    threshold=float(cfg["threshold"]),
+                    tolerance=float(cfg["tolerance"]),
+                    weight=0.0,
+                    direction=str(cfg["direction"]),
+                )
             checks[key] = {
                 "active": False,
-                "status": "skipped_no_validation_period",
+                "status": "diagnostic_only",
+                "diagnostic_status": diagnostic_status,
+                "diagnostic_only": True,
                 "value": raw_value,
                 "threshold": cfg["threshold"],
                 "tolerance": cfg["tolerance"],
-                "weight": cfg["weight"],
+                "weight": 0.0,
                 "penalty": 0.0,
             }
             continue
@@ -859,7 +880,9 @@ def _compute_flow_guard_terms(metrics: dict[str, Any]) -> tuple[float, dict[str,
     group = {
         "active": bool(active_count > 0),
         "status": "ok" if total_penalty <= EPS else "penalized",
-        "summary": "flow floor guard; skipped metrics are not hard failures",
+        "summary": "calibration-period flow floor guard; validation metrics are diagnostic only",
+        "scoring_period": "calibration_period",
+        "validation_diagnostic_only": True,
         "checks": checks,
         "penalty": float(total_penalty),
     }
@@ -1363,20 +1386,24 @@ def _compute_cryo_terms(
     calib_mask: np.ndarray,
 ) -> tuple[float, dict[str, Any], dict[str, Any]]:
     djf_mask = calib_mask & np.isin(dates.month.to_numpy(dtype=np.int32), np.array([12, 1, 2], dtype=np.int32))
+    winter_sample_count = int(np.count_nonzero(djf_mask))
     winter_score_total = float(np.sum(q_score_base[djf_mask])) if np.any(djf_mask) else 0.0
     winter_ice_total = float(np.sum(q_ice[djf_mask])) if np.any(djf_mask) else 0.0
     winter_ice_ratio = float(winter_ice_total / winter_score_total) if winter_score_total > EPS else 0.0
     winter_ice_mean = float(np.mean(q_ice[djf_mask])) if np.any(djf_mask) else 0.0
     winter_penalty = 0.10 * ((max(0.0, winter_ice_ratio - 0.05) / 0.05) ** 2)
     winter_item = _status_item(
-        active=True,
-        status="ok",
+        active=bool(winter_sample_count),
+        status="ok" if winter_sample_count else "skipped_insufficient_data",
         value_obs=0.05,
-        value_sim=float(winter_ice_ratio),
+        value_sim=float(winter_ice_ratio) if winter_sample_count else None,
         tolerance=0.05,
         weight=0.10,
         penalty=float(winter_penalty),
-        extra={"winter_ice_ratio_djf": float(winter_ice_ratio)},
+        extra={
+            "winter_ice_ratio_djf": float(winter_ice_ratio) if winter_sample_count else None,
+            "sample_count": winter_sample_count,
+        },
     )
 
     calib_dates = dates[calib_mask]
@@ -1410,8 +1437,11 @@ def _compute_cryo_terms(
         "centroid_snow_doy": centroid_snow,
         "centroid_ice_doy": centroid_ice,
         "lag_days": lag_days,
-        "winter_ice_ratio_djf": float(winter_ice_ratio),
-        "winter_ice_mean_m3s": float(winter_ice_mean),
+        "winter_sample_count": winter_sample_count,
+        "winter_ice_check_active": bool(winter_sample_count),
+        "winter_ice_check_status": "ok" if winter_sample_count else "skipped_insufficient_data",
+        "winter_ice_ratio_djf": float(winter_ice_ratio) if winter_sample_count else None,
+        "winter_ice_mean_m3s": float(winter_ice_mean) if winter_sample_count else None,
     }
     return total_penalty, group, diag
 

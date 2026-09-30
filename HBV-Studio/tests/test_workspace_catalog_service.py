@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from services.workspace_catalog import (  # noqa: E402
     build_empty_workspace,
     detect_object_type,
     detect_profile_from_payload,
+    instantiate_template,
     list_workspaces,
     normalize_config_before_save,
     runtime_root_for_workspace,
@@ -135,6 +137,80 @@ class WorkspaceCatalogServiceTests(unittest.TestCase):
         self.assertEqual(config["时间步长_小时"], 1.0)
         self.assertEqual(config["初始状态"], {"SP": 0.0, "SM": 10.0})
         self.assertEqual(config["气象策略"]["降水来源"], "era5")
+        self.assertEqual(config["气象策略"]["station_correction_algorithm"], "monthly_transfer_v3")
+        self.assertEqual(config["气象策略"]["station_rule_training_start"], "")
+        self.assertEqual(config["气象策略"]["station_rule_training_end"], "")
+        self.assertEqual(config["边界条件"]["缺失填补"], "preserve_missing")
+
+    def test_normalize_preserves_recorded_station_algorithms_and_explicit_boundary_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            for algorithm in ("monthly_transfer_v3", "occurrence_amount_v2", "legacy_ratio_v1"):
+                with self.subTest(algorithm=algorithm):
+                    config = normalize_config_before_save(
+                        {
+                            "气象策略": {
+                                "降水方案": "grid_plus_station_bias",
+                                "station_correction_algorithm": algorithm,
+                                "station_rule_training_start": "2025-05-01",
+                                "station_rule_training_end": "2025-09-10",
+                            },
+                            "边界条件": {"缺失填补": "zero"},
+                        },
+                        root / "workspaces" / "项目.json",
+                        context,
+                    )
+                    self.assertEqual(config["气象策略"]["station_correction_algorithm"], algorithm)
+                    self.assertEqual(config["气象策略"]["station_rule_training_start"], "2025-05-01")
+                    self.assertEqual(config["气象策略"]["station_rule_training_end"], "2025-09-10")
+                    self.assertEqual(config["边界条件"]["缺失填补"], "zero")
+
+    def test_normalize_does_not_upgrade_unversioned_existing_station_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = normalize_config_before_save(
+                {"气象策略": {"降水方案": "grid_plus_station_bias"}},
+                root / "workspaces" / "旧项目.json",
+                self._context(root),
+            )
+        self.assertNotIn("station_correction_algorithm", config["气象策略"])
+
+    def test_blank_template_instantiation_defaults_to_transfer_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            context.template_dir.mkdir(parents=True)
+            template = context.template_dir / "blank.template.json"
+            template.write_text(
+                json.dumps({"_studio_template": {"id": "blank-workspace"}, "气象策略": {"降水方案": "grid_only"}}),
+                encoding="utf-8",
+            )
+
+            def write_json(path: Path, data: dict[str, Any]) -> None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(data), encoding="utf-8")
+
+            context = replace(
+                context,
+                read_json_file=lambda path: json.loads(path.read_text(encoding="utf-8")),
+                write_json_file=write_json,
+            )
+            result = instantiate_template({"template_id": "blank-workspace", "workspace_name": "新项目"}, context)
+        self.assertEqual(result["config"]["气象策略"]["station_correction_algorithm"], "monthly_transfer_v3")
+        self.assertEqual(result["config"]["气象策略"]["station_rule_training_start"], "")
+        self.assertEqual(result["config"]["边界条件"]["缺失填补"], "preserve_missing")
+
+    def test_empty_boundary_policy_uses_safe_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            context = self._context(root)
+            for value in (None, ""):
+                with self.subTest(value=value):
+                    config = normalize_config_before_save(
+                        {"边界条件": {"缺失填补": value}}, root / "workspaces" / "项目.json", context
+                    )
+                    self.assertEqual(config["边界条件"]["缺失填补"], "preserve_missing")
 
     def test_normalize_config_before_save_applies_defaults_and_portable_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

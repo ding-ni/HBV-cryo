@@ -312,6 +312,7 @@ def station_precip_expected_coverage(
     *,
     mode: str,
     time_basis_label: str,
+    frozen_rule_training: bool = False,
 ) -> dict[str, Any]:
     expected_count = 0
     covered_count = 0
@@ -340,6 +341,11 @@ def station_precip_expected_coverage(
                 missing.append(f"\u7ad9\u70b9\u964d\u6c34\u65f6\u95f4\u8303\u56f4\u4e0e{time_basis_label}\u5b8c\u5168\u4e0d\u91cd\u53e0\u3002")
             elif coverage_ratio < 0.99:
                 message = f"\u7ad9\u70b9\u964d\u6c34\u5728{time_basis_label}\u5185\u8986\u76d6\u4e0d\u8db3\uff1a\u8986\u76d6 {coverage_ratio * 100:.1f}%\u3002"
+                if frozen_rule_training:
+                    message = (
+                        f"规则训练时段内有站点观测的时间步占 {coverage_ratio * 100:.1f}%；"
+                        "缺测样本不参与训练，训练后的冻结规则统一应用完整气象时段，不要求预热期站点连续观测。"
+                    )
                 if mode == "thiessen_station_only":
                     missing.append(message)
                 else:
@@ -573,6 +579,8 @@ def analyze_station_precip_inputs(
 ) -> dict[str, Any]:
     meteo = dict(config.get(METEO_KEY, {}) or {})
     mode = str(meteo.get(METEO_PRECIP_MODE_KEY, "grid_only")).strip() or "grid_only"
+    algorithm = str(meteo.get("station_correction_algorithm", "") or "").strip().lower()
+    monthly_transfer = mode == "grid_plus_station_bias" and algorithm == "monthly_transfer_v3"
     if mode == "grid_only":
         return {
             "enabled": False,
@@ -591,6 +599,8 @@ def analyze_station_precip_inputs(
     time_basis_label = TIME_BASIS_LABELS.get(time_basis, "\u5f53\u524d\u4efb\u52a1\u65f6\u6bb5")
     event_info = analysis_context.normalized_flood_events(config, step_hours=step) if time_basis == TIME_BASIS_EVENT_WINDOWS else None
     expected_index = analysis_context.build_expected_forcing_index(config, context=runtime_context)
+    application_index = expected_index
+    training_info: dict[str, Any] = {}
     station_prec_raw = str(meteo.get(METEO_STATION_PREC_KEY, "") or "").strip()
     station_meta_raw = str(meteo.get(METEO_STATION_META_KEY, "") or "").strip()
     station_prec_path = analysis_context.resolve_config_related_path(config, station_prec_raw)
@@ -622,6 +632,9 @@ def analyze_station_precip_inputs(
             "time_basis": time_basis,
             "time_basis_label": time_basis_label,
             "task_context": station_precip_task_context_summary(
+                station_correction_algorithm=algorithm,
+                training_info=training_info,
+                application_index=application_index,
                 mode=mode,
                 context=runtime_context,
                 time_basis=time_basis,
@@ -654,6 +667,9 @@ def analyze_station_precip_inputs(
             "time_basis": time_basis,
             "time_basis_label": time_basis_label,
             "task_context": station_precip_task_context_summary(
+                station_correction_algorithm=algorithm,
+                training_info=training_info,
+                application_index=application_index,
                 mode=mode,
                 context=runtime_context,
                 time_basis=time_basis,
@@ -682,11 +698,28 @@ def analyze_station_precip_inputs(
     warnings.extend(match_info["warnings"])
 
     matched_series = station_series[matched_ids].copy() if matched_ids else pd.DataFrame(index=station_series.index)
+    if monthly_transfer:
+        time_basis_label = "规则训练时段"
+        event_info = None
+        valid_times = matched_series.index[((matched_series.notna()) & (matched_series >= 0)).any(axis=1)]
+        start_raw = meteo.get("station_rule_training_start", meteo.get("station_bias_training_start"))
+        end_raw = meteo.get("station_rule_training_end", meteo.get("station_bias_training_end"))
+        try:
+            training_start = pd.Timestamp(start_raw) if str(start_raw or "").strip() else (valid_times.min() if len(valid_times) else None)
+            training_end = pd.Timestamp(end_raw) if str(end_raw or "").strip() else (valid_times.max() if len(valid_times) else None)
+            if training_end is not None and end_raw and step < 24 and len(str(end_raw).strip()) == 10:
+                training_end += pd.Timedelta(days=1) - pd.Timedelta(hours=step)
+            expected_index = pd.date_range(training_start, training_end, freq=pd.Timedelta(hours=step)) if training_start is not None and training_end is not None and training_start <= training_end else None
+        except (ValueError, TypeError):
+            expected_index = None
+            missing.append("降水规则训练日期无效，请检查训练开始和结束日期。")
+        training_info["start"], training_info["end"], _ = index_display_range(expected_index, step)
     coverage_info = station_precip_expected_coverage(
         matched_series,
         expected_index,
         mode=mode,
         time_basis_label=time_basis_label,
+        frozen_rule_training=monthly_transfer,
     )
     expected_count = int(coverage_info["expected_count"])
     covered_count = int(coverage_info["covered_count"])
@@ -698,6 +731,23 @@ def analyze_station_precip_inputs(
     quality_series = coverage_info["quality_series"]
     missing.extend(coverage_info["missing"])
     warnings.extend(coverage_info["warnings"])
+    if monthly_transfer:
+        valid_samples = (quality_series.notna()) & (quality_series >= 0)
+        observed_months = sorted(set(int(month) for month in quality_series.index[valid_samples.any(axis=1)].month))
+        unobserved_months = [month for month in range(1, 13) if month not in observed_months]
+        training_info.update({
+            "available_station_samples": int(valid_samples.to_numpy().sum()),
+            "observed_months": observed_months, "unobserved_months": unobserved_months,
+        })
+        if covered_count <= 0:
+            missing.append("规则训练范围内没有可用站点观测，无法训练月规则。")
+        if unobserved_months:
+            winter = [month for month in (12, 1, 2) if month in unobserved_months]
+            warnings.append(
+                "训练样本未覆盖月份：" + "、".join(str(month) for month in unobserved_months)
+                + "；这些月份保留原格点，未经该季节实测验证。"
+                + ("冬季 " + "、".join(str(month) for month in winter) + " 月缺少站点观测支持。" if winter else "")
+            )
 
     event_info_summary = station_precip_event_coverage_summary(
         matched_series,
@@ -719,10 +769,18 @@ def analyze_station_precip_inputs(
     status_info = station_precip_analysis_status(missing, warnings)
     status = status_info["status"]
     summary = status_info["summary"]
+    if monthly_transfer:
+        summary = (
+            "冻结月规则训练仍有关键输入问题，请先补齐或核对训练资料。" if missing
+            else "已有站点样本用于训练月规则，完整气象时段统一应用；请查看样本月份支持及异常资料提示。"
+        )
 
     station_start = station_series.index.min() if len(station_series.index) else None
     station_end = station_series.index.max() if len(station_series.index) else None
     task_context = station_precip_task_context_summary(
+        station_correction_algorithm=algorithm,
+        training_info=training_info,
+        application_index=application_index,
         mode=mode,
         context=runtime_context,
         time_basis=time_basis,
@@ -765,6 +823,11 @@ def analyze_station_precip_inputs(
         extreme_count=extreme_count,
         event_coverage=event_coverage,
     )
+    if monthly_transfer:
+        labels = {"无可用站点时间步": "训练期无观测时间步", "最大连续无站点": "训练样本最长间断", "可用站点数": "训练时段可用站点数", "单站最大缺测率": "训练样本单站最大缺测率"}
+        for item in items:
+            item["label"] = labels.get(item["label"], item["label"])
+        items.extend(task_context["items"][1:])
     return {
         "enabled": True,
         "mode": mode,
@@ -790,6 +853,8 @@ def analyze_station_precip_inputs(
         "time_basis_label": time_basis_label,
         "station_time_aggregation": station_time_aggregation,
         "task_context": task_context,
+        "station_correction_algorithm": algorithm,
+        "training_samples": training_info if monthly_transfer else None,
         "event_coverage": event_coverage,
     }
 
@@ -813,6 +878,9 @@ def station_precip_task_context_summary(
     station_end: Any = None,
     event_info: dict[str, Any] | None = None,
     event_coverage: list[dict[str, Any]] | None = None,
+    station_correction_algorithm: str = "",
+    training_info: dict[str, Any] | None = None,
+    application_index: pd.DatetimeIndex | None = None,
 ) -> dict[str, Any]:
     start, end, expected_steps = index_display_range(expected_index, step_hours)
     station_start_text = format_time_for_check(station_start, step_hours)
@@ -841,7 +909,31 @@ def station_precip_task_context_summary(
         status = "warn"
 
     count_text = station_count_text(min_available_station_count, mean_available_station_count)
-    if time_basis == TIME_BASIS_EVENT_WINDOWS:
+    if mode == "grid_plus_station_bias" and station_correction_algorithm == "monthly_transfer_v3":
+        training = dict(training_info or {})
+        training_start, training_end = training.get("start", ""), training.get("end", "")
+        application_start, application_end, application_steps = index_display_range(application_index, step_hours)
+        headline = (
+            f"按 {training_start} 至 {training_end} 的已有实测训练冻结月规则。"
+            if training_start and training_end else "站点资料用于训练冻结月规则，训练时段与应用时段分别核对。"
+        )
+        detail = (
+            "站点观测只用于训练月份校正规则；训练后同一月份的所有日期统一应用该规则，"
+            "预热、率定和验证使用完整连续气象，不要求站点在应用全时段连续观测。"
+            "有效月份以冻结规则的配对样本检查为准；没有足够样本的月份保留原格点并标记未经验证，不能用暖季规则代替冬季规则。"
+        )
+        observed = list(training.get("observed_months", []) or [])
+        unobserved = list(training.get("unobserved_months", []) or [])
+        status = "fail" if covered_count <= 0 else "warn" if unobserved or zero_available_steps else "ok"
+        items = [
+            {"label": "检查口径", "value": "月规则训练样本；完整气象应用时段另行检查", "status": status},
+            {"label": "训练时段", "value": f"{training_start} 至 {training_end}" if training_start and training_end else "未形成可用训练时段", "status": "ok" if covered_count else "fail"},
+            {"label": "有效站点样本", "value": str(training.get("available_station_samples", 0)), "status": "ok" if covered_count else "fail"},
+            {"label": "有观测样本月份", "value": "、".join(str(month) for month in observed) or "无", "status": "ok" if observed else "fail"},
+            {"label": "无观测月份", "value": "、".join(str(month) for month in unobserved) or "无", "status": "warn" if unobserved else "ok"},
+            {"label": "冻结规则应用时段", "value": f"{application_start} 至 {application_end}" if application_start and application_end else "以完整气象目标时段为准", "status": "ok" if application_steps else "warn"},
+        ]
+    elif time_basis == TIME_BASIS_EVENT_WINDOWS:
         headline = (
             f"\u5f53\u524d\u6309 {event_valid_count} \u573a\u6d2a\u6c34\u4e8b\u4ef6\u8fd0\u884c\u7a97\u53e3\u6838\u5bf9\u7ad9\u70b9\u964d\u6c34\uff0c\u4e8b\u4ef6\u4e4b\u95f4\u5141\u8bb8\u8d44\u6599\u95f4\u65ad\u3002"
             if event_valid_count > 0

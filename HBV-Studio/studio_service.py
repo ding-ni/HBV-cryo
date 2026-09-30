@@ -997,6 +997,7 @@ def _forcing_validation_context() -> ForcingValidationContext:
         validate_tif_grid_alignment=validate_tif_grid_alignment,
         event_windows_ui_summary=event_windows_ui_summary,
         event_forcing_coverage_summary=event_forcing_coverage_summary,
+        check_precip_strategy_outputs=check_precip_strategy_outputs,
     )
 
 
@@ -2668,6 +2669,7 @@ def _workspace_completeness_context() -> WorkspaceCompletenessContext:
         has_matching=has_matching,
         validate_workspace_fields=validate_workspace_fields,
         object_interbasin=OBJECT_INTERBASIN,
+        check_precip_strategy_outputs=check_precip_strategy_outputs,
     )
 
 

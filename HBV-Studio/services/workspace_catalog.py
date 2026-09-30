@@ -205,7 +205,9 @@ def build_empty_workspace(name: str = "新流域工作区", profile: str = "", c
         },
         "气象策略": {
             "降水方案": "grid_only",
-            "station_correction_algorithm": "occurrence_amount_v2",
+            "station_correction_algorithm": "monthly_transfer_v3",
+            "station_rule_training_start": "",
+            "station_rule_training_end": "",
             "降水来源": "era5",
             "降水源": "era5",
             "站点降水_csv": "",
@@ -320,7 +322,7 @@ def normalize_config_before_save(data: dict[str, Any], save_path: Path, context:
     boundary.setdefault("上游边界入流_csv", "")
     boundary.setdefault("时间字段", "date")
     boundary.setdefault("流量字段", "flow")
-    boundary.setdefault("缺失填补", "preserve_missing")
+    boundary["缺失填补"] = boundary.get("缺失填补") or "preserve_missing"
     config["边界条件"] = boundary
 
     event_mode = dict(config.get("事件资料模式", {}) or {})
@@ -575,6 +577,11 @@ def instantiate_template(payload: dict[str, Any], context: WorkspaceCatalogConte
         config["流域编号"] = slugify_workspace_name(target_name)
     if template_id == "blank-workspace":
         config["运行目录"] = str(runtime_root_for_workspace(target_name, context.project_runtime_dir))
+        meteo = dict(config.get(context.meteo_key, {}))
+        meteo.setdefault("station_correction_algorithm", "monthly_transfer_v3")
+        meteo.setdefault("station_rule_training_start", "")
+        meteo.setdefault("station_rule_training_end", "")
+        config[context.meteo_key] = meteo
     workspace_path = context.workspace_dir / f"{slugify_workspace_name(target_name)}.json"
     context.write_json_file(workspace_path, normalize_config_before_save(config, workspace_path, context))
     return {

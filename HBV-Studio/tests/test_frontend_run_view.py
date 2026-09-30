@@ -52,6 +52,53 @@ class FrontendRunViewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_saved_time_ranges_are_distinct_from_configured_warmup(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/runView.js", "utf8"), context);
+            const runView = context.window.HBVStudioRunView;
+            const config = {
+              time_step_hours: 24,
+              warmup_start: "2022-01-01",
+              calib_start: "2025-06-01",
+              valid_end: "2025-10-31",
+            };
+            const partial = runView.runMetricsText({
+              time_config: config,
+              series_range: {
+                actual_start: "2025-06-01", actual_end: "2025-10-31",
+                warmup_covered: false, full_period_covered: false,
+              },
+            });
+            if (partial !== "已保存时段：2025-06-01 ~ 2025-10-31") {
+              throw new Error(`configured warmup must not become saved output: ${partial}`);
+            }
+            const complete = runView.runMetricsText({
+              time_config: config,
+              series_range: {
+                actual_start: "2022-01-01", actual_end: "2025-10-31",
+                warmup_covered: true, full_period_covered: true,
+              },
+            });
+            if (complete !== "已保存时段（含预热）：2022-01-01 ~ 2025-10-31") {
+              throw new Error(`saved warmup should be labeled only with coverage evidence: ${complete}`);
+            }
+            const unknown = runView.runMetricsText({ time_config: config });
+            if (!unknown.startsWith("配置时段") || unknown.includes("已保存") || unknown.includes("全时段")) {
+              throw new Error(`unknown saved output must be labeled as configuration: ${unknown}`);
+            }
+            """
+        )
+        result = subprocess.run(
+            ["node", "-e", script], cwd=STUDIO_DIR, text=True, capture_output=True, timeout=20
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_run_time_ranges_and_objective_statuses(self) -> None:
         script = textwrap.dedent(
             r"""

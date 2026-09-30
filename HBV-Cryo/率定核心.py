@@ -5092,7 +5092,7 @@ def detect_obs_eval_mask():
     if sim_index.empty:
         return default_mask, mode
 
-    keep = np.zeros(len(sim_index), dtype=bool)
+    complete_year_masks = []
     for year in sorted(set(sim_index.year)):
         year_start = pd.Timestamp(year=year, month=1, day=1)
         year_end = pd.Timestamp(year=year, month=12, day=31)
@@ -5102,33 +5102,48 @@ def detect_obs_eval_mask():
         if expected.empty:
             continue
         year_mask = sim_index.year == year
-        if int(np.sum(year_mask)) != len(expected):
-            continue
-        year_slice = sim_index[year_mask]
-        if year_slice[0] == expected[0] and year_slice[-1] == expected[-1]:
-            if (
-                Q_OBS_FULL is not None
-                and len(Q_OBS_FULL) == len(sim_index)
-                and not np.all(np.isfinite(Q_OBS_FULL[year_mask]))
-            ):
-                continue
+        if sim_index[year_mask].equals(expected):
+            complete_year_masks.append(year_mask)
+
+    finite_obs = (
+        np.isfinite(np.asarray(Q_OBS_FULL))
+        if Q_OBS_FULL is not None and len(Q_OBS_FULL) == len(sim_index)
+        else None
+    )
+    keep = np.zeros(len(sim_index), dtype=bool)
+    for year_mask in complete_year_masks:
+        if finite_obs is None or np.all(finite_obs[year_mask]):
             keep[year_mask] = True
 
-    if np.any(keep) and Q_OBS_FULL is not None and len(Q_OBS_FULL) == len(sim_index):
-        def _segment_lost_valid_obs(segment_mask):
-            if segment_mask is None or len(segment_mask) != len(sim_index):
-                return False
-            segment_mask = np.asarray(segment_mask, dtype=bool)
-            if not np.any(segment_mask):
-                return False
-            before = np.isfinite(Q_OBS_FULL[segment_mask])
-            if not np.any(before):
-                return False
-            after = np.isfinite(Q_OBS_FULL[segment_mask & keep])
-            return not np.any(after)
+    # Select complete observed years within each scoring period independently.
+    # A held-out gap, or its fallback, must not change calibration samples.
+    period_selections = []
+    for raw_period_mask in (CALIB_MASK, VALID_MASK):
+        if raw_period_mask is None:
+            continue
+        period_mask = np.asarray(raw_period_mask, dtype=bool)
+        if period_mask.shape != default_mask.shape or not np.any(period_mask):
+            continue
+        period_keep = np.zeros(len(sim_index), dtype=bool)
+        for year_mask in complete_year_masks:
+            if not np.all(period_mask[year_mask]):
+                continue
+            if finite_obs is None or np.all(finite_obs[year_mask]):
+                period_keep[year_mask] = True
+        fallback = not np.any(period_keep)
+        if fallback:
+            period_keep = period_mask.copy()
+        period_selections.append((period_mask, period_keep, fallback))
 
-        if _segment_lost_valid_obs(CALIB_MASK) or _segment_lost_valid_obs(VALID_MASK):
+    if period_selections:
+        if all(fallback for _, _, fallback in period_selections):
             return default_mask, "all_valid"
+        # Apply validation first so a legacy overlap remains owned by calibration.
+        for period_mask, period_keep, _ in reversed(period_selections):
+            keep[period_mask] = period_keep[period_mask]
+        if any(fallback for _, _, fallback in period_selections):
+            return keep, "full_year_with_period_fallback"
+        return keep, mode
 
     if np.any(keep):
         return keep, mode
@@ -8165,18 +8180,21 @@ def build_daily_unified_objective_meta(profile_name=None):
     profile_label = "统一日尺度率定" if profile_name == "daily" else "小时尺度率定"
     return {
         "type": OBJECTIVE_FAMILY_DAILY,
+        "objective_scoring_policy": daily_unified_objective.OBJECTIVE_SCORING_POLICY,
+        "optimization_period": "calibration_period",
+        "validation_diagnostic_only": True,
         "profile": profile_name,
         "label": profile_label,
-        "summary": "唯一正式主线：flow-first guarded objective；flow 与 flow_guard 优先，非 flow 项封顶排序，diagnostics 只解释不计分。",
+        "summary": "日尺度率定仅以率定期实测调参：flow 与 flow_guard 优先，非 flow 项封顶排序；验证期指标只展示，不参与优化或选优。",
         "formula": "flow + flow_guard + min(seasonality + process_signatures + cryo_consistency + external_evidence, nonflow_cap) + ice_dominance_guard",
         "weights": {
             "flow": {
                 "nse_calibration": 1.0,
                 "log_nse_calibration": 0.35,
-                "nse_validation": 0.35,
-                "log_nse_validation": 0.1225,
+                "nse_validation": 0.0,
+                "log_nse_validation": 0.0,
                 "pbias_calibration": 0.10,
-                "pbias_validation": 0.10,
+                "pbias_validation": 0.0,
             },
             "flow_guard": {
                 "nse_calibration_floor": 0.60,
@@ -8185,6 +8203,13 @@ def build_daily_unified_objective_meta(profile_name=None):
                 "kge_validation_floor": 0.65,
                 "abs_pbias_calibration_max": 15.0,
                 "abs_pbias_validation_max": 15.0,
+                "nse_calibration_weight": 3.0,
+                "kge_calibration_weight": 2.0,
+                "pbias_calibration_weight": 1.5,
+                "nse_validation_weight": 0.0,
+                "kge_validation_weight": 0.0,
+                "pbias_validation_weight": 0.0,
+                "validation_diagnostic_only": True,
             },
             "seasonality": {
                 "warm_fraction": 0.10,
@@ -8224,9 +8249,12 @@ def build_daily_unified_objective_meta(profile_name=None):
         "diagnostic_only_constraints": {
             "glacier_fraction_window": True,
             "interbasin_residual": not bool(INTERVAL_OBJECTIVE_GUARD_ENABLED),
+            "validation_flow_metrics": True,
         },
         "notes": [
-            "flow 主体项沿用现有成熟 NSE / logNSE / PBIAS 骨架，并记录 KGE 供 flow_guard 使用。",
+            "flow 只使用率定期 NSE / logNSE / PBIAS；flow_guard 只使用率定期 NSE / KGE / PBIAS。",
+            "验证期指标继续计算和展示，权重和罚项固定为零；MC、全局搜索和精修按同一率定目标选优。",
+            "最优参数冻结后，在预热、率定和验证的连续模拟状态上评价验证期，不以验证实测再次调整参数。",
             "flow_guard 为连续软惩罚；数据不足的项跳过，不直接 hard fail。",
             "季节性、水文过程特征和冰雪过程一致性作为辅助评价项；外部冰融水参考约束默认不启用。",
             "ice_dominance_guard 是宽松过程保护项，防止无外部证据时 q_ice 极端支配。",
@@ -8350,6 +8378,38 @@ def current_objective_profile():
     return base_profile
 
 
+def compute_flow_component_fractions(q_total, q_local, q_boundary, q_rain, q_snow, q_ice, observations):
+    """Use the same finite outlet/observation pairs for every numerator and denominator."""
+    total = np.asarray(q_total, dtype=np.float64)
+    observed = np.asarray(observations, dtype=np.float64)
+    count = min(len(total), len(observed))
+    common = np.isfinite(total[:count]) & np.isfinite(observed[:count])
+    components = {
+        "total": total,
+        "local": np.asarray(q_local, dtype=np.float64),
+        "boundary": np.asarray(q_boundary, dtype=np.float64),
+        "rain": np.asarray(q_rain, dtype=np.float64),
+        "snow": np.asarray(q_snow, dtype=np.float64),
+        "ice": np.asarray(q_ice, dtype=np.float64),
+    }
+    sums = {name: float(np.sum(values[:count][common])) for name, values in components.items()}
+
+    def fraction(numerator, denominator):
+        return sums[numerator] / sums[denominator] if sums[denominator] > 0.0 else float("nan")
+
+    return {
+        "sample_count": int(np.sum(common)),
+        "boundary_inflow_fraction": fraction("boundary", "total"),
+        "local_runoff_fraction": fraction("local", "total"),
+        "rain_fraction": fraction("rain", "total"),
+        "snow_fraction": fraction("snow", "total"),
+        "ice_fraction": fraction("ice", "total"),
+        "local_rain_fraction": fraction("rain", "local"),
+        "local_snow_fraction": fraction("snow", "local"),
+        "local_ice_fraction": fraction("ice", "local"),
+    }
+
+
 def save_results(result):
     elapsed_total = time.time() - start_time
     selected_stage = str(getattr(result, "result_stage", "") or "").strip().lower()
@@ -8419,26 +8479,12 @@ def save_results(result):
     else:
         reliability_notes = []
 
-    den_q_cal = np.nansum(q_sim_calib)
-    den_q_val = np.nansum(q_sim_valid)
-    den_local_cal = np.nansum(q_local_calib)
-    den_local_val = np.nansum(q_local_valid)
-    boundary_frac_cal = float(np.nansum(q_boundary_calib) / den_q_cal) if den_q_cal > 0 else 0.0
-    local_frac_cal = float(np.nansum(q_local_calib) / den_q_cal) if den_q_cal > 0 else 0.0
-    boundary_frac_val = float(np.nansum(q_boundary_valid) / den_q_val) if den_q_val > 0 else 0.0
-    local_frac_val = float(np.nansum(q_local_valid) / den_q_val) if den_q_val > 0 else 0.0
-    rain_frac_cal = float(np.nansum(rain_calib) / den_q_cal) if den_q_cal > 0 else 0.0
-    snow_frac_cal = float(np.nansum(snow_calib) / den_q_cal) if den_q_cal > 0 else 0.0
-    ice_frac_cal = float(np.nansum(ice_calib) / den_q_cal) if den_q_cal > 0 else 0.0
-    local_rain_frac_cal = float(np.nansum(rain_calib) / den_local_cal) if den_local_cal > 0 else 0.0
-    local_snow_frac_cal = float(np.nansum(snow_calib) / den_local_cal) if den_local_cal > 0 else 0.0
-    local_ice_frac_cal = float(np.nansum(ice_calib) / den_local_cal) if den_local_cal > 0 else 0.0
-    rain_frac_val = float(np.nansum(rain_valid) / den_q_val) if den_q_val > 0 else 0.0
-    snow_frac_val = float(np.nansum(snow_valid) / den_q_val) if den_q_val > 0 else 0.0
-    ice_frac_val = float(np.nansum(ice_valid) / den_q_val) if den_q_val > 0 else 0.0
-    local_rain_frac_val = float(np.nansum(rain_valid) / den_local_val) if den_local_val > 0 else 0.0
-    local_snow_frac_val = float(np.nansum(snow_valid) / den_local_val) if den_local_val > 0 else 0.0
-    local_ice_frac_val = float(np.nansum(ice_valid) / den_local_val) if den_local_val > 0 else 0.0
+    fractions_cal = compute_flow_component_fractions(
+        q_sim_calib, q_local_calib, q_boundary_calib, rain_calib, snow_calib, ice_calib, Q_OBS_CALIB,
+    )
+    fractions_val = compute_flow_component_fractions(
+        q_sim_valid, q_local_valid, q_boundary_valid, rain_valid, snow_valid, ice_valid, Q_OBS_VALID,
+    )
 
     run_dir = os.path.join(RUNS_DIR, f"hbv_cryo_{args.prec_source}_{args.glacier_mode}_{RUN_ID}")
     os.makedirs(run_dir, exist_ok=True)
@@ -8484,7 +8530,9 @@ def save_results(result):
         with open(os.path.join(run_dir, water_balance_file), "w", encoding="utf-8") as fh:
             json_dump_safe(water_balance_diagnostics, fh, indent=2)
 
-    export_start = max(int(WARMUP_STEPS or 0), 0)
+    # Retain warmup output; calibration/validation masks still own all scoring.
+    # A missing boundary leaves outlet flow unknown while local components remain available.
+    export_start = 0
     q_sim_export = q_sim[export_start:]
     q_local_export = q_local[export_start:]
     q_boundary_export = q_boundary[export_start:]
@@ -8893,14 +8941,15 @@ def save_results(result):
                 "log_nse": round(metrics["log_nse_cal"], 4) if np.isfinite(metrics["log_nse_cal"]) else None,
                 "pbias": round(metrics["pbias_cal"], 2) if np.isfinite(metrics["pbias_cal"]) else None,
                 "rmse_m3s": round(metrics["rmse_cal"], 4) if np.isfinite(metrics["rmse_cal"]) else None,
-                "boundary_inflow_fraction": round(boundary_frac_cal, 4),
-                "local_runoff_fraction": round(local_frac_cal, 4),
-                "rain_fraction": round(rain_frac_cal, 4),
-                "snow_fraction": round(snow_frac_cal, 4),
-                "ice_fraction": round(ice_frac_cal, 4),
-                "local_rain_fraction": round(local_rain_frac_cal, 4),
-                "local_snow_fraction": round(local_snow_frac_cal, 4),
-                "local_ice_fraction": round(local_ice_frac_cal, 4),
+                "fraction_sample_count": fractions_cal["sample_count"],
+                "boundary_inflow_fraction": round(fractions_cal["boundary_inflow_fraction"], 4),
+                "local_runoff_fraction": round(fractions_cal["local_runoff_fraction"], 4),
+                "rain_fraction": round(fractions_cal["rain_fraction"], 4),
+                "snow_fraction": round(fractions_cal["snow_fraction"], 4),
+                "ice_fraction": round(fractions_cal["ice_fraction"], 4),
+                "local_rain_fraction": round(fractions_cal["local_rain_fraction"], 4),
+                "local_snow_fraction": round(fractions_cal["local_snow_fraction"], 4),
+                "local_ice_fraction": round(fractions_cal["local_ice_fraction"], 4),
             },
             "validation": {
                 "sample_count": int(metrics["obs_count_val"]),
@@ -8912,14 +8961,15 @@ def save_results(result):
                 "log_nse": round(metrics["log_nse_val"], 4) if np.isfinite(metrics["log_nse_val"]) else None,
                 "pbias": round(metrics["pbias_val"], 2) if np.isfinite(metrics["pbias_val"]) else None,
                 "rmse_m3s": round(metrics["rmse_val"], 4) if np.isfinite(metrics["rmse_val"]) else None,
-                "boundary_inflow_fraction": round(boundary_frac_val, 4),
-                "local_runoff_fraction": round(local_frac_val, 4),
-                "rain_fraction": round(rain_frac_val, 4),
-                "snow_fraction": round(snow_frac_val, 4),
-                "ice_fraction": round(ice_frac_val, 4),
-                "local_rain_fraction": round(local_rain_frac_val, 4),
-                "local_snow_fraction": round(local_snow_frac_val, 4),
-                "local_ice_fraction": round(local_ice_frac_val, 4),
+                "fraction_sample_count": fractions_val["sample_count"],
+                "boundary_inflow_fraction": round(fractions_val["boundary_inflow_fraction"], 4),
+                "local_runoff_fraction": round(fractions_val["local_runoff_fraction"], 4),
+                "rain_fraction": round(fractions_val["rain_fraction"], 4),
+                "snow_fraction": round(fractions_val["snow_fraction"], 4),
+                "ice_fraction": round(fractions_val["ice_fraction"], 4),
+                "local_rain_fraction": round(fractions_val["local_rain_fraction"], 4),
+                "local_snow_fraction": round(fractions_val["local_snow_fraction"], 4),
+                "local_ice_fraction": round(fractions_val["local_ice_fraction"], 4),
             },
         },
         "glacier_reference_comparison": {

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import rasterio
+import profile_runner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "公共"))
 
@@ -28,7 +29,8 @@ WET_STATION_MEAN_MM = 0.10
 RATIO_CLIP = (0.2, 5.0)
 STATION_CORRECTION_ALGORITHM_V2 = "occurrence_amount_v2"
 STATION_CORRECTION_ALGORITHM_LEGACY = "legacy_ratio_v1"
-DEFAULT_STATION_CORRECTION_ALGORITHM = STATION_CORRECTION_ALGORITHM_V2
+STATION_CORRECTION_ALGORITHM_V3 = "monthly_transfer_v3"
+DEFAULT_STATION_CORRECTION_ALGORITHM = STATION_CORRECTION_ALGORITHM_V3
 CONFIG_FALLBACK_STATION_CORRECTION_ALGORITHM = STATION_CORRECTION_ALGORITHM_LEGACY
 MIN_STATION_SUPPORT_RADIUS_M = 30_000.0
 OCCURRENCE_DECISION_THRESHOLD = 0.5
@@ -43,6 +45,19 @@ MIN_DAILY_PRECIP_HOURS = 24
 TRANSFER_RULES_JSON = "station_bias_transfer_rules.json"
 TRANSFER_RULES_NPZ = "station_bias_transfer_rules.npz"
 TRANSFER_RULES_SCHEMA = "station_bias_transfer_rules_v1"
+MONTHLY_TRANSFER_RULES_JSON = "station_bias_monthly_transfer_rules_v3.json"
+MONTHLY_TRANSFER_RULES_NPZ = "station_bias_monthly_transfer_rules_v3.npz"
+MONTHLY_TRANSFER_RULES_SCHEMA = "station_bias_monthly_transfer_rules_v3"
+CORRECTION_CACHE_JSON = "station_bias_processing_cache_v3.json"
+CORRECTION_CACHE_SCHEMA = "station_bias_processing_cache_v3"
+# Seven effective observation days and 1 mm of paired grid precipitation are
+# minimum support, not an assertion that a month or a high mountain is validated.
+MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS = 7.0
+MONTHLY_TRANSFER_MIN_GRID_TOTAL_MM = 1.0
+# Do not hide small observed/grid ratios behind the old daily lower bound of 0.2.
+# An upper safety bound is reported as a QC failure rather than silently trusted.
+MONTHLY_TRANSFER_RATIO_CLIP = (0.0, 10.0)
+CORRECTION_IMPLEMENTATION_REVISION = "monthly-transfer-and-observed-only-v2-conservation-1"
 TIME_BASIS_CONTINUOUS = "continuous"
 TIME_BASIS_EVENT_WINDOWS = "event_windows"
 TIME_BASIS_FORECAST_WINDOW = "forecast_window"
@@ -513,16 +528,39 @@ def station_series_integrity_diagnostics(
     }
 
 
+def portable_identity_path(value: str | Path) -> str:
+    """Use the startup repair's path representation before identity hashing."""
+    text = str(value)
+    if not text:
+        return text
+    if text.startswith(("__PROJECT_ROOT__", "__GUI_ROOT__")):
+        return text.replace("\\", "/")
+    candidate = Path(text).expanduser()
+    if not candidate.is_absolute():
+        return text
+    return profile_runner.to_portable_path(str(candidate.resolve(strict=False)))
+
+
+def portable_identity_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: portable_identity_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [portable_identity_value(item) for item in value]
+    if isinstance(value, (str, Path)):
+        return portable_identity_path(value)
+    return value
+
+
 def sha256_file_identity(path: Path) -> dict[str, Any]:
     resolved = Path(path).resolve(strict=False)
     if not resolved.exists() or not resolved.is_file():
-        return {"path": str(resolved), "available": False}
+        return {"path": portable_identity_path(resolved), "available": False}
     digest = hashlib.sha256()
     with resolved.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return {
-        "path": str(resolved),
+        "path": portable_identity_path(resolved),
         "available": True,
         "size_bytes": int(resolved.stat().st_size),
         "sha256": digest.hexdigest(),
@@ -546,7 +584,7 @@ def raster_series_fingerprint(
             else source_path
         )
         if not path.exists():
-            missing_files.append(str(path.resolve(strict=False)))
+            missing_files.append(portable_identity_path(path.resolve(strict=False)))
             continue
         identity = sha256_file_identity(path)
         file_count += 1
@@ -1274,15 +1312,16 @@ def summarize_precipitation_hydro_diagnostics(
         if np.any(station_base_mask):
             obs_for_base.extend(obs[station_base_mask].astype("float64").tolist())
             base_at_station.extend(base_station_values[station_base_mask].astype("float64").tolist())
-            raw_ratios = obs[station_base_mask] / np.maximum(base_station_values[station_base_mask], MIN_GRID_PRECIP_MM)
-            clipped = np.abs(raw_ratios - np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])) > 1e-9
-            if np.any(clipped):
-                clipped_step_count += 1
-                clipped_station_sample_count += int(np.sum(clipped))
-            obs_mean = float(np.mean(obs[station_base_mask]))
-            grid_mean = float(np.mean(base_station_values[station_base_mask]))
-            if grid_mean < MIN_GRID_PRECIP_MM and obs_mean >= WET_STATION_MEAN_MM:
-                occurrence_repair_step_count += 1
+            if algorithm != STATION_CORRECTION_ALGORITHM_V3:
+                raw_ratios = obs[station_base_mask] / np.maximum(base_station_values[station_base_mask], MIN_GRID_PRECIP_MM)
+                clipped = np.abs(raw_ratios - np.clip(raw_ratios, RATIO_CLIP[0], RATIO_CLIP[1])) > 1e-9
+                if np.any(clipped):
+                    clipped_step_count += 1
+                    clipped_station_sample_count += int(np.sum(clipped))
+                obs_mean = float(np.mean(obs[station_base_mask]))
+                grid_mean = float(np.mean(base_station_values[station_base_mask]))
+                if grid_mean < MIN_GRID_PRECIP_MM and obs_mean >= WET_STATION_MEAN_MM:
+                    occurrence_repair_step_count += 1
 
         station_corrected_mask = obs_valid & np.isfinite(corrected_station_values) & (corrected_station_values >= 0.0)
         if np.any(station_corrected_mask):
@@ -1573,7 +1612,7 @@ def summarize_record_participation(
 
 def write_strategy_summary(target_dir: Path, summary: dict[str, Any]) -> Path:
     path = target_dir / "precipitation_strategy_summary.json"
-    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    path.write_text(json.dumps(portable_identity_value(summary), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return path
 
 
@@ -1843,13 +1882,24 @@ def fit_grid_bias_transfer_rules(
     station_series: pd.DataFrame,
     *,
     overwrite: bool = False,
+    step_hours: float = 24.0,
+    input_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     json_path, npz_path = _rule_paths(target_dir)
+    identity = _correction_input_identity(
+        records, stations, station_series, STATION_CORRECTION_ALGORITHM_LEGACY,
+        step_hours, None, input_identity,
+    )
+    identity_sha256 = _json_digest(identity)
     if json_path.exists() and npz_path.exists() and not overwrite:
         try:
             summary = json.loads(json_path.read_text(encoding="utf-8"))
-            summary["loaded_existing"] = True
-            return summary
+            if (
+                summary.get("identity_sha256") == identity_sha256
+                and summary.get("npz_sha256") == sha256_file_identity(npz_path).get("sha256")
+            ):
+                summary["loaded_existing"] = True
+                return summary
         except Exception:
             pass
 
@@ -1912,8 +1962,10 @@ def fit_grid_bias_transfer_rules(
             "status": "no_training_samples",
             "training_days": 0,
             "valid_station_samples": 0,
-            "json_path": str(json_path.resolve(strict=False)),
-            "npz_path": str(npz_path.resolve(strict=False)),
+            "identity": identity,
+            "identity_sha256": identity_sha256,
+            "json_path": portable_identity_path(json_path.resolve(strict=False)),
+            "npz_path": portable_identity_path(npz_path.resolve(strict=False)),
         }
         target_dir.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1959,11 +2011,14 @@ def fit_grid_bias_transfer_rules(
         "global_ratio_max": safe_stat(ratio_finite, np.max),
         "global_residual_mean_mm": safe_stat(residual_finite, np.mean),
         "raw_station_ratio_mean": safe_stat(raw_ratio_arr, np.mean),
-        "json_path": str(json_path.resolve(strict=False)),
-        "npz_path": str(npz_path.resolve(strict=False)),
+        "identity": identity,
+        "identity_sha256": identity_sha256,
+        "json_path": portable_identity_path(json_path.resolve(strict=False)),
+        "npz_path": portable_identity_path(npz_path.resolve(strict=False)),
     }
     target_dir.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(npz_path, **arrays)
+    summary["npz_sha256"] = sha256_file_identity(npz_path)["sha256"]
     json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return summary
 
@@ -1988,6 +2043,22 @@ def apply_transfer_rule_to_array(arr: np.ndarray, rules: dict[str, Any], ts: pd.
     if arrays is None:
         return arr.copy(), False, "none"
     month = int(pd.Timestamp(ts).month)
+    summary = dict(rules.get("summary", {}) or {})
+    if summary.get("schema") == MONTHLY_TRANSFER_RULES_SCHEMA:
+        ratio = np.asarray(arrays.get(f"month_{month:02d}_ratio"), dtype="float64")
+        if ratio.shape != arr.shape or not np.all(np.isfinite(ratio)) or np.any(ratio < 0.0):
+            raise ValueError("月降水订正规则缺失、格网不匹配或倍率无效，不能按原场视作成功。")
+        month_meta = dict(dict(summary.get("monthly", {}) or {}).get(f"{month:02d}", {}) or {})
+        if month_meta.get("status") not in {"supported", "unverified_identity"}:
+            raise ValueError("月降水订正规则缺少月份支持度记录。")
+        if month_meta["status"] == "unverified_identity" and not np.all(ratio == 1.0):
+            raise ValueError("无观测支持月份必须使用明确记录的原场倍率1。")
+        out = arr.copy()
+        valid = np.isfinite(out)
+        if np.any(out[valid] < 0.0):
+            raise ValueError("基础格点降水存在负值。")
+        out[valid] *= ratio[valid]
+        return out, True, "identity_unverified" if month_meta["status"] == "unverified_identity" else f"month_{month:02d}"
     monthly = dict(dict(rules.get("summary", {}) or {}).get("monthly", {}) or {})
     month_meta = dict(monthly.get(f"{month:02d}", {}) or {})
     ratio_key = f"month_{month:02d}_ratio"
@@ -2029,14 +2100,29 @@ def apply_transfer_rule_to_raster(
     *,
     overwrite: bool = True,
 ) -> tuple[bool, str]:
-    if target_path.exists() and not overwrite:
+    is_monthly = dict(rules.get("summary", {}) or {}).get("schema") == MONTHLY_TRANSFER_RULES_SCHEMA
+    if target_path.exists() and not overwrite and not is_monthly:
         return True, "existing"
     with rasterio.open(source_path) as src:
+        if is_monthly:
+            if _grid_identity(src) != rules["summary"].get("grid"):
+                raise ValueError("预报或应用格网与训练月降水订正规则格网不一致。")
         arr = src.read(1).astype("float64")
         nodata = src.nodata
         if nodata is not None:
             arr[arr == nodata] = np.nan
         out, applied, source = apply_transfer_rule_to_array(arr, rules, pd.Timestamp(ts))
+        if is_monthly and target_path.exists() and not overwrite:
+            with rasterio.open(target_path) as existing:
+                if _grid_identity(existing) == _grid_identity(src):
+                    previous = existing.read(1).astype("float64")
+                    if existing.nodata is not None:
+                        previous[previous == existing.nodata] = np.nan
+                    valid = np.isfinite(out)
+                    if np.array_equal(valid, np.isfinite(previous)) and np.allclose(
+                        previous[valid], out[valid], rtol=1e-6, atol=1e-6,
+                    ):
+                        return applied, source
         profile = src.profile.copy()
         profile.update(dtype="float32", compress="lzw")
         if nodata is None:
@@ -2170,6 +2256,657 @@ def no_available_station_steps(
     return missing
 
 
+def _json_digest(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _frame_digest(frame: pd.DataFrame) -> str:
+    digest = hashlib.sha256()
+    digest.update(_json_digest([str(item) for item in frame.columns]).encode("ascii"))
+    digest.update(pd.util.hash_pandas_object(frame, index=True).to_numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _rule_arrays_digest(arrays: dict[str, np.ndarray]) -> str:
+    digest = hashlib.sha256()
+    for key in sorted(arrays):
+        values = np.ascontiguousarray(arrays[key])
+        digest.update(_json_digest([key, values.dtype.str, list(values.shape)]).encode("ascii"))
+        digest.update(values.tobytes())
+    return digest.hexdigest()
+
+
+def _grid_identity(src: rasterio.io.DatasetReader) -> dict[str, Any]:
+    return {
+        "shape": [int(src.height), int(src.width)],
+        "crs": str(src.crs) if src.crs is not None else "",
+        "transform": [float(item) for item in src.transform.to_gdal()],
+    }
+
+
+def _algorithm_identity(algorithm: str, step_hours: float) -> dict[str, Any]:
+    return {
+        "algorithm": algorithm,
+        "implementation_revision": CORRECTION_IMPLEMENTATION_REVISION,
+        "implementation_sha256": sha256_file_identity(Path(__file__)).get("sha256", "bundled"),
+        "step_hours": float(step_hours),
+        "idw_power": float(IDW_POWER),
+        "idw_min_distance_m": float(IDW_MIN_DISTANCE_M),
+        "monthly_min_effective_days": float(MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS),
+        "monthly_min_grid_total_mm": float(MONTHLY_TRANSFER_MIN_GRID_TOTAL_MM),
+        "monthly_ratio_clip": list(MONTHLY_TRANSFER_RATIO_CLIP),
+        "daily_ratio_clip": list(RATIO_CLIP),
+        "wet_threshold_mm": float(WET_STATION_MEAN_MM),
+        "exact_dry_confidence": float(EXACT_DRY_CONFIDENCE),
+        "occurrence_decision_threshold": float(OCCURRENCE_DECISION_THRESHOLD),
+        "minimum_station_support_radius_m": float(MIN_STATION_SUPPORT_RADIUS_M),
+        "max_monthly_redistribution_factor": float(MAX_MONTHLY_REDISTRIBUTION_FACTOR),
+        "max_monthly_removed_fraction": float(MAX_MONTHLY_REMOVED_FRACTION),
+    }
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(portable_identity_value(payload), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _filter_rule_training_records(
+    records: list[tuple[pd.Timestamp, Path]],
+    *,
+    training_start: Any = None,
+    training_end: Any = None,
+    step_hours: float = 24.0,
+) -> list[tuple[pd.Timestamp, Path]]:
+    start = pd.Timestamp(training_start) if str(training_start or "").strip() else None
+    end = pd.Timestamp(training_end) if str(training_end or "").strip() else None
+    if end is not None and float(step_hours) < 24.0 and is_date_only_string(str(training_end)):
+        end = end + pd.Timedelta(days=1) - pd.Timedelta(hours=float(step_hours))
+    if start is not None and end is not None and end < start:
+        raise ValueError("降水订正规则训练结束时间不能早于开始时间。")
+    return sorted(
+        [(pd.Timestamp(ts), Path(path)) for ts, path in records
+         if (start is None or pd.Timestamp(ts) >= start) and (end is None or pd.Timestamp(ts) <= end)],
+        key=lambda item: item[0],
+    )
+
+
+def fit_monthly_transfer_rules(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    *,
+    overwrite: bool = False,
+    step_hours: float = 24.0,
+    training_start: Any = None,
+    training_end: Any = None,
+    input_identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Fit frozen calendar-month amount rules from the same paired observations.
+
+    Real zeros enter both sums. Missing observations enter neither sum. No daily
+    ratios, additive residuals, global winter fallback or occurrence decisions are
+    learned. Station ratios are anchored at their sampled grid cells, then IDW
+    interpolated; coincident station cells pool their paired precipitation totals.
+    """
+    if not np.isfinite(float(step_hours)) or float(step_hours) <= 0.0:
+        raise ValueError("降水订正规则时间步长必须大于零。")
+    training_records = _filter_rule_training_records(
+        records, training_start=training_start, training_end=training_end, step_hours=step_hours,
+    )
+    if not training_records:
+        raise ValueError("降水订正规则训练范围内没有基础格点降水文件。")
+    base_identity = raster_series_fingerprint(training_records)
+    if base_identity["missing_file_count"]:
+        raise ValueError("降水订正规则训练的基础格点文件缺失，不能复用旧规则。")
+    identity = {
+        "schema": MONTHLY_TRANSFER_RULES_SCHEMA,
+        "algorithm": _algorithm_identity(STATION_CORRECTION_ALGORITHM_V3, step_hours),
+        "base_series": base_identity,
+        "station_metadata_content_sha256": _frame_digest(stations),
+        "station_series_content_sha256": _frame_digest(station_series),
+        "requested_training_start": str(training_start or ""),
+        "requested_training_end": str(training_end or ""),
+        "training_input_start": training_records[0][0].isoformat(),
+        "training_input_end": training_records[-1][0].isoformat(),
+        "input_files": portable_identity_value(dict(input_identity or {})),
+    }
+    with rasterio.open(training_records[0][1]) as first_src:
+        identity["grid"] = _grid_identity(first_src)
+    identity_sha256 = _json_digest(identity)
+    json_path = Path(target_dir) / MONTHLY_TRANSFER_RULES_JSON
+    npz_path = Path(target_dir) / MONTHLY_TRANSFER_RULES_NPZ
+    existing = load_monthly_transfer_rules(target_dir, expected_fingerprint=identity_sha256)
+    if existing is not None and not overwrite:
+        summary = dict(existing["summary"])
+        summary["loaded_existing"] = True
+        return summary
+
+    station_ids = [str(item) for item in stations["station_id"].tolist()]
+    station_weights = stations["weight"].to_numpy(dtype="float64")
+    station_count = len(station_ids)
+    obs_totals = np.zeros((12, station_count), dtype="float64")
+    grid_totals = np.zeros((12, station_count), dtype="float64")
+    paired_counts = np.zeros((12, station_count), dtype="int64")
+    paired_days: list[list[set[pd.Timestamp]]] = [[set() for _ in station_ids] for _ in range(12)]
+    month_steps = np.zeros(12, dtype="int64")
+    month_days: list[set[pd.Timestamp]] = [set() for _ in range(12)]
+    paired_timestamps: list[pd.Timestamp] = []
+    anchor_rows: np.ndarray | None = None
+    anchor_cols: np.ndarray | None = None
+    active_mask: np.ndarray | None = None
+    transform: Any = None
+    crs: Any = None
+    seen_timestamps: set[pd.Timestamp] = set()
+    for ts, path in training_records:
+        if ts in seen_timestamps:
+            raise ValueError(f"降水订正规则训练存在重复时间：{ts}。")
+        seen_timestamps.add(ts)
+        with rasterio.open(path) as src:
+            if _grid_identity(src) != identity["grid"]:
+                raise ValueError(f"降水订正规则训练格网不一致：{path}")
+            arr = src.read(1).astype("float64")
+            if src.nodata is not None:
+                arr[arr == src.nodata] = np.nan
+            if np.any(np.isfinite(arr) & (arr < 0.0)):
+                raise ValueError(f"基础格点降水存在负值：{path}")
+            if active_mask is None:
+                active_mask = np.isfinite(arr)
+                transform = src.transform
+                crs = src.crs
+                rr, cc = rasterio.transform.rowcol(
+                    src.transform, stations["x"].to_numpy(), stations["y"].to_numpy(),
+                )
+                anchor_rows = np.asarray(rr, dtype="int64")
+                anchor_cols = np.asarray(cc, dtype="int64")
+            else:
+                active_mask |= np.isfinite(arr)
+            grid_at_station = sample_station_values(src, stations)
+            obs = station_values_for_time(station_series, ts, station_ids)
+            valid = valid_station_observation_mask(obs, grid_at_station, station_weights)
+            if not np.any(valid):
+                continue
+            month_index = ts.month - 1
+            obs_totals[month_index, valid] += obs[valid]
+            grid_totals[month_index, valid] += grid_at_station[valid]
+            paired_counts[month_index, valid] += 1
+            for index in np.where(valid)[0]:
+                paired_days[month_index][int(index)].add(ts.normalize())
+            month_steps[month_index] += 1
+            month_days[month_index].add(ts.normalize())
+            paired_timestamps.append(ts)
+
+    assert active_mask is not None and anchor_rows is not None and anchor_cols is not None
+    rows, cols, target_x, target_y = grid_cell_coordinates(active_mask, transform)
+    arrays: dict[str, np.ndarray] = {}
+    monthly: dict[str, Any] = {}
+    supported_months: list[str] = []
+    unverified_months: list[str] = []
+    clipped_station_months = 0
+    unsupported_station_months = 0
+    for month_index in range(12):
+        month_key = f"{month_index + 1:02d}"
+        station_details: list[dict[str, Any]] = []
+        anchored: dict[tuple[int, int], list[int]] = {}
+        for station_index, station_id in enumerate(station_ids):
+            count = int(paired_counts[month_index, station_index])
+            day_count = len(paired_days[month_index][station_index])
+            effective_days = count * float(step_hours) / 24.0
+            grid_total = float(grid_totals[month_index, station_index])
+            observed_total = float(obs_totals[month_index, station_index])
+            supported = (
+                effective_days >= MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS
+                and day_count >= int(np.ceil(MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS))
+                and grid_total >= MONTHLY_TRANSFER_MIN_GRID_TOTAL_MM
+                and 0 <= anchor_rows[station_index] < active_mask.shape[0]
+                and 0 <= anchor_cols[station_index] < active_mask.shape[1]
+            )
+            raw_ratio = observed_total / grid_total if grid_total > 0.0 else None
+            if supported:
+                reason = "paired_month_amount"
+                anchored.setdefault((int(anchor_rows[station_index]), int(anchor_cols[station_index])), []).append(station_index)
+            elif count == 0:
+                reason = "no_paired_observations"
+            elif effective_days < MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS or day_count < MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS:
+                reason = "insufficient_paired_days"
+            else:
+                reason = "insufficient_paired_grid_precipitation"
+            if count and not supported:
+                unsupported_station_months += 1
+            station_details.append({
+                "station_id": station_id,
+                "paired_steps": count,
+                "paired_days": day_count,
+                "effective_days": float(effective_days),
+                "observed_total_mm": observed_total,
+                "grid_total_mm": grid_total,
+                "raw_ratio": raw_ratio,
+                "supported": bool(supported),
+                "status": reason,
+            })
+        ratio_field = np.ones(active_mask.shape, dtype="float32")
+        support_details: dict[str, Any] = {}
+        if anchored:
+            anchor_cell_rows = np.asarray([cell[0] for cell in anchored], dtype="int64")
+            anchor_cell_cols = np.asarray([cell[1] for cell in anchored], dtype="int64")
+            sx = transform.c + (anchor_cell_cols + 0.5) * transform.a + (anchor_cell_rows + 0.5) * transform.b
+            sy = transform.f + (anchor_cell_cols + 0.5) * transform.d + (anchor_cell_rows + 0.5) * transform.e
+            raw_ratios = np.asarray([
+                float(np.sum(obs_totals[month_index, indices])) / float(np.sum(grid_totals[month_index, indices]))
+                for indices in anchored.values()
+            ])
+            clipped_ratios = np.clip(raw_ratios, *MONTHLY_TRANSFER_RATIO_CLIP)
+            month_clipped = int(np.count_nonzero(np.abs(clipped_ratios - raw_ratios) > 1e-12))
+            clipped_station_months += month_clipped
+            metric = metric_transformer_for_points(crs, np.concatenate([target_x, sx]), np.concatenate([target_y, sy]))
+            tx_m, ty_m = transform_metric_xy(target_x, target_y, metric)
+            sx_m, sy_m = transform_metric_xy(sx, sy, metric)
+            ratio_field[rows, cols] = idw_interpolate_to_points(
+                sx_m, sy_m, clipped_ratios, tx_m, ty_m,
+            ).astype("float32")
+            distances = nearest_station_distance_to_points(sx_m, sy_m, tx_m, ty_m)
+            support_radius = station_support_radius_m(sx_m, sy_m)
+            support_details = {
+                "anchor_cell_count": int(len(anchored)),
+                "ratio_clipped_anchor_count": month_clipped,
+                "raw_anchor_ratio_min": float(np.min(raw_ratios)),
+                "raw_anchor_ratio_max": float(np.max(raw_ratios)),
+                "station_support_radius_m": float(support_radius),
+                "maximum_nearest_station_distance_m": float(np.max(distances)) if distances.size else None,
+                "grid_cells_beyond_station_support": int(np.count_nonzero(distances > support_radius)),
+            }
+            supported_months.append(month_key)
+        else:
+            unverified_months.append(month_key)
+        arrays[f"month_{month_key}_ratio"] = ratio_field
+        monthly[month_key] = {
+            "training_days": int(len(month_days[month_index])),
+            "training_steps": int(month_steps[month_index]),
+            "valid_station_samples": int(np.sum(paired_counts[month_index])),
+            "supported_station_count": int(sum(bool(item["supported"]) for item in station_details)),
+            "status": "supported" if anchored else "unverified_identity",
+            "fallback": "" if anchored else "identity",
+            "ratio_mean": float(np.mean(ratio_field[rows, cols])) if rows.size else 1.0,
+            "ratio_min": float(np.min(ratio_field[rows, cols])) if rows.size else 1.0,
+            "ratio_max": float(np.max(ratio_field[rows, cols])) if rows.size else 1.0,
+            "station_samples": station_details,
+            **support_details,
+        }
+    qc_failures: list[str] = []
+    if not supported_months:
+        qc_failures.append("no_supported_months")
+    if clipped_station_months:
+        qc_failures.append("monthly_multiplier_exceeds_upper_safety_bound")
+    summary = {
+        "schema": MONTHLY_TRANSFER_RULES_SCHEMA,
+        "algorithm": STATION_CORRECTION_ALGORITHM_V3,
+        "available": True,
+        "status": "ok" if not qc_failures else "qc_failed",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "method": "same_paired_dates_observed_sum_divided_by_grid_sum_then_monthly_idw",
+        "occurrence_correction": "not_performed",
+        "independent_validation": "not_performed",
+        "unsupported_month_policy": "identity_unverified",
+        "spatial_extrapolation": "idw_without_elevation_adjustment",
+        "step_hours": float(step_hours),
+        "training_days": int(len({ts.normalize() for ts in paired_timestamps})),
+        "training_steps": int(len(paired_timestamps)),
+        "valid_station_samples": int(np.sum(paired_counts)),
+        "actual_training_start": paired_timestamps[0].isoformat() if paired_timestamps else "",
+        "actual_training_end": paired_timestamps[-1].isoformat() if paired_timestamps else "",
+        "minimum_effective_days": float(MONTHLY_TRANSFER_MIN_EFFECTIVE_DAYS),
+        "minimum_paired_grid_total_mm": float(MONTHLY_TRANSFER_MIN_GRID_TOTAL_MM),
+        "ratio_clip": list(MONTHLY_TRANSFER_RATIO_CLIP),
+        "clipped_station_months": int(clipped_station_months),
+        "unsupported_station_months": int(unsupported_station_months),
+        "supported_months": supported_months,
+        "unverified_months": unverified_months,
+        "monthly": monthly,
+        "grid": identity["grid"],
+        "shape": identity["grid"]["shape"],
+        "crs": identity["grid"]["crs"],
+        "transform": identity["grid"]["transform"],
+        "identity": identity,
+        "identity_sha256": identity_sha256,
+        "arrays_sha256": _rule_arrays_digest(arrays),
+        "quality_checks": {
+            "status": "passed" if not qc_failures else "failed",
+            "qc_blocked": bool(qc_failures),
+            "failures": qc_failures,
+            "grid_identity_checked": True,
+            "training_coverage": "partial_season_support" if unverified_months else "all_calendar_months_supported",
+            "same_paired_dates": True,
+            "real_zeros_included": True,
+        },
+        "json_path": portable_identity_path(json_path.resolve(strict=False)),
+        "npz_path": portable_identity_path(npz_path.resolve(strict=False)),
+    }
+    Path(target_dir).mkdir(parents=True, exist_ok=True)
+    temporary_npz = npz_path.with_name(npz_path.name + ".tmp")
+    with temporary_npz.open("wb") as handle:
+        np.savez_compressed(handle, **arrays)
+    temporary_npz.replace(npz_path)
+    summary["npz_sha256"] = sha256_file_identity(npz_path)["sha256"]
+    summary = portable_identity_value(summary)
+    summary["summary_content_sha256"] = _json_digest(summary)
+    _write_json_atomic(json_path, summary)
+    return summary
+
+
+def load_monthly_transfer_rules(
+    rule_dir: Path,
+    *,
+    expected_fingerprint: str | None = None,
+) -> dict[str, Any] | None:
+    json_path = Path(rule_dir) / MONTHLY_TRANSFER_RULES_JSON
+    npz_path = Path(rule_dir) / MONTHLY_TRANSFER_RULES_NPZ
+    if not json_path.exists() or not npz_path.exists():
+        return None
+    try:
+        summary = json.loads(json_path.read_text(encoding="utf-8"))
+        if summary.get("schema") != MONTHLY_TRANSFER_RULES_SCHEMA or not summary.get("available"):
+            return None
+        if summary.get("summary_content_sha256") != _json_digest({
+            key: value for key, value in summary.items() if key != "summary_content_sha256"
+        }):
+            return None
+        if summary.get("identity_sha256") != _json_digest(summary.get("identity")):
+            return None
+        if expected_fingerprint is not None and summary["identity_sha256"] != expected_fingerprint:
+            return None
+        if summary.get("npz_sha256") != sha256_file_identity(npz_path).get("sha256"):
+            return None
+        quality = dict(summary.get("quality_checks", {}) or {})
+        if (
+            quality.get("status") not in {"passed", "failed"}
+            or "qc_blocked" not in quality
+            or bool(quality["qc_blocked"]) != (quality["status"] == "failed")
+        ):
+            return None
+        with np.load(npz_path, allow_pickle=False) as loaded:
+            arrays = {key: np.asarray(loaded[key]).copy() for key in loaded.files}
+        if summary.get("arrays_sha256") != _rule_arrays_digest(arrays):
+            return None
+        shape = tuple(summary["grid"]["shape"])
+        if any(
+            f"month_{month:02d}_ratio" not in arrays
+            or arrays[f"month_{month:02d}_ratio"].shape != shape
+            or not np.all(np.isfinite(arrays[f"month_{month:02d}_ratio"]))
+            or np.any(arrays[f"month_{month:02d}_ratio"] < 0.0)
+            for month in range(1, 13)
+        ):
+            return None
+        return {"summary": summary, "arrays": arrays, "json_path": json_path, "npz_path": npz_path}
+    except Exception:
+        return None
+
+
+def _correction_input_identity(
+    records: list[tuple[pd.Timestamp, Path]],
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    algorithm: str,
+    step_hours: float,
+    transfer_rules: dict[str, Any] | None,
+    input_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source = raster_series_fingerprint(records)
+    if source["missing_file_count"]:
+        raise ValueError("基础格点降水文件缺失，不能复用旧订正结果。")
+    rules = dict(transfer_rules or {})
+    rule_summary = dict(rules.get("summary", {}) or {})
+    return {
+        "algorithm": _algorithm_identity(algorithm, step_hours),
+        "base_series": source,
+        "station_metadata_content_sha256": _frame_digest(stations),
+        "station_series_content_sha256": _frame_digest(station_series),
+        "rule_identity_sha256": rule_summary.get("identity_sha256", ""),
+        "rule_arrays_sha256": _rule_arrays_digest(dict(rules.get("arrays", {}) or {})),
+        "input_files": portable_identity_value(dict(input_identity or {})),
+    }
+
+
+def _read_correction_cache(
+    target_dir: Path,
+    records: list[tuple[pd.Timestamp, Path]],
+    input_sha256: str,
+) -> dict[str, Any] | None:
+    cache_path = Path(target_dir) / CORRECTION_CACHE_JSON
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        if payload.get("schema") != CORRECTION_CACHE_SCHEMA or payload.get("input_identity_sha256") != input_sha256:
+            return None
+        stats = dict(payload.get("processing_stats", {}) or {})
+        if (
+            payload.get("input_identity_sha256") != _json_digest(payload.get("input_identity"))
+            or payload.get("processing_stats_sha256") != _json_digest(stats)
+            or stats.get("input_identity_sha256") != input_sha256
+        ):
+            return None
+        quality = dict(stats.get("quality_checks", {}) or {})
+        if (
+            quality.get("status") not in {"passed", "failed"}
+            or "qc_blocked" not in quality
+            or bool(quality["qc_blocked"]) != (quality["status"] == "failed")
+        ):
+            return None
+        if int(quality.get("checked_steps", 0)) != len(records):
+            return None
+        if bool(stats.get("qc_blocked", False)) != bool(quality["qc_blocked"]):
+            return None
+        if stats.get("algorithm") == STATION_CORRECTION_ALGORITHM_V3:
+            if not quality.get("frozen_rule_values_checked") or not stats.get("rules_identity_sha256"):
+                return None
+        if stats.get("algorithm") == STATION_CORRECTION_ALGORITHM_V2:
+            monthly = dict(stats.get("monthly_conservation", {}) or {})
+            if "qc_blocked" not in monthly or not isinstance(monthly.get("months"), list):
+                return None
+        current_outputs = raster_series_fingerprint(records, directory=target_dir)
+        if current_outputs["missing_file_count"] or current_outputs != payload.get("output_identity"):
+            return None
+        stats["processed_steps"] = 0
+        stats["skipped_existing_steps"] = int(len(records))
+        stats["quality_evidence_reused"] = True
+        stats["qc_blocked"] = bool(stats.get("qc_blocked", False) or quality["qc_blocked"])
+        return stats
+    except Exception:
+        return None
+
+
+def _write_correction_cache(
+    target_dir: Path,
+    records: list[tuple[pd.Timestamp, Path]],
+    identity: dict[str, Any],
+    stats: dict[str, Any],
+) -> None:
+    outputs = raster_series_fingerprint(records, directory=target_dir)
+    if outputs["missing_file_count"]:
+        raise ValueError("订正降水输出不完整，不能建立有效质量检查记录。")
+    identity = portable_identity_value(identity)
+    stats = portable_identity_value(stats)
+    _write_json_atomic(Path(target_dir) / CORRECTION_CACHE_JSON, {
+        "schema": CORRECTION_CACHE_SCHEMA,
+        "input_identity": identity,
+        "input_identity_sha256": _json_digest(identity),
+        "output_identity": outputs,
+        "processing_stats": stats,
+        "processing_stats_sha256": _json_digest(stats),
+    })
+
+
+def _validate_correction_outputs(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    *,
+    transfer_rules: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Scan final files; v3 also verifies every value against its frozen rule."""
+    checked = 0
+    failures: list[str] = []
+    for ts, source_path in records:
+        output_path = Path(target_dir) / source_path.name
+        if not output_path.exists():
+            failures.append(f"missing_output:{source_path.name}")
+            continue
+        with rasterio.open(source_path) as src, rasterio.open(output_path) as dst:
+            if _grid_identity(src) != _grid_identity(dst):
+                failures.append(f"grid_mismatch:{source_path.name}")
+                continue
+            base = src.read(1).astype("float64")
+            out = dst.read(1).astype("float64")
+            if src.nodata is not None:
+                base[base == src.nodata] = np.nan
+            if dst.nodata is not None:
+                out[out == dst.nodata] = np.nan
+            valid = np.isfinite(base)
+            if not np.array_equal(valid, np.isfinite(out)) or np.any(out[np.isfinite(out)] < 0.0):
+                failures.append(f"invalid_output_values:{source_path.name}")
+                continue
+            if transfer_rules is not None:
+                expected, applied, _ = apply_transfer_rule_to_array(base, transfer_rules, ts)
+                if not applied or not np.allclose(out[valid], expected[valid], rtol=1e-6, atol=1e-6):
+                    failures.append(f"frozen_rule_mismatch:{source_path.name}")
+                    continue
+            checked += 1
+    return {
+        "status": "passed" if not failures and checked == len(records) else "failed",
+        "qc_blocked": bool(failures or checked != len(records)),
+        "checked_steps": int(checked),
+        "expected_steps": int(len(records)),
+        "failures": failures[:20],
+        "grid_and_values_checked": True,
+        "frozen_rule_values_checked": transfer_rules is not None,
+    }
+
+
+def _check_monthly_transfer_rule_inputs(
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    transfer_rules: dict[str, Any],
+    *,
+    step_hours: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    summary = dict(transfer_rules.get("summary", {}) or {})
+    if summary.get("schema") != MONTHLY_TRANSFER_RULES_SCHEMA:
+        raise ValueError("monthly_transfer_v3 需要对应版本的冻结月规则，不能复用旧每日订正规则。")
+    quality = dict(summary.get("quality_checks", {}) or {})
+    if (
+        quality.get("status") not in {"passed", "failed"}
+        or "qc_blocked" not in quality
+        or bool(quality["qc_blocked"]) != (quality["status"] == "failed")
+    ):
+        raise ValueError("冻结月降水订正规则缺少完整质量证据。")
+    if summary.get("summary_content_sha256") != _json_digest({
+        key: value for key, value in summary.items() if key != "summary_content_sha256"
+    }):
+        raise ValueError("冻结月降水订正规则支持度或质量记录已变化，请重新训练。")
+    if summary.get("identity_sha256") != _json_digest(summary.get("identity")):
+        raise ValueError("冻结月降水订正规则身份校验失败。")
+    if summary.get("arrays_sha256") != _rule_arrays_digest(transfer_rules["arrays"]):
+        raise ValueError("冻结月降水订正规则内容校验失败。")
+    rule_identity = dict(summary.get("identity", {}) or {})
+    if rule_identity.get("station_metadata_content_sha256") != _frame_digest(stations):
+        raise ValueError("站点信息已变化，请重新训练月降水订正规则。")
+    if rule_identity.get("station_series_content_sha256") != _frame_digest(station_series):
+        raise ValueError("站点观测资料已变化，请重新训练月降水订正规则。")
+    if float(summary.get("step_hours", -1.0)) != float(step_hours):
+        raise ValueError("时间尺度已变化，请重新训练月降水订正规则。")
+    return summary, quality
+
+
+def _apply_monthly_transfer_correction(
+    records: list[tuple[pd.Timestamp, Path]],
+    target_dir: Path,
+    stations: pd.DataFrame,
+    station_series: pd.DataFrame,
+    transfer_rules: dict[str, Any],
+    *,
+    identity: dict[str, Any],
+    step_hours: float,
+) -> dict[str, Any]:
+    summary, quality = _check_monthly_transfer_rule_inputs(
+        stations, station_series, transfer_rules, step_hours=step_hours,
+    )
+    station_ids = [str(item) for item in stations["station_id"].tolist()]
+    weights = stations["weight"].to_numpy(dtype="float64")
+    applied_steps = 0
+    identity_steps = 0
+    no_station_steps = 0
+    station_samples = 0
+    supported_month_counts: dict[str, int] = {}
+    unverified_month_counts: dict[str, int] = {}
+    for ts, source_path in records:
+        with rasterio.open(source_path) as src:
+            if _grid_identity(src) != summary.get("grid"):
+                raise ValueError(f"应用降水格网与冻结月规则不一致：{source_path}")
+            arr = src.read(1).astype("float64")
+            if src.nodata is not None:
+                arr[arr == src.nodata] = np.nan
+            obs = station_values_for_time(station_series, pd.Timestamp(ts), station_ids)
+            valid = valid_station_observation_mask(obs, sample_station_values(src, stations), weights)
+            station_samples += int(np.count_nonzero(valid))
+            no_station_steps += int(not np.any(valid))
+            out, _applied, source = apply_transfer_rule_to_array(arr, transfer_rules, ts)
+            month_key = f"{pd.Timestamp(ts).month:02d}"
+            if source == "identity_unverified":
+                identity_steps += 1
+                unverified_month_counts[month_key] = unverified_month_counts.get(month_key, 0) + 1
+            else:
+                applied_steps += 1
+                supported_month_counts[month_key] = supported_month_counts.get(month_key, 0) + 1
+            profile = src.profile.copy()
+            profile.update(dtype="float32", compress="lzw")
+            if profile.get("nodata") is None:
+                profile["nodata"] = -9999.0
+            write_raster(Path(target_dir) / source_path.name, profile, np.where(np.isfinite(out), out, profile["nodata"]))
+    output_quality = _validate_correction_outputs(records, target_dir, transfer_rules=transfer_rules)
+    output_quality["rule_quality_status"] = quality["status"]
+    output_quality["unverified_months"] = list(summary.get("unverified_months", []))
+    if quality["qc_blocked"]:
+        output_quality["qc_blocked"] = True
+        output_quality["status"] = "failed"
+        output_quality["failures"].extend(quality.get("failures", []))
+    stats = {
+        "method": "grid_plus_station_bias",
+        "algorithm": STATION_CORRECTION_ALGORITHM_V3,
+        "written_files": int(len(records)),
+        "processed_steps": int(len(records)),
+        "skipped_existing_steps": 0,
+        "direct_station_corrected_steps": 0,
+        "no_available_station_steps": int(no_station_steps),
+        "transfer_rule_applied_steps": int(applied_steps),
+        "frozen_rule_applied_steps": int(applied_steps),
+        "unsupported_month_identity_steps": int(identity_steps),
+        "pass_through_steps": int(identity_steps),
+        "supported_month_step_counts": supported_month_counts,
+        "unverified_month_step_counts": unverified_month_counts,
+        "valid_station_step_samples": int(station_samples),
+        "ratio_clip_steps": 0,
+        "ratio_clipped_station_months": int(summary.get("clipped_station_months", 0)),
+        "grid_missed_precip_repair_steps": 0,
+        "occurrence_correction": "not_performed",
+        "transfer_rules_available": True,
+        "rules_identity_sha256": summary["identity_sha256"],
+        "input_identity_sha256": _json_digest(identity),
+        "quality_checks": output_quality,
+        "quality_evidence_reused": False,
+        "monthly_conservation": None,
+        "qc_blocked": bool(output_quality["qc_blocked"]),
+    }
+    _write_correction_cache(target_dir, records, identity, stats)
+    print(
+        "冻结月规则订正摘要: "
+        f"处理范围 {record_period_text(records, step_hours)}；"
+        f"规则应用 {time_step_count_text(applied_steps, step_hours)}；"
+        f"缺少该月观测支持并保留原场 {time_step_count_text(identity_steps, step_hours)}；"
+        "同月有无当日观测均使用同一倍率；未单独订正降雨发生。"
+    )
+    return stats
+
+
 def enforce_monthly_occurrence_conservation(
     records: list[tuple[pd.Timestamp, Path]],
     target_dir: Path,
@@ -2194,11 +2931,13 @@ def enforce_monthly_occurrence_conservation(
     high_removed_fraction_volume_mm = 0.0
     target_volume_mm = 0.0
     removed_volume_mm = 0.0
+    frozen_missing_steps = 0
 
     for (year, month), month_records in sorted(grouped.items()):
         target_sum: np.ndarray | None = None
         corrected_sum: np.ndarray | None = None
         output_paths: list[Path] = []
+        observed_timestamps: set[pd.Timestamp] = set()
         profile: dict[str, Any] | None = None
         for day_index, (ts, source_path) in enumerate(month_records):
             output_path = target_dir / source_path.name
@@ -2215,6 +2954,12 @@ def enforce_monthly_occurrence_conservation(
                 grid_station = sample_station_values(src, stations)
                 obs = station_values_for_time(station_series, ts, station_ids)
                 valid = valid_station_observation_mask(obs, grid_station, weights)
+                if not np.any(valid):
+                    # Missing station days keep their original grid values and do
+                    # not fund or receive the observed-day monthly redistribution.
+                    frozen_missing_steps += 1
+                    continue
+                observed_timestamps.add(ts)
                 if np.any(valid):
                     fields = interpolated_station_correction_fields(src, arr, stations, obs, grid_station, valid)
                     rows = fields["rows"]
@@ -2279,6 +3024,8 @@ def enforce_monthly_occurrence_conservation(
         removed_volume_mm += month_removed_volume
 
         for _ts, source_path in month_records:
+            if _ts not in observed_timestamps:
+                continue
             output_path = target_dir / source_path.name
             if not output_path.exists():
                 continue
@@ -2318,6 +3065,8 @@ def enforce_monthly_occurrence_conservation(
 
     return {
         "method": "same_cell_same_month_amount_conservation",
+        "scope": "observed_station_steps_only",
+        "frozen_missing_station_steps": int(frozen_missing_steps),
         "months": month_summaries,
         "max_redistribution_factor": float(max_factor),
         "max_allowed_redistribution_factor": float(MAX_MONTHLY_REDISTRIBUTION_FACTOR),
@@ -2355,10 +3104,46 @@ def apply_grid_bias_correction(
     return_stats: bool = False,
     algorithm: str = DEFAULT_STATION_CORRECTION_ALGORITHM,
     step_hours: float = 24.0,
+    input_identity: dict[str, Any] | None = None,
 ) -> int | dict[str, Any]:
     algorithm_key = str(algorithm or DEFAULT_STATION_CORRECTION_ALGORITHM).strip().lower()
-    if algorithm_key not in {STATION_CORRECTION_ALGORITHM_V2, STATION_CORRECTION_ALGORITHM_LEGACY}:
+    if algorithm_key not in {STATION_CORRECTION_ALGORITHM_V3, STATION_CORRECTION_ALGORITHM_V2, STATION_CORRECTION_ALGORITHM_LEGACY}:
         raise ValueError(f"Unknown station precipitation correction algorithm: {algorithm}")
+    if not records:
+        raise ValueError("没有可用于站点降水订正的基础格点文件。")
+    if algorithm_key == STATION_CORRECTION_ALGORITHM_V3 and transfer_rules is None:
+        fit_monthly_transfer_rules(
+            records, target_dir, stations, station_series,
+            overwrite=overwrite, step_hours=step_hours, input_identity=input_identity,
+        )
+        transfer_rules = load_monthly_transfer_rules(target_dir)
+        if transfer_rules is None:
+            raise ValueError("冻结月降水订正规则生成后无法校验。")
+    if algorithm_key == STATION_CORRECTION_ALGORITHM_V3:
+        assert transfer_rules is not None
+        _check_monthly_transfer_rule_inputs(stations, station_series, transfer_rules, step_hours=step_hours)
+    identity = _correction_input_identity(
+        records, stations, station_series, algorithm_key, step_hours, transfer_rules, input_identity,
+    )
+    identity_sha256 = _json_digest(identity)
+    cached = _read_correction_cache(target_dir, records, identity_sha256) if not overwrite else None
+    if cached is not None:
+        print(
+            "空间订正摘要: "
+            f"处理范围 {record_period_text(records, step_hours)}；"
+            f"已有输出复用 {time_step_count_text(len(records), step_hours)}；"
+            "输入、规则、全部输出和质量检查证据均已核对；本次没有重新计算。"
+        )
+        return cached if return_stats else int(cached["written_files"])
+    if algorithm_key == STATION_CORRECTION_ALGORITHM_V3:
+        assert transfer_rules is not None
+        stats = _apply_monthly_transfer_correction(
+            records, target_dir, stations, station_series, transfer_rules,
+            identity=identity, step_hours=step_hours,
+        )
+        return stats if return_stats else int(stats["written_files"])
+    if any((Path(target_dir) / path.name).exists() for _, path in records) and not overwrite:
+        print("已有订正结果缺少匹配的输入身份或完整质量证据，将从原始格点重新计算全部目标时段。")
     written = 0
     processed_count = 0
     skipped_existing_count = 0
@@ -2372,10 +3157,6 @@ def apply_grid_bias_correction(
     station_ids = stations["station_id"].tolist()
     for ts, path in records:
         output = target_dir / path.name
-        if output.exists() and not overwrite:
-            skipped_existing_count += 1
-            written += 1
-            continue
         with rasterio.open(path) as src:
             arr = src.read(1).astype("float64")
             nodata = src.nodata
@@ -2479,7 +3260,18 @@ def apply_grid_bias_correction(
         "transfer_rules_available": bool(transfer_rules is not None),
         "monthly_conservation": monthly_conservation,
         "qc_blocked": bool(monthly_conservation and monthly_conservation.get("qc_blocked")),
+        "input_identity_sha256": identity_sha256,
+        "rules_identity_sha256": dict(dict(transfer_rules or {}).get("summary", {}) or {}).get("identity_sha256", ""),
+        "quality_evidence_reused": False,
     }
+    quality = _validate_correction_outputs(records, target_dir)
+    if stats["qc_blocked"]:
+        quality["qc_blocked"] = True
+        quality["status"] = "failed"
+        quality["failures"].append("monthly_occurrence_conservation_qc_failed")
+    stats["quality_checks"] = quality
+    stats["qc_blocked"] = bool(quality["qc_blocked"])
+    _write_correction_cache(target_dir, records, identity, stats)
     return stats if return_stats else written
 
 
@@ -2664,34 +3456,69 @@ def main() -> None:
     transfer_rules: dict[str, Any] | None = None
     processing_stats: dict[str, Any] = {}
     if mode == "grid_plus_station_bias":
-        if correction_algorithm == STATION_CORRECTION_ALGORITHM_LEGACY:
+        correction_input_files = {
+            "station_precipitation_input": sha256_file_identity(station_prec_path),
+            "station_metadata_input": sha256_file_identity(station_meta_path),
+            "source_daily_forcing_manifest": sha256_file_identity(base_dir.parent / "daily_forcing_manifest.json"),
+            "station_time_aggregation": station_time_aggregation,
+            "precipitation_source": prec_source,
+            "profile": profile,
+        }
+        if correction_algorithm == STATION_CORRECTION_ALGORITHM_V3:
+            transfer_rule_summary = fit_monthly_transfer_rules(
+                all_base_records, target_dir, stations, station_series,
+                overwrite=args.覆盖,
+                step_hours=model_step_hours,
+                training_start=meteo.get("station_rule_training_start", meteo.get("station_bias_training_start")),
+                training_end=meteo.get("station_rule_training_end", meteo.get("station_bias_training_end")),
+                input_identity=correction_input_files,
+            )
+        elif correction_algorithm == STATION_CORRECTION_ALGORITHM_LEGACY:
             transfer_rule_summary = fit_grid_bias_transfer_rules(
                 all_base_records,
                 target_dir,
                 stations,
                 station_series,
                 overwrite=args.覆盖,
+                step_hours=model_step_hours,
+                input_identity=correction_input_files,
             )
-        else:
+        elif correction_algorithm == STATION_CORRECTION_ALGORITHM_V2:
             transfer_rule_summary = {
                 "schema": TRANSFER_RULES_SCHEMA,
                 "available": False,
                 "status": "disabled_for_occurrence_amount_v2",
             }
+        else:
+            raise ValueError(f"未知站点降水订正算法：{correction_algorithm}")
         if transfer_rule_summary.get("available"):
+            if correction_algorithm == STATION_CORRECTION_ALGORITHM_V3:
+                print(
+                    "订正规则: "
+                    f"有效重叠观测 {int(transfer_rule_summary.get('training_days', 0))} 日；"
+                    f"有观测支持月份 {','.join(transfer_rule_summary.get('supported_months', [])) or '无'}；"
+                    f"无支持月份 {','.join(transfer_rule_summary.get('unverified_months', [])) or '无'} "
+                    "保留原格点并标记未验证；按同日期累计量训练月倍率，应用全时段。"
+                )
+                transfer_rules = load_monthly_transfer_rules(
+                    target_dir, expected_fingerprint=transfer_rule_summary["identity_sha256"],
+                )
+                if transfer_rules is None:
+                    raise ValueError("月降水订正规则文件或身份校验未通过。")
             month_count = sum(
                 1
                 for item in dict(transfer_rule_summary.get("monthly", {}) or {}).values()
                 if int(dict(item).get("training_days", 0) or 0) > 0
             )
-            print(
-                "订正规则: "
-                f"订正样本日 {int(transfer_rule_summary.get('training_days', 0) or 0)}；"
-                f"有效站点样本 {int(transfer_rule_summary.get('valid_station_samples', 0) or 0)}；"
-                f"有独立月规则 {month_count}/12；"
-                f"平均倍率 {transfer_rule_summary.get('global_ratio_mean', '未形成')}"
-            )
-            transfer_rules = load_grid_bias_transfer_rules(target_dir)
+            if correction_algorithm != STATION_CORRECTION_ALGORITHM_V3:
+                print(
+                    "订正规则: "
+                    f"订正样本日 {int(transfer_rule_summary.get('training_days', 0) or 0)}；"
+                    f"有效站点样本 {int(transfer_rule_summary.get('valid_station_samples', 0) or 0)}；"
+                    f"有独立月规则 {month_count}/12；"
+                    f"平均倍率 {transfer_rule_summary.get('global_ratio_mean', '未形成')}"
+                )
+                transfer_rules = load_grid_bias_transfer_rules(target_dir)
         else:
             print("订正规则: 未形成可外推规则；无站点时段将保留格点基线。")
         correction_result = apply_grid_bias_correction(
@@ -2704,6 +3531,7 @@ def main() -> None:
             return_stats=True,
             algorithm=correction_algorithm,
             step_hours=model_step_hours,
+            input_identity=correction_input_files,
         )
         processing_stats = dict(correction_result) if isinstance(correction_result, dict) else {}
         written = int(processing_stats.get("written_files", correction_result if isinstance(correction_result, int) else 0))

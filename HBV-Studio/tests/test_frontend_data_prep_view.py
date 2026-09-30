@@ -225,6 +225,15 @@ class FrontendDataPrepViewTests(unittest.TestCase):
             if (hourlyBoundaryGuidance.className !== "hint-box status-warn" || !hourlyBoundaryGuidance.text.includes("1 小时")) {
               throw new Error(`hourly boundary guidance mismatch: ${JSON.stringify(hourlyBoundaryGuidance)}`);
             }
+            for (const guidance of [dailyBoundaryGuidance, hourlyBoundaryGuidance]) {
+              if (!guidance.text.includes("边界未观测时保留缺测") || !guidance.text.includes("14 天汇流预热") || !guidance.text.includes("实测零值保留为 0")) {
+                throw new Error(`missing-boundary contract mismatch: ${JSON.stringify(guidance)}`);
+              }
+            }
+            const configuredBoundaryGuidance = view.boundaryGuidanceState({ fullUpstream: false, hourly: false, boundaryRoutingWarmupDays: 7 });
+            if (!configuredBoundaryGuidance.text.includes("7 天汇流预热")) {
+              throw new Error(`configured boundary warmup should be visible: ${JSON.stringify(configuredBoundaryGuidance)}`);
+            }
             const rangeBoundaryQuery = view.boundaryPreviewQueryState({
               hourly: true,
               expectedStart: "2020-01-01 00:00",

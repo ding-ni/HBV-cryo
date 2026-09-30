@@ -2028,6 +2028,36 @@ function stationPrecipModeLabel(mode) {
   return window.HBVStudioStationPrecip.stationPrecipModeLabel(mode);
 }
 
+function getWizardStationCorrectionAlgorithm() {
+  return String($("#wz-station-correction-algorithm")?.value
+    || state.currentWorkspace?.气象策略?.station_correction_algorithm
+    || "monthly_transfer_v3").trim().toLowerCase();
+}
+
+function populateStationCorrectionFields(meteo = {}) {
+  const algorithm = $("#wz-station-correction-algorithm");
+  // Unversioned older workspaces used the legacy algorithm; loading must preserve that contract.
+  if (algorithm) algorithm.value = meteo.station_correction_algorithm || "legacy_ratio_v1";
+  setWizardTimeValue("#wz-station-rule-training-start", meteo.station_rule_training_start || meteo.station_bias_training_start || "");
+  setWizardTimeValue("#wz-station-rule-training-end", meteo.station_rule_training_end || meteo.station_bias_training_end || "");
+  updateStationCorrectionFields();
+}
+
+function updateStationCorrectionFields() {
+  const usesStationBias = getSelectedRadio("wz-precip-mode") === "grid_plus_station_bias";
+  const algorithm = getWizardStationCorrectionAlgorithm();
+  $("#wz-station-correction-fields")?.classList.toggle("hidden", !usesStationBias);
+  $("#wz-station-rule-training-fields")?.classList.toggle("hidden", algorithm !== "monthly_transfer_v3");
+  const hint = $("#wz-station-correction-hint");
+  if (!hint) return;
+  const hints = {
+    monthly_transfer_v3: "按有效同日期累计量学习月倍率，同月所有年份统一应用。只订正降水量，不单独调整降雨发生；缺少该月观测支持时保留原格点并标注未验证。训练日期留空时使用站点与格点的有效重叠资料；需要独立检验订正效果时，训练日期应留出检验资料。",
+    occurrence_amount_v2: "使用当天或当小时的实测站点订正同期格点，分别处理降雨发生和雨量；没有实测时保留原格点。此方法不学习用于其他年份的固定规则。",
+    legacy_ratio_v1: "为复核旧项目保留：有实测时逐时段订正，无实测时使用旧版月规则，缺少月份可能使用全局规则。统计订正全时段请选第一种方法。",
+  };
+  hint.textContent = hints[algorithm] || "请确认项目记录的站点订正方法。";
+}
+
 function renderPrecipStrategyStatus() {
   const host = $("#wz-precip-strategy-status");
   if (!host) return;
@@ -2071,6 +2101,8 @@ function updateBoundaryGuidance() {
   const hint = window.HBVStudioDataPrepView.boundaryGuidanceState({
     fullUpstream: isFullUpstream(),
     hourly: isHourlyTimescaleSelected(),
+    boundaryRoutingWarmupDays: state.currentWorkspace?.洪水事件率定?.边界汇流预热天数
+      ?? state.currentWorkspace?.洪水事件率定?.boundary_routing_warmup_days ?? 14,
   });
   host.textContent = hint.text;
   host.className = hint.className;
@@ -2742,6 +2774,11 @@ const WIZARD_TIME_FIELDS = [
   "#wz-valid-end",
 ];
 
+const STATION_RULE_TIME_FIELDS = [
+  "#wz-station-rule-training-start",
+  "#wz-station-rule-training-end",
+];
+
 function isHourlyTimescaleSelected() {
   return getSelectedRadio("wz-timescale") === "hourly";
 }
@@ -2768,7 +2805,7 @@ function getWizardTimeValue(selector) {
 
 function syncWizardTimeInputMode() {
   const hourly = isHourlyTimescaleSelected();
-  WIZARD_TIME_FIELDS.forEach(selector => {
+  [...WIZARD_TIME_FIELDS, ...STATION_RULE_TIME_FIELDS].forEach(selector => {
     const input = $(selector);
     if (!input) return;
     const preserved = toWizardInputTimeValue(input.value, hourly);
@@ -2893,6 +2930,7 @@ function updateConditionalFields() {
 
   const stationFields = $("#wz-station-fields");
   if (stationFields) stationFields.classList.toggle("hidden", !fieldState.stationFieldsVisible);
+  updateStationCorrectionFields();
 
   const customPrecGroup = $("#wz-custom-prec-group");
   if (customPrecGroup) customPrecGroup.classList.toggle("hidden", !fieldState.customPrecVisible);
@@ -2999,7 +3037,9 @@ function collectStepData(step) {
     case 4: return {
       气象策略: {
         降水方案: getSelectedRadio("wz-precip-mode"),
-        station_correction_algorithm: "occurrence_amount_v2",
+        station_correction_algorithm: getWizardStationCorrectionAlgorithm(),
+        station_rule_training_start: getWizardTimeValue("#wz-station-rule-training-start"),
+        station_rule_training_end: getWizardTimeValue("#wz-station-rule-training-end"),
         降水来源: $("#wz-prec-source").value,
         降水源: $("#wz-prec-source").value,
         站点降水_csv: $("#wz-station-prec").value.trim(),
@@ -3069,6 +3109,7 @@ async function saveCurrentWizardStep() {
       if (step === 3 && $("#wz-boundary-csv")) {
         $("#wz-boundary-csv").value = result.config.边界条件?.上游边界入流_csv || $("#wz-boundary-csv").value;
       }
+      if (step === 4) populateStationCorrectionFields(result.config.气象策略 || {});
     }
     if (step === 1) {
       await loadWorkspaces();
@@ -3152,6 +3193,7 @@ function populateWizardFromConfig(cfg, path) {
 
   // step 4
   setRadioAndCard("wz-precip-mode", cfg.气象策略?.降水方案 || "grid_only");
+  populateStationCorrectionFields(cfg.气象策略 || {});
   $("#wz-station-prec").value    = cfg.气象策略?.站点降水_csv || "";
   $("#wz-station-meta").value    = cfg.气象策略?.站点信息_csv || "";
   $("#wz-prec-source").value     = workspaceConfiguredPrecipSource(cfg);
@@ -3245,13 +3287,14 @@ function resetWizard() {
     "#wz-import-dem", "#wz-import-flowacc",
     "#wz-import-flowdir", "#wz-import-glacier",
   ].forEach(s => { if ($(s)) $(s).value = ""; });
-  WIZARD_TIME_FIELDS.forEach(selector => {
+  [...WIZARD_TIME_FIELDS, ...STATION_RULE_TIME_FIELDS].forEach(selector => {
     if ($(selector)) $(selector).value = "";
   });
   $("#wz-cfmax").value = "5000";
   $("#wz-fao-elev").value = "4500";
   if ($("#wz-time-basis")) $("#wz-time-basis").value = "continuous";
-  $("#wz-gap-fill").value = "zero";
+  $("#wz-gap-fill").value = "preserve_missing";
+  if ($("#wz-station-correction-algorithm")) $("#wz-station-correction-algorithm").value = "monthly_transfer_v3";
   setRadioAndCard("wz-precip-mode", "grid_only");
   setRadioValue("wz-meteo-mode", "pipeline");
   $("#wz-prec-source").value = "era5";
@@ -6370,6 +6413,14 @@ function bindEvents() {
   if (petSelect) petSelect.addEventListener("change", updateConditionalFields);
   const precSelect = $("#wz-prec-source");
   if (precSelect) precSelect.addEventListener("change", updateConditionalFields);
+  $("#wz-station-correction-algorithm")?.addEventListener("change", () => {
+    updateStationCorrectionFields();
+    clearInputCheckCache();
+  });
+  STATION_RULE_TIME_FIELDS.forEach(selector => {
+    $(selector)?.addEventListener("change", clearInputCheckCache);
+    $(selector)?.addEventListener("input", clearInputCheckCache);
+  });
   ["#wz-station-prec", "#wz-station-meta"].forEach(sel => {
     const el = $(sel);
     if (el) {

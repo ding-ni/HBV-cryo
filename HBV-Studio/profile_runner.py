@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import numpy as np
 import pandas as pd
 import shutil
 import sys
@@ -46,7 +47,9 @@ from 公共函数 import (  # type: ignore
     边界条件配置,
 )
 from services.boundary import BoundaryInflowInspectContext, inspect_boundary_inflow_csv
-from services.time_utils import time_step_missing_text
+from services.time_utils import is_date_only_string, time_step_missing_text
+from 上游边界入流 import read_boundary_inflow_series  # type: ignore
+from 观测径流处理 import DEFAULT_MIN_DAILY_HOURS, inspect_observed_discharge  # type: ignore
 
 
 GUI_ROOT = APP_ROOT / "HBV-Studio"
@@ -419,12 +422,15 @@ def resolve_runtime_init_state(config: dict[str, Any]) -> list[float]:
 
 
 def to_portable_path(value: str) -> str:
-    if not value:
+    if not value or "__PROJECT_ROOT__" in value or "__GUI_ROOT__" in value:
         return value
     try:
-        resolved = Path(value).resolve(strict=False)
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            return value
+        resolved = candidate.resolve(strict=False)
     except (OSError, ValueError):
-        resolved = Path(value)
+        return value
     gui_resolved = GUI_ROOT.resolve(strict=False)
     app_resolved = APP_ROOT.resolve(strict=False)
     try:
@@ -958,7 +964,7 @@ def daily_forcing_manifest_error(config: dict[str, Any], profile: str) -> str:
         return ""
     meteo = dict(config.get("气象策略", {}) or {})
     algorithm = str(meteo.get("station_correction_algorithm", "") or "").strip().lower()
-    if algorithm != "occurrence_amount_v2":
+    if algorithm not in {"occurrence_amount_v2", "monthly_transfer_v3"}:
         return ""
     paths = build_profile_paths(config, profile)
     manifest_path = Path(paths["aligned_dir"]) / "daily_forcing_manifest.json"
@@ -1013,6 +1019,8 @@ def required_boundary_index(config: dict[str, Any]) -> tuple[pd.DatetimeIndex, f
     if not evaluation_end_raw:
         raise ValueError("时间.验证结束或时间.率定结束未设置。")
     evaluation_end = pd.to_datetime(evaluation_end_raw)
+    if step_hours < 24.0 and is_date_only_string(evaluation_end_raw):
+        evaluation_end += pd.Timedelta(days=1) - pd.Timedelta(hours=step_hours)
     required_steps = max(1, int(round(14.0 * 24.0 / step_hours)))
     required_start = warmup_end - pd.Timedelta(hours=step_hours * (required_steps - 1))
     frequency = pd.Timedelta(hours=step_hours)
@@ -1024,8 +1032,26 @@ def required_boundary_coverage_error(config: dict[str, Any], profile: str) -> st
         return ""
     boundary = 边界条件配置(config)
     boundary_path = Path(boundary.get("上游边界入流_csv", ""))
-    if not boundary_path.exists():
+    if not boundary_path.is_file():
         return f"上游边界入流文件不存在：{boundary_path}"
+    gap_mode = str(boundary.get("缺失填补", "preserve_missing")).strip().lower()
+    if gap_mode in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"}:
+        _, step_hours = resolve_runtime_time_config(config)
+        flood_cfg = _runtime_flood_event_config(config)
+        event_info = normalize_runtime_flood_events(config, step_hours)
+        scored_events = bool(
+            event_info.get("events")
+            and (
+                resolve_objective_mode(config, config.get("目标函数模式"), profile) == OBJECTIVE_MODE_FLOOD_EVENT
+                or _runtime_truthy(flood_cfg.get("启用", flood_cfg.get("enabled")), default=False)
+            )
+        )
+        if runtime_time_basis(config) != TIME_BASIS_EVENT_WINDOWS and not scored_events:
+            try:
+                summary = continuous_boundary_evaluation_summary(config)
+            except Exception as exc:
+                return f"上游边界入流评价资料检查失败：{exc}"
+            return "；".join(summary["errors"])
     expected_index, step_hours = required_boundary_index(config)
 
     def resolve_boundary_path(raw: str, *, must_exist: bool = False) -> Path:
@@ -1057,6 +1083,155 @@ def required_boundary_coverage_error(config: dict[str, Any], profile: str) -> st
     )
 
 
+def continuous_boundary_evaluation_summary(config: dict[str, Any]) -> dict[str, Any]:
+    """Check the same finite pairs and boundary recovery warmup used by the core."""
+    time_cfg, step_hours = resolve_runtime_time_config(config)
+    frequency = pd.Timedelta(hours=step_hours)
+
+    def timestamp(value: Any, *, end: bool = False) -> pd.Timestamp:
+        result = pd.Timestamp(value)
+        if end and step_hours < 24.0 and is_date_only_string(value):
+            result += pd.Timedelta(days=1) - frequency
+        return result
+
+    evaluation_end = time_cfg.get("验证结束") or time_cfg.get("率定结束")
+    index = pd.date_range(timestamp(time_cfg["预热开始"]), timestamp(evaluation_end, end=True), freq=frequency)
+    if index.empty:
+        raise ValueError("连续模拟时段为空。")
+    boundary = 边界条件配置(config)
+    boundary_path = Path(boundary["上游边界入流_csv"])
+    info = inspect_boundary_inflow_csv(
+        str(boundary_path),
+        BoundaryInflowInspectContext(
+            resolve_path=lambda raw, **_kwargs: Path(raw).expanduser().resolve(strict=False),
+            profile_daily=PROFILE_DAILY,
+            profile_hourly=PROFILE_HOURLY,
+        ),
+        date_field=str(boundary["时间字段"]),
+        flow_field=str(boundary["流量字段"]),
+        expected_index=index,
+        expected_step_hours=step_hours,
+    )
+    errors: list[str] = []
+    if int(info.get("duplicate_count", 0) or 0):
+        errors.append(f"上游边界入流存在重复时间戳 {info['duplicate_count']} 个，请先修正资料。")
+    if int(info.get("negative_count", 0) or 0):
+        errors.append(f"上游边界入流存在负流量 {info['negative_count']} 条，请先修正资料。")
+    values, enabled = read_boundary_inflow_series(
+        str(boundary_path),
+        index,
+        date_field=str(boundary["时间字段"]),
+        flow_field=str(boundary["流量字段"]),
+        gap_fill="preserve_missing",
+        expected_step_hours=step_hours,
+    )
+    if not enabled:
+        raise ValueError("区间流域未启用实际上游边界资料。")
+    flood_cfg = _runtime_flood_event_config(config)
+    warmup_days = float(
+        flood_cfg.get("边界汇流预热天数", flood_cfg.get("boundary_routing_warmup_days", 14.0)) or 14.0
+    )
+    if not math.isfinite(warmup_days) or warmup_days < 0:
+        raise ValueError("边界汇流预热天数必须是非负有限数。")
+    warmup_steps = max(0, int(math.ceil(warmup_days * 24.0 / step_hours)))
+    boundary_valid = np.isfinite(values)
+    boundary_evaluable = (
+        pd.Series(boundary_valid.astype(int), index=index)
+        .rolling(warmup_steps + 1, min_periods=warmup_steps + 1)
+        .sum()
+        .eq(warmup_steps + 1)
+        .to_numpy(dtype=bool)
+    )
+    observed_path = resolve_path(config.get("观测径流_csv", ""), base=config_base_dir(config))
+    observed_info = inspect_observed_discharge(
+        observed_path,
+        expected_index=index,
+        target_step_hours=step_hours,
+        allow_hourly_to_daily=True,
+        min_daily_hours=DEFAULT_MIN_DAILY_HOURS,
+        return_series=True,
+    )
+    observed_values = observed_info["series"].reindex(index).to_numpy(dtype=float)
+    windows = {
+        name: (index >= timestamp(time_cfg[start])) & (index <= timestamp(time_cfg[end], end=True))
+        for name, start, end in (
+            ("calibration", "率定开始", "率定结束"),
+            ("validation", "验证开始", "验证结束"),
+        )
+    }
+    observation_evaluable = np.ones(len(index), dtype=bool)
+    if str(config.get("观测口径模式", "full_year") or "full_year").strip().lower() == "full_year":
+        # Match the core's independent complete-year selection and period fallback.
+        complete_years = np.zeros(len(index), dtype=bool)
+        complete_year_masks = []
+        finite_observed = np.isfinite(observed_values)
+        for year in sorted(set(index.year)):
+            expected = pd.date_range(
+                pd.Timestamp(year=year, month=1, day=1),
+                pd.Timestamp(year=year + 1, month=1, day=1) - frequency,
+                freq=frequency,
+            )
+            year_mask = index.year == year
+            if index[year_mask].equals(expected):
+                complete_year_masks.append(year_mask)
+                if np.all(finite_observed[year_mask]):
+                    complete_years[year_mask] = True
+        period_selections = []
+        for window in windows.values():
+            if not np.any(window):
+                continue
+            period_keep = np.zeros(len(index), dtype=bool)
+            for year_mask in complete_year_masks:
+                if np.all(window[year_mask]) and np.all(finite_observed[year_mask]):
+                    period_keep[year_mask] = True
+            fallback = not np.any(period_keep)
+            if fallback:
+                period_keep = window.copy()
+            period_selections.append((window, period_keep, fallback))
+        if not period_selections or not all(fallback for _, _, fallback in period_selections):
+            if np.any(complete_years):
+                observation_evaluable = complete_years
+            # Validation cannot overwrite calibration when legacy windows overlap.
+            for window, period_keep, _ in reversed(period_selections):
+                observation_evaluable[window] = period_keep[window]
+    paired = boundary_evaluable & observation_evaluable & np.isfinite(observed_values)
+    periods: dict[str, Any] = {}
+    for name, label, minimum in (("calibration", "率定期", 3), ("validation", "验证期", 2)):
+        window = windows[name]
+        total = int(np.sum(window))
+        count = int(np.sum(paired & window))
+        coverage = float(count / total) if total else 0.0
+        periods[name] = {
+            "expected_steps": total,
+            "boundary_valid_steps": int(np.sum(boundary_valid & window)),
+            "boundary_evaluable_steps": int(np.sum(boundary_evaluable & window)),
+            "paired_steps": count,
+            "excluded_steps": total - count,
+            "coverage_ratio": coverage,
+            "excluded_sample": [format_runtime_time_value(ts, step_hours) for ts in index[window & ~paired][:3]],
+        }
+        if count < minimum:
+            errors.append(
+                f"{label}完成边界汇流预热后仅有 {count}/{total} 个实际边界与观测径流共同有效的评价时步，"
+                f"至少需要 {minimum} 个；缺测值不能补 0 或插值后参与正式评价。"
+            )
+        elif coverage < 0.75:
+            errors.append(
+                f"{label}完成边界汇流预热后的共同有效评价覆盖率只有 {coverage * 100:.1f}%"
+                f"（{count}/{total}），低于 75%；请补充资料或调整评价时段。"
+            )
+    return {
+        "errors": errors,
+        "routing_warmup_days": warmup_days,
+        "routing_warmup_steps": warmup_steps,
+        "periods": periods,
+        "simulation_index": index,
+        "boundary_valid_mask": boundary_valid,
+        "boundary_evaluable_mask": boundary_evaluable,
+        "paired_evaluation_mask": paired,
+    }
+
+
 def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> list[str]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -1070,13 +1245,34 @@ def validate_profile_input_contracts(config: dict[str, Any], profile: str) -> li
     if str(meteo.get("降水方案", "grid_only") or "grid_only").strip() != "grid_only":
         paths = build_profile_paths(config, profile)
         summary_path = Path(paths["aligned_prec_effective_dir"]) / "precipitation_strategy_summary.json"
+        algorithm = str(meteo.get("station_correction_algorithm", "") or "").strip().lower()
+        strict_station_rules = (
+            str(meteo.get("降水方案", "") or "") == "grid_plus_station_bias"
+            and algorithm in {"monthly_transfer_v3", "occurrence_amount_v2"}
+        )
         if summary_path.exists():
             try:
-                summary_warning = precipitation_strategy_qc_warning(json.loads(summary_path.read_text(encoding="utf-8")))
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary_warning = precipitation_strategy_qc_warning(summary)
+                if strict_station_rules:
+                    from services.precip_strategy_status import versioned_precip_summary_error
+                    evidence_error = versioned_precip_summary_error(
+                        summary,
+                        algorithm,
+                        sum(1 for _ in summary_path.parent.glob("*.tif")),
+                        config=config,
+                        base_dir=paths.get("aligned_prec_effective_base_dir", paths.get("aligned_prec_base_dir")),
+                    )
+                    if evidence_error:
+                        errors.append(evidence_error)
             except Exception as exc:
                 summary_warning = f"站点订正降水 QC 摘要无法读取：{exc}"
+                if strict_station_rules:
+                    errors.append(summary_warning)
             if summary_warning:
                 warnings.append(summary_warning)
+        elif strict_station_rules:
+            errors.append("站点订正缺少质量摘要，请先完成降水方案。")
     boundary_error = required_boundary_coverage_error(config, profile)
     if boundary_error:
         errors.append(boundary_error)
@@ -1231,11 +1427,20 @@ def build_profile_paths(config: dict[str, Any], profile: str) -> dict[str, Path]
     paths["aligned_prec_base_dir"] = select_workspace_path(aligned_root, ("降水_MSWEP",), ("prec",))
     paths["aligned_prec_cmfd_base_dir"] = select_workspace_path(aligned_root, ("降水_CMFD",), ("prec_cmfd",))
     paths["aligned_prec_custom_base_dir"] = select_workspace_path(aligned_root, ("降水_本地导入",), ("prec_custom",))
-    paths["aligned_prec_era5_corrected_dir"] = select_workspace_path(aligned_root, ("降水_ERA5_站点订正",), ("precipitation_corrected",))
-    paths["aligned_prec_corrected_dir"] = select_workspace_path(aligned_root, ("降水_MSWEP_站点订正",), ("prec_corrected",))
-    paths["aligned_prec_cmfd_corrected_dir"] = select_workspace_path(aligned_root, ("降水_CMFD_站点订正",), ("prec_cmfd_corrected",))
-    paths["aligned_prec_custom_corrected_dir"] = select_workspace_path(aligned_root, ("降水_本地导入_站点订正",), ("prec_custom_corrected",))
-    precip_mode = str(dict(config.get("气象策略", {})).get("降水方案", "grid_only")).strip()
+    meteo = dict(config.get("气象策略", {}) or {})
+    precip_mode = str(meteo.get("降水方案", "grid_only")).strip()
+    monthly_transfer = (
+        precip_mode == "grid_plus_station_bias"
+        and str(meteo.get("station_correction_algorithm", "") or "").strip().lower() == "monthly_transfer_v3"
+    )
+    # Statistical rules are a different forcing product. Keep the existing
+    # observation-fusion rasters available for reproducing historical runs.
+    corrected_suffix = "_月规则_v3" if monthly_transfer else ""
+    legacy_suffix = "_monthly_v3" if monthly_transfer else ""
+    paths["aligned_prec_era5_corrected_dir"] = select_workspace_path(aligned_root, ("降水_ERA5_站点订正" + corrected_suffix,), ("precipitation_corrected" + legacy_suffix,))
+    paths["aligned_prec_corrected_dir"] = select_workspace_path(aligned_root, ("降水_MSWEP_站点订正" + corrected_suffix,), ("prec_corrected" + legacy_suffix,))
+    paths["aligned_prec_cmfd_corrected_dir"] = select_workspace_path(aligned_root, ("降水_CMFD_站点订正" + corrected_suffix,), ("prec_cmfd_corrected" + legacy_suffix,))
+    paths["aligned_prec_custom_corrected_dir"] = select_workspace_path(aligned_root, ("降水_本地导入_站点订正" + corrected_suffix,), ("prec_custom_corrected" + legacy_suffix,))
     use_corrected = precip_mode != "grid_only"
     paths["aligned_prec_era5_dir"] = paths["aligned_prec_era5_corrected_dir"] if use_corrected else paths["aligned_prec_era5_base_dir"]
     paths["aligned_prec_dir"] = paths["aligned_prec_corrected_dir"] if use_corrected else paths["aligned_prec_base_dir"]
@@ -1579,7 +1784,7 @@ def patch_runtime_environment(module: Any, config: dict[str, Any], profile: str,
 
 def build_weighted_multi_objective_meta(profile: str) -> dict[str, Any]:
     profile_label = PROFILE_LABELS.get(profile, profile)
-    return {
+    meta = {
         "type": OBJECTIVE_MODE_MULTI,
         "profile": profile,
         "label": profile_label,
@@ -1650,6 +1855,35 @@ def build_weighted_multi_objective_meta(profile: str) -> dict[str, Any]:
             "hard checks 固定先于总分执行，并输出合同约定的失败码与结构。",
         ],
     }
+    if profile == PROFILE_DAILY:
+        meta.update({
+            "objective_scoring_policy": "calibration_only_v1",
+            "optimization_period": "calibration_period",
+            "validation_diagnostic_only": True,
+            "summary": "日尺度率定仅以率定期实测调参：flow 与 flow_guard 优先，非 flow 项封顶排序；验证期指标只展示，不参与优化或选优。",
+        })
+        meta["weights"]["flow"].update({
+            "nse_validation": 0.0,
+            "log_nse_validation": 0.0,
+            "pbias_validation": 0.0,
+        })
+        meta["weights"]["flow_guard"].update({
+            "nse_calibration_weight": 3.0,
+            "kge_calibration_weight": 2.0,
+            "pbias_calibration_weight": 1.5,
+            "nse_validation_weight": 0.0,
+            "kge_validation_weight": 0.0,
+            "pbias_validation_weight": 0.0,
+            "validation_diagnostic_only": True,
+        })
+        meta["diagnostic_only_constraints"]["validation_flow_metrics"] = True
+        meta["notes"] = [
+            "flow 只使用率定期 NSE / logNSE / PBIAS；flow_guard 只使用率定期 NSE / KGE / PBIAS。",
+            "验证期指标继续计算和展示，权重和罚项固定为零；MC、全局搜索和精修按同一率定目标选优。",
+            "最优参数冻结后，在预热、率定和验证的连续模拟状态上评价验证期，不以验证实测再次调整参数。",
+            *meta["notes"][1:],
+        ]
+    return meta
 
 
 def build_weighted_multi_objective(module: Any, profile: str) -> tuple[Any, Any, Any, dict[str, Any]]:
@@ -1678,7 +1912,12 @@ def build_weighted_multi_objective(module: Any, profile: str) -> tuple[Any, Any,
             try:
                 return core_compute_terms(metrics, sim)
             except Exception:
-                pass
+                if profile == PROFILE_DAILY:
+                    return module.BAD_OBJ, None
+        if profile == PROFILE_DAILY:
+            # A missing or broken daily core must not silently select parameters
+            # with the legacy objective, which includes validation observations.
+            return module.BAD_OBJ, None
         nse_cal = float(metrics.get("nse_cal", float("nan")))
         nse_val = float(metrics.get("nse_val", float("nan")))
         log_nse_cal = float(metrics.get("log_nse_cal", float("nan")))
@@ -2081,7 +2320,12 @@ def patch_profile_behavior(
         data_sources["runtime_prec_source"] = runtime_prec_source
         data_sources["configured_precip_source"] = configured_precip_source(config)
         data_sources["station_precip_mode"] = str(dict(config.get("气象策略", {}) or {}).get("降水方案", "grid_only") or "grid_only").strip()
+        data_sources["station_correction_algorithm"] = str(dict(config.get("气象策略", {}) or {}).get("station_correction_algorithm", "legacy_ratio_v1") or "legacy_ratio_v1").strip()
         data_sources["prec_dir"] = str(getattr(module, "PREC_DIR", "") or data_sources.get("prec_dir", ""))
+        if data_sources["station_correction_algorithm"] == "monthly_transfer_v3":
+            rule_path = Path(data_sources["prec_dir"]) / "station_bias_monthly_transfer_rules_v3.json"
+            if rule_path.exists():
+                data_sources["station_rule_identity_sha256"] = str(json.loads(rule_path.read_text(encoding="utf-8")).get("identity_sha256", ""))
         data_sources["glacier_mode"] = str(getattr(module.args, "glacier_mode", "") or data_sources.get("glacier_mode", "inline"))
         metadata["data_sources"] = data_sources
         metadata = portableize_value_paths(metadata)

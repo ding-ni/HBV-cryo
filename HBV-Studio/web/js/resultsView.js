@@ -1159,7 +1159,7 @@
     const run = data?.run || {};
     const summary = hydrologySummaryFor(data);
     const timeCfg = meta.time_config || {};
-    const seriesRange = data.series_range || {};
+    const seriesRange = savedRunSeriesRange(data);
     const paramBoundsProfileLabels = helpers.paramBoundsProfileLabels || {};
     const hydrologySummaryValue = helpers.hydrologySummaryValue || defaultHydrologySummaryValue;
     const componentFractionReport = helpers.componentFractionReport || (() => ({}));
@@ -1173,7 +1173,6 @@
     const timeRangeText = helpers.timeRangeText || ((start, end) => [start || "—", end || "—"].join(" 至 "));
     const shortPath = helpers.shortPath || (value => String(value || "").replace(/\\/g, "/").split("/").pop() || "—");
     const runMetricsText = helpers.runMetricsText || (() => "");
-    const compactTimeText = helpers.compactTimeText || (value => String(value || ""));
     const currentRunStepHours = helpers.currentRunStepHours || runStepHours;
     const editable = isStudioEditableRun(data);
     const manual = Boolean(meta?.manual_result?.enabled);
@@ -1214,7 +1213,9 @@
         </section>
       `,
     ].join("");
-    const periodHint = runMetricsText(run);
+    const periodHint = seriesRange.actual_start && seriesRange.actual_end
+      ? `当前图表与导出可用时段：${timeRangeText(seriesRange.actual_start, seriesRange.actual_end, stepHours)}`
+      : runMetricsText(run);
     const baseText = editable
       ? manual
         ? "当前结果来自一次手调后的保存结果。继续改参数后，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
@@ -1222,16 +1223,18 @@
           ? "当前结果是系统生成的手调起点。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录。"
           : "当前结果支持继续手调。直接在下方改参数值，再点“保存并重算”，左侧会新增一条结果记录，图表和指标也会切换到最新结果。"
       : "当前结果只支持查看。若要手动调参，请选择一个可调结果。";
-    const legacyWarmupWarning = seriesRange.warmup_start && seriesRange.actual_start && !seriesRange.warmup_covered
-      ? `当前这个历史结果实际从 ${compactTimeText(seriesRange.actual_start, stepHours)} 开始保存，未包含预热段；如果需要导出或查看预热期，请用新版程序重新生成一次结果。`
-      : "";
+    const coverageWarning = seriesRange.warmup_start && seriesRange.actual_start && seriesRange.warmup_covered === false
+      ? "当前结果未完整保存预热段；如需补存完整过程，可用当前参数重新计算并保存。"
+      : seriesRange.actual_start && seriesRange.full_period_covered === false
+        ? "当前结果未完整保存配置时段；图表和导出使用已保存的记录。"
+        : "";
     const hintText = [
       baseText,
-      periodHint ? `当前图表与导出都覆盖${periodHint}。` : "",
-      legacyWarmupWarning,
+      periodHint ? `${periodHint}。` : "",
+      coverageWarning,
       "结果页只显示简要水文解释；完整过程复核请打开本地过程复核报告。",
     ].filter(Boolean).join(" ");
-    const hintClassName = `hint-box ${(editable && !legacyWarmupWarning) ? "status-ok" : "status-warn"}`.trim();
+    const hintClassName = `hint-box ${(editable && !coverageWarning) ? "status-ok" : "status-warn"}`.trim();
     return {
       metadataHtml,
       hintText,
@@ -1338,14 +1341,26 @@
     };
   }
 
+  function savedRunSeriesRange(data = {}) {
+    const range = data?.series_range || data?.run?.series_range || {};
+    const dates = Array.isArray(data?.series?.dates) ? data.series.dates : [];
+    const timeCfg = data?.metadata?.time_config || data?.run?.time_config || {};
+    return {
+      ...range,
+      actual_start: range.actual_start || dates[0] || "",
+      actual_end: range.actual_end || dates[dates.length - 1] || "",
+      warmup_start: range.warmup_start || timeCfg.warmup_start || "",
+    };
+  }
+
   function runExportPanelState(data = {}, options = {}, helpers = {}) {
     const formatInputTime = helpers.formatInputTime || (value => String(value || "").trim());
     const stepHours = runStepHours(data);
     const hourly = stepHours <= 1.5;
-    const timeCfg = data?.metadata?.time_config || {};
-    const dates = Array.isArray(data?.series?.dates) ? data.series.dates : [];
-    const startValue = timeCfg.warmup_start || timeCfg.calib_start || dates[0] || "";
-    const endValue = timeCfg.valid_end || dates[dates.length - 1] || "";
+    const timeCfg = data?.metadata?.time_config || data?.run?.time_config || {};
+    const seriesRange = savedRunSeriesRange(data);
+    const startValue = seriesRange.actual_start;
+    const endValue = seriesRange.actual_end;
     const hasRunPath = Boolean(data?.run?.path);
     const hasExportPath = Boolean(options.lastExportPath);
     const start = {
@@ -1360,12 +1375,24 @@
     };
     const exportDisabled = !hasRunPath;
     const openDisabled = !hasExportPath;
+    const savedPeriodText = startValue && endValue && seriesRange.full_period_covered === true
+      ? timeCfg.warmup_start
+        ? "当前结果已保存预热至验证全时段。默认已带入已保存的全时段。"
+        : "当前结果已保存配置全时段。默认已带入已保存的全时段。"
+      : startValue && endValue
+        ? `当前结果实际保存时段为 ${startValue} 至 ${endValue}。默认已带入这一时段。`
+        : "当前结果尚未确认实际保存时段，请确认结果记录后填写导出范围。";
+    const warmupNote = seriesRange.warmup_start && seriesRange.warmup_covered === false
+      ? "预热段未完整保存在此结果中。"
+      : "";
     const hintText = hasRunPath
-      ? hourly
-        ? "当前结果已保存预热至验证全时段。默认已带入全时段，小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
-        : "当前结果已保存预热至验证全时段。默认已带入全时段，日尺度结果会导出到当前结果目录下的“导出”子目录。"
+      ? `${savedPeriodText}${warmupNote}${hourly
+        ? "小时结果会导出到当前结果目录下的“导出”子目录，时间范围按分钟精度填写。"
+        : "日尺度结果会导出到当前结果目录下的“导出”子目录。"}`
       : "选择一个结果后，可按时间范围导出 Excel。";
-    const hintClassName = "hint-box";
+    const hintClassName = hasRunPath && (seriesRange.full_period_covered === false || warmupNote)
+      ? "hint-box status-warn"
+      : "hint-box";
     return {
       stepHours,
       hourly,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,24 @@ import precipitation_strategy_runner as runner  # noqa: E402
 
 
 class PrecipitationStrategyRunnerTests(unittest.TestCase):
+    @staticmethod
+    def _write_records(root: Path, timestamps: list[pd.Timestamp], values: list[float]) -> list[tuple[pd.Timestamp, Path]]:
+        records = []
+        for timestamp, value in zip(timestamps, values):
+            path = root / (pd.Timestamp(timestamp).strftime("%Y.%m.%d.%H.%M") + ".tif")
+            with rasterio.open(
+                path, "w", driver="GTiff", height=1, width=1, count=1,
+                dtype="float32", crs="EPSG:3857", transform=from_origin(0.0, 1000.0, 1000.0, 1000.0),
+                nodata=-9999.0,
+            ) as dst:
+                dst.write(np.asarray([[value]], dtype="float32"), 1)
+            records.append((pd.Timestamp(timestamp), path))
+        return records
+
+    @staticmethod
+    def _one_station() -> pd.DataFrame:
+        return pd.DataFrame({"station_id": ["S1"], "x": [500.0], "y": [500.0], "weight": [1.0]})
+
     def test_station_series_integrity_blocks_distinct_ids_with_identical_nonzero_series(self) -> None:
         index = pd.date_range("2026-01-01", periods=30, freq="1D")
         series = pd.DataFrame(
@@ -219,12 +238,18 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
+                runner.apply_grid_bias_correction(
+                    [(pd.Timestamp("2026-01-01"), raster_path)],
+                    output_dir, stations, station_series, overwrite=True,
+                    algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
+                )
                 written = runner.apply_grid_bias_correction(
                     [(pd.Timestamp("2026-01-01"), raster_path)],
                     output_dir,
                     stations,
                     station_series,
                     overwrite=False,
+                    algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
                 )
 
         self.assertEqual(written, 1)
@@ -457,6 +482,7 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
                 overwrite=True,
                 transfer_rules={"arrays": {"global_ratio": np.full((2, 2), 3.0)}},
                 return_stats=True,
+                algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
             )
 
             with rasterio.open(output_dir / raster_path.name) as src:
@@ -498,6 +524,7 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
                 station_series,
                 overwrite=True,
                 return_stats=True,
+                algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
             )
 
             with rasterio.open(output_dir / records[0][1].name) as src:
@@ -545,6 +572,7 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
                 station_series,
                 overwrite=True,
                 return_stats=True,
+                algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
             )
 
             values = []
@@ -591,6 +619,249 @@ class PrecipitationStrategyRunnerTests(unittest.TestCase):
             self.assertEqual(summary["training_days"], 1)
             self.assertEqual(summary["monthly"]["06"]["training_days"], 1)
             self.assertEqual(summary["monthly"]["01"]["fallback"], "global")
+
+    def test_monthly_transfer_uses_paired_totals_and_one_rule_for_all_years(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            training_times = list(pd.date_range("2025-10-01", periods=10, freq="D"))
+            timestamps = [pd.Timestamp("2022-01-01"), pd.Timestamp("2022-10-01"), *training_times]
+            base = [3.0, 50.0, 100.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 50.0, 0.0]
+            records = self._write_records(root, timestamps, base)
+            station_series = pd.DataFrame(
+                {"S1": [5.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.nan, 2.0]}, index=training_times,
+            )
+            output_dir = root / "out"
+            summary = runner.fit_monthly_transfer_rules(records, output_dir, self._one_station(), station_series)
+            rules = runner.load_monthly_transfer_rules(output_dir)
+            self.assertIsNotNone(rules)
+            ratio = 8.0 / 107.0
+            self.assertAlmostEqual(float(rules["arrays"]["month_10_ratio"][0, 0]), ratio, places=7)
+            self.assertLess(ratio, 0.2)
+            sample = summary["monthly"]["10"]["station_samples"][0]
+            self.assertEqual(sample["paired_steps"], 9)
+            self.assertEqual(sample["observed_total_mm"], 8.0)
+            self.assertEqual(sample["grid_total_mm"], 107.0)
+            self.assertEqual(summary["monthly"]["01"]["fallback"], "identity")
+            self.assertEqual(summary["monthly"]["01"]["status"], "unverified_identity")
+            stats = runner.apply_grid_bias_correction(
+                records, output_dir, self._one_station(), station_series, False, rules,
+                return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V3,
+            )
+            actual = []
+            for _, path in records:
+                with rasterio.open(output_dir / path.name) as src:
+                    actual.append(float(src.read(1)[0, 0]))
+            np.testing.assert_allclose(actual, [3.0, *[value * ratio for value in base[1:]]], rtol=1e-6)
+            self.assertEqual(actual[-1], 0.0)  # no additive residual creates rain
+            self.assertEqual(stats["direct_station_corrected_steps"], 0)
+            self.assertEqual(stats["frozen_rule_applied_steps"], 11)
+            self.assertEqual(stats["unsupported_month_identity_steps"], 1)
+            self.assertEqual(stats["quality_checks"]["checked_steps"], 12)
+            self.assertEqual(stats["quality_checks"]["status"], "passed")
+            self.assertEqual(stats["occurrence_correction"], "not_performed")
+            self.assertFalse(stats["qc_blocked"])
+
+    def test_monthly_transfer_training_range_changes_the_frozen_rule_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-05-01", periods=14, freq="D"))
+            records = self._write_records(root, timestamps, [1.0] * 14)
+            stations = self._one_station()
+            series = pd.DataFrame({"S1": [2.0] * 7 + [1.0] * 7}, index=timestamps)
+            out = root / "out"
+            all_data = runner.fit_monthly_transfer_rules(records, out, stations, series)
+            selected = runner.fit_monthly_transfer_rules(
+                records, out, stations, series, training_start="2025-05-08", training_end="2025-05-14",
+            )
+            self.assertNotEqual(all_data["identity_sha256"], selected["identity_sha256"])
+            self.assertEqual(selected["training_days"], 7)
+            self.assertEqual(selected["actual_training_start"], "2025-05-08T00:00:00")
+            self.assertEqual(selected["monthly"]["05"]["ratio_mean"], 1.0)
+            again = runner.fit_monthly_transfer_rules(
+                records, out, stations, series, training_start="2025-05-08", training_end="2025-05-14",
+            )
+            self.assertTrue(again["loaded_existing"])
+
+    def test_monthly_transfer_does_not_extrapolate_a_single_station_day_to_a_month(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = [*list(pd.date_range("2025-05-01", periods=7)), pd.Timestamp("2025-02-01")]
+            records = self._write_records(root, timestamps, [2.0] * 7 + [1.0])
+            series = pd.DataFrame({"S1": [1.0] * 7 + [8.0]}, index=timestamps)
+            summary = runner.fit_monthly_transfer_rules(records, root / "out", self._one_station(), series)
+            self.assertEqual(summary["supported_months"], ["05"])
+            self.assertIn("02", summary["unverified_months"])
+            self.assertEqual(summary["monthly"]["02"]["ratio_mean"], 1.0)
+            self.assertEqual(summary["monthly"]["02"]["station_samples"][0]["status"], "insufficient_paired_days")
+            self.assertEqual(summary["quality_checks"]["status"], "passed")
+
+    def test_monthly_transfer_cache_rebuilds_after_source_observation_or_output_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=7))
+            records = self._write_records(root, timestamps, [2.0] * 7)
+            stations = self._one_station()
+            series = pd.DataFrame({"S1": [1.0] * 7}, index=timestamps)
+            out = root / "out"
+            first = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            cached = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            self.assertEqual(cached["processed_steps"], 0)
+            self.assertEqual(cached["quality_checks"], first["quality_checks"])
+            self.assertTrue(cached["quality_evidence_reused"])
+            self._write_records(root, timestamps[:1], [4.0])
+            changed_base = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            self.assertNotEqual(first["input_identity_sha256"], changed_base["input_identity_sha256"])
+            self.assertEqual(changed_base["processed_steps"], 7)
+            with rasterio.open(out / records[0][1].name) as src:
+                self.assertAlmostEqual(float(src.read(1)[0, 0]), 4.0 * 7.0 / 16.0)
+            series.loc[timestamps[0], "S1"] = 2.0
+            changed_observation = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            self.assertNotEqual(changed_base["rules_identity_sha256"], changed_observation["rules_identity_sha256"])
+            self._write_records(out, timestamps[:1], [999.0])
+            repaired = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            self.assertEqual(repaired["processed_steps"], 7)
+            with rasterio.open(out / records[0][1].name) as src:
+                self.assertAlmostEqual(float(src.read(1)[0, 0]), 2.0)
+            cache_path = out / runner.CORRECTION_CACHE_JSON
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            payload["processing_stats"].pop("quality_checks")
+            cache_path.write_text(json.dumps(payload), encoding="utf-8")
+            rebuilt_qc = runner.apply_grid_bias_correction(records, out, stations, series, False, return_stats=True)
+            self.assertEqual(rebuilt_qc["processed_steps"], 7)
+            self.assertEqual(rebuilt_qc["quality_checks"]["checked_steps"], 7)
+
+    def test_monthly_transfer_no_grid_rain_does_not_invent_rain_and_reports_missing_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=7))
+            records = self._write_records(root, timestamps, [0.0] * 7)
+            series = pd.DataFrame({"S1": [1.0] * 7}, index=timestamps)
+            stats = runner.apply_grid_bias_correction(records, root / "out", self._one_station(), series, False, return_stats=True)
+            self.assertTrue(stats["qc_blocked"])
+            self.assertEqual(stats["quality_checks"]["status"], "failed")
+            self.assertIn("no_supported_months", stats["quality_checks"]["failures"])
+            for _, path in records:
+                with rasterio.open(root / "out" / path.name) as src:
+                    self.assertEqual(float(src.read(1)[0, 0]), 0.0)
+
+    def test_monthly_transfer_hourly_samples_require_seven_effective_days(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01 12:00", periods=7, freq="D"))
+            records = self._write_records(root, timestamps, [2.0] * 7)
+            series = pd.DataFrame({"S1": [1.0] * 7}, index=timestamps)
+            summary = runner.fit_monthly_transfer_rules(records, root / "out", self._one_station(), series, step_hours=1.0)
+            self.assertEqual(summary["supported_months"], [])
+            self.assertAlmostEqual(summary["monthly"]["10"]["station_samples"][0]["effective_days"], 7.0 / 24.0)
+            self.assertTrue(summary["quality_checks"]["qc_blocked"])
+
+    def test_monthly_transfer_upper_bound_clipping_remains_a_quality_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=7))
+            records = self._write_records(root, timestamps, [1.0] * 7)
+            series = pd.DataFrame({"S1": [15.0] * 7}, index=timestamps)
+            out = root / "out"
+            summary = runner.fit_monthly_transfer_rules(records, out, self._one_station(), series)
+            self.assertEqual(summary["monthly"]["10"]["raw_anchor_ratio_max"], 15.0)
+            self.assertEqual(summary["monthly"]["10"]["ratio_max"], 10.0)
+            self.assertTrue(summary["quality_checks"]["qc_blocked"])
+            rules = runner.load_monthly_transfer_rules(out)
+            stats = runner.apply_grid_bias_correction(
+                records, out, self._one_station(), series, False, rules,
+                return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V3,
+            )
+            self.assertTrue(stats["qc_blocked"])
+            cached = runner.apply_grid_bias_correction(
+                records, out, self._one_station(), series, False, rules,
+                return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V3,
+            )
+            self.assertTrue(cached["qc_blocked"])
+
+    def test_monthly_transfer_same_shape_different_grid_is_rejected_for_forecast(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=7))
+            records = self._write_records(root, timestamps, [2.0] * 7)
+            series = pd.DataFrame({"S1": [1.0] * 7}, index=timestamps)
+            out = root / "out"
+            runner.fit_monthly_transfer_rules(records, out, self._one_station(), series)
+            rules = runner.load_monthly_transfer_rules(out)
+            shifted = root / "shifted.tif"
+            with rasterio.open(
+                shifted, "w", driver="GTiff", height=1, width=1, count=1, dtype="float32",
+                crs="EPSG:3857", transform=from_origin(1000.0, 1000.0, 1000.0, 1000.0), nodata=-9999.0,
+            ) as dst:
+                dst.write(np.ones((1, 1), dtype="float32"), 1)
+            existing_output = out / "existing_forecast.tif"
+            self._write_records(out, [pd.Timestamp("2026-10-01")], [2.0])
+            (out / "2026.10.01.00.00.tif").rename(existing_output)
+            with self.assertRaisesRegex(ValueError, "格网不一致"):
+                runner.apply_transfer_rule_to_raster(
+                    pd.Timestamp("2026-10-01"), shifted, existing_output, rules, overwrite=False,
+                )
+
+    def test_monthly_transfer_unknown_rule_quality_cannot_bypass_checks_via_output_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=7))
+            records = self._write_records(root, timestamps, [2.0] * 7)
+            series = pd.DataFrame({"S1": [1.0] * 7}, index=timestamps)
+            out = root / "out"
+            runner.apply_grid_bias_correction(records, out, self._one_station(), series, False, return_stats=True)
+            rules = runner.load_monthly_transfer_rules(out)
+            rules["summary"].pop("quality_checks")
+            with self.assertRaisesRegex(ValueError, "质量证据"):
+                runner.apply_grid_bias_correction(
+                    records, out, self._one_station(), series, False, rules,
+                    return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V3,
+                )
+
+    def test_v2_reuse_keeps_failed_monthly_qc_and_never_multiplies_output_twice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=3))
+            records = self._write_records(root, timestamps, [1.0] * 3)
+            stations = self._one_station()
+            series = pd.DataFrame({"S1": [0.0, 0.0, 1.0]}, index=timestamps)
+            out = root / "out"
+            first = runner.apply_grid_bias_correction(
+                records, out, stations, series, False, return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
+            )
+            cached = runner.apply_grid_bias_correction(
+                records, out, stations, series, False, return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
+            )
+            overwritten = runner.apply_grid_bias_correction(
+                records, out, stations, series, True, return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
+            )
+            self.assertTrue(first["qc_blocked"])
+            self.assertTrue(cached["qc_blocked"])
+            self.assertTrue(overwritten["qc_blocked"])
+            self.assertEqual(cached["processed_steps"], 0)
+            self.assertEqual(cached["monthly_conservation"], first["monthly_conservation"])
+            self.assertEqual(overwritten["monthly_conservation"], first["monthly_conservation"])
+            with rasterio.open(out / records[-1][1].name) as src:
+                self.assertEqual(float(src.read(1)[0, 0]), 3.0)
+
+    def test_v2_monthly_redistribution_keeps_missing_station_day_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            timestamps = list(pd.date_range("2025-10-01", periods=3))
+            records = self._write_records(root, timestamps, [1.0, 5.0, 1.0])
+            series = pd.DataFrame({"S1": [0.0, np.nan, 1.0]}, index=timestamps)
+            out = root / "out"
+            stats = runner.apply_grid_bias_correction(
+                records, out, self._one_station(), series, False,
+                return_stats=True, algorithm=runner.STATION_CORRECTION_ALGORITHM_V2,
+            )
+            actual = []
+            for _, path in records:
+                with rasterio.open(out / path.name) as src:
+                    actual.append(float(src.read(1)[0, 0]))
+            self.assertEqual(actual, [0.0, 5.0, 2.0])
+            self.assertEqual(stats["monthly_conservation"]["frozen_missing_station_steps"], 1)
+            self.assertEqual(stats["monthly_conservation"]["scope"], "observed_station_steps_only")
+            self.assertTrue(stats["qc_blocked"])
 
 
 if __name__ == "__main__":

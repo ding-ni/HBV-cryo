@@ -357,7 +357,7 @@
     }
     if (!hourly && objectType === "interbasin_with_boundary") {
       return {
-        text: "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流文件：可直接使用日尺度流量，小时流量会按水文日 08:00 起算聚合为日平均；覆盖预热到验证全时段，不能有重复时间戳。",
+        text: "当前是“日尺度 + 区间流域”组合。最关键的是上游边界入流文件：可直接使用日尺度流量，小时流量会按水文日 08:00 起算聚合为日平均，不能有重复时间戳。连续气象用于全时段预热，缺测边界保留缺测；边界恢复并完成汇流预热后，才评价出口总流量。",
         className: "hint-box status-warn",
       };
     }
@@ -382,10 +382,13 @@
       };
     }
     const hourly = Boolean(model.hourly);
+    const configuredWarmupDays = Number(model.boundaryRoutingWarmupDays ?? 14);
+    const warmupDays = Number.isFinite(configuredWarmupDays) && configuredWarmupDays >= 0 ? configuredWarmupDays : 14;
+    const coverageHint = `连续气象覆盖预热至验证全时段，用于本区积雪、土壤水和响应库预热。边界未观测时保留缺测；边界资料恢复后连续完成 ${warmupDays} 天汇流预热，再与有效实测流量评价出口总流量。实测零值保留为 0。`;
     return {
       text: hourly
-        ? "区间流域小时项目对边界入流最敏感。建议先确认文件时间步为 1 小时、覆盖预热至验证全时段、零值不是误填缺测。"
-        : "区间流域日尺度项目可导入日尺度或小时尺度边界流量；小时流量会按水文日 08:00 起算聚合为日平均，并覆盖预热、率定、验证全时段。",
+        ? `区间流域小时项目的边界入流时间步应为 1 小时。${coverageHint}`
+        : `区间流域日尺度项目可导入日尺度或小时尺度边界流量；小时流量会按水文日 08:00 起算聚合为日平均。${coverageHint}`,
       className: "hint-box status-warn",
     };
   }

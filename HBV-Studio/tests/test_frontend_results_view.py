@@ -25,6 +25,99 @@ def run_node_script(script: str) -> subprocess.CompletedProcess[str]:
 
 class FrontendResultsViewTests(unittest.TestCase):
     @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
+    def test_saved_coverage_keeps_detail_and_export_consistent(self) -> None:
+        script = textwrap.dedent(
+            r"""
+            const fs = require("fs");
+            const vm = require("vm");
+            const context = { window: {}, console };
+            vm.createContext(context);
+            vm.runInContext(fs.readFileSync("web/js/resultsView.js", "utf8"), context);
+            const results = context.window.HBVStudioResultsView;
+            const config = {
+              time_step_hours: 24,
+              warmup_start: "2022-01-01", warmup_end: "2025-05-31",
+              calib_start: "2025-06-01", valid_end: "2025-10-31",
+            };
+            const helpers = {
+              isStudioEditableRun: () => true,
+              timeRangeText: (start, end) => `${start} ~ ${end}`,
+              runMetricsText: () => "CONFIG_RANGE_SHOULD_NOT_APPEAR",
+              formatInputTime: value => String(value).replace(" ", "T"),
+            };
+            const partial = {
+              run: { path: "C:/runs/current", run_type: "calibration", time_config: config },
+              metadata: { time_config: config },
+              series: { dates: ["2025-06-01", "2025-10-31"] },
+              series_range: {
+                actual_start: "2025-06-01", actual_end: "2025-10-31",
+                warmup_start: config.warmup_start,
+                warmup_covered: false, full_period_covered: false,
+              },
+            };
+            const detail = results.renderRunDetailMetadata(partial, helpers);
+            const panel = results.runExportPanelState(partial, {}, helpers);
+            if (!detail.hintText.includes("2025-06-01 ~ 2025-10-31") ||
+                !detail.hintText.includes("未完整保存预热段") ||
+                detail.hintText.includes("CONFIG_RANGE_SHOULD_NOT_APPEAR") ||
+                detail.hintText.includes("历史结果") || detail.hintText.includes("新版") ||
+                detail.hintText.includes("重新率定")) {
+              throw new Error(`detail must state the current saved coverage: ${detail.hintText}`);
+            }
+            if (panel.start.value !== "2025-06-01" || panel.end.value !== "2025-10-31" ||
+                panel.hintText.includes("已保存预热至验证全时段") ||
+                !panel.hintText.includes("预热段未完整保存在此结果中") ||
+                panel.hintClassName !== "hint-box status-warn") {
+              throw new Error(`export must not claim unavailable warmup: ${JSON.stringify(panel)}`);
+            }
+            const complete = {
+              ...partial,
+              series: { dates: ["2022-01-01", "2025-10-31"] },
+              series_range: {
+                ...partial.series_range, actual_start: "2022-01-01",
+                warmup_covered: true, full_period_covered: true,
+              },
+            };
+            const completeDetail = results.renderRunDetailMetadata(complete, helpers);
+            const completePanel = results.runExportPanelState(complete, {}, helpers);
+            if (!completeDetail.hintText.includes("2022-01-01 ~ 2025-10-31") ||
+                completeDetail.hintText.includes("未完整保存") ||
+                completePanel.start.value !== "2022-01-01" ||
+                !completePanel.hintText.includes("已保存预热至验证全时段")) {
+              throw new Error(`verified full output should be shown consistently: ${completeDetail.hintText}`);
+            }
+            const shortEnd = {
+              ...complete,
+              series_range: { ...complete.series_range, actual_end: "2025-09-30", full_period_covered: false },
+            };
+            const shortEndDetail = results.renderRunDetailMetadata(shortEnd, helpers);
+            const shortEndPanel = results.runExportPanelState(shortEnd, {}, helpers);
+            if (shortEndPanel.end.value !== "2025-09-30" || shortEndPanel.hintText.includes("已保存预热至验证全时段") ||
+                !shortEndDetail.hintText.includes("未完整保存配置时段")) {
+              throw new Error("saved warmup must not imply the validation endpoint exists");
+            }
+            const hourly = {
+              ...partial,
+              metadata: { time_config: { ...config, time_step_hours: 1 } },
+              series_range: {
+                ...partial.series_range, actual_start: "2025-06-01 08:00", actual_end: "2025-10-31 07:00",
+              },
+            };
+            const hourlyPanel = results.runExportPanelState(hourly, {}, helpers);
+            if (hourlyPanel.start.value !== "2025-06-01T08:00" || hourlyPanel.end.value !== "2025-10-31T07:00" ||
+                !hourlyPanel.hintText.includes("分钟精度") || hourlyPanel.hintText.includes("已保存预热至验证全时段")) {
+              throw new Error(`hourly export must retain actual saved timestamps: ${JSON.stringify(hourlyPanel)}`);
+            }
+            const unknown = results.runExportPanelState({ run: partial.run, metadata: partial.metadata });
+            if (unknown.start.value !== "" || unknown.end.value !== "" || unknown.hintText.includes("已保存预热至验证全时段")) {
+              throw new Error(`configuration cannot stand in for unknown saved output: ${JSON.stringify(unknown)}`);
+            }
+            """
+        )
+        result = run_node_script(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipIf(shutil.which("node") is None, "node is required for frontend JavaScript tests")
     def test_results_view_renders_filters_hints_and_compact_widgets(self) -> None:
         script = textwrap.dedent(
             r"""
@@ -1078,10 +1171,10 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (dailyExport.stepHours !== 24 || dailyExport.hourly) {
               throw new Error(`unexpected daily export timescale: ${JSON.stringify(dailyExport)}`);
             }
-            if (dailyExport.start.type !== "date" || dailyExport.start.step !== "" || dailyExport.start.value !== "D:2019-10-01") {
+            if (dailyExport.start.type !== "date" || dailyExport.start.step !== "" || dailyExport.start.value !== "D:2020-01-02") {
               throw new Error(`unexpected daily export start: ${JSON.stringify(dailyExport.start)}`);
             }
-            if (dailyExport.end.type !== "date" || dailyExport.end.step !== "" || dailyExport.end.value !== "D:2021-12-31") {
+            if (dailyExport.end.type !== "date" || dailyExport.end.step !== "" || dailyExport.end.value !== "D:2021-12-30") {
               throw new Error(`unexpected daily export end: ${JSON.stringify(dailyExport.end)}`);
             }
             if (dailyExport.exportDisabled || !dailyExport.openDisabled || dailyExport.hintClassName !== "hint-box" || !dailyExport.hintText.includes("日尺度结果")) {
@@ -1090,8 +1183,8 @@ class FrontendResultsViewTests(unittest.TestCase):
             const dailyExportDom = Object.fromEntries(dailyExport.domUpdates.map(update => [update.selector, update]));
             if (dailyExportDom["#run-export-start"].type !== "date" ||
                 dailyExportDom["#run-export-start"].step !== "" ||
-                dailyExportDom["#run-export-start"].value !== "D:2019-10-01" ||
-                dailyExportDom["#run-export-end"].value !== "D:2021-12-31" ||
+                dailyExportDom["#run-export-start"].value !== "D:2020-01-02" ||
+                dailyExportDom["#run-export-end"].value !== "D:2021-12-30" ||
                 dailyExportDom["#btn-run-export"].disabled !== false ||
                 dailyExportDom["#btn-open-export-file"].disabled !== true ||
                 dailyExportDom["#run-export-hint"].className !== "hint-box" ||
@@ -1118,7 +1211,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (hourlyExport.stepHours !== 1 || !hourlyExport.hourly) {
               throw new Error(`unexpected hourly export timescale: ${JSON.stringify(hourlyExport)}`);
             }
-            if (hourlyExport.start.type !== "datetime-local" || hourlyExport.start.step !== "60" || hourlyExport.start.value !== "H:2020-01-01 00:00") {
+            if (hourlyExport.start.type !== "datetime-local" || hourlyExport.start.step !== "60" || hourlyExport.start.value !== "H:2020-01-01 01:00") {
               throw new Error(`unexpected hourly export start: ${JSON.stringify(hourlyExport.start)}`);
             }
             if (hourlyExport.end.type !== "datetime-local" || hourlyExport.end.step !== "60" || hourlyExport.end.value !== "H:2020-01-03 23:00") {
@@ -1130,7 +1223,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             const hourlyExportDom = Object.fromEntries(hourlyExport.domUpdates.map(update => [update.selector, update]));
             if (hourlyExportDom["#run-export-start"].type !== "datetime-local" ||
                 hourlyExportDom["#run-export-start"].step !== "60" ||
-                hourlyExportDom["#run-export-start"].value !== "H:2020-01-01 00:00" ||
+                hourlyExportDom["#run-export-start"].value !== "H:2020-01-01 01:00" ||
                 hourlyExportDom["#run-export-end"].type !== "datetime-local" ||
                 hourlyExportDom["#run-export-end"].step !== "60" ||
                 hourlyExportDom["#btn-run-export"].disabled !== false ||
@@ -1484,6 +1577,7 @@ class FrontendResultsViewTests(unittest.TestCase):
               series_range: {
                 warmup_start: "2019-01-01",
                 actual_start: "2020-01-02",
+                actual_end: "2021-12-31",
                 warmup_covered: false,
               },
             }, {
@@ -1513,7 +1607,7 @@ class FrontendResultsViewTests(unittest.TestCase):
             if (!detail.metadataHtml.includes('data-run-detail-open-dir="C:/runs/A"') || !detail.metadataHtml.includes('data-run-detail-open-report="C:/runs/A/report&amp;detail.md"')) {
               throw new Error("detail metadata action buttons missing");
             }
-            if (detail.hintClassName !== "hint-box status-warn" || !detail.hintText.includes("未包含预热段") || !detail.hintText.includes("率定期<2020>&验证期")) {
+            if (detail.hintClassName !== "hint-box status-warn" || !detail.hintText.includes("未完整保存预热段") || !detail.hintText.includes("2020-01-02 至 2021-12-31")) {
               throw new Error(`unexpected detail hint: ${detail.hintClassName} ${detail.hintText}`);
             }
             const detailDom = Object.fromEntries(detail.domUpdates.map(update => [update.selector, update]));

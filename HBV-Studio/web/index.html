@@ -209,6 +209,7 @@
                   <div></div>
                 </div>
               </div>
+              <div class="hint-box">连续气象覆盖预热、率定和验证全时段。预热用于演算积雪、土壤水和响应库初始状态；率定和验证只评价各自时段内有效的实测流量。延长气象预热不要求补出缺测流量。</div>
               <div class="field-grid two" style="margin-top:12px">
                 <div class="field-group">
                   <label>水文建模工作流</label>
@@ -261,7 +262,7 @@
                   </select>
                 </div>
               </div>
-              <div class="hint-box">支持 CSV、XLS、XLSX、XLSM。缺测边界不会自动解释为零流量；边界资料恢复后需完成汇流预热，出口总流量才进入评价。</div>
+              <div class="hint-box">支持 CSV、XLS、XLSX、XLSM。实测零流量保留为 0，未观测的时段保留缺测。没有历史边界资料也可用连续气象预热本区积雪和土壤状态；缺测时不评价出口总流量，边界恢复后先完成汇流预热。</div>
               <div class="action-row">
                 <button class="ghost-button" id="wz-boundary-preview-btn">预览边界入流数据</button>
               </div>
@@ -320,6 +321,27 @@
                       <button class="browse-button" data-target="wz-station-meta" data-browse-kind="file" data-extensions=".csv">选择</button>
                     </div>
                   </div>
+                </div>
+                <div id="wz-station-correction-fields" style="margin-top:12px">
+                  <div class="field-group">
+                    <label>站点订正方法</label>
+                    <select id="wz-station-correction-algorithm">
+                      <option value="monthly_transfer_v3">统计订正：学习规则后应用全时段</option>
+                      <option value="occurrence_amount_v2">逐时段站点融合（有实测时订正）</option>
+                      <option value="legacy_ratio_v1">旧版倍率订正（复核旧项目）</option>
+                    </select>
+                  </div>
+                  <div id="wz-station-rule-training-fields" class="field-grid two" style="margin-top:12px">
+                    <div class="field-group">
+                      <label>规则训练开始（可选）</label>
+                      <input id="wz-station-rule-training-start" type="date">
+                    </div>
+                    <div class="field-group">
+                      <label>规则训练结束（可选）</label>
+                      <input id="wz-station-rule-training-end" type="date">
+                    </div>
+                  </div>
+                  <div class="hint-box" id="wz-station-correction-hint">按有效同日期累计量学习月倍率，同月所有年份统一应用。只订正降水量，不单独调整降雨发生；缺少该月观测支持时保留原格点并标注未验证。训练日期留空时使用站点与格点的有效重叠资料；需要独立检验订正效果时，训练日期应留出检验资料。</div>
                 </div>
               </div>
               <div class="field-grid" style="margin-top:12px">

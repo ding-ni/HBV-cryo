@@ -22,6 +22,7 @@ class WorkspaceCompletenessContext:
     has_matching: Callable[[Path], bool]
     validate_workspace_fields: Callable[..., dict[str, Any]]
     object_interbasin: str
+    check_precip_strategy_outputs: Callable[..., tuple[bool, str, int]] | None = None
 
 
 def _all_steps_for_object(object_type: str, context: WorkspaceCompletenessContext) -> list[int]:
@@ -62,7 +63,13 @@ def quick_workspace_completeness(
     _, precip_dir, _ = context.effective_precip_paths(config, profile, precip_source=runtime_prec_source)
     temp_dir = Path(paths["aligned_temp_dir"])
     evap_dir = Path(paths["aligned_evap_dir"])
-    if context.has_matching(Path(precip_dir)) and context.has_matching(temp_dir) and context.has_matching(evap_dir):
+    precip_quality_ready = True
+    precip_quality_missing: list[str] = []
+    if context.check_precip_strategy_outputs is not None and str(dict(config.get("气象策略", {}) or {}).get("降水方案", "grid_only")) != "grid_only":
+        precip_quality_ready, message, _ = context.check_precip_strategy_outputs(config, precip_source=runtime_prec_source)
+        if not precip_quality_ready:
+            precip_quality_missing.append(message)
+    if precip_quality_ready and context.has_matching(Path(precip_dir)) and context.has_matching(temp_dir) and context.has_matching(evap_dir):
         completed.append(6)
 
     completed = sorted(set(completed))
@@ -88,7 +95,7 @@ def quick_workspace_completeness(
         "next_step": next_step,
         "ready_for_calibration": ready,
         "pending_validation": pending_validation,
-        "missing": validation_missing if next_step == 7 else [],
+        "missing": validation_missing if next_step == 7 else precip_quality_missing,
         "warnings": validation_warnings if next_step == 7 else [],
         "object_type": object_type,
         "profile": profile,
@@ -122,7 +129,7 @@ def workspace_completeness(
 
     profile = context.current_profile(config)
     calib_validation = context.validate_workspace_fields(str(cfg_path), stage="calibration", precip_source=precip_source)
-    ready = calib_validation["valid"]
+    ready = bool(calib_validation["valid"]) and not remaining
     next_step: int | None = remaining[0] if remaining else None
 
     return {

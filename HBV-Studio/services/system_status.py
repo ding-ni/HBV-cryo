@@ -34,9 +34,12 @@ def source_files_latest_mtime(context: HealthContext) -> tuple[float, str]:
         context.gui_root / "web" / "js" / "workspaceLayout.js",
         context.gui_root / "web" / "js" / "appDataFlow.js",
     ]
+    # Installed builds ship adjacent bytecode; ignore automatically generated import caches.
+    candidates.extend([path.with_suffix(".pyc") for path in candidates if path.suffix == ".py"])
     services_dir = context.gui_root / "services"
     if services_dir.exists():
         candidates.extend(sorted(services_dir.glob("*.py")))
+        candidates.extend(sorted(services_dir.glob("*.pyc")))
     latest = 0.0
     latest_file = ""
     for path in candidates:

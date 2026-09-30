@@ -29,6 +29,7 @@ class ForcingValidationContext:
     validate_tif_grid_alignment: Callable[..., dict[str, Any]]
     event_windows_ui_summary: Callable[[dict[str, Any] | None, float], dict[str, Any] | None]
     event_forcing_coverage_summary: Callable[..., dict[str, Any] | None]
+    check_precip_strategy_outputs: Callable[..., tuple[bool, str, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -844,6 +845,10 @@ def validate_forcing_bundle(
     for item in directories.values():
         errors.extend(item["errors"])
         warnings.extend(item["warnings"])
+    if context.check_precip_strategy_outputs is not None and str(dict(config.get("气象策略", {}) or {}).get("降水方案", "grid_only")) != "grid_only":
+        strategy_ok, strategy_message, _ = context.check_precip_strategy_outputs(config, precip_source=selected_source)
+        if not strategy_ok:
+            errors.append(strategy_message)
     dem_path = context.workspace_dem_path(paths["gis_dir"], prefer=context.configured_dem_kind(config))
     grid_checks = {
         "prec": context.validate_tif_grid_alignment(precip_label, Path(precip_dir), dem_path),

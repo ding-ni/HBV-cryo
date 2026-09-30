@@ -130,10 +130,14 @@
   function runMetricsText(run) {
     const cfg = run?.time_config || {};
     const stepHours = Number(cfg.time_step_hours || run?.time_step_hours || 24);
+    const saved = run?.series_range || {};
+    if (saved.actual_start && saved.actual_end) {
+      return `已保存时段${cfg.warmup_start && saved.warmup_covered === true ? "（含预热）" : ""}：${timeRangeText(saved.actual_start, saved.actual_end, stepHours)}`;
+    }
     const start = String(cfg.warmup_start || cfg.calib_start || "").trim();
     const end = String(cfg.valid_end || cfg.calib_end || "").trim();
     if (!start && !end) return "";
-    return `全时段${cfg.warmup_start ? "（含预热）" : ""}：${timeRangeText(start, end, stepHours)}`;
+    return `配置时段${cfg.warmup_start ? "（含预热）" : ""}：${timeRangeText(start, end, stepHours)}`;
   }
 
   function runTypeBadge(run, helpers = {}) {

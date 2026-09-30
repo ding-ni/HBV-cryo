@@ -59,7 +59,7 @@ class P1P3RuntimeResilienceTests(unittest.TestCase):
     def test_health_source_mtime_reports_current_code_surface(self) -> None:
         latest, path = svc.source_files_latest_mtime()
         self.assertGreater(latest, 0)
-        self.assertTrue(path.endswith((".py", ".js", ".html", ".css")))
+        self.assertTrue(path.endswith((".py", ".pyc", ".js", ".html", ".css")))
 
     def test_get_api_route_registry_is_complete_and_resolvable(self) -> None:
         expected_routes = {

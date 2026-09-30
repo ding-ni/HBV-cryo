@@ -104,7 +104,7 @@ def forecast_boundary_fields(args: argparse.Namespace, source_metadata: dict[str
         "gap_fill": str(
             getattr(args, "forecast_boundary_gap_fill", "")
             or boundary_condition.get("gap_fill")
-            or "zero"
+            or "preserve_missing"
         ).strip(),
     }
 
@@ -273,6 +273,7 @@ def archive_forecast_inputs(
     forecast_end: str,
     boundary_source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    step_hours = float(getattr(module, "TIME_STEP_HOURS", 24.0) or 24.0)
     expected_index = forecast_time_index(module, forecast_start, forecast_end)
     expected_set = set(expected_index)
     archive_root = output_dir / "forecast_inputs"
@@ -378,6 +379,51 @@ def archive_forecast_inputs(
     }
 
 
+def source_precip_rule_binding(
+    source_metadata: dict[str, Any], config: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Recover a historical binding from its own metadata, never a new v3 rule."""
+    data_sources = dict(source_metadata.get("data_sources", {}) or {})
+    previous = [dict(item or {}) for item in (
+        data_sources.get("forecast_precipitation_transfer"),
+        source_metadata.get("forecast_precipitation_transfer"),
+        dict(source_metadata.get("forecast_result", {}) or {}).get("precipitation_transfer"),
+    ) if isinstance(item, dict)]
+
+    def historical_value(*keys: str) -> str:
+        for node in (data_sources, *previous):
+            for key in keys:
+                text = str(node.get(key, "") or "").strip()
+                if text:
+                    return text
+        return ""
+
+    mode = historical_value("station_precip_mode", "precipitation_mode")
+    algorithm = historical_value("station_correction_algorithm").lower()
+    identity = historical_value("station_rule_identity_sha256")
+    for item in previous:
+        rule_summary = dict(item.get("rule_summary", {}) or {})
+        identity = identity or str(rule_summary.get("identity_sha256", "") or "").strip()
+        if not algorithm and rule_summary.get("schema") == precipitation_strategy_runner.MONTHLY_TRANSFER_RULES_SCHEMA:
+            algorithm = "monthly_transfer_v3"
+    if not mode and (algorithm == "monthly_transfer_v3" or any(bool(item.get("enabled")) for item in previous)):
+        mode = "grid_plus_station_bias"
+    meteo = dict((config or {}).get("气象策略", {}) or {})
+    configured_algorithm = str(meteo.get("station_correction_algorithm", "") or "").strip().lower()
+    if not algorithm and configured_algorithm == "monthly_transfer_v3" and mode != "grid_only":
+        raise ValueError("源结果未保存降水方案及冻结月规则身份，不能按当前工作区规则猜测接续预报。请先恢复源结果的规则记录。")
+    # Older legacy results predate the binding fields. Keep their original compatibility path.
+    mode = mode or str(meteo.get("降水方案", "grid_only") or "grid_only").strip()
+    algorithm = algorithm or ("legacy_ratio_v1" if configured_algorithm == "monthly_transfer_v3" else configured_algorithm) or "legacy_ratio_v1"
+    return {
+        "station_precip_mode": mode,
+        "station_correction_algorithm": algorithm,
+        "station_rule_identity_sha256": identity,
+        "rule_snapshot_dir": historical_value("station_rule_snapshot_dir", "source_rule_snapshot_dir", "prec_rule_snapshot_dir", "rule_snapshot_dir"),
+        "source_rule_dir": historical_value("source_rule_dir"),
+    }
+
+
 def source_precip_rule_dirs(
     config: dict[str, Any],
     profile: str,
@@ -386,7 +432,10 @@ def source_precip_rule_dirs(
 ) -> list[Path]:
     candidates: list[Path] = []
     data_sources = dict(source_metadata.get("data_sources", {}) or {})
+    binding = source_precip_rule_binding(source_metadata)
     for raw in (
+        binding.get("rule_snapshot_dir"),
+        binding.get("source_rule_dir"),
         data_sources.get("prec_dir"),
         data_sources.get("forecast_prec_dir"),
         data_sources.get("runtime_prec_dir"),
@@ -425,38 +474,66 @@ def apply_forecast_precip_transfer_rules(
     forecast_start: str,
     forecast_end: str,
 ) -> dict[str, Any]:
-    meteo = dict(config.get("气象策略", {}) or {})
-    data_sources = dict(source_metadata.get("data_sources", {}) or {})
-    source_mode = str(
-        data_sources.get("station_precip_mode")
-        or data_sources.get("precipitation_mode")
-        or meteo.get("降水方案")
-        or "grid_only"
-    ).strip()
+    binding = source_precip_rule_binding(source_metadata, config)
+    source_mode = binding["station_precip_mode"]
     if source_mode != "grid_plus_station_bias":
         return {"enabled": False, "status": "station_bias_not_selected", "station_precip_mode": source_mode}
+    algorithm = binding["station_correction_algorithm"]
+    monthly_transfer = algorithm == "monthly_transfer_v3"
+    expected_rule_identity = binding["station_rule_identity_sha256"]
+    if monthly_transfer and not expected_rule_identity:
+        raise ValueError("源结果缺少冻结月规则身份，不能使用当前工作区的任意规则接续预报。请恢复历史规则记录。")
     archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
-    raw_prec_dir = Path(str(archived_dirs.get("prec", "") or "")).resolve(strict=False)
-    if not raw_prec_dir.exists():
+    raw_prec_text = str(archived_dirs.get("prec", "") or "").strip()
+    raw_prec_dir = Path(raw_prec_text).resolve(strict=False)
+    if not raw_prec_text or not raw_prec_dir.exists():
+        if monthly_transfer:
+            raise ValueError("连续预报缺少已归档的基础降水，不能跳过冻结月规则。")
         return {"enabled": False, "status": "missing_archived_precip"}
     source_rule_dir: Path | None = None
     rules: dict[str, Any] | None = None
+    rule_filename = precipitation_strategy_runner.MONTHLY_TRANSFER_RULES_JSON if monthly_transfer else precipitation_strategy_runner.TRANSFER_RULES_JSON
     for candidate in source_precip_rule_dirs(config, profile, source_metadata, paths):
-        loaded = precipitation_strategy_runner.load_grid_bias_transfer_rules(candidate)
+        if monthly_transfer:
+            loaded = precipitation_strategy_runner.load_monthly_transfer_rules(candidate, expected_fingerprint=expected_rule_identity)
+        else:
+            loaded = precipitation_strategy_runner.load_grid_bias_transfer_rules(candidate)
+            if loaded is not None and expected_rule_identity and dict(loaded.get("summary", {}) or {}).get("identity_sha256") != expected_rule_identity:
+                loaded = None
         if loaded is not None:
             source_rule_dir = candidate
             rules = loaded
             break
     if rules is None or source_rule_dir is None:
+        if monthly_transfer:
+            raise ValueError("连续预报缺少与历史运行一致的冻结月规则，不能自动切换为原始降水。请恢复该运行使用的规则文件。")
         return {
             "enabled": False,
             "status": "missing_transfer_rules",
             "raw_prec_dir": str(raw_prec_dir),
         }
+    rule_summary = dict(rules.get("summary", {}) or {})
+    rule_quality = dict(rule_summary.get("quality_checks", {}) or {})
+    if monthly_transfer and (rule_quality.get("status") != "passed" or rule_quality.get("qc_blocked") is not False):
+        raise ValueError("历史冻结月规则未通过质量检查，不能用于连续预报。")
+    rule_snapshot_dir = raw_prec_dir.parent / "station_precip_rule_snapshot"
+    if rule_snapshot_dir.exists():
+        rule_snapshot_dir = rule_snapshot_dir.with_name(f"{rule_snapshot_dir.name}_{uuid.uuid4().hex[:8]}")
+    rule_snapshot_dir.mkdir(parents=True, exist_ok=False)
+    for key in ("json_path", "npz_path"):
+        source_file = Path(rules[key])
+        shutil.copy2(source_file, rule_snapshot_dir / source_file.name)
+    if monthly_transfer:
+        snapshot_rules = precipitation_strategy_runner.load_monthly_transfer_rules(
+            rule_snapshot_dir, expected_fingerprint=expected_rule_identity,
+        )
+        if snapshot_rules is None or dict(snapshot_rules["summary"].get("quality_checks", {}) or {}).get("status") != "passed":
+            raise ValueError("预报规则快照身份或质量检查未通过，请待原规则写入完成后重试。")
+        rules = snapshot_rules
     expected_index = forecast_time_index(module, forecast_start, forecast_end)
     target_dir = raw_prec_dir.parent / "prec_station_bias_corrected"
     if target_dir.exists():
-        shutil.rmtree(target_dir)
+        target_dir = raw_prec_dir.parent / f"prec_station_bias_corrected_{uuid.uuid4().hex[:8]}"
     target_dir.mkdir(parents=True, exist_ok=True)
     time_to_file: dict[pd.Timestamp, Path] = {}
     for tif_path in raw_prec_dir.glob("*.tif"):
@@ -465,6 +542,7 @@ def apply_forecast_precip_transfer_rules(
             time_to_file[pd.Timestamp(timestamp)] = tif_path
     applied_count = 0
     fallback_global_count = 0
+    unverified_identity_count = 0
     failed_count = 0
     files: list[str] = []
     for timestamp in expected_index:
@@ -484,9 +562,13 @@ def apply_forecast_precip_transfer_rules(
             applied_count += 1
             if source == "global":
                 fallback_global_count += 1
+            elif source == "identity_unverified":
+                unverified_identity_count += 1
         else:
             failed_count += 1
         files.append(target_file.name)
+    if failed_count or applied_count != len(expected_index) or not applied_count:
+        raise ValueError(f"预报降水规则未完整应用：成功 {applied_count}，失败或缺失 {failed_count}，目标 {len(expected_index)}；请补齐输入后重试。")
     if applied_count > 0 and failed_count == 0:
         archived_dirs["prec_raw_before_station_bias"] = str(raw_prec_dir)
         archived_dirs["prec"] = str(target_dir.resolve(strict=False))
@@ -500,9 +582,13 @@ def apply_forecast_precip_transfer_rules(
                 "raw_archive_dir": str(raw_prec_dir),
                 "archive_dir": archived_dirs["prec"],
                 "source_rule_dir": str(source_rule_dir.resolve(strict=False)),
-                "source_rule_json": str((source_rule_dir / precipitation_strategy_runner.TRANSFER_RULES_JSON).resolve(strict=False)),
+                "source_rule_json": str((source_rule_dir / rule_filename).resolve(strict=False)),
+                "station_rule_identity_sha256": str(rule_summary.get("identity_sha256", "") or expected_rule_identity),
+                "station_rule_snapshot_dir": str(rule_snapshot_dir.resolve(strict=False)),
                 "applied_files": int(applied_count),
                 "fallback_global_files": int(fallback_global_count),
+                "unverified_identity_files": int(unverified_identity_count),
+                "station_correction_algorithm": algorithm,
                 "files": files,
             }
         )
@@ -522,6 +608,13 @@ def apply_forecast_precip_transfer_rules(
         "applied_files": int(applied_count),
         "failed_files": int(failed_count),
         "fallback_global_files": int(fallback_global_count),
+        "unverified_identity_files": int(unverified_identity_count),
+        "station_correction_algorithm": algorithm,
+        "station_precip_mode": source_mode,
+        "station_rule_identity_sha256": str(rule_summary.get("identity_sha256", "") or expected_rule_identity),
+        "rule_snapshot_dir": str(rule_snapshot_dir.resolve(strict=False)),
+        "rule_snapshot_json": str((rule_snapshot_dir / rule_filename).resolve(strict=False)),
+        "rule_snapshot_npz": str((rule_snapshot_dir / Path(rules["npz_path"]).name).resolve(strict=False)),
         "rule_summary": clean_for_json(dict(rules.get("summary", {}) or {})),
     }
 
@@ -586,12 +679,14 @@ def write_forecast_outputs(
         np.savez_compressed(output_dir / forecast_state_file, **state_arrays)
 
     restart = dict(sim.get("forecast_restart", {}) or {})
-    source_initial = dict(read_json(source_run / "metadata.json").get("initial_state", {}) or {})
+    source_metadata = read_json(source_run / "metadata.json")
+    source_initial = dict(source_metadata.get("initial_state", {}) or {})
     source_state_time = str(source_initial.get("state_snapshot_time", "") or "").strip()
     source_state_summary = dict(source_state_summary or {})
     source_parameter_summary = dict(source_parameter_summary or {})
     forecast_input_check = dict(forecast_input_check or {})
     forecast_precip_transfer = dict(forecast_precip_transfer or {})
+    source_precip_binding = source_precip_rule_binding(source_metadata)
     forecast_boundary_source = dict(forecast_boundary_source or {})
     boundary_enabled = bool(
         getattr(module, "BOUNDARY_INFLOW_ENABLED", False)
@@ -661,6 +756,10 @@ def write_forecast_outputs(
         },
         "data_sources": {
             "prec_source": "forecast_custom",
+            "station_precip_mode": str(forecast_precip_transfer.get("station_precip_mode") or source_precip_binding["station_precip_mode"]),
+            "station_correction_algorithm": str(forecast_precip_transfer.get("station_correction_algorithm") or source_precip_binding["station_correction_algorithm"]),
+            "station_rule_identity_sha256": str(forecast_precip_transfer.get("station_rule_identity_sha256") or source_precip_binding["station_rule_identity_sha256"]),
+            "station_rule_snapshot_dir": str(forecast_precip_transfer.get("rule_snapshot_dir") or source_precip_binding["rule_snapshot_dir"]),
             "forecast_prec_dir": forecast_dirs.get("prec", ""),
             "forecast_temp_dir": forecast_dirs.get("temp", ""),
             "forecast_evap_dir": forecast_dirs.get("evap", ""),
@@ -777,6 +876,11 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         forecast_start,
         forecast_end,
     )
+    if forecast_precip_transfer.get("status") == "partial_or_failed" or (
+        forecast_precip_transfer.get("station_correction_algorithm") == "monthly_transfer_v3"
+        and not forecast_precip_transfer.get("enabled")
+    ):
+        raise ValueError("冻结降水规则未完整应用，不能继续连续预报。")
     archived_dirs = dict(input_archive.get("archived_dirs", {}) or {})
     module.PREC_DIR = archived_dirs.get("prec", source_forecast_dirs["prec"])
     module.TEMP_DIR = archived_dirs.get("temp", source_forecast_dirs["temp"])
@@ -789,7 +893,7 @@ def run_forecast(args: argparse.Namespace, stage_callback: Any = None) -> dict[s
         module.BOUNDARY_INFLOW_FILE = boundary_file
         module.BOUNDARY_INFLOW_DATE_FIELD = boundary_source.get("date_field") or "date"
         module.BOUNDARY_INFLOW_FLOW_FIELD = boundary_source.get("flow_field") or "flow"
-        module.BOUNDARY_INFLOW_GAP_FILL = boundary_source.get("gap_fill") or "zero"
+        module.BOUNDARY_INFLOW_GAP_FILL = boundary_source.get("gap_fill") or "preserve_missing"
         boundary_source["file"] = boundary_file
     else:
         module.BOUNDARY_INFLOW_FILE = ""

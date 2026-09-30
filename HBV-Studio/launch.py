@@ -123,6 +123,12 @@ def latest_source_mtime() -> tuple[float, str]:
         root / "web" / "js" / "stationPrecip.js",
         root / "web" / "js" / "appDataFlow.js",
     ]
+    # Installed builds ship adjacent bytecode; __pycache__ is only an import cache.
+    candidates.extend([path.with_suffix(".pyc") for path in candidates if path.suffix == ".py"])
+    services_dir = root / "services"
+    if services_dir.exists():
+        candidates.extend(sorted(services_dir.glob("*.py")))
+        candidates.extend(sorted(services_dir.glob("*.pyc")))
     latest = 0.0
     latest_file = ""
     for path in candidates:

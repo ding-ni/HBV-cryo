@@ -16,6 +16,7 @@ import pandas as pd
 
 import profile_runner
 from services.run_hydrology import metadata_objective_family, safe_float
+from services.time_utils import format_timestamp_for_display, is_date_only_string, normalize_time_step_hours
 
 
 RUN_KIND_LABELS = {
@@ -527,12 +528,15 @@ def resolve_source_run_reference(
 
 
 def to_portable_path(value: str, context: RunPortablePathContext) -> str:
-    if not value:
+    if not value or "__PROJECT_ROOT__" in value or "__GUI_ROOT__" in value:
         return value
     try:
-        resolved = Path(value).resolve()
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            return value
+        resolved = candidate.resolve(strict=False)
     except (OSError, ValueError):
-        resolved = Path(value)
+        return value
     gui_resolved = context.gui_root.resolve()
     proj_resolved = context.project_root.resolve()
     try:
@@ -1955,6 +1959,64 @@ def load_run_date_sequence(run_path: Path) -> list[str]:
     return dates
 
 
+def build_run_series_range(
+    dates: list[str],
+    time_config: dict[str, Any],
+    *,
+    total_points: int | None = None,
+) -> dict[str, Any]:
+    """Describe saved CSV dates independently of the configured simulation window."""
+    parsed = pd.DatetimeIndex(pd.to_datetime(dates, errors="coerce", format="mixed")).dropna()
+    actual = parsed.drop_duplicates().sort_values()
+    invalid_dates = max((len(dates) if total_points is None else total_points) - len(parsed), 0)
+    duplicate_dates = len(parsed) - len(actual)
+    step_hours = normalize_time_step_hours(time_config.get("time_step_hours", 24.0))
+    step = pd.Timedelta(hours=step_hours)
+
+    def timestamp(value: Any, *, is_end: bool = False) -> pd.Timestamp | None:
+        parsed_value = pd.to_datetime(value, errors="coerce") if value else pd.NaT
+        if pd.isna(parsed_value):
+            return None
+        result = pd.Timestamp(parsed_value)
+        if is_end and step_hours < 24.0 and is_date_only_string(value):
+            result += pd.Timedelta(days=1) - step
+        return result
+
+    def covers(start: pd.Timestamp | None, end: pd.Timestamp | None) -> bool:
+        if actual.empty or start is None or end is None or end < start or invalid_dates or duplicate_dates:
+            return False
+        if actual[0] > start or actual[-1] < end:
+            return False
+        expected = pd.date_range(start, end, freq=step)
+        return expected.difference(actual).empty
+
+    warmup_start = timestamp(time_config.get("warmup_start"))
+    warmup_end = timestamp(time_config.get("warmup_end"), is_end=True)
+    if warmup_start is not None and warmup_end is None:
+        calib_start = timestamp(time_config.get("calib_start"))
+        warmup_end = max(calib_start - step, warmup_start) if calib_start is not None else warmup_start
+    expected_start = timestamp(
+        time_config.get("forecast_start") or time_config.get("warmup_start") or time_config.get("calib_start")
+    )
+    expected_end = timestamp(
+        time_config.get("forecast_end") or time_config.get("valid_end") or time_config.get("calib_end"),
+        is_end=True,
+    )
+    return {
+        "actual_start": format_timestamp_for_display(actual[0], step_hours) if not actual.empty else "",
+        "actual_end": format_timestamp_for_display(actual[-1], step_hours) if not actual.empty else "",
+        "warmup_start": str(time_config.get("warmup_start", "") or ""),
+        "warmup_end": str(time_config.get("warmup_end", "") or ""),
+        "warmup_covered": covers(warmup_start, warmup_end) if time_config.get("warmup_start") else bool(len(actual)),
+        "full_period_covered": covers(expected_start, expected_end),
+        "continuous": bool(len(actual)) and not invalid_dates and not duplicate_dates
+        and (len(actual) == 1 or bool(((actual[1:] - actual[:-1]) == step).all())),
+        "valid_points": len(actual),
+        "invalid_date_count": invalid_dates,
+        "duplicate_date_count": duplicate_dates,
+    }
+
+
 def run_csv_preview(run_path: Path, *, limit: int = 3) -> dict[str, Any]:
     csv_path = run_path / "simulation.csv"
     if not csv_path.exists():
@@ -2093,8 +2155,8 @@ def apply_run_replay_config_overrides(
     boundary_cfg = dict(patched.get("边界条件", {}) or {})
     boundary_cfg["时间字段"] = str(boundary_meta.get("date_field", boundary_cfg.get("时间字段", "date")) or "date")
     boundary_cfg["流量字段"] = str(boundary_meta.get("flow_field", boundary_cfg.get("流量字段", "inflow_m3s")) or "inflow_m3s")
-    gap_fill = boundary_meta.get("gap_fill", boundary_cfg.get("缺失填补", "zero"))
-    boundary_cfg["缺失填补"] = str(gap_fill or "zero")
+    gap_fill = boundary_meta.get("gap_fill") or boundary_cfg.get("缺失填补") or "preserve_missing"
+    boundary_cfg["缺失填补"] = str(gap_fill)
     if boundary_enabled is False:
         boundary_cfg["上游边界入流_csv"] = ""
     elif boundary_file:
@@ -2317,10 +2379,7 @@ def load_run_detail(run_path: str, context: RunDetailContext) -> dict[str, Any]:
         for field in fields:
             series[field].append(context.safe_float(row.get(field)))
     time_cfg = dict(metadata.get("time_config", {}) or {})
-    actual_start = dates[0] if dates else ""
-    actual_end = dates[-1] if dates else ""
-    warmup_start = str(time_cfg.get("warmup_start", "") or "")
-    warmup_covered = bool(actual_start and (not warmup_start or str(actual_start).strip() == warmup_start.strip()))
+    series_range = build_run_series_range(load_run_date_sequence(run_dir), time_cfg, total_points=total_rows)
     hydrology_summary = context.ensure_hydrology_diagnostic_report(
         run_dir,
         metadata,
@@ -2335,18 +2394,13 @@ def load_run_detail(run_path: str, context: RunDetailContext) -> dict[str, Any]:
         updated_at_ns=updated_at_ns,
     )
     run_summary["hydrology_summary"] = hydrology_summary
+    run_summary["series_range"] = series_range
     return {
         "run": run_summary,
         "metadata": metadata,
         "hydrology_summary": hydrology_summary,
         "series": {"dates": dates, "residuals": residuals, **series},
-        "series_range": {
-            "actual_start": actual_start,
-            "actual_end": actual_end,
-            "warmup_start": warmup_start,
-            "warmup_end": str(time_cfg.get("warmup_end", "") or ""),
-            "warmup_covered": warmup_covered,
-        },
+        "series_range": series_range,
         "sampling": {"sampled_points": len(sampled), "total_points": total_rows},
         "parameters": [{"name": key, "value": value} for key, value in metadata.get("optimized_params", {}).items()],
         "studio_compatible": context.is_studio_editable_metadata(metadata, resolved_config),
@@ -2395,12 +2449,12 @@ def export_run_excel(payload: dict[str, Any], context: RunExportContext) -> dict
 
     actual_start = pd.Timestamp(frame["date"].min())
     actual_end = pd.Timestamp(frame["date"].max())
-    warmup_start_raw = str(time_cfg.get("warmup_start", "") or "").strip()
-    warmup_start_ts = pd.to_datetime(warmup_start_raw) if warmup_start_raw else None
-    if warmup_start_ts is not None and actual_start > warmup_start_ts and start_ts < actual_start:
+    if start_ts < actual_start or end_ts > actual_end:
+        saved_start = context.format_timestamp_for_display(actual_start, step_hours)
+        saved_end = context.format_timestamp_for_display(actual_end, step_hours)
         raise ValueError(
-            "当前结果文件只保存了率定后时段，未包含预热段。"
-            "请用新版程序重新生成结果后，再导出包含预热期的全时段数据。"
+            f"导出范围超出当前结果实际保存时段：{saved_start} 至 {saved_end}。"
+            "请按已保存时段导出；如需补存完整过程，可用当前参数重新计算并保存。"
         )
 
     filtered = frame.loc[(frame["date"] >= start_ts) & (frame["date"] <= end_ts)].copy()

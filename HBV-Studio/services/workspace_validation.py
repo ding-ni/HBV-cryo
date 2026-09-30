@@ -215,6 +215,7 @@ def build_engineering_focus_checks(
             detected_step = context.normalize_time_step_hours(boundary_info.get("time_step_hours"))
             step_match = detected_step == step_hours if boundary_info.get("time_step_hours") is not None else None
             gap_fill = str((boundary_info.get("gap_fill") or "") or "").strip().lower()
+            preserve_missing = gap_fill in {"preserve_missing", "preserve", "missing", "nan", "none", "keep_missing", "保留缺测"}
             # Preserve-missing is a supported runtime mode: missing segments remain
             # unevaluable until boundary data resumes and routing warm-up completes.
             # Coverage is therefore a warning in that mode, while zero/interpolation
@@ -225,7 +226,16 @@ def build_engineering_focus_checks(
                 summary = "边界入流仍有关键问题，正式率定前需要先修正时间步长、覆盖率或异常值。"
             elif coverage_issue or zero_ratio >= 0.8 or int(boundary_info.get("invalid_rows", 0) or 0) > 0 or out_of_range_count > 0:
                 status = "warn"
-                summary = "边界入流可以继续核查，但仍有高零值比例或范围外记录等风险。"
+                details = []
+                if coverage_issue and preserve_missing:
+                    details.append("边界资料未覆盖全部模拟时段，缺测保留为空；缺测段及恢复后的汇流预热段不参与出口流量评分，实际有效日期以评分掩码为准")
+                if zero_ratio >= 0.8:
+                    details.append("已观测边界流量的零值比例较高，请核对是否为真实零流量")
+                if int(boundary_info.get("invalid_rows", 0) or 0) > 0:
+                    details.append("存在无效记录，请核对原始资料")
+                if out_of_range_count > 0:
+                    details.append("模拟时段外记录不参与本次运行")
+                summary = "；".join(details) + "。"
             else:
                 status = "ok"
                 summary = "边界入流时间步和覆盖范围基本合理，可进入后续调试或率定。"
@@ -266,6 +276,11 @@ def build_engineering_focus_checks(
                             "value": f"{zero_ratio * 100:.1f}%",
                             "status": "warn" if zero_ratio >= 0.8 else "ok",
                         },
+                        *([{
+                            "label": "缺测与评分",
+                            "value": "缺测不当作零流量；边界恢复并完成汇流预热后，与实测流量共同有效的日期才进入评分。",
+                            "status": "warn" if coverage_issue else "ok",
+                        }] if preserve_missing else []),
                     ],
                 }
             )
