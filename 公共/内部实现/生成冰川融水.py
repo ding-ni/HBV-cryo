@@ -22,6 +22,7 @@ _PUBLIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."
 if _PUBLIC_DIR not in sys.path:
     sys.path.insert(0, _PUBLIC_DIR)
 from 公共 import 公共函数 as _common  # noqa: E402
+from era5_ssrd_repair import repair_ssrd_single_point, validate_ssrd_cumulative  # noqa: E402
 
 
 def _prefer_existing_path(*paths):
@@ -151,7 +152,12 @@ def load_daily_radiation(year):
         ds.close()
         return None, None, None
 
-    ssrd = ds["ssrd"]
+    ssrd = repair_ssrd_single_point(
+        ds["ssrd"],
+        source_paths=[nc_path],
+        report_path=nc_path + ".ssrd_repair.json",
+    )
+    validate_ssrd_cumulative(ssrd, label=f"冰川融水太阳辐射 {os.path.basename(nc_path)}")
     daily = daily_totals_from_cumulative(ssrd)
     lons, lats = coords_of(daily)
     _, lons_out, lats_out = orient_grid(np.zeros((len(lats), len(lons)), dtype=np.float32), lons, lats)

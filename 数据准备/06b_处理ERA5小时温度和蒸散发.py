@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 
 from cds_chunked_download import is_usable_netcdf  # type: ignore
 from 公共函数 import build_workspace_paths, data_date_range, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config  # type: ignore
+from era5_ssrd_repair import repair_ssrd_single_point, validate_ssrd_cumulative  # type: ignore
 from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 # 只认下载合并后的按年文件：era5_t2m_hourly_2025.nc
@@ -296,7 +297,14 @@ def build_hourly_et(
         ds_v10 = stack.enter_context(open_netcdf_dataset_safe(v10_file))
         ds_dew = stack.enter_context(open_netcdf_dataset_safe(dew_file))
         t2m_all = rename_time_dim(ds_temp["t2m"] - 273.15)
-        ssrd_all = rename_time_dim(ds_solar["ssrd"] / 1e6)
+        ssrd_all = rename_time_dim(ds_solar["ssrd"])
+        ssrd_all = repair_ssrd_single_point(
+            ssrd_all,
+            source_paths=[solar_file],
+            report_path=solar_file.with_suffix(".ssrd_repair.json"),
+        )
+        validate_ssrd_cumulative(ssrd_all, label=f"小时太阳辐射 {solar_file.name}")
+        ssrd_all = ssrd_all / 1e6
         u10_all = rename_time_dim(ds_u10["u10"])
         v10_all = rename_time_dim(ds_v10["v10"])
         d2m_all = rename_time_dim(ds_dew["d2m"] - 273.15)

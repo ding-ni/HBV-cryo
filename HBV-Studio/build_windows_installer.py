@@ -94,6 +94,7 @@ BUILD_CONTRACTS = {
     "model_water_balance": "hbv_cryo_model_water_balance_v1",
     "hourly_forcing_manifest": "hbv_cryo_hourly_forcing_generator_v2",
     "era5_accumulation_boundary": "hbv_cryo_era5_accumulation_following_midnight_v1",
+    "era5_ssrd_repair": "hbv_era5_ssrd_repair_manifest_v1",
     "path_memory": "hbvstudio.pathBrowser.lastDirectory.v1",
 }
 

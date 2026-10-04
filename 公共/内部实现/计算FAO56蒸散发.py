@@ -33,6 +33,7 @@ from era5_accumulation import (
     daily_totals_from_following_midnight,
     find_boundary_file,
 )
+from era5_ssrd_repair import repair_ssrd_single_point, validate_ssrd_cumulative
 
 # ============================================================
 # 路径配置
@@ -276,6 +277,12 @@ def process_year(year):
         # 获取变量
         t2m = rename_time_dim(ds_temp['t2m'] - 273.15)  # K -> °C
         ssrd = rename_time_dim(ds_solar['ssrd']).load()
+        ssrd = repair_ssrd_single_point(
+            ssrd,
+            source_paths=[solar_file] + ([solar_boundary_file] if solar_boundary_file else []),
+            report_path=solar_file + ".ssrd_repair.json",
+        )
+        validate_ssrd_cumulative(ssrd, label=f"日尺度 FAO56 太阳辐射 {os.path.basename(solar_file)}")
         if ds_solar_boundary is not None:
             boundary_name = 'ssrd' if 'ssrd' in ds_solar_boundary.data_vars else list(ds_solar_boundary.data_vars)[0]
             ssrd = append_following_midnight(
