@@ -136,6 +136,48 @@ class Era5QualityTests(unittest.TestCase):
             self.assertEqual(report["missing"]["count"], 1)
             self.assertEqual(report["status"], "failed")
 
+    def test_second_verified_gap_is_repaired_and_reported(self) -> None:
+        times = pd.date_range("2022-02-01", periods=3, freq="h")
+        values = np.full((3, 3, 3), 100.0)
+        values[1, 1, 1] = np.nan
+        values[1, 0, 0], values[1, 0, 2] = 10.0, 20.0
+        values[1, 2, 0], values[1, 2, 2] = 30.0, 40.0
+        arr = xr.DataArray(values, dims=("time", "latitude", "longitude"),
+                           coords={"time": times, "latitude": [29.6, 29.7, 29.8],
+                                   "longitude": [91.9, 92.0, 92.1]}, name="ssrd")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "repair.json"
+            repaired = repair_ssrd_single_point(arr, report_path=report_path)
+            self.assertAlmostEqual(float(repaired.values[1, 1, 1]), 25.0)
+            self.assertTrue(np.isnan(arr.values[1, 1, 1]))
+            manifest = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["repairs"][0]["time_utc"], "2022-02-01T01:00:00Z")
+            self.assertEqual(audit_era5_dataarray(repaired, variable="ssrd")["status"], "passed")
+
+    def test_registered_time_outside_project_grid_is_not_an_error(self) -> None:
+        times = pd.date_range("2023-01-28", periods=3, freq="h")
+        arr = make_grid(np.ones((3, 3, 3)), times).assign_coords(longitude=[93.0, 93.1, 93.2])
+        repaired = repair_ssrd_single_point(arr)
+        np.testing.assert_array_equal(repaired.values, arr.values)
+
+    def test_encoded_fill_neighbor_is_not_used_for_interpolation(self) -> None:
+        times = pd.date_range("2023-01-28", periods=3, freq="h")
+        values = np.full((3, 3, 3), 100.0)
+        values[1, 1, 1], values[1, 0, 0] = np.nan, -9999.0
+        arr = make_grid(values, times)
+        arr.encoding["_FillValue"] = -9999.0
+        with self.assertRaises(ValueError):
+            repair_ssrd_single_point(arr)
+
+    def test_unregistered_encoded_fill_marker_survives_repair(self) -> None:
+        times = pd.date_range("2025-01-01", periods=3, freq="h")
+        values = np.ones((3, 3, 3))
+        values[1, 0, 0] = -9999.0
+        arr = make_grid(values, times)
+        arr.encoding["_FillValue"] = -9999.0
+        with self.assertRaises(Era5QualityError):
+            audit_era5_dataarray(repair_ssrd_single_point(arr), variable="ssrd")
+
 
 if __name__ == "__main__":
     unittest.main()

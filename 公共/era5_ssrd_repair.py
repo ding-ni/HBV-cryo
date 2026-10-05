@@ -17,11 +17,17 @@ import pandas as pd
 import xarray as xr
 
 
-ERA5_SSRD_REPAIR_VERSION = "2026.10.05.1"
+ERA5_SSRD_REPAIR_VERSION = "2026.10.05.2"
 ERA5_SSRD_COORD_TOLERANCE = 1e-4
 
 # 仅允许修复已经核实的 ERA5-Land 单点单时刻缺测。
 ERA5_SSRD_REPAIR_WHITELIST = (
+    {
+        "time": pd.Timestamp("2022-02-01 01:00:00"),
+        "longitude": 92.0,
+        "latitude": 29.7,
+        "reason": "CDS 原始传输包及独立 ssrd 重下载均复现的单点单时刻缺测",
+    },
     {
         "time": pd.Timestamp("2023-01-28 01:00:00"),
         "longitude": 92.2,
@@ -128,6 +134,11 @@ def repair_ssrd_single_point(
         time_matches = np.flatnonzero(times == timestamp)
         if len(time_matches) == 0:
             continue
+        # A project may not cover this registered location. Such a grid must
+        # still pass its own quality audit, but has nothing to repair here.
+        if (not np.any(np.isclose(lons, float(case["longitude"]), rtol=0.0, atol=ERA5_SSRD_COORD_TOLERANCE))
+                or not np.any(np.isclose(lats, float(case["latitude"]), rtol=0.0, atol=ERA5_SSRD_COORD_TOLERANCE))):
+            continue
         time_index = int(time_matches[0])
         lon_index = _find_index(lons, float(case["longitude"]), "longitude")
         lat_index = _find_index(lats, float(case["latitude"]), "latitude")
@@ -146,7 +157,7 @@ def repair_ssrd_single_point(
             name: float(values[time_index, lat_idx, lon_idx])
             for name, (lat_idx, lon_idx) in corner_indices.items()
         }
-        if not all(np.isfinite(value) for value in corner_values.values()):
+        if any(missing[time_index, lat_idx, lon_idx] for lat_idx, lon_idx in corner_indices.values()):
             raise ValueError(
                 f"ERA5-Land ssrd 白名单点 {timestamp:%Y-%m-%d %H:%M} "
                 f"({case['longitude']}, {case['latitude']}) 的四个周边网格点也有缺测，拒绝静默填补。"
@@ -181,6 +192,9 @@ def repair_ssrd_single_point(
 
     result = xr.DataArray(values, coords=work.coords, dims=work.dims, attrs=work.attrs, name=work.name)
     result = result.transpose(*arr.dims)
+    # Preserve encoded finite fill markers so other, unregistered missing
+    # cells remain detectable by the mandatory post-repair quality audit.
+    result.encoding = dict(arr.encoding)
     if repairs and report_path is not None:
         report = {
             "schema": "hbv_era5_ssrd_repair_manifest_v1",
