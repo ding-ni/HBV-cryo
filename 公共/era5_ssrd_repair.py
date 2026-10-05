@@ -17,7 +17,7 @@ import pandas as pd
 import xarray as xr
 
 
-ERA5_SSRD_REPAIR_VERSION = "2026.10.04.1"
+ERA5_SSRD_REPAIR_VERSION = "2026.10.05.1"
 ERA5_SSRD_COORD_TOLERANCE = 1e-4
 
 # 仅允许修复已经核实的 ERA5-Land 单点单时刻缺测。

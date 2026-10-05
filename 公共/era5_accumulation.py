@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from era5_quality import write_quality_failure_report
+
 
 ERA5_ACCUMULATION_CONTRACT = "hbv_cryo_era5_accumulation_following_midnight_v1"
 
@@ -21,14 +23,43 @@ def boundary_file_candidates(directory: Any, prefix: str, year: int) -> list[Pat
     ]
 
 
-def find_boundary_file(directory: Any, prefix: str, year: int) -> Path:
+def find_boundary_file(
+    directory: Any,
+    prefix: str,
+    year: int,
+    *,
+    report_path: Any | None = None,
+) -> Path:
     candidates = boundary_file_candidates(directory, prefix, year)
+    midnight = f"{int(year) + 1}-01-01"
+    existing: list[Path] = []
+    coverage_errors: list[str] = []
     for candidate in candidates:
         if candidate.is_file():
             from cds_chunked_download import netcdf_covers_range
-            midnight = f"{int(year) + 1}-01-01"
-            if netcdf_covers_range(candidate, midnight, midnight, ["00:00"]):
-                return candidate
+            existing.append(candidate)
+            try:
+                if netcdf_covers_range(candidate, midnight, midnight, ["00:00"]):
+                    return candidate
+                coverage_errors.append(f"{candidate.name} 不包含 {midnight} 00:00 样本。")
+            except Exception as exc:
+                coverage_errors.append(f"{candidate.name} 无法检查边界时刻：{exc}")
+    errors = [
+        f"{int(year)} 年累计变量缺少次年 01-01 00:00 收尾样本。",
+        *coverage_errors,
+    ]
+    if report_path is not None:
+        write_quality_failure_report(
+            report_path,
+            variable=f"{prefix}_boundary",
+            errors=errors,
+            source_paths=existing or candidates,
+            required_times=[pd.Timestamp(int(year) + 1, 1, 1)],
+            context={
+                "boundary_year": int(year),
+                "candidate_files": [str(item) for item in candidates],
+            },
+        )
     raise FileNotFoundError(
         f"{year} 年累计变量缺少次年 01-01 00:00 收尾样本；"
         f"请准备边界文件 {candidates[1]}。"

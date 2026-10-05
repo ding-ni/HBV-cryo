@@ -31,6 +31,7 @@ from era5_accumulation import (
     daily_totals_from_following_midnight,
     find_boundary_file,
 )
+from era5_quality import audit_era5_dataarray
 
 # ============================================================
 # 路径配置
@@ -152,14 +153,38 @@ def process_precipitation(year):
     day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
     if day_start > day_end:
         return 0
-    boundary_file = find_boundary_file(RAW_PREC_ERA5_DIR, "era5_tp", year) if day_end.month == 12 and day_end.day == 31 else None
+    boundary_file = (
+        find_boundary_file(
+            RAW_PREC_ERA5_DIR,
+            "era5_tp",
+            year,
+            report_path=os.path.join(RAW_PREC_ERA5_DIR, f"era5_tp_{year + 1}_boundary_quality.json"),
+        )
+        if day_end.month == 12 and day_end.day == 31
+        else None
+    )
     with open_netcdf_dataset_safe(nc_file) as ds:
         var_name = 'tp' if 'tp' in ds.data_vars else list(ds.data_vars)[0]
         precip = rename_time_dim(ds[var_name]).load()
+        audit_era5_dataarray(
+            precip,
+            variable="tp",
+            source_paths=[nc_file],
+            report_path=f"{nc_file}.tp_quality.json",
+        )
         if boundary_file:
             with open_netcdf_dataset_safe(boundary_file) as boundary_ds:
                 boundary_name = 'tp' if 'tp' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
-                precip = append_year_boundary(precip, rename_time_dim(boundary_ds[boundary_name]).load(), year)
+                boundary = rename_time_dim(boundary_ds[boundary_name]).load()
+                audit_era5_dataarray(
+                    boundary,
+                    variable="tp_boundary",
+                    source_paths=[boundary_file],
+                    report_path=f"{boundary_file}.tp_quality.json",
+                    required_times=[pd.Timestamp(year=int(year) + 1, month=1, day=1)],
+                    check_time_gaps=False,
+                )
+                precip = append_year_boundary(precip, boundary, year)
         precip_daily = daily_totals_from_cumulative(
             precip * 1000.0,
             start_date=day_start.isoformat(),
@@ -224,6 +249,12 @@ def process_temperature(year):
         # ERA5 温度变量名可能是 't2m' 或 'VAR_2T'
         var_name = 't2m' if 't2m' in ds.data_vars else list(ds.data_vars)[0]
         temp = ds[var_name]
+        audit_era5_dataarray(
+            temp,
+            variable="t2m",
+            source_paths=[nc_file],
+            report_path=f"{nc_file}.t2m_quality.json",
+        )
 
         # 从 Kelvin 转换为 Celsius
         temp_c = temp - 273.15
@@ -305,15 +336,39 @@ def process_evaporation(year):
     day_end = min(END_DATE or date(year, 12, 31), date(year, 12, 31))
     if day_start > day_end:
         return 0
-    boundary_file = find_boundary_file(RAW_EVAP_DIR, "era5_evap", year) if day_end.month == 12 and day_end.day == 31 else None
+    boundary_file = (
+        find_boundary_file(
+            RAW_EVAP_DIR,
+            "era5_evap",
+            year,
+            report_path=os.path.join(RAW_EVAP_DIR, f"era5_evap_{year + 1}_boundary_quality.json"),
+        )
+        if day_end.month == 12 and day_end.day == 31
+        else None
+    )
     with open_netcdf_dataset_safe(nc_file) as ds:
         # ERA5 蒸散发变量名
         var_name = 'e' if 'e' in ds.data_vars else list(ds.data_vars)[0]
         evap = rename_time_dim(ds[var_name]).load()
+        audit_era5_dataarray(
+            evap,
+            variable="e",
+            source_paths=[nc_file],
+            report_path=f"{nc_file}.e_quality.json",
+        )
         if boundary_file:
             with open_netcdf_dataset_safe(boundary_file) as boundary_ds:
                 boundary_name = 'e' if 'e' in boundary_ds.data_vars else list(boundary_ds.data_vars)[0]
-                evap = append_year_boundary(evap, rename_time_dim(boundary_ds[boundary_name]).load(), year)
+                boundary = rename_time_dim(boundary_ds[boundary_name]).load()
+                audit_era5_dataarray(
+                    boundary,
+                    variable="e_boundary",
+                    source_paths=[boundary_file],
+                    report_path=f"{boundary_file}.e_quality.json",
+                    required_times=[pd.Timestamp(year=int(year) + 1, month=1, day=1)],
+                    check_time_gaps=False,
+                )
+                evap = append_year_boundary(evap, boundary, year)
 
         # ERA5 蒸散发单位是 m，转换为 mm
         # 且 ERA5 蒸散发是负值（向下为正），取绝对值

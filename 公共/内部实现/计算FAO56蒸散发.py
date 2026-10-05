@@ -34,6 +34,7 @@ from era5_accumulation import (
     find_boundary_file,
 )
 from era5_ssrd_repair import repair_ssrd_single_point, validate_ssrd_cumulative
+from era5_quality import audit_era5_dataarray
 
 # ============================================================
 # 路径配置
@@ -276,11 +277,23 @@ def process_year(year):
 
         # 获取变量
         t2m = rename_time_dim(ds_temp['t2m'] - 273.15)  # K -> °C
+        audit_era5_dataarray(
+            rename_time_dim(ds_temp['t2m']).load(),
+            variable="t2m",
+            source_paths=[temp_file],
+            report_path=f"{temp_file}.t2m_quality.json",
+        )
         ssrd = rename_time_dim(ds_solar['ssrd']).load()
         ssrd = repair_ssrd_single_point(
             ssrd,
             source_paths=[solar_file] + ([solar_boundary_file] if solar_boundary_file else []),
             report_path=solar_file + ".ssrd_repair.json",
+        )
+        audit_era5_dataarray(
+            ssrd,
+            variable="ssrd",
+            source_paths=[solar_file],
+            report_path=f"{solar_file}.ssrd_quality.json",
         )
         validate_ssrd_cumulative(ssrd, label=f"日尺度 FAO56 太阳辐射 {os.path.basename(solar_file)}")
         if ds_solar_boundary is not None:
@@ -294,6 +307,9 @@ def process_year(year):
         u10 = rename_time_dim(ds_u10['u10'])
         v10 = rename_time_dim(ds_v10['v10'])
         d2m = rename_time_dim(ds_dew['d2m'] - 273.15)  # K -> °C
+        audit_era5_dataarray(rename_time_dim(ds_u10['u10']).load(), variable="u10", source_paths=[u10_file], report_path=f"{u10_file}.u10_quality.json")
+        audit_era5_dataarray(rename_time_dim(ds_v10['v10']).load(), variable="v10", source_paths=[v10_file], report_path=f"{v10_file}.v10_quality.json")
+        audit_era5_dataarray(rename_time_dim(ds_dew['d2m']).load(), variable="d2m", source_paths=[dewpoint_file], report_path=f"{dewpoint_file}.d2m_quality.json")
 
         # ERA5-Land 累积辐射在下一天 00:00 给出上一日总量；缺边界样本时拒绝生成。
         day_slice = slice(day_start.isoformat(), day_end.isoformat())

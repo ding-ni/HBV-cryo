@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "HBV-Studio"))
 from cds_chunked_download import is_usable_netcdf  # type: ignore
 from 公共函数 import build_workspace_paths, data_date_range, ensure_workspace_dirs, example_config_path, load_legacy_module, old_script_path, open_netcdf_dataset_safe, read_config  # type: ignore
 from era5_ssrd_repair import repair_ssrd_single_point, validate_ssrd_cumulative  # type: ignore
+from era5_quality import audit_era5_dataarray  # type: ignore
 from services.raster_time_series import validate_tif_time_series  # type: ignore
 
 # 只认下载合并后的按年文件：era5_t2m_hourly_2025.nc
@@ -214,6 +215,12 @@ def write_hourly_stack_from_yearly_nc(
         if var_name is None:
             var_name = list(ds.data_vars)[0]
         series = rename_time_dim(ds[var_name] * scale)
+        audit_era5_dataarray(
+            series,
+            variable=variable_candidates[0],
+            source_paths=[nc_file],
+            report_path=nc_file.with_name(f"{nc_file.name}.{variable_candidates[0]}_quality.json"),
+        )
         times = pd.DatetimeIndex(pd.to_datetime(series["time"].values))
         if len(times) == 0:
             return 0
@@ -303,11 +310,21 @@ def build_hourly_et(
             source_paths=[solar_file],
             report_path=solar_file.with_suffix(".ssrd_repair.json"),
         )
+        audit_era5_dataarray(
+            ssrd_all,
+            variable="ssrd",
+            source_paths=[solar_file],
+            report_path=solar_file.with_name(f"{solar_file.name}.ssrd_quality.json"),
+        )
         validate_ssrd_cumulative(ssrd_all, label=f"小时太阳辐射 {solar_file.name}")
         ssrd_all = ssrd_all / 1e6
         u10_all = rename_time_dim(ds_u10["u10"])
         v10_all = rename_time_dim(ds_v10["v10"])
         d2m_all = rename_time_dim(ds_dew["d2m"] - 273.15)
+        audit_era5_dataarray(rename_time_dim(ds_temp["t2m"]).load(), variable="t2m", source_paths=[temp_file], report_path=temp_file.with_name(f"{temp_file.name}.t2m_quality.json"))
+        audit_era5_dataarray(rename_time_dim(ds_u10["u10"]).load(), variable="u10", source_paths=[u10_file], report_path=u10_file.with_name(f"{u10_file.name}.u10_quality.json"))
+        audit_era5_dataarray(rename_time_dim(ds_v10["v10"]).load(), variable="v10", source_paths=[v10_file], report_path=v10_file.with_name(f"{v10_file.name}.v10_quality.json"))
+        audit_era5_dataarray(rename_time_dim(ds_dew["d2m"]).load(), variable="d2m", source_paths=[dew_file], report_path=dew_file.with_name(f"{dew_file.name}.d2m_quality.json"))
 
         times = pd.DatetimeIndex(pd.to_datetime(t2m_all["time"].values))
         if len(times) == 0:

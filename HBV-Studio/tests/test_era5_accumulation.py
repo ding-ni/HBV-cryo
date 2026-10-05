@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 import numpy as np
@@ -99,6 +100,18 @@ class Era5AccumulationTests(unittest.TestCase):
             self.assertEqual(find_boundary_file(root, "era5_tp", 2024), boundary)
             xr.Dataset({"tp": ("time", [0.01])}, coords={"time": pd.to_datetime(["2025-01-01"])}).to_netcdf(full_year)
             self.assertEqual(find_boundary_file(root, "era5_tp", 2024), full_year)
+
+    def test_missing_boundary_file_writes_quality_failure_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report_path = root / "era5_tp_2025_boundary_quality.json"
+            with self.assertRaisesRegex(FileNotFoundError, "缺少次年 01-01 00:00"):
+                find_boundary_file(root, "era5_tp", 2024, report_path=report_path)
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["schema"], "hbv_era5_quality_report_v1")
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["required_time_missing"], ["2025-01-01T00:00:00"])
 
 
 if __name__ == "__main__":
